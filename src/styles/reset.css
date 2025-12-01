@@ -1,0 +1,47 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--pf-color-bg-dark);
+  color: var(--pf-color-text-main);
+  font-family: var(--pf-font-mono);
+  font-size: var(--pf-font-size-md);
+  overflow: hidden; /* App-like feel */
+  width: 100vw;
+  height: 100vh;
+  -webkit-font-smoothing: none; /* Pixel-crisp fonts */
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+canvas {
+  image-rendering: pixelated; /* Critical for pixel art */
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--pf-color-bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--pf-color-border);
+  border: 1px solid var(--pf-color-bg-dark);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--pf-color-text-muted);
+}
