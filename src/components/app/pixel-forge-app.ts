@@ -12,6 +12,7 @@ import '../color/pf-palette-panel';
 import '../layers/pf-layers-panel';
 import '../timeline/pf-timeline';
 import '../dialogs/pf-resize-dialog';
+import '../dialogs/pf-export-dialog';
 import '../preview/pf-preview-window';
 import '../brush/pf-brush-panel';
 import '../ui/pf-undo-history';
@@ -97,11 +98,15 @@ export class PixelForgeApp extends BaseComponent {
   `;
 
   @state() showResizeDialog = false;
+  @state() showExportDialog = false;
 
   render() {
     return html`
       <header class="menu-bar">
-        <pf-menu-bar @resize-canvas=${() => this.showResizeDialog = true}></pf-menu-bar>
+        <pf-menu-bar
+          @resize-canvas=${() => this.showResizeDialog = true}
+          @show-export-dialog=${() => this.showExportDialog = true}
+        ></pf-menu-bar>
       </header>
 
       <aside class="toolbar">
@@ -158,6 +163,11 @@ export class PixelForgeApp extends BaseComponent {
       <footer class="status-bar">
         <pf-status-bar></pf-status-bar>
       </footer>
+
+      <pf-export-dialog
+        ?open=${this.showExportDialog}
+        @close=${() => this.showExportDialog = false}
+      ></pf-export-dialog>
     `;
   }
 }
