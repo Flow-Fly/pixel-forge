@@ -2,7 +2,6 @@ import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import '../toolbar/pf-toolbar';
-import '../toolbar/pf-context-bar';
 import '../status/pf-status-bar';
 import '../menu/pf-menu-bar';
 import '../canvas/pf-drawing-canvas';
@@ -14,7 +13,12 @@ import '../layers/pf-layers-panel';
 import '../timeline/pf-timeline';
 import '../dialogs/pf-resize-dialog';
 import '../preview/pf-preview-window';
+import '../brush/pf-brush-panel';
+import '../ui/pf-undo-history';
+import '../ui/pf-collapsible-panel';
+import '../shape/pf-shape-options';
 import { projectStore } from '../../stores/project';
+import { type ToolType } from '../../stores/tools';
 
 @customElement('pixel-forge-app')
 export class PixelForgeApp extends BaseComponent {
@@ -72,6 +76,12 @@ export class PixelForgeApp extends BaseComponent {
       border-left: 1px solid var(--pf-color-border);
       display: flex;
       flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .panels pf-collapsible-panel {
+      flex-shrink: 0;
     }
 
     .status-bar {
@@ -92,8 +102,6 @@ export class PixelForgeApp extends BaseComponent {
     return html`
       <header class="menu-bar">
         <pf-menu-bar @resize-canvas=${() => this.showResizeDialog = true}></pf-menu-bar>
-        <div style="flex: 1"></div>
-        <pf-context-bar></pf-context-bar>
       </header>
 
       <aside class="toolbar">
@@ -117,21 +125,34 @@ export class PixelForgeApp extends BaseComponent {
         <div style="padding: 8px; border-bottom: 1px solid var(--pf-color-border);">
           <pf-color-selector></pf-color-selector>
         </div>
-        <pf-color-sliders></pf-color-sliders>
-        <div style="height: 200px; border-top: 1px solid var(--pf-color-border); overflow-y: auto;">
+
+        <pf-collapsible-panel panelId="color-sliders" title="Color Sliders">
+          <pf-color-sliders></pf-color-sliders>
+        </pf-collapsible-panel>
+
+        <pf-collapsible-panel
+          panelId="brush"
+          title="Brushes"
+          .visibleForTools=${['pencil', 'eraser'] as ToolType[]}
+        >
           <pf-brush-panel></pf-brush-panel>
-        </div>
-        <div style="padding: 8px; font-size: 12px; color: var(--pf-color-text-muted); border-top: 1px solid var(--pf-color-border);">Palette</div>
-        <pf-palette-panel></pf-palette-panel>
-        <div style="padding: 8px; border-top: 1px solid var(--pf-color-border);">
+        </pf-collapsible-panel>
+
+        <pf-collapsible-panel panelId="palette" title="Palette">
+          <pf-palette-panel></pf-palette-panel>
+        </pf-collapsible-panel>
+
+        <pf-collapsible-panel panelId="preview" title="Preview">
           <pf-preview-window></pf-preview-window>
-        </div>
-        <div style="flex: 1; display: flex; flex-direction: column; border-top: 1px solid var(--pf-color-border); min-height: 150px;">
+        </pf-collapsible-panel>
+
+        <pf-collapsible-panel panelId="layers" title="Layers">
           <pf-layers-panel></pf-layers-panel>
-        </div>
-        <div style="height: 150px; border-top: 1px solid var(--pf-color-border);">
+        </pf-collapsible-panel>
+
+        <pf-collapsible-panel panelId="history" title="History">
           <pf-undo-history></pf-undo-history>
-        </div>
+        </pf-collapsible-panel>
       </aside>
 
       <footer class="status-bar">

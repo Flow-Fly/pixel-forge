@@ -13,10 +13,13 @@ export interface Command {
 class HistoryStore {
   undoStack = signal<Command[]>([]);
   redoStack = signal<Command[]>([]);
-  
+
   // Computed signals for UI
   canUndo = signal<boolean>(false);
   canRedo = signal<boolean>(false);
+
+  // Version signal - increments on undo/redo to trigger canvas re-render
+  version = signal<number>(0);
 
   constructor() {
     // Update computed signals when stacks change
@@ -105,6 +108,7 @@ class HistoryStore {
   private updateComputed() {
     this.canUndo.value = this.undoStack.value.length > 0;
     this.canRedo.value = this.redoStack.value.length > 0;
+    this.version.value++;
   }
   
   clear() {

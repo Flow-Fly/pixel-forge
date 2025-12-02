@@ -3,6 +3,7 @@ import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { toolStore, type ToolType } from '../../stores/tools';
 import './pf-tool-button';
+import '../color/pf-color-selector-compact';
 
 @customElement('pf-toolbar')
 export class PFToolbar extends BaseComponent {
@@ -23,6 +24,17 @@ export class PFToolbar extends BaseComponent {
 
     .group:last-child {
       border-bottom: none;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .color-section {
+      padding: var(--pf-spacing-2) 0;
+      border-top: 1px solid var(--pf-color-border);
+      display: flex;
+      justify-content: center;
     }
   `;
 
@@ -94,24 +106,30 @@ export class PFToolbar extends BaseComponent {
         ></pf-tool-button>
       </div>
       <div class="group">
-        <pf-tool-button 
-          tool="fill" 
-          shortcut="G" 
+        <pf-tool-button
+          tool="fill"
+          shortcut="G"
           ?active=${activeTool === 'fill'}
           @click=${() => this.selectTool('fill')}
         ></pf-tool-button>
-        <pf-tool-button 
-          tool="gradient" 
-          shortcut="H" 
+        <pf-tool-button
+          tool="gradient"
+          shortcut="H"
           ?active=${activeTool === 'gradient'}
           @click=${() => this.selectTool('gradient')}
         ></pf-tool-button>
-        <pf-tool-button 
-          tool="transform" 
-          shortcut="T" 
+        <pf-tool-button
+          tool="transform"
+          shortcut="T"
           ?active=${activeTool === 'transform'}
           @click=${() => this.selectTool('transform')}
         ></pf-tool-button>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="color-section">
+        <pf-color-selector-compact></pf-color-selector-compact>
       </div>
     `;
   }

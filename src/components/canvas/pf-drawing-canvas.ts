@@ -58,7 +58,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
   protected updated(_changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>): void {
     super.updated(_changedProperties);
-    
+
     // Check if tool changed
     const currentTool = toolStore.activeTool.value;
     if (this.activeTool?.name !== currentTool) {
@@ -68,7 +68,7 @@ export class PFDrawingCanvas extends BaseComponent {
     if (_changedProperties.has('width') || _changedProperties.has('height') || _changedProperties.has('zoom')) {
       this.resizeCanvas();
     }
-    
+
     // Always re-render when updated (which happens on signal changes)
     this.renderCanvas();
   }
@@ -395,6 +395,12 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   render() {
+    // Access signals to register them with SignalWatcher for reactive updates
+    // This ensures canvas re-renders when these values change
+    void historyStore.version.value;
+    void layerStore.layers.value;
+    void animationStore.currentFrameId.value;
+
     return html`
       <canvas
         @mousedown=${this.handleMouseDown}
