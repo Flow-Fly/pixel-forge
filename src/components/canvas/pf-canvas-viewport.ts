@@ -1,11 +1,11 @@
-import { html, css } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { viewportStore } from '../../stores/viewport';
-import { gridStore } from '../../stores/grid';
-import { projectStore } from '../../stores/project';
+import { html, css } from "lit";
+import { customElement, state, query } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { viewportStore } from "../../stores/viewport";
+import { gridStore } from "../../stores/grid";
+import { projectStore } from "../../stores/project";
 
-@customElement('pf-canvas-viewport')
+@customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
   static styles = css`
     :host {
@@ -55,7 +55,7 @@ export class PFCanvasViewport extends BaseComponent {
     }
   `;
 
-  @query('#grid-overlay') gridCanvas!: HTMLCanvasElement;
+  @query("#grid-overlay") gridCanvas!: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D | null = null;
 
   // Local state for drag tracking
@@ -65,14 +65,14 @@ export class PFCanvasViewport extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
-    window.addEventListener('keydown', this.handleKeyDown);
-    window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener("keydown", this.handleKeyDown);
+    window.addEventListener("keyup", this.handleKeyUp);
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions();
-    window.addEventListener('resize', this.handleResize);
+    window.addEventListener("resize", this.handleResize);
 
-    // Center canvas on launch (like pressing "0")
+    // Center canvas on launch
     requestAnimationFrame(() => {
       viewportStore.zoomToFit(this.clientWidth, this.clientHeight);
       this.initGridCanvas();
@@ -82,7 +82,7 @@ export class PFCanvasViewport extends BaseComponent {
 
   private initGridCanvas() {
     if (!this.gridCanvas) return;
-    this.gridCtx = this.gridCanvas.getContext('2d');
+    this.gridCtx = this.gridCanvas.getContext("2d");
     this.resizeGridCanvas();
   }
 
@@ -104,13 +104,13 @@ export class PFCanvasViewport extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener('keydown', this.handleKeyDown);
-    window.removeEventListener('keyup', this.handleKeyUp);
-    window.removeEventListener('resize', this.handleResize);
+    window.removeEventListener("keydown", this.handleKeyDown);
+    window.removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("resize", this.handleResize);
 
     // Clean up any active drag listeners
-    window.removeEventListener('mousemove', this.handleGlobalMouseMove);
-    window.removeEventListener('mouseup', this.handleGlobalMouseUp);
+    window.removeEventListener("mousemove", this.handleGlobalMouseMove);
+    window.removeEventListener("mouseup", this.handleGlobalMouseUp);
   }
 
   private updateContainerDimensions = () => {
@@ -135,8 +135,8 @@ export class PFCanvasViewport extends BaseComponent {
     void gridStore.tileGridOpacity.value;
 
     // Update host attributes for cursor styling
-    this.toggleAttribute('space-down', isSpaceDown && !isPanning);
-    this.toggleAttribute('panning', isPanning);
+    this.toggleAttribute("space-down", isSpaceDown && !isPanning);
+    this.toggleAttribute("panning", isPanning);
 
     // Draw grids after render
     requestAnimationFrame(() => this.drawGrids());
@@ -182,13 +182,34 @@ export class PFCanvasViewport extends BaseComponent {
     const canvasHeight = projectStore.height.value;
 
     // Pixel grid: only show at or above threshold
-    if (gridStore.pixelGridEnabled.value && zoom >= gridStore.autoShowThreshold.value) {
-      this.drawPixelGrid(ctx, viewWidth, viewHeight, zoom, panX, panY, canvasWidth, canvasHeight);
+    if (
+      gridStore.pixelGridEnabled.value &&
+      zoom >= gridStore.autoShowThreshold.value
+    ) {
+      this.drawPixelGrid(
+        ctx,
+        viewWidth,
+        viewHeight,
+        zoom,
+        panX,
+        panY,
+        canvasWidth,
+        canvasHeight
+      );
     }
 
     // Tile grid: always show if enabled
     if (gridStore.tileGridEnabled.value) {
-      this.drawTileGrid(ctx, viewWidth, viewHeight, zoom, panX, panY, canvasWidth, canvasHeight);
+      this.drawTileGrid(
+        ctx,
+        viewWidth,
+        viewHeight,
+        zoom,
+        panX,
+        panY,
+        canvasWidth,
+        canvasHeight
+      );
     }
   }
 
@@ -300,7 +321,7 @@ export class PFCanvasViewport extends BaseComponent {
     }
 
     // Spacebar for pan mode
-    if (e.code === 'Space' && !e.repeat) {
+    if (e.code === "Space" && !e.repeat) {
       e.preventDefault();
       viewportStore.isSpacebarDown.value = true;
       this.requestUpdate();
@@ -308,36 +329,36 @@ export class PFCanvasViewport extends BaseComponent {
     }
 
     // Zoom keys 1-6
-    if (e.key >= '1' && e.key <= '6') {
+    if (e.key >= "1" && e.key <= "6") {
       viewportStore.zoomToLevel(parseInt(e.key) as 1 | 2 | 3 | 4 | 5 | 6);
       this.requestUpdate();
       return;
     }
 
     // +/- for zoom in/out
-    if (e.key === '+' || e.key === '=') {
+    if (e.key === "+" || e.key === "=") {
       viewportStore.zoomIn();
       this.requestUpdate();
-    } else if (e.key === '-') {
+    } else if (e.key === "-") {
       viewportStore.zoomOut();
       this.requestUpdate();
-    } else if (e.key === '0') {
+    } else if (e.key === "0") {
       viewportStore.zoomToFit(this.clientWidth, this.clientHeight);
       this.requestUpdate();
-    } else if (e.key === 'Home') {
+    } else if (e.key === "Home") {
       viewportStore.resetView();
       this.requestUpdate();
     }
 
     // Ctrl+G for pixel grid toggle
-    if (e.key === 'g' && !e.shiftKey && (e.ctrlKey || e.metaKey)) {
+    if (e.key === "g" && !e.shiftKey && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       gridStore.togglePixelGrid();
       return;
     }
 
     // Ctrl+Shift+G for tile grid toggle
-    if (e.key === 'G' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+    if (e.key === "G" && e.shiftKey && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       gridStore.toggleTileGrid();
       return;
@@ -345,7 +366,7 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private handleKeyUp = (e: KeyboardEvent) => {
-    if (e.code === 'Space') {
+    if (e.code === "Space") {
       viewportStore.isSpacebarDown.value = false;
 
       // If we were panning with spacebar, clamp to bounds
@@ -380,8 +401,8 @@ export class PFCanvasViewport extends BaseComponent {
     e.preventDefault();
 
     // Attach global listeners to track mouse even outside viewport
-    window.addEventListener('mousemove', this.handleGlobalMouseMove);
-    window.addEventListener('mouseup', this.handleGlobalMouseUp);
+    window.addEventListener("mousemove", this.handleGlobalMouseMove);
+    window.addEventListener("mouseup", this.handleGlobalMouseUp);
 
     this.requestUpdate();
   }
@@ -409,8 +430,8 @@ export class PFCanvasViewport extends BaseComponent {
     viewportStore.clampPanToBounds();
 
     // Remove global listeners
-    window.removeEventListener('mousemove', this.handleGlobalMouseMove);
-    window.removeEventListener('mouseup', this.handleGlobalMouseUp);
+    window.removeEventListener("mousemove", this.handleGlobalMouseMove);
+    window.removeEventListener("mouseup", this.handleGlobalMouseUp);
 
     this.requestUpdate();
   };

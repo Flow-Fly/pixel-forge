@@ -1,9 +1,9 @@
-import { html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { viewportStore } from '../../stores/viewport';
+import { html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { viewportStore } from "../../stores/viewport";
 
-@customElement('pf-status-bar')
+@customElement("pf-status-bar")
 export class PFStatusBar extends BaseComponent {
   static styles = css`
     :host {
@@ -28,7 +28,7 @@ export class PFStatusBar extends BaseComponent {
 
     return html`
       <div class="left">
-        <span>${this.cursor.x}, ${this.cursor.y}</span>
+        <span>${this.cursor.x + 1}, ${this.cursor.y + 1}</span>
       </div>
       <div class="right">
         <span>${zoomPercent}%</span>
