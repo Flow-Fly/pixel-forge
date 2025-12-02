@@ -7,6 +7,7 @@ import { toolStore, type ToolType } from '../../stores/tools';
 import { animationStore } from '../../stores/animation';
 import { historyStore } from '../../stores/history';
 import { BrushCommand } from '../../commands/drawing-commands';
+import type { ModifierKeys } from '../../tools/base-tool';
 
 @customElement('pf-drawing-canvas')
 export class PFDrawingCanvas extends BaseComponent {
@@ -34,6 +35,8 @@ export class PFDrawingCanvas extends BaseComponent {
       image-rendering: pixelated;
       background-color: white; /* Default canvas background */
       box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+      /* Cursor is set dynamically based on active tool */
+      cursor: crosshair;
     }
   `;
 
@@ -128,9 +131,11 @@ export class PFDrawingCanvas extends BaseComponent {
 
     if (ToolClass) {
       this.activeTool = new ToolClass(this.ctx);
-      // Ensure context is set correctly if it wasn't passed in constructor or if it needs update
-      // The constructor usually sets it, but we also have setContext
-      // We'll rely on the constructor for now, and handleMouseDown updates it for layers
+
+      // Set cursor based on tool
+      if (this.canvas && this.activeTool.cursor) {
+        this.canvas.style.cursor = this.activeTool.cursor;
+      }
     }
   }
 
@@ -259,25 +264,34 @@ export class PFDrawingCanvas extends BaseComponent {
     this.ctx.restore();
   }
 
-  private getCanvasCoordinates(e: MouseEvent): { x: number, y: number } {
+  private getCanvasCoordinates(e: MouseEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
-    
+
     return {
       x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }
+
+  private getModifiers(e: MouseEvent): ModifierKeys {
+    return {
+      shift: e.shiftKey,
+      ctrl: e.ctrlKey || e.metaKey,
+      alt: e.altKey,
     };
   }
 
   private handleMouseDown(e: MouseEvent) {
     if (!this.activeTool) return;
     const { x, y } = this.getCanvasCoordinates(e);
-    
+    const modifiers = this.getModifiers(e);
+
     // Update active tool context to the active layer's canvas
     const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
-    
+    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+
     if (activeLayer && activeLayer.canvas && !activeLayer.locked && activeLayer.visible) {
       const layerCtx = activeLayer.canvas.getContext('2d');
       if (layerCtx) {
@@ -286,8 +300,8 @@ export class PFDrawingCanvas extends BaseComponent {
 
         // Update tool context to layer context
         this.activeTool.setContext(layerCtx);
-        
-        this.activeTool.onDown(x, y);
+
+        this.activeTool.onDown(x, y, modifiers);
         this.renderCanvas(); // Re-render after tool action
       }
     }
@@ -296,41 +310,43 @@ export class PFDrawingCanvas extends BaseComponent {
   private handleMouseMove(e: MouseEvent) {
     if (!this.activeTool) return;
     const { x, y } = this.getCanvasCoordinates(e);
-    
+    const modifiers = this.getModifiers(e);
+
     if (e.buttons === 1) {
-      this.activeTool.onDrag(x, y);
+      this.activeTool.onDrag(x, y, modifiers);
       this.renderCanvas(); // Re-render during drag
     } else {
-      this.activeTool.onMove(x, y);
+      this.activeTool.onMove(x, y, modifiers);
     }
   }
 
   private handleMouseUp(e: MouseEvent) {
     if (!this.activeTool) return;
     const { x, y } = this.getCanvasCoordinates(e);
-    this.activeTool.onUp(x, y);
+    const modifiers = this.getModifiers(e);
+    this.activeTool.onUp(x, y, modifiers);
     this.renderCanvas(); // Final render
 
     // Capture state after drawing and create command
     const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
-    
+    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+
     if (activeLayer && activeLayer.canvas && this.previousImageData) {
       const layerCtx = activeLayer.canvas.getContext('2d');
       if (layerCtx) {
         const newImageData = layerCtx.getImageData(0, 0, this.width, this.height);
-        
+
         // Only create command if image data actually changed
-        // For now, we assume it changed if mouse was down. 
+        // For now, we assume it changed if mouse was down.
         // Optimization: Compare data buffers?
-        
+
         const command = new BrushCommand(
           activeLayer.canvas,
           { x: 0, y: 0, w: this.width, h: this.height },
           this.previousImageData,
           newImageData
         );
-        
+
         historyStore.execute(command);
         this.previousImageData = null;
       }

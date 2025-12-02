@@ -3,11 +3,11 @@ import type { Brush } from '../types/brush';
 
 class BrushStore {
   brushes = signal<Brush[]>([
-    { id: 'pixel-1', name: '1px Pixel', size: 1, shape: 'square', opacity: 1 },
-    { id: 'round-3', name: '3px Round', size: 3, shape: 'circle', opacity: 1 },
-    { id: 'round-5', name: '5px Round', size: 5, shape: 'circle', opacity: 1 },
-    { id: 'square-3', name: '3px Square', size: 3, shape: 'square', opacity: 1 },
-    { id: 'square-5', name: '5px Square', size: 5, shape: 'square', opacity: 1 },
+    { id: 'pixel-1', name: '1px Pixel', size: 1, shape: 'square', opacity: 1, pixelPerfect: true },
+    { id: 'round-3', name: '3px Round', size: 3, shape: 'circle', opacity: 1, pixelPerfect: false },
+    { id: 'round-5', name: '5px Round', size: 5, shape: 'circle', opacity: 1, pixelPerfect: false },
+    { id: 'square-3', name: '3px Square', size: 3, shape: 'square', opacity: 1, pixelPerfect: false },
+    { id: 'square-5', name: '5px Square', size: 5, shape: 'square', opacity: 1, pixelPerfect: false },
   ]);
 
   activeBrush = signal<Brush>(this.brushes.value[0]);

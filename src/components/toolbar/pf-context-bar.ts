@@ -3,6 +3,7 @@ import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { toolStore } from '../../stores/tools';
 import { brushStore } from '../../stores/brush';
+import { EraserTool, type EraserMode } from '../../tools/eraser-tool';
 
 @customElement('pf-context-bar')
 export class PFContextBar extends BaseComponent {
@@ -49,10 +50,10 @@ export class PFContextBar extends BaseComponent {
         return html`
           <div class="option">
             <label>Size:</label>
-            <input 
-              type="range" 
-              min="1" 
-              max="50" 
+            <input
+              type="range"
+              min="1"
+              max="50"
               .value=${brushStore.activeBrush.value.size}
               @input=${(e: Event) => brushStore.updateActiveBrushSettings({ size: parseInt((e.target as HTMLInputElement).value) })}
               style="width: 60px"
@@ -62,15 +63,60 @@ export class PFContextBar extends BaseComponent {
           <div class="separator"></div>
           <div class="option">
             <label>Opacity:</label>
-            <input 
-              type="range" 
-              min="0" 
-              max="100" 
+            <input
+              type="range"
+              min="0"
+              max="100"
               .value=${brushStore.activeBrush.value.opacity * 100}
               @input=${(e: Event) => brushStore.updateActiveBrushSettings({ opacity: parseInt((e.target as HTMLInputElement).value) / 100 })}
               style="width: 60px"
             >
             <span>${Math.round(brushStore.activeBrush.value.opacity * 100)}%</span>
+          </div>
+          <div class="separator"></div>
+          <div class="option">
+            <input
+              type="checkbox"
+              id="pixel-perfect"
+              .checked=${brushStore.activeBrush.value.pixelPerfect}
+              @change=${(e: Event) => brushStore.updateActiveBrushSettings({ pixelPerfect: (e.target as HTMLInputElement).checked })}
+            >
+            <label for="pixel-perfect" title="Remove L-shaped artifacts from 1px strokes">Pixel Perfect</label>
+          </div>
+        `;
+      case 'eraser':
+        return html`
+          <div class="option">
+            <label>Size:</label>
+            <input
+              type="range"
+              min="1"
+              max="50"
+              .value=${brushStore.activeBrush.value.size}
+              @input=${(e: Event) => brushStore.updateActiveBrushSettings({ size: parseInt((e.target as HTMLInputElement).value) })}
+              style="width: 60px"
+            >
+            <span>${brushStore.activeBrush.value.size}px</span>
+          </div>
+          <div class="separator"></div>
+          <div class="option">
+            <label>Mode:</label>
+            <select
+              @change=${(e: Event) => EraserTool.setMode((e.target as HTMLSelectElement).value as EraserMode)}
+            >
+              <option value="transparent" ?selected=${EraserTool.getMode() === 'transparent'}>To Transparent</option>
+              <option value="background" ?selected=${EraserTool.getMode() === 'background'}>To Background</option>
+            </select>
+          </div>
+          <div class="separator"></div>
+          <div class="option">
+            <input
+              type="checkbox"
+              id="eraser-pixel-perfect"
+              .checked=${brushStore.activeBrush.value.pixelPerfect}
+              @change=${(e: Event) => brushStore.updateActiveBrushSettings({ pixelPerfect: (e.target as HTMLInputElement).checked })}
+            >
+            <label for="eraser-pixel-perfect" title="Remove L-shaped artifacts from 1px eraser">Pixel Perfect</label>
           </div>
         `;
       case 'fill':

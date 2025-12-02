@@ -12,17 +12,18 @@ export class PFCanvasViewport extends BaseComponent {
       overflow: hidden;
       background-color: #1a1a1a;
       position: relative;
-      cursor: grab;
     }
 
-    :host(:active) {
-      cursor: grabbing;
-    }
-
+    /* Grab cursor only shows on the background, not the canvas */
     .viewport-content {
       position: absolute;
       transform-origin: 0 0;
       will-change: transform;
+    }
+
+    /* Show grab cursor when panning */
+    :host([panning]) {
+      cursor: grabbing;
     }
   `;
 
@@ -50,10 +51,11 @@ export class PFCanvasViewport extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
-    if (e.button === 1 || e.shiftKey) { // Middle click or Shift+Click to pan
+    if (e.button === 1 || (e.button === 0 && e.altKey)) { // Middle click or Alt+Click to pan
       this.isDragging = true;
       this.lastMouseX = e.clientX;
       this.lastMouseY = e.clientY;
+      this.toggleAttribute('panning', true);
       e.preventDefault();
     }
   }
@@ -62,10 +64,10 @@ export class PFCanvasViewport extends BaseComponent {
     if (this.isDragging) {
       const dx = e.clientX - this.lastMouseX;
       const dy = e.clientY - this.lastMouseY;
-      
+
       this.panX += dx;
       this.panY += dy;
-      
+
       this.lastMouseX = e.clientX;
       this.lastMouseY = e.clientY;
     }
@@ -73,6 +75,7 @@ export class PFCanvasViewport extends BaseComponent {
 
   private handleMouseUp() {
     this.isDragging = false;
+    this.toggleAttribute('panning', false);
   }
 
   private handleWheel(e: WheelEvent) {
