@@ -6,6 +6,8 @@ import type { ProjectFile } from '../types/project';
 class ProjectStore {
   width = signal(64);
   height = signal(64);
+  /** Background color for export. null = transparent (default) */
+  backgroundColor = signal<string | null>(null);
 
   setSize(width: number, height: number) {
     this.width.value = width;

@@ -34,7 +34,7 @@ export class PFDrawingCanvas extends BaseComponent {
       left: 50%;
       transform: translate(-50%, -50%);
       image-rendering: pixelated;
-      background-color: white; /* Default canvas background */
+      /* Transparent background - checkerboard pattern shows through from viewport */
       box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
       /* Cursor is set dynamically based on active tool */
       cursor: crosshair;

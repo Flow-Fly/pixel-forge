@@ -6,6 +6,8 @@ import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
 import { FlipLayerCommand, RotateLayerCommand } from '../../commands/layer-commands';
 import { FileService } from '../../services/file-service';
+import { exportSpritesheet } from '../../services/spritesheet-export';
+import { openAseFile, exportAseFile } from '../../services/aseprite-service';
 import { type ProjectFile } from '../../types/project';
 
 @customElement('pf-menu-bar')
@@ -121,35 +123,71 @@ export class PFMenuBar extends BaseComponent {
 
   async saveProject() {
     const project = await projectStore.saveProject();
-    FileService.saveToJSON(project, 'project.pf');
+    FileService.saveCompressed(project, 'project.pf');
   }
 
   async openProject() {
     try {
-      const project = await FileService.loadFromJSON<ProjectFile>();
+      const project = await FileService.loadProject<ProjectFile>();
       await projectStore.loadProject(project);
     } catch (e) {
       console.error('Failed to load project:', e);
     }
   }
 
-  exportImage() {
-    // Combine all layers
+  private compositeToCanvas(): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
     canvas.width = projectStore.width.value;
     canvas.height = projectStore.height.value;
-    const ctx = canvas.getContext('2d');
-    
-    if (ctx) {
-      // Draw layers in order
-      layerStore.layers.value.forEach(layer => {
-        if (layer.visible && layer.canvas) {
-          ctx.globalAlpha = layer.opacity / 255;
-          ctx.drawImage(layer.canvas, 0, 0);
-        }
-      });
-      FileService.exportToPNG(canvas, 'image.png');
+    const ctx = canvas.getContext('2d')!;
+
+    // Optionally fill background color if set
+    const bgColor = projectStore.backgroundColor.value;
+    if (bgColor) {
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+
+    // Draw layers in order
+    layerStore.layers.value.forEach(layer => {
+      if (layer.visible && layer.canvas) {
+        ctx.globalAlpha = layer.opacity / 255;
+        ctx.drawImage(layer.canvas, 0, 0);
+      }
+    });
+    ctx.globalAlpha = 1;
+
+    return canvas;
+  }
+
+  exportPNG() {
+    const canvas = this.compositeToCanvas();
+    FileService.exportToPNG(canvas, 'image.png');
+  }
+
+  exportWebP() {
+    const canvas = this.compositeToCanvas();
+    FileService.exportToWebP(canvas, 'image.webp');
+  }
+
+  exportSpriteSheet() {
+    exportSpritesheet('spritesheet', {
+      direction: 'horizontal',
+      padding: 0,
+      includeJSON: true,
+    });
+  }
+
+  async openAseprite() {
+    try {
+      await openAseFile();
+    } catch (e) {
+      console.error('Failed to import Aseprite file:', e);
+    }
+  }
+
+  exportAseprite() {
+    exportAseFile('sprite.ase');
   }
 
   render() {
@@ -159,7 +197,11 @@ export class PFMenuBar extends BaseComponent {
         <div class="menu-item">New... <span class="shortcut">Ctrl+N</span></div>
         <div class="menu-item" @click=${this.openProject}>Open... <span class="shortcut">Ctrl+O</span></div>
         <div class="menu-item" @click=${this.saveProject}>Save <span class="shortcut">Ctrl+S</span></div>
-        <div class="menu-item" @click=${this.exportImage}>Export PNG...</div>
+        <div class="menu-item" @click=${this.openAseprite}>Import Aseprite...</div>
+        <div class="menu-item" @click=${this.exportPNG}>Export PNG...</div>
+        <div class="menu-item" @click=${this.exportWebP}>Export WebP...</div>
+        <div class="menu-item" @click=${this.exportSpriteSheet}>Export Sprite Sheet...</div>
+        <div class="menu-item" @click=${this.exportAseprite}>Export Aseprite...</div>
       </div>
 
       <button id="btn-edit" class="menu-btn" popovertarget="menu-edit">Edit</button>
