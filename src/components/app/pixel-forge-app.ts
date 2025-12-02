@@ -99,6 +99,11 @@ export class PixelForgeApp extends BaseComponent {
 
   @state() showResizeDialog = false;
   @state() showExportDialog = false;
+  @state() cursorPosition = { x: 0, y: 0 };
+
+  private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
+    this.cursorPosition = e.detail;
+  };
 
   render() {
     return html`
@@ -114,11 +119,10 @@ export class PixelForgeApp extends BaseComponent {
       </aside>
 
       <main class="workspace">
-        <pf-canvas-viewport>
-          <pf-drawing-canvas 
-            .width=${projectStore.width.value} 
-            .height=${projectStore.height.value} 
-            zoom="10"
+        <pf-canvas-viewport @canvas-cursor=${this.handleCanvasCursor}>
+          <pf-drawing-canvas
+            .width=${projectStore.width.value}
+            .height=${projectStore.height.value}
           ></pf-drawing-canvas>
         </pf-canvas-viewport>
         <div class="timeline-container">
@@ -161,7 +165,7 @@ export class PixelForgeApp extends BaseComponent {
       </aside>
 
       <footer class="status-bar">
-        <pf-status-bar></pf-status-bar>
+        <pf-status-bar .cursor=${this.cursorPosition}></pf-status-bar>
       </footer>
 
       <pf-export-dialog

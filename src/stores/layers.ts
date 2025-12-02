@@ -15,9 +15,15 @@ class LayerStore {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    // Fill with transparent data explicitly if needed, but new canvas is transparent
-    const ctx = canvas.getContext('2d');
+
+    // Get context with appropriate hints for layer canvases
+    const ctx = canvas.getContext('2d', {
+      alpha: true,
+      willReadFrequently: true // Layers are read frequently for compositing and history
+    });
+
     if (ctx) {
+      ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 

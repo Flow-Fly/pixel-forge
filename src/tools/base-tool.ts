@@ -1,3 +1,7 @@
+import { dirtyRectStore } from '../stores/dirty-rect';
+import { brushStore } from '../stores/brush';
+import { rectExpand, type Rect } from '../types/geometry';
+
 export interface Point {
   x: number;
   y: number;
@@ -33,5 +37,15 @@ export abstract class BaseTool {
 
   get ctx(): CanvasRenderingContext2D | null {
     return this.context;
+  }
+
+  /**
+   * Mark a region as dirty for partial canvas redraw.
+   * Tools should call this after modifying pixels.
+   */
+  protected markDirty(x: number, y: number, width: number = 1, height: number = 1): void {
+    const brushSize = brushStore.activeBrush.value.size;
+    const rect: Rect = { x, y, width, height };
+    dirtyRectStore.markDirty(rectExpand(rect, brushSize));
   }
 }

@@ -47,7 +47,16 @@ class AnimationStore {
         const canvas = document.createElement('canvas');
         canvas.width = 64; // TODO: Get from project settings
         canvas.height = 64;
-        
+
+        // Apply optimized context settings for cel canvases
+        const ctx = canvas.getContext('2d', {
+          alpha: true,
+          willReadFrequently: true // Cels are read frequently for compositing
+        });
+        if (ctx) {
+          ctx.imageSmoothingEnabled = false;
+        }
+
         newCels.set(key, {
           id: crypto.randomUUID(),
           layerId: layer.id,
@@ -186,15 +195,22 @@ class AnimationStore {
         const canvas = document.createElement('canvas');
         canvas.width = 64; // TODO: Get from project settings
         canvas.height = 64;
-        
-        // If the layer has content (e.g. newly added layer with drawing), preserve it
-        if (layer.canvas) {
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
+
+        // Apply optimized context settings
+        const ctx = canvas.getContext('2d', {
+          alpha: true,
+          willReadFrequently: true
+        });
+
+        if (ctx) {
+          ctx.imageSmoothingEnabled = false;
+
+          // If the layer has content (e.g. newly added layer with drawing), preserve it
+          if (layer.canvas) {
             ctx.drawImage(layer.canvas, 0, 0);
           }
         }
-        
+
         cel = {
           id: crypto.randomUUID(),
           layerId: layer.id,

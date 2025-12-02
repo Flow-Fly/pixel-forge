@@ -1,11 +1,16 @@
 import { signal } from '../core/signal';
 import { userStore } from './user';
 
+// Configuration constants for history limits
+const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_HISTORY_COUNT = 100;
+
 export interface Command {
   id: string;
   name: string;
   userId?: string;
   timestamp?: number;
+  memorySize?: number; // Optional for backwards compatibility
   execute(): void | Promise<void>;
   undo(): void | Promise<void>;
 }
@@ -20,6 +25,9 @@ class HistoryStore {
 
   // Version signal - increments on undo/redo to trigger canvas re-render
   version = signal<number>(0);
+
+  // Track total memory usage
+  private memoryUsage = 0;
 
   constructor() {
     // Update computed signals when stacks change
@@ -41,7 +49,46 @@ class HistoryStore {
     this.undoStack.value = [...this.undoStack.value, command];
     this.redoStack.value = []; // Clear redo stack on new action
 
+    // Update memory tracking
+    if (command.memorySize) {
+      this.memoryUsage += command.memorySize;
+    }
+
+    // Enforce limits
+    this.enforceHistoryLimits();
     this.updateComputed();
+  }
+
+  /**
+   * Enforce history limits by removing oldest commands when necessary.
+   */
+  private enforceHistoryLimits() {
+    let stack = [...this.undoStack.value];
+
+    // Remove oldest commands if over count limit
+    while (stack.length > MAX_HISTORY_COUNT) {
+      const removed = stack.shift();
+      if (removed?.memorySize) {
+        this.memoryUsage -= removed.memorySize;
+      }
+    }
+
+    // Remove oldest commands if over memory limit
+    while (this.memoryUsage > MAX_HISTORY_SIZE_BYTES && stack.length > 1) {
+      const removed = stack.shift();
+      if (removed?.memorySize) {
+        this.memoryUsage -= removed.memorySize;
+      }
+    }
+
+    this.undoStack.value = stack;
+  }
+
+  /**
+   * Get current memory usage for debugging/UI.
+   */
+  getMemoryUsage(): number {
+    return this.memoryUsage;
   }
 
   async undo() {

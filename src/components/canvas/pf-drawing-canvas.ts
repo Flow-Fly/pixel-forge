@@ -6,17 +6,20 @@ import { selectionStore } from '../../stores/selection';
 import { toolStore, type ToolType } from '../../stores/tools';
 import { animationStore } from '../../stores/animation';
 import { historyStore } from '../../stores/history';
-import { BrushCommand, FillCommand, GradientCommand, ShapeCommand } from '../../commands/drawing-commands';
-import { type Command } from '../../commands/index';
+import { dirtyRectStore } from '../../stores/dirty-rect';
+import { viewportStore } from '../../stores/viewport';
+import { renderScheduler } from '../../services/render-scheduler';
+import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
 import type { ModifierKeys } from '../../tools/base-tool';
+import { rectClamp, type Rect } from '../../types/geometry';
 
 @customElement('pf-drawing-canvas')
 export class PFDrawingCanvas extends BaseComponent {
   @property({ type: Number }) width = 64;
   @property({ type: Number }) height = 64;
-  @property({ type: Number }) zoom = 10;
 
   @query('canvas') canvas!: HTMLCanvasElement;
+
   static styles = css`
     :host {
       display: block;
@@ -47,11 +50,20 @@ export class PFDrawingCanvas extends BaseComponent {
 
   protected firstUpdated(_changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>): void {
     super.firstUpdated(_changedProperties);
-    this.ctx = this.canvas.getContext('2d')!;
-    
+
+    // Get context with performance hints
+    this.ctx = this.canvas.getContext('2d', {
+      alpha: true,
+      desynchronized: true, // Hint for lower latency (may not be supported everywhere)
+      willReadFrequently: false // We mostly write, read only for history snapshots
+    })!;
+
+    // Explicit setting for pixel art - critical for crisp rendering
+    this.ctx.imageSmoothingEnabled = false;
+
     // Initial tool load
     this.loadTool(toolStore.activeTool.value);
-    
+
     // Initial render
     this.renderCanvas();
   }
@@ -65,11 +77,12 @@ export class PFDrawingCanvas extends BaseComponent {
       this.loadTool(currentTool);
     }
 
-    if (_changedProperties.has('width') || _changedProperties.has('height') || _changedProperties.has('zoom')) {
+    if (_changedProperties.has('width') || _changedProperties.has('height')) {
       this.resizeCanvas();
     }
 
-    // Always re-render when updated (which happens on signal changes)
+    // Request full redraw for signal-triggered updates (layer visibility, frame changes, etc.)
+    dirtyRectStore.requestFullRedraw();
     this.renderCanvas();
   }
 
@@ -142,48 +155,88 @@ export class PFDrawingCanvas extends BaseComponent {
 
   resizeCanvas() {
     if (!this.canvas) return;
-    
-    // Resize canvas element based on zoom
+
+    // Set canvas to logical pixel dimensions
+    // The viewport component handles zoom via CSS transform
     this.canvas.width = this.width;
     this.canvas.height = this.height;
-    
-    const displayWidth = this.width * this.zoom;
-    const displayHeight = this.height * this.zoom;
 
-    this.canvas.style.width = `${displayWidth}px`;
-    this.canvas.style.height = `${displayHeight}px`;
-    
-    // Also resize the host to match
-    this.style.width = `${displayWidth}px`;
-    this.style.height = `${displayHeight}px`;
+    // Display size matches logical size - viewport scales it
+    this.canvas.style.width = `${this.width}px`;
+    this.canvas.style.height = `${this.height}px`;
+
+    // Host matches canvas size
+    this.style.width = `${this.width}px`;
+    this.style.height = `${this.height}px`;
+
+    // Re-apply context settings after resize (context may be reset)
+    if (this.ctx) {
+      this.ctx.imageSmoothingEnabled = false;
+    }
   }
 
   renderCanvas() {
     if (!this.ctx) return;
 
-    // Clear main canvas
-    this.ctx.clearRect(0, 0, this.width, this.height);
+    const fullRedraw = dirtyRectStore.consumeFullRedraw();
+    const dirtyRect = fullRedraw ? null : dirtyRectStore.consumePendingDirty();
 
-    // Draw onion skins if enabled
-    this.drawOnionSkins();
-    
-    // Composite layers
+    if (dirtyRect && !fullRedraw) {
+      // Partial redraw - clip to dirty region
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
+      this.ctx.clip();
+
+      // Clear just the dirty region
+      this.ctx.clearRect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
+
+      // Render layers (clipped)
+      this.renderLayers(dirtyRect);
+
+      this.ctx.restore();
+    } else {
+      // Full redraw
+      this.ctx.clearRect(0, 0, this.width, this.height);
+
+      // Draw onion skins if enabled (only on full redraw)
+      this.drawOnionSkins();
+
+      // Render all layers
+      this.renderLayers(null);
+    }
+
+    // Selection overlay always needs to be drawn
+    this.drawSelection();
+  }
+
+  /**
+   * Render visible layers, optionally clipped to a dirty rect.
+   */
+  private renderLayers(dirtyRect: Rect | null) {
     const layers = layerStore.layers.value;
-    // Render from bottom to top
+
     for (const layer of layers) {
       if (layer.visible && layer.canvas) {
         this.ctx.globalAlpha = layer.opacity / 255;
         this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
-        this.ctx.drawImage(layer.canvas, 0, 0);
+
+        if (dirtyRect) {
+          // Draw only the dirty region from layer
+          this.ctx.drawImage(
+            layer.canvas,
+            dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height,
+            dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height
+          );
+        } else {
+          this.ctx.drawImage(layer.canvas, 0, 0);
+        }
       }
     }
-    
+
     // Reset composite operation
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
-
-    // Draw selection overlay
-    this.drawSelection();
   }
 
   private drawOnionSkins() {
@@ -285,6 +338,14 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
+    // Skip drawing during pan operations:
+    // - Middle mouse button (button 1) is for panning
+    // - Alt+click is for panning
+    // - Spacebar pan mode
+    if (e.button === 1 || e.altKey || viewportStore.isSpacebarDown.value) {
+      return;
+    }
+
     if (!this.activeTool) return;
     const { x, y } = this.getCanvasCoordinates(e);
     const modifiers = this.getModifiers(e);
@@ -303,19 +364,38 @@ export class PFDrawingCanvas extends BaseComponent {
         this.activeTool.setContext(layerCtx);
 
         this.activeTool.onDown(x, y, modifiers);
-        this.renderCanvas(); // Re-render after tool action
+
+        // Schedule render instead of immediate call
+        renderScheduler.scheduleRender(() => this.renderCanvas());
       }
     }
   }
 
   private handleMouseMove(e: MouseEvent) {
-    if (!this.activeTool) return;
     const { x, y } = this.getCanvasCoordinates(e);
+
+    // Emit cursor position for status bar
+    this.dispatchEvent(
+      new CustomEvent('canvas-cursor', {
+        detail: { x: Math.floor(x), y: Math.floor(y) },
+        bubbles: true,
+        composed: true,
+      })
+    );
+
+    // Skip tool interaction during pan operations
+    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
+      return;
+    }
+
+    if (!this.activeTool) return;
     const modifiers = this.getModifiers(e);
 
     if (e.buttons === 1) {
       this.activeTool.onDrag(x, y, modifiers);
-      this.renderCanvas(); // Re-render during drag
+
+      // Schedule render instead of immediate call
+      renderScheduler.scheduleRender(() => this.renderCanvas());
     } else {
       this.activeTool.onMove(x, y, modifiers);
     }
@@ -326,26 +406,50 @@ export class PFDrawingCanvas extends BaseComponent {
     const { x, y } = this.getCanvasCoordinates(e);
     const modifiers = this.getModifiers(e);
     this.activeTool.onUp(x, y, modifiers);
-    this.renderCanvas(); // Final render
+
+    // Get stroke bounds before flushing
+    const strokeBounds = dirtyRectStore.flushStroke();
+
+    // Flush any pending renders before capturing final state
+    renderScheduler.flush();
+
+    // Request full redraw for final state
+    dirtyRectStore.requestFullRedraw();
+    this.renderCanvas();
 
     // Capture state after drawing and create command
     const activeLayerId = layerStore.activeLayerId.value;
     const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
 
-    if (activeLayer && activeLayer.canvas && this.previousImageData) {
+    if (activeLayer && activeLayer.canvas && this.previousImageData && strokeBounds && activeLayerId) {
       const layerCtx = activeLayer.canvas.getContext('2d');
       if (layerCtx) {
-        const newImageData = layerCtx.getImageData(0, 0, this.width, this.height);
+        // Clamp bounds to canvas dimensions
+        const bounds = rectClamp(strokeBounds, this.width, this.height);
 
-        // Only create command if canvas actually changed
-        if (!this.imageDataEquals(this.previousImageData, newImageData)) {
-          const command = this.createCommandForTool(
-            activeLayer.canvas,
-            { x: 0, y: 0, w: this.width, h: this.height },
-            this.previousImageData,
-            newImageData
+        // Skip if bounds are empty
+        if (bounds.width <= 0 || bounds.height <= 0) {
+          this.previousImageData = null;
+          return;
+        }
+
+        // Extract only the affected region from previous snapshot
+        const prevRegion = this.extractRegion(this.previousImageData, bounds);
+
+        // Get current state of the affected region
+        const newImageData = layerCtx.getImageData(
+          bounds.x, bounds.y, bounds.width, bounds.height
+        );
+
+        // Only create command if data actually changed
+        if (!this.uint8ArrayEquals(prevRegion, newImageData.data)) {
+          const command = new OptimizedDrawingCommand(
+            activeLayerId,
+            bounds,
+            prevRegion,
+            new Uint8ClampedArray(newImageData.data),
+            this.getCommandNameForTool()
           );
-
           historyStore.execute(command);
         }
 
@@ -355,43 +459,50 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   /**
-   * Create the appropriate command based on active tool type.
+   * Extract a rectangular region from full ImageData.
    */
-  private createCommandForTool(
-    canvas: HTMLCanvasElement,
-    bounds: { x: number; y: number; w: number; h: number },
-    prev: ImageData,
-    next: ImageData
-  ): Command {
-    const toolName = this.activeTool?.name;
+  private extractRegion(fullImageData: ImageData, bounds: Rect): Uint8ClampedArray {
+    const result = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+    const fullWidth = fullImageData.width;
 
-    switch (toolName) {
-      case 'fill':
-        return new FillCommand(canvas, bounds, prev, next);
-      case 'gradient':
-        return new GradientCommand(canvas, bounds, prev, next);
-      case 'line':
-        return new ShapeCommand(canvas, bounds, prev, next, 'Line');
-      case 'rectangle':
-        return new ShapeCommand(canvas, bounds, prev, next, 'Rectangle');
-      case 'ellipse':
-        return new ShapeCommand(canvas, bounds, prev, next, 'Ellipse');
-      default:
-        return new BrushCommand(canvas, bounds, prev, next);
+    for (let y = 0; y < bounds.height; y++) {
+      const srcOffset = ((bounds.y + y) * fullWidth + bounds.x) * 4;
+      const dstOffset = y * bounds.width * 4;
+      result.set(
+        fullImageData.data.subarray(srcOffset, srcOffset + bounds.width * 4),
+        dstOffset
+      );
     }
+
+    return result;
   }
 
   /**
-   * Compare two ImageData objects for equality.
+   * Compare two Uint8ClampedArray for equality.
    */
-  private imageDataEquals(a: ImageData, b: ImageData): boolean {
-    if (a.width !== b.width || a.height !== b.height) return false;
-    const dataA = a.data;
-    const dataB = b.data;
-    for (let i = 0; i < dataA.length; i++) {
-      if (dataA[i] !== dataB[i]) return false;
+  private uint8ArrayEquals(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
     }
     return true;
+  }
+
+  /**
+   * Get command name based on active tool.
+   */
+  private getCommandNameForTool(): string {
+    const toolName = this.activeTool?.name;
+    switch (toolName) {
+      case 'pencil': return 'Brush Stroke';
+      case 'eraser': return 'Erase';
+      case 'fill': return 'Fill';
+      case 'gradient': return 'Gradient';
+      case 'line': return 'Draw Line';
+      case 'rectangle': return 'Draw Rectangle';
+      case 'ellipse': return 'Draw Ellipse';
+      default: return 'Drawing';
+    }
   }
 
   render() {

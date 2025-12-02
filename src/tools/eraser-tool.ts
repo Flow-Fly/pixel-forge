@@ -246,6 +246,9 @@ export class EraserTool extends BaseTool {
         this.context.restore();
       }
     }
+
+    // Mark dirty region for partial redraw
+    this.markDirty(x, y);
   }
 
   /**

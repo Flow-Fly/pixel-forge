@@ -4,6 +4,8 @@ import { BaseComponent } from '../../core/base-component';
 import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
+import { gridStore } from '../../stores/grid';
+import { viewportStore } from '../../stores/viewport';
 import { FlipLayerCommand, RotateLayerCommand } from '../../commands/layer-commands';
 import { FileService } from '../../services/file-service';
 import { openAseFile, exportAseFile } from '../../services/aseprite-service';
@@ -176,6 +178,8 @@ export class PFMenuBar extends BaseComponent {
         <div class="menu-item">Zoom In <span class="shortcut">Ctrl++</span></div>
         <div class="menu-item">Zoom Out <span class="shortcut">Ctrl+-</span></div>
         <div class="menu-item">Fit on Screen <span class="shortcut">Ctrl+0</span></div>
+        <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>${gridStore.pixelGridEnabled.value ? '✓ ' : '   '}Pixel Grid <span class="shortcut">Ctrl+G</span></div>
+        <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>${gridStore.tileGridEnabled.value ? '✓ ' : '   '}Tile Grid <span class="shortcut">Ctrl+Shift+G</span></div>
         <div class="menu-item">Grid Settings...</div>
       </div>
 

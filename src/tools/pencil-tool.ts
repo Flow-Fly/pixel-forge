@@ -216,6 +216,9 @@ export class PencilTool extends BaseTool {
     }
 
     this.context.globalAlpha = 1;
+
+    // Mark dirty region for partial redraw
+    this.markDirty(x, y);
   }
 
   /**
