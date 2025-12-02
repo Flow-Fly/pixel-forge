@@ -6,7 +6,8 @@ import { selectionStore } from '../../stores/selection';
 import { toolStore, type ToolType } from '../../stores/tools';
 import { animationStore } from '../../stores/animation';
 import { historyStore } from '../../stores/history';
-import { BrushCommand } from '../../commands/drawing-commands';
+import { BrushCommand, FillCommand, GradientCommand, ShapeCommand } from '../../commands/drawing-commands';
+import { type Command } from '../../commands/index';
 import type { ModifierKeys } from '../../tools/base-tool';
 
 @customElement('pf-drawing-canvas')
@@ -336,21 +337,61 @@ export class PFDrawingCanvas extends BaseComponent {
       if (layerCtx) {
         const newImageData = layerCtx.getImageData(0, 0, this.width, this.height);
 
-        // Only create command if image data actually changed
-        // For now, we assume it changed if mouse was down.
-        // Optimization: Compare data buffers?
+        // Only create command if canvas actually changed
+        if (!this.imageDataEquals(this.previousImageData, newImageData)) {
+          const command = this.createCommandForTool(
+            activeLayer.canvas,
+            { x: 0, y: 0, w: this.width, h: this.height },
+            this.previousImageData,
+            newImageData
+          );
 
-        const command = new BrushCommand(
-          activeLayer.canvas,
-          { x: 0, y: 0, w: this.width, h: this.height },
-          this.previousImageData,
-          newImageData
-        );
+          historyStore.execute(command);
+        }
 
-        historyStore.execute(command);
         this.previousImageData = null;
       }
     }
+  }
+
+  /**
+   * Create the appropriate command based on active tool type.
+   */
+  private createCommandForTool(
+    canvas: HTMLCanvasElement,
+    bounds: { x: number; y: number; w: number; h: number },
+    prev: ImageData,
+    next: ImageData
+  ): Command {
+    const toolName = this.activeTool?.name;
+
+    switch (toolName) {
+      case 'fill':
+        return new FillCommand(canvas, bounds, prev, next);
+      case 'gradient':
+        return new GradientCommand(canvas, bounds, prev, next);
+      case 'line':
+        return new ShapeCommand(canvas, bounds, prev, next, 'Line');
+      case 'rectangle':
+        return new ShapeCommand(canvas, bounds, prev, next, 'Rectangle');
+      case 'ellipse':
+        return new ShapeCommand(canvas, bounds, prev, next, 'Ellipse');
+      default:
+        return new BrushCommand(canvas, bounds, prev, next);
+    }
+  }
+
+  /**
+   * Compare two ImageData objects for equality.
+   */
+  private imageDataEquals(a: ImageData, b: ImageData): boolean {
+    if (a.width !== b.width || a.height !== b.height) return false;
+    const dataA = a.data;
+    const dataB = b.data;
+    for (let i = 0; i < dataA.length; i++) {
+      if (dataA[i] !== dataB[i]) return false;
+    }
+    return true;
   }
 
   render() {
