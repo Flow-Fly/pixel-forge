@@ -4,6 +4,7 @@ import { BaseComponent } from "../../core/base-component";
 import { viewportStore } from "../../stores/viewport";
 import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
+import { colorStore } from "../../stores/colors";
 
 @customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
@@ -149,6 +150,7 @@ export class PFCanvasViewport extends BaseComponent {
         @mousemove=${this.handleMouseMove}
         @mouseleave=${this.handleMouseLeave}
         @wheel=${this.handleWheel}
+        @contextmenu=${this.handleContextMenu}
       >
         <slot></slot>
       </div>
@@ -381,6 +383,24 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private handleMouseDown(e: MouseEvent) {
+    // Ctrl+Click for lightness shifting
+    if (e.ctrlKey || e.metaKey) {
+      if (e.button === 0) {
+        // Left click: shift darker
+        e.preventDefault();
+        e.stopPropagation();
+        colorStore.shiftLightnessDarker();
+        return;
+      }
+      if (e.button === 2) {
+        // Right click: shift lighter
+        e.preventDefault();
+        e.stopPropagation();
+        colorStore.shiftLightnessLighter();
+        return;
+      }
+    }
+
     // Spacebar pan mode
     if (viewportStore.isSpacebarDown.value) {
       this.startDragging(e);
@@ -450,6 +470,13 @@ export class PFCanvasViewport extends BaseComponent {
     if (!this.isDragging) {
       viewportStore.cursorScreenX.value = null;
       viewportStore.cursorScreenY.value = null;
+    }
+  }
+
+  private handleContextMenu(e: MouseEvent) {
+    // Prevent context menu when Ctrl+RightClick is used for lightness shifting
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
     }
   }
 

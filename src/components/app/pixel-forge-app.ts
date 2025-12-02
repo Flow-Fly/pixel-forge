@@ -1,33 +1,34 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import '../toolbar/pf-toolbar';
-import '../status/pf-status-bar';
-import '../menu/pf-menu-bar';
-import '../canvas/pf-drawing-canvas';
-import '../canvas/pf-canvas-viewport';
-import '../color/pf-color-selector';
-import '../color/pf-color-sliders';
-import '../color/pf-palette-panel';
-import '../layers/pf-layers-panel';
-import '../timeline/pf-timeline';
-import '../dialogs/pf-resize-dialog';
-import '../dialogs/pf-export-dialog';
-import '../preview/pf-preview-window';
-import '../brush/pf-brush-panel';
-import '../ui/pf-undo-history';
-import '../ui/pf-collapsible-panel';
-import '../shape/pf-shape-options';
-import { projectStore } from '../../stores/project';
-import { type ToolType } from '../../stores/tools';
+import { html, css } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import "../toolbar/pf-toolbar";
+import "../status/pf-status-bar";
+import "../menu/pf-menu-bar";
+import "../canvas/pf-drawing-canvas";
+import "../canvas/pf-canvas-viewport";
+import "../color/pf-color-selector";
+import "../color/pf-color-sliders";
+import "../color/pf-palette-panel";
+import "../color/pf-lightness-bar";
+import "../layers/pf-layers-panel";
+import "../timeline/pf-timeline";
+import "../dialogs/pf-resize-dialog";
+import "../dialogs/pf-export-dialog";
+import "../preview/pf-preview-window";
+import "../brush/pf-brush-panel";
+import "../ui/pf-undo-history";
+import "../ui/pf-collapsible-panel";
+import "../shape/pf-shape-options";
+import { projectStore } from "../../stores/project";
+import { type ToolType } from "../../stores/tools";
 
-@customElement('pixel-forge-app')
+@customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
   static styles = css`
     :host {
       display: grid;
       grid-template-columns: 48px 1fr 250px; /* Toolbar, Workspace, Panels */
-      grid-template-rows: 32px 1fr 32px; /* Menu, Main, Status */
+      grid-template-rows: 32px auto 1fr 32px; /* Menu, ContextBar, Main, Status */
       width: 100vw;
       height: 100vh;
       background-color: var(--pf-color-bg-dark);
@@ -36,6 +37,7 @@ export class PixelForgeApp extends BaseComponent {
 
     .menu-bar {
       grid-column: 1 / -1;
+      grid-row: 1;
       background-color: var(--pf-color-bg-panel);
       border-bottom: 1px solid var(--pf-color-border);
       display: flex;
@@ -43,16 +45,21 @@ export class PixelForgeApp extends BaseComponent {
       padding: 0 var(--pf-spacing-2);
     }
 
+    .context-bar {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
     .toolbar {
       grid-column: 1;
-      grid-row: 2;
+      grid-row: 3;
       background-color: var(--pf-color-bg-panel);
       border-right: 1px solid var(--pf-color-border);
     }
 
     .workspace {
       grid-column: 2;
-      grid-row: 2;
+      grid-row: 3;
       position: relative;
       background-color: var(--pf-color-bg-dark);
       overflow: hidden;
@@ -72,7 +79,7 @@ export class PixelForgeApp extends BaseComponent {
 
     .panels {
       grid-column: 3;
-      grid-row: 2;
+      grid-row: 3;
       background-color: var(--pf-color-bg-panel);
       border-left: 1px solid var(--pf-color-border);
       display: flex;
@@ -87,7 +94,7 @@ export class PixelForgeApp extends BaseComponent {
 
     .status-bar {
       grid-column: 1 / -1;
-      grid-row: 3;
+      grid-row: 4;
       background-color: var(--pf-color-bg-panel);
       border-top: 1px solid var(--pf-color-border);
       display: flex;
@@ -109,10 +116,14 @@ export class PixelForgeApp extends BaseComponent {
     return html`
       <header class="menu-bar">
         <pf-menu-bar
-          @resize-canvas=${() => this.showResizeDialog = true}
-          @show-export-dialog=${() => this.showExportDialog = true}
+          @resize-canvas=${() => (this.showResizeDialog = true)}
+          @show-export-dialog=${() => (this.showExportDialog = true)}
         ></pf-menu-bar>
       </header>
+
+      <div class="context-bar">
+        <pf-lightness-bar></pf-lightness-bar>
+      </div>
 
       <aside class="toolbar">
         <pf-toolbar></pf-toolbar>
@@ -131,18 +142,20 @@ export class PixelForgeApp extends BaseComponent {
       </main>
 
       <aside class="panels">
+        <!-- Color Selector 
         <div style="padding: 8px; border-bottom: 1px solid var(--pf-color-border);">
           <pf-color-selector></pf-color-selector>
         </div>
-
+        
         <pf-collapsible-panel panelId="color-sliders" title="Color Sliders">
-          <pf-color-sliders></pf-color-sliders>
+        <pf-color-sliders></pf-color-sliders>
         </pf-collapsible-panel>
+        -->
 
         <pf-collapsible-panel
           panelId="brush"
           title="Brushes"
-          .visibleForTools=${['pencil', 'eraser'] as ToolType[]}
+          .visibleForTools=${["pencil", "eraser"] as ToolType[]}
         >
           <pf-brush-panel></pf-brush-panel>
         </pf-collapsible-panel>
@@ -170,7 +183,7 @@ export class PixelForgeApp extends BaseComponent {
 
       <pf-export-dialog
         ?open=${this.showExportDialog}
-        @close=${() => this.showExportDialog = false}
+        @close=${() => (this.showExportDialog = false)}
       ></pf-export-dialog>
     `;
   }

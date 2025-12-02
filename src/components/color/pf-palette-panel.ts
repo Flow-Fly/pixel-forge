@@ -108,6 +108,7 @@ export class PFPalettePanel extends BaseComponent {
 
   private selectColor(color: string) {
     colorStore.setPrimaryColor(color);
+    colorStore.updateLightnessVariations(color);
   }
 
   private handleSwatchRightClick(e: MouseEvent, color: string) {

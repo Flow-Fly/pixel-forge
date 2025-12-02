@@ -29,5 +29,6 @@ export class EyedropperTool extends BaseTool {
       pixel[2].toString(16).padStart(2, '0');
     
     colorStore.setPrimaryColor(hex);
+    colorStore.updateLightnessVariations(hex);
   }
 }

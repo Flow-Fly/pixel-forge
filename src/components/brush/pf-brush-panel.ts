@@ -1,10 +1,10 @@
-import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { brushStore } from '../../stores/brush';
-import type { Brush } from '../../types/brush';
+import { html, css } from "lit";
+import { customElement } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { brushStore } from "../../stores/brush";
+import type { Brush } from "../../types/brush";
 
-@customElement('pf-brush-panel')
+@customElement("pf-brush-panel")
 export class PFBrushPanel extends BaseComponent {
   static styles = css`
     :host {
@@ -82,48 +82,50 @@ export class PFBrushPanel extends BaseComponent {
 
     return html`
       <div class="header">Brushes</div>
-      
+
       <div class="brush-list">
-        ${brushes.map(brush => html`
-          <div 
-            class="brush-item ${brush.id === activeBrush.id ? 'active' : ''}"
-            @click=${() => brushStore.setActiveBrush(brush)}
-            title="${brush.name}"
-          >
-            <div 
-              class="brush-preview"
-              style="
+        ${brushes.map(
+          (brush) => html`
+            <div
+              class="brush-item ${brush.id === activeBrush.id ? "active" : ""}"
+              @click=${() => brushStore.setActiveBrush(brush)}
+              title="${brush.name}"
+            >
+              <div
+                class="brush-preview"
+                style="
                 width: ${Math.min(24, brush.size * 2)}px; 
                 height: ${Math.min(24, brush.size * 2)}px;
-                border-radius: ${brush.shape === 'circle' ? '50%' : '0'};
-                background-color: black;
+                border-radius: ${brush.shape === "circle" ? "50%" : "0"};
+                background-color: whitesmoke;
               "
-            ></div>
-          </div>
-        `)}
+              ></div>
+            </div>
+          `
+        )}
       </div>
 
       <div class="controls">
         <div class="control-group">
           <label>Size: ${activeBrush.size}px</label>
-          <input 
-            type="range" 
-            min="1" 
-            max="50" 
+          <input
+            type="range"
+            min="1"
+            max="50"
             .value=${activeBrush.size}
             @input=${(e: Event) => this.updateSize(e)}
-          >
+          />
         </div>
-        
+
         <div class="control-group">
           <label>Opacity: ${Math.round(activeBrush.opacity * 100)}%</label>
-          <input 
-            type="range" 
-            min="0" 
-            max="100" 
+          <input
+            type="range"
+            min="0"
+            max="100"
             .value=${activeBrush.opacity * 100}
             @input=${(e: Event) => this.updateOpacity(e)}
-          >
+          />
         </div>
       </div>
     `;
@@ -136,6 +138,8 @@ export class PFBrushPanel extends BaseComponent {
 
   updateOpacity(e: Event) {
     const input = e.target as HTMLInputElement;
-    brushStore.updateActiveBrushSettings({ opacity: parseInt(input.value) / 100 });
+    brushStore.updateActiveBrushSettings({
+      opacity: parseInt(input.value) / 100,
+    });
   }
 }
