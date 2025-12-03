@@ -189,6 +189,20 @@ export class PFToolbar extends BaseComponent {
         BIG
       </div>
 
+      <div
+        class="big-pixel-toggle ${bigPixelMode ? 'active' : ''}"
+        @click=${() => brushStore.toggleBigPixelMode()}
+        title="Big Pixel Mode (Ctrl+Shift+B)"
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <rect x="1" y="1" width="6" height="6"/>
+          <rect x="9" y="1" width="6" height="6"/>
+          <rect x="1" y="9" width="6" height="6"/>
+          <rect x="9" y="9" width="6" height="6"/>
+        </svg>
+        BIG
+      </div>
+
       <div class="spacer"></div>
 
       <div class="color-section">
