@@ -6,6 +6,7 @@ import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
 import { colorStore } from "../../stores/colors";
 import "./pf-marching-ants-overlay";
+import "./pf-brush-cursor-overlay";
 
 @customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
@@ -40,10 +41,16 @@ export class PFCanvasViewport extends BaseComponent {
     :host([space-down]) {
       cursor: grab;
     }
+    :host([space-down]) ::slotted(*) {
+      cursor: grab !important;
+    }
 
     /* Show grabbing cursor when panning */
     :host([panning]) {
       cursor: grabbing;
+    }
+    :host([panning]) ::slotted(*) {
+      cursor: grabbing !important;
     }
 
     /* Grid overlay canvas - renders at screen resolution, not scaled */
@@ -140,6 +147,18 @@ export class PFCanvasViewport extends BaseComponent {
     this.toggleAttribute("space-down", isSpaceDown && !isPanning);
     this.toggleAttribute("panning", isPanning);
 
+    // Update slotted drawing canvas cursor for pan mode
+    const drawingCanvas = this.querySelector('pf-drawing-canvas');
+    if (drawingCanvas) {
+      if (isPanning) {
+        drawingCanvas.setAttribute('pan-cursor', 'grabbing');
+      } else if (isSpaceDown) {
+        drawingCanvas.setAttribute('pan-cursor', 'grab');
+      } else {
+        drawingCanvas.removeAttribute('pan-cursor');
+      }
+    }
+
     // Draw grids after render
     requestAnimationFrame(() => this.drawGrids());
 
@@ -157,6 +176,7 @@ export class PFCanvasViewport extends BaseComponent {
       </div>
       <canvas id="grid-overlay"></canvas>
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
+      <pf-brush-cursor-overlay></pf-brush-cursor-overlay>
     `;
   }
 
