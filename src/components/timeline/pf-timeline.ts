@@ -58,7 +58,6 @@ export class PFTimeline extends BaseComponent {
       </div>
       <div class="timeline-content">
         <div class="layers-sidebar">
-          <div style="height: 32px; border-bottom: 1px solid var(--pf-color-border);"></div> <!-- Header spacer -->
           <pf-timeline-layers></pf-timeline-layers>
         </div>
         <div class="grid-area">

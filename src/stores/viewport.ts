@@ -259,6 +259,28 @@ class ViewportStore {
     this.panX.value = newX;
     this.panY.value = newY;
   }
+
+  /**
+   * Center the viewport on a specific canvas coordinate.
+   * Used by minimap navigation.
+   */
+  centerOn(canvasX: number, canvasY: number): void {
+    const containerW = this.containerWidth.value;
+    const containerH = this.containerHeight.value;
+    const zoom = this.zoom.value;
+
+    // Calculate pan values that center the given canvas point
+    // screenCenter = canvasPoint * zoom + pan
+    // pan = screenCenter - canvasPoint * zoom
+    const centerScreenX = containerW / 2;
+    const centerScreenY = containerH / 2;
+
+    this.panX.value = centerScreenX - canvasX * zoom;
+    this.panY.value = centerScreenY - canvasY * zoom;
+
+    // Clamp to valid bounds
+    this.clampPanToBounds();
+  }
 }
 
 export const viewportStore = new ViewportStore();

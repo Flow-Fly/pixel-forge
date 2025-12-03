@@ -1,0 +1,503 @@
+import { html, css } from 'lit';
+import { customElement, state, query } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { animationStore } from '../../stores/animation';
+import { layerStore } from '../../stores/layers';
+import { viewportStore } from '../../stores/viewport';
+import { projectStore } from '../../stores/project';
+
+type BackgroundType = 'white' | 'black' | 'checker';
+
+const STORAGE_KEY_POSITION = 'pf-preview-position';
+const STORAGE_KEY_COLLAPSED = 'pf-preview-collapsed';
+const STORAGE_KEY_BG = 'pf-preview-bg';
+
+@customElement('pf-preview-overlay')
+export class PFPreviewOverlay extends BaseComponent {
+  static styles = css`
+    :host {
+      position: absolute;
+      z-index: 100;
+      user-select: none;
+    }
+
+    .container {
+      background: var(--pf-color-bg-panel);
+      border: 1px solid var(--pf-color-border);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      min-width: 120px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px;
+      background: var(--pf-color-bg-surface);
+      border-bottom: 1px solid var(--pf-color-border);
+      border-radius: 4px 4px 0 0;
+      cursor: grab;
+      gap: 8px;
+    }
+
+    .header:active {
+      cursor: grabbing;
+    }
+
+    .header-title {
+      flex: 1;
+      font-size: 11px;
+      color: var(--pf-color-text-muted);
+    }
+
+    .chevron {
+      cursor: pointer;
+      color: var(--pf-color-text-muted);
+      font-size: 10px;
+      transition: transform 0.15s ease;
+      padding: 2px;
+    }
+
+    .chevron:hover {
+      color: var(--pf-color-text-main);
+    }
+
+    .chevron.collapsed {
+      transform: rotate(-90deg);
+    }
+
+    .content {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: max-height 0.15s ease, opacity 0.15s ease;
+      max-height: 300px;
+    }
+
+    .content.collapsed {
+      max-height: 0;
+      opacity: 0;
+    }
+
+    .preview-area {
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--pf-color-bg-dark);
+      position: relative;
+      cursor: crosshair;
+    }
+
+    .preview-canvas-wrapper {
+      position: relative;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+    }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+    }
+
+    .bg-white canvas {
+      background-color: white;
+    }
+
+    .bg-black canvas {
+      background-color: black;
+    }
+
+    .bg-checker canvas {
+      background-image:
+        linear-gradient(45deg, #808080 25%, transparent 25%),
+        linear-gradient(-45deg, #808080 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #808080 75%),
+        linear-gradient(-45deg, transparent 75%, #808080 75%);
+      background-size: 8px 8px;
+      background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+      background-color: #c0c0c0;
+    }
+
+    .viewport-indicator {
+      position: absolute;
+      border: 2px solid var(--pf-color-accent);
+      pointer-events: none;
+      box-sizing: border-box;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      border-top: 1px solid var(--pf-color-border);
+      background: var(--pf-color-bg-surface);
+      gap: 4px;
+    }
+
+    .bg-selector {
+      display: flex;
+      gap: 2px;
+    }
+
+    .bg-btn {
+      width: 18px;
+      height: 18px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: 2px;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .bg-btn:hover {
+      border-color: var(--pf-color-text-muted);
+    }
+
+    .bg-btn.active {
+      border-color: var(--pf-color-accent);
+      box-shadow: 0 0 0 1px var(--pf-color-accent);
+    }
+
+    .bg-btn.white {
+      background: white;
+    }
+
+    .bg-btn.black {
+      background: black;
+    }
+
+    .bg-btn.checker {
+      background-image:
+        linear-gradient(45deg, #808080 25%, transparent 25%),
+        linear-gradient(-45deg, #808080 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #808080 75%),
+        linear-gradient(-45deg, transparent 75%, #808080 75%);
+      background-size: 6px 6px;
+      background-position: 0 0, 0 3px, 3px -3px, -3px 0px;
+      background-color: #c0c0c0;
+    }
+
+    .play-btn {
+      background: var(--pf-color-bg-panel);
+      border: 1px solid var(--pf-color-border);
+      border-radius: 3px;
+      color: var(--pf-color-text-muted);
+      cursor: pointer;
+      font-size: 10px;
+      padding: 2px 8px;
+    }
+
+    .play-btn:hover {
+      background: var(--pf-color-bg-hover);
+      color: var(--pf-color-text-main);
+    }
+  `;
+
+  @query('canvas') previewCanvas!: HTMLCanvasElement;
+
+  @state() private collapsed = false;
+  @state() private bgType: BackgroundType = 'checker';
+  @state() private posX = 0;
+  @state() private posY = 0;
+  @state() private isDragging = false;
+  @state() private dragOffsetX = 0;
+  @state() private dragOffsetY = 0;
+
+  private ctx: CanvasRenderingContext2D | null = null;
+  private animationFrameId: number = 0;
+  private lastFrameTime: number = 0;
+  private previewScale = 2; // Preview canvas scale factor
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.loadState();
+    this.startAnimationLoop();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    cancelAnimationFrame(this.animationFrameId);
+    window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('mouseup', this.handleMouseUp);
+  }
+
+  firstUpdated() {
+    if (this.previewCanvas) {
+      this.ctx = this.previewCanvas.getContext('2d');
+    }
+    // Set default position if not loaded
+    if (this.posX === 0 && this.posY === 0) {
+      this.posX = 8;
+      this.posY = 8;
+    }
+  }
+
+  private loadState() {
+    const savedPos = localStorage.getItem(STORAGE_KEY_POSITION);
+    if (savedPos) {
+      try {
+        const { x, y } = JSON.parse(savedPos);
+        this.posX = x;
+        this.posY = y;
+      } catch {}
+    }
+
+    const savedCollapsed = localStorage.getItem(STORAGE_KEY_COLLAPSED);
+    if (savedCollapsed !== null) {
+      this.collapsed = savedCollapsed === 'true';
+    }
+
+    const savedBg = localStorage.getItem(STORAGE_KEY_BG) as BackgroundType;
+    if (savedBg && ['white', 'black', 'checker'].includes(savedBg)) {
+      this.bgType = savedBg;
+    }
+  }
+
+  private savePosition() {
+    localStorage.setItem(STORAGE_KEY_POSITION, JSON.stringify({ x: this.posX, y: this.posY }));
+  }
+
+  private saveCollapsed() {
+    localStorage.setItem(STORAGE_KEY_COLLAPSED, String(this.collapsed));
+  }
+
+  private saveBgType() {
+    localStorage.setItem(STORAGE_KEY_BG, this.bgType);
+  }
+
+  private toggleCollapse() {
+    this.collapsed = !this.collapsed;
+    this.saveCollapsed();
+  }
+
+  private setBgType(type: BackgroundType) {
+    this.bgType = type;
+    this.saveBgType();
+  }
+
+  private handleHeaderMouseDown = (e: MouseEvent) => {
+    // Don't start drag if clicking on chevron
+    if ((e.target as HTMLElement).classList.contains('chevron')) return;
+
+    this.isDragging = true;
+    this.dragOffsetX = e.clientX - this.posX;
+    this.dragOffsetY = e.clientY - this.posY;
+
+    window.addEventListener('mousemove', this.handleMouseMove);
+    window.addEventListener('mouseup', this.handleMouseUp);
+  };
+
+  private handleMouseMove = (e: MouseEvent) => {
+    if (!this.isDragging) return;
+
+    this.posX = e.clientX - this.dragOffsetX;
+    this.posY = e.clientY - this.dragOffsetY;
+
+    // Keep within bounds
+    const parent = this.parentElement;
+    if (parent) {
+      const maxX = parent.clientWidth - 140;
+      const maxY = parent.clientHeight - 50;
+      this.posX = Math.max(0, Math.min(this.posX, maxX));
+      this.posY = Math.max(0, Math.min(this.posY, maxY));
+    }
+  };
+
+  private handleMouseUp = () => {
+    this.isDragging = false;
+    this.savePosition();
+    window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('mouseup', this.handleMouseUp);
+  };
+
+  private handlePreviewClick(e: MouseEvent) {
+    if (!this.previewCanvas) return;
+
+    const rect = this.previewCanvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    // Convert to canvas coordinates
+    const canvasX = clickX / this.previewScale;
+    const canvasY = clickY / this.previewScale;
+
+    // Center viewport on this point
+    viewportStore.centerOn(canvasX, canvasY);
+  }
+
+  private togglePlay() {
+    animationStore.isPlaying.value = !animationStore.isPlaying.value;
+  }
+
+  private startAnimationLoop() {
+    const loop = (timestamp: number) => {
+      if (!this.lastFrameTime) this.lastFrameTime = timestamp;
+      const elapsed = timestamp - this.lastFrameTime;
+      const fps = animationStore.fps.value;
+      const interval = 1000 / fps;
+
+      if (animationStore.isPlaying.value && elapsed > interval) {
+        this.advanceFrame();
+        this.lastFrameTime = timestamp;
+      }
+
+      this.renderPreview();
+      this.animationFrameId = requestAnimationFrame(loop);
+    };
+    this.animationFrameId = requestAnimationFrame(loop);
+  }
+
+  private advanceFrame() {
+    const frames = animationStore.frames.value;
+    const currentId = animationStore.currentFrameId.value;
+    const currentIndex = frames.findIndex(f => f.id === currentId);
+    const nextIndex = (currentIndex + 1) % frames.length;
+    animationStore.currentFrameId.value = frames[nextIndex].id;
+  }
+
+  private renderPreview() {
+    if (!this.ctx || !this.previewCanvas) return;
+
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+
+    // Clear
+    this.ctx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+
+    const currentFrameId = animationStore.currentFrameId.value;
+    const layers = layerStore.layers.value;
+    const cels = animationStore.cels.value;
+
+    // Render layers for current frame
+    for (const layer of layers) {
+      if (layer.visible) {
+        const key = animationStore.getCelKey(layer.id, currentFrameId);
+        const cel = cels.get(key);
+        if (cel && cel.canvas) {
+          this.ctx.globalAlpha = layer.opacity / 255;
+          this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+          this.ctx.drawImage(cel.canvas, 0, 0);
+        }
+      }
+    }
+
+    this.ctx.globalAlpha = 1;
+    this.ctx.globalCompositeOperation = 'source-over';
+  }
+
+  private getViewportIndicatorStyle() {
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const zoom = viewportStore.zoom.value;
+    const panX = viewportStore.panX.value;
+    const panY = viewportStore.panY.value;
+    const containerW = viewportStore.containerWidth.value;
+    const containerH = viewportStore.containerHeight.value;
+
+    if (containerW === 0 || containerH === 0) return null;
+
+    // Calculate what portion of the canvas is visible
+    // Visible area in canvas coordinates
+    const visibleLeft = Math.max(0, -panX / zoom);
+    const visibleTop = Math.max(0, -panY / zoom);
+    const visibleRight = Math.min(canvasW, (containerW - panX) / zoom);
+    const visibleBottom = Math.min(canvasH, (containerH - panY) / zoom);
+
+    // Convert to preview coordinates
+    const scale = this.previewScale;
+    const left = visibleLeft * scale;
+    const top = visibleTop * scale;
+    const width = (visibleRight - visibleLeft) * scale;
+    const height = (visibleBottom - visibleTop) * scale;
+
+    // Don't show if viewport covers entire canvas
+    if (visibleLeft <= 0 && visibleTop <= 0 &&
+        visibleRight >= canvasW && visibleBottom >= canvasH) {
+      return null;
+    }
+
+    return {
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${Math.max(4, width)}px`,
+      height: `${Math.max(4, height)}px`,
+    };
+  }
+
+  render() {
+    const isPlaying = animationStore.isPlaying.value;
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const displayW = canvasW * this.previewScale;
+    const displayH = canvasH * this.previewScale;
+
+    const viewportStyle = this.getViewportIndicatorStyle();
+
+    return html`
+      <div
+        class="container"
+        style="transform: translate(${this.posX}px, ${this.posY}px)"
+      >
+        <div class="header" @mousedown=${this.handleHeaderMouseDown}>
+          <span
+            class="chevron ${this.collapsed ? 'collapsed' : ''}"
+            @click=${this.toggleCollapse}
+          >▼</span>
+          <span class="header-title">Preview</span>
+        </div>
+
+        <div class="content ${this.collapsed ? 'collapsed' : ''}">
+          <div
+            class="preview-area bg-${this.bgType}"
+            @click=${this.handlePreviewClick}
+          >
+            <div class="preview-canvas-wrapper">
+              <canvas
+                width="${canvasW}"
+                height="${canvasH}"
+                style="width: ${displayW}px; height: ${displayH}px;"
+              ></canvas>
+              ${viewportStyle ? html`
+                <div
+                  class="viewport-indicator"
+                  style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
+                ></div>
+              ` : ''}
+            </div>
+          </div>
+
+          <div class="controls">
+            <div class="bg-selector">
+              <button
+                class="bg-btn white ${this.bgType === 'white' ? 'active' : ''}"
+                @click=${() => this.setBgType('white')}
+                title="White background"
+              ></button>
+              <button
+                class="bg-btn black ${this.bgType === 'black' ? 'active' : ''}"
+                @click=${() => this.setBgType('black')}
+                title="Black background"
+              ></button>
+              <button
+                class="bg-btn checker ${this.bgType === 'checker' ? 'active' : ''}"
+                @click=${() => this.setBgType('checker')}
+                title="Transparent (checker)"
+              ></button>
+            </div>
+            <button class="play-btn" @click=${this.togglePlay}>
+              ${isPlaying ? '⏸' : '▶'}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'pf-preview-overlay': PFPreviewOverlay;
+  }
+}

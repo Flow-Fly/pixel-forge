@@ -1,4 +1,9 @@
 import { signal } from '../core/signal';
+import { layerStore } from './layers';
+import { animationStore } from './animation';
+
+// Harmony types for palette generation
+export type Harmony = 'analogous' | 'triadic' | 'complementary' | 'split' | 'tetradic';
 
 // DB32 Palette - Default colors
 const DB32_COLORS = [
@@ -10,10 +15,15 @@ const DB32_COLORS = [
 
 class PaletteStore {
   colors = signal<string[]>([...DB32_COLORS]);
-  editMode = signal(false);
+
+  // Palette generator state
+  generatedColors = signal<string[]>([]);
+  selectedHarmony = signal<Harmony>('analogous');
+  isExtracting = signal<boolean>(false);
 
   constructor() {
     this.loadFromStorage();
+    this.loadHarmonyFromStorage();
   }
 
   addColor(color: string) {
@@ -32,18 +42,236 @@ class PaletteStore {
     }
   }
 
-  setEditMode(enabled: boolean) {
-    this.editMode.value = enabled;
-  }
-
-  toggleEditMode() {
-    this.editMode.value = !this.editMode.value;
-  }
-
   resetToDefault() {
     this.colors.value = [...DB32_COLORS];
     this.saveToStorage();
   }
+
+  // ==========================================
+  // Palette Generator Methods
+  // ==========================================
+
+  /**
+   * Set harmony type and regenerate palette
+   */
+  setHarmony(harmony: Harmony) {
+    this.selectedHarmony.value = harmony;
+    this.saveHarmonyToStorage();
+  }
+
+  /**
+   * Generate harmonious palette from a base color
+   */
+  generateHarmony(baseColor: string): void {
+    const rgb = this.hexToRgb(baseColor);
+    if (!rgb) {
+      this.generatedColors.value = [baseColor, baseColor, baseColor, baseColor, baseColor];
+      return;
+    }
+
+    const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
+    const hues = this.generateHarmonyHues(hsl.h * 360, this.selectedHarmony.value);
+
+    // Generate 5 colors with the harmony hues, keeping original saturation/lightness
+    const colors = hues.slice(0, 5).map(hue => {
+      const newRgb = this.hslToRgb(hue / 360, hsl.s, hsl.l);
+      return this.rgbToHex(newRgb.r, newRgb.g, newRgb.b);
+    });
+
+    // Pad to 5 if needed (for harmonies that produce fewer colors)
+    while (colors.length < 5) {
+      colors.push(colors[colors.length - 1] || baseColor);
+    }
+
+    this.generatedColors.value = colors;
+  }
+
+  /**
+   * Generate hues based on harmony type
+   */
+  private generateHarmonyHues(baseHue: number, type: Harmony): number[] {
+    const hues: number[] = [baseHue];
+
+    switch (type) {
+      case 'complementary':
+        // Base + opposite + 3 variations between
+        hues.push((baseHue + 180) % 360);
+        hues.push((baseHue + 60) % 360);
+        hues.push((baseHue + 120) % 360);
+        hues.push((baseHue + 240) % 360);
+        break;
+
+      case 'analogous':
+        // Spread evenly within ±60° range
+        hues.push((baseHue - 30 + 360) % 360);
+        hues.push((baseHue - 15 + 360) % 360);
+        hues.push((baseHue + 15) % 360);
+        hues.push((baseHue + 30) % 360);
+        break;
+
+      case 'triadic':
+        // Base + 120° + 240° + 2 variations
+        hues.push((baseHue + 120) % 360);
+        hues.push((baseHue + 240) % 360);
+        hues.push((baseHue + 60) % 360);
+        hues.push((baseHue + 180) % 360);
+        break;
+
+      case 'split':
+        // Base + 150° + 210° + 2 variations
+        hues.push((baseHue + 150) % 360);
+        hues.push((baseHue + 210) % 360);
+        hues.push((baseHue + 30) % 360);
+        hues.push((baseHue + 330) % 360);
+        break;
+
+      case 'tetradic':
+        // Base + 90° + 180° + 270°
+        hues.push((baseHue + 90) % 360);
+        hues.push((baseHue + 180) % 360);
+        hues.push((baseHue + 270) % 360);
+        hues.push((baseHue + 45) % 360);
+        break;
+    }
+
+    return hues;
+  }
+
+  /**
+   * Extract distinct colors from the current drawing (all visible layers)
+   */
+  async extractFromDrawing(): Promise<void> {
+    this.isExtracting.value = true;
+
+    // Use setTimeout to allow UI to update with loading state
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    try {
+      const currentFrameId = animationStore.currentFrameId.value;
+      const layers = layerStore.layers.value;
+      const cels = animationStore.cels.value;
+
+      // Collect all pixel colors from visible layers
+      const colorCounts = new Map<string, number>();
+
+      for (const layer of layers) {
+        if (!layer.visible) continue;
+
+        const key = animationStore.getCelKey(layer.id, currentFrameId);
+        const cel = cels.get(key);
+        if (!cel?.canvas) continue;
+
+        const ctx = cel.canvas.getContext('2d');
+        if (!ctx) continue;
+
+        const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const a = data[i + 3];
+          if (a < 128) continue; // Skip transparent pixels
+
+          const hex = this.rgbToHex(data[i], data[i + 1], data[i + 2]);
+          colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
+        }
+      }
+
+      if (colorCounts.size === 0) {
+        this.generatedColors.value = [];
+        return;
+      }
+
+      // Cluster similar colors
+      const clusters = this.clusterColors(colorCounts);
+
+      // Sort by total pixel count and pick top 5
+      clusters.sort((a, b) => b.count - a.count);
+      const topColors = clusters.slice(0, 5).map(c => c.representative);
+
+      this.generatedColors.value = topColors;
+    } finally {
+      this.isExtracting.value = false;
+    }
+  }
+
+  /**
+   * Cluster similar colors together using HSL distance
+   */
+  private clusterColors(colorCounts: Map<string, number>): Array<{ representative: string; count: number }> {
+    const threshold = 0.15; // HSL distance threshold for clustering
+    const clusters: Array<{ colors: Map<string, number>; hsl: { h: number; s: number; l: number } }> = [];
+
+    for (const [hex, count] of colorCounts) {
+      const rgb = this.hexToRgb(hex);
+      if (!rgb) continue;
+
+      const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
+
+      // Find existing cluster within threshold
+      let foundCluster = false;
+      for (const cluster of clusters) {
+        const dist = this.hslDistance(hsl, cluster.hsl);
+        if (dist < threshold) {
+          cluster.colors.set(hex, count);
+          foundCluster = true;
+          break;
+        }
+      }
+
+      if (!foundCluster) {
+        const newCluster = { colors: new Map<string, number>(), hsl };
+        newCluster.colors.set(hex, count);
+        clusters.push(newCluster);
+      }
+    }
+
+    // Convert clusters to result format with representative color (most frequent in cluster)
+    return clusters.map(cluster => {
+      let maxCount = 0;
+      let representative = '';
+      let totalCount = 0;
+
+      for (const [hex, count] of cluster.colors) {
+        totalCount += count;
+        if (count > maxCount) {
+          maxCount = count;
+          representative = hex;
+        }
+      }
+
+      return { representative, count: totalCount };
+    });
+  }
+
+  /**
+   * Calculate distance between two HSL colors (0-1 range)
+   */
+  private hslDistance(a: { h: number; s: number; l: number }, b: { h: number; s: number; l: number }): number {
+    // Hue is circular, so we need to handle wrap-around
+    let hueDiff = Math.abs(a.h - b.h);
+    if (hueDiff > 0.5) hueDiff = 1 - hueDiff;
+
+    const satDiff = Math.abs(a.s - b.s);
+    const lightDiff = Math.abs(a.l - b.l);
+
+    // Weighted distance (hue matters most for color perception)
+    return Math.sqrt(hueDiff * hueDiff * 2 + satDiff * satDiff + lightDiff * lightDiff);
+  }
+
+  private loadHarmonyFromStorage() {
+    const saved = localStorage.getItem('pf-palette-harmony');
+    if (saved && ['analogous', 'triadic', 'complementary', 'split', 'tetradic'].includes(saved)) {
+      this.selectedHarmony.value = saved as Harmony;
+    }
+  }
+
+  private saveHarmonyToStorage() {
+    localStorage.setItem('pf-palette-harmony', this.selectedHarmony.value);
+  }
+
+  // ==========================================
+  // Lightness Variations
+  // ==========================================
 
   /**
    * Generate lightness variations for a given color.

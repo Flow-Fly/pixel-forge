@@ -1,7 +1,9 @@
 import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { layerStore } from '../../stores/layers';
+import { historyStore } from '../../stores/history';
+import { AddLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../commands/layer-commands';
 
 @customElement('pf-timeline-layers')
 export class PFTimelineLayers extends BaseComponent {
@@ -9,41 +11,327 @@ export class PFTimelineLayers extends BaseComponent {
     :host {
       display: flex;
       flex-direction: column;
+      height: 100%;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 2px;
+      padding: 4px;
+      border-bottom: 1px solid var(--pf-color-border);
+      background: var(--pf-color-bg-surface);
+    }
+
+    .toolbar button {
+      background: var(--pf-color-bg-panel);
+      border: 1px solid var(--pf-color-border);
+      border-radius: 3px;
+      color: var(--pf-color-text-muted);
+      font-size: 12px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .toolbar button:hover {
+      background: var(--pf-color-bg-hover);
+      color: var(--pf-color-text-main);
+    }
+
+    .toolbar button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .layer-list {
+      flex: 1;
+      overflow-y: auto;
     }
 
     .layer-row {
       height: 32px;
       display: flex;
       align-items: center;
-      padding: 0 var(--pf-spacing-2);
+      padding: 0 4px;
       border-bottom: 1px solid var(--pf-color-border);
       font-size: 12px;
       color: var(--pf-color-text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      cursor: pointer;
+      gap: 4px;
+    }
+
+    .layer-row:hover {
+      background-color: var(--pf-color-bg-hover);
     }
 
     .layer-row.active {
-      background-color: var(--pf-color-bg-hover);
+      background-color: var(--pf-color-bg-selected, rgba(74, 158, 255, 0.2));
       color: var(--pf-color-text-main);
+    }
+
+    .layer-row.dragging {
+      opacity: 0.5;
+    }
+
+    .layer-row.drag-over {
+      border-top: 2px solid var(--pf-color-accent);
+    }
+
+    .icon-btn {
+      background: none;
+      border: none;
+      color: var(--pf-color-text-muted);
+      cursor: pointer;
+      padding: 2px;
+      font-size: 14px;
+      opacity: 0.7;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+    }
+
+    .icon-btn:hover {
+      opacity: 1;
+      color: var(--pf-color-text-main);
+    }
+
+    .icon-btn.active {
+      opacity: 1;
+      color: var(--pf-color-accent);
+    }
+
+    .icon-btn.hidden-layer {
+      opacity: 0.3;
+    }
+
+    .icon-btn.locked-layer {
+      color: var(--pf-color-accent-yellow, #ffc107);
+    }
+
+    .layer-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 2px 4px;
+      border-radius: 2px;
+    }
+
+    .layer-name:hover {
+      background: var(--pf-color-bg-surface);
+    }
+
+    .layer-name-input {
+      flex: 1;
+      background: var(--pf-color-bg-surface);
+      border: 1px solid var(--pf-color-accent);
+      border-radius: 2px;
+      color: var(--pf-color-text-main);
+      font-size: 12px;
+      padding: 2px 4px;
+      outline: none;
+    }
+
+    .drag-handle {
+      cursor: grab;
+      opacity: 0.5;
+      font-size: 10px;
+    }
+
+    .drag-handle:hover {
+      opacity: 1;
     }
   `;
 
+  @state() private editingLayerId: string | null = null;
+  @state() private editingName: string = '';
+  @state() private draggedLayerId: string | null = null;
+  @state() private dragOverLayerId: string | null = null;
+
+  private addLayer() {
+    historyStore.execute(new AddLayerCommand());
+  }
+
+  private deleteLayer() {
+    const activeId = layerStore.activeLayerId.value;
+    if (activeId && layerStore.layers.value.length > 1) {
+      historyStore.execute(new RemoveLayerCommand(activeId));
+    }
+  }
+
+  private moveLayer(direction: 'up' | 'down') {
+    const activeId = layerStore.activeLayerId.value;
+    if (activeId) {
+      layerStore.reorderLayer(activeId, direction);
+    }
+  }
+
+  private selectLayer(id: string) {
+    layerStore.setActiveLayer(id);
+  }
+
+  private toggleVisibility(id: string, e: Event) {
+    e.stopPropagation();
+    layerStore.toggleVisibility(id);
+  }
+
+  private toggleLock(id: string, e: Event) {
+    e.stopPropagation();
+    layerStore.toggleLock(id);
+  }
+
+  private startRename(id: string, currentName: string, e: Event) {
+    e.stopPropagation();
+    this.editingLayerId = id;
+    this.editingName = currentName;
+    // Focus the input after render
+    this.updateComplete.then(() => {
+      const input = this.shadowRoot?.querySelector('.layer-name-input') as HTMLInputElement;
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  private handleRenameInput(e: Event) {
+    this.editingName = (e.target as HTMLInputElement).value;
+  }
+
+  private finishRename() {
+    if (this.editingLayerId && this.editingName.trim()) {
+      historyStore.execute(new UpdateLayerCommand(this.editingLayerId, { name: this.editingName.trim() }));
+    }
+    this.editingLayerId = null;
+    this.editingName = '';
+  }
+
+  private cancelRename() {
+    this.editingLayerId = null;
+    this.editingName = '';
+  }
+
+  private handleRenameKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      this.finishRename();
+    } else if (e.key === 'Escape') {
+      this.cancelRename();
+    }
+  }
+
+  // Drag and drop handlers
+  private handleDragStart(id: string, e: DragEvent) {
+    this.draggedLayerId = id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+    }
+  }
+
+  private handleDragEnd() {
+    this.draggedLayerId = null;
+    this.dragOverLayerId = null;
+  }
+
+  private handleDragOver(id: string, e: DragEvent) {
+    e.preventDefault();
+    if (this.draggedLayerId && this.draggedLayerId !== id) {
+      this.dragOverLayerId = id;
+    }
+  }
+
+  private handleDragLeave() {
+    this.dragOverLayerId = null;
+  }
+
+  private handleDrop(targetId: string, e: DragEvent) {
+    e.preventDefault();
+    if (!this.draggedLayerId || this.draggedLayerId === targetId) return;
+
+    const layers = [...layerStore.layers.value];
+    const draggedIndex = layers.findIndex(l => l.id === this.draggedLayerId);
+    const targetIndex = layers.findIndex(l => l.id === targetId);
+
+    if (draggedIndex !== -1 && targetIndex !== -1) {
+      const [draggedLayer] = layers.splice(draggedIndex, 1);
+      layers.splice(targetIndex, 0, draggedLayer);
+      layerStore.layers.value = layers;
+    }
+
+    this.draggedLayerId = null;
+    this.dragOverLayerId = null;
+  }
+
   render() {
-    // Render layers in reverse order (top to bottom) to match canvas stacking visually?
-    // Usually timeline shows top layer at top.
-    // layerStore.layers is bottom-to-top (0 is background).
-    // So we should reverse for display.
+    // Render layers in reverse order (top layer at top of list)
     const layers = [...layerStore.layers.value].reverse();
     const activeLayerId = layerStore.activeLayerId.value;
+    const canDelete = layerStore.layers.value.length > 1;
+
+    // Check if we can move up/down
+    const activeIndex = layerStore.layers.value.findIndex(l => l.id === activeLayerId);
+    const canMoveUp = activeIndex < layerStore.layers.value.length - 1;
+    const canMoveDown = activeIndex > 0;
 
     return html`
-      ${layers.map(layer => html`
-        <div class="layer-row ${layer.id === activeLayerId ? 'active' : ''}">
-          ${layer.name}
-        </div>
-      `)}
+      <div class="toolbar">
+        <button @click=${this.addLayer} title="Add Layer">+</button>
+        <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>-</button>
+        <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>↑</button>
+        <button @click=${() => this.moveLayer('down')} title="Move Down" ?disabled=${!canMoveDown}>↓</button>
+      </div>
+      <div class="layer-list">
+        ${layers.map(layer => html`
+          <div
+            class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${this.draggedLayerId === layer.id ? 'dragging' : ''} ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
+            @click=${() => this.selectLayer(layer.id)}
+            draggable="true"
+            @dragstart=${(e: DragEvent) => this.handleDragStart(layer.id, e)}
+            @dragend=${this.handleDragEnd}
+            @dragover=${(e: DragEvent) => this.handleDragOver(layer.id, e)}
+            @dragleave=${this.handleDragLeave}
+            @drop=${(e: DragEvent) => this.handleDrop(layer.id, e)}
+          >
+            <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+            <button
+              class="icon-btn ${!layer.visible ? 'hidden-layer' : ''}"
+              @click=${(e: Event) => this.toggleVisibility(layer.id, e)}
+              title="${layer.visible ? 'Hide' : 'Show'} layer"
+            >
+              ${layer.visible ? '👁' : '👁'}
+            </button>
+            <button
+              class="icon-btn ${layer.locked ? 'locked-layer' : ''}"
+              @click=${(e: Event) => this.toggleLock(layer.id, e)}
+              title="${layer.locked ? 'Unlock' : 'Lock'} layer"
+            >
+              ${layer.locked ? '🔒' : '🔓'}
+            </button>
+            ${this.editingLayerId === layer.id ? html`
+              <input
+                class="layer-name-input"
+                type="text"
+                .value=${this.editingName}
+                @input=${this.handleRenameInput}
+                @blur=${this.finishRename}
+                @keydown=${this.handleRenameKeydown}
+                @click=${(e: Event) => e.stopPropagation()}
+              />
+            ` : html`
+              <span
+                class="layer-name"
+                @dblclick=${(e: Event) => this.startRename(layer.id, layer.name, e)}
+              >
+                ${layer.name}
+              </span>
+            `}
+          </div>
+        `)}
+      </div>
     `;
   }
 }

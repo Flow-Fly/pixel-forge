@@ -9,12 +9,12 @@ import "../canvas/pf-canvas-viewport";
 import "../color/pf-color-selector";
 import "../color/pf-color-sliders";
 import "../color/pf-palette-panel";
+import "../color/pf-palette-generator";
 import "../color/pf-lightness-bar";
-import "../layers/pf-layers-panel";
 import "../timeline/pf-timeline";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
-import "../preview/pf-preview-window";
+import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-collapsible-panel";
@@ -136,6 +136,7 @@ export class PixelForgeApp extends BaseComponent {
             .height=${projectStore.height.value}
           ></pf-drawing-canvas>
         </pf-canvas-viewport>
+        <pf-preview-overlay></pf-preview-overlay>
         <div class="timeline-container">
           <pf-timeline></pf-timeline>
         </div>
@@ -164,12 +165,8 @@ export class PixelForgeApp extends BaseComponent {
           <pf-palette-panel></pf-palette-panel>
         </pf-collapsible-panel>
 
-        <pf-collapsible-panel panelId="preview" title="Preview">
-          <pf-preview-window></pf-preview-window>
-        </pf-collapsible-panel>
-
-        <pf-collapsible-panel panelId="layers" title="Layers">
-          <pf-layers-panel></pf-layers-panel>
+        <pf-collapsible-panel panelId="palette-generator" title="Palette Generator">
+          <pf-palette-generator></pf-palette-generator>
         </pf-collapsible-panel>
 
         <pf-collapsible-panel panelId="history" title="History">

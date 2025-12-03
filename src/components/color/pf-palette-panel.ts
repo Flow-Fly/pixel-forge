@@ -15,10 +15,49 @@ export class PFPalettePanel extends BaseComponent {
 
     .toolbar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
       margin-bottom: 8px;
-      gap: 4px;
+      gap: 6px;
+    }
+
+    .hex-input {
+      flex: 1;
+      min-width: 0;
+      padding: 4px 6px;
+      background: var(--pf-color-bg-surface, #1e1e1e);
+      border: 1px solid var(--pf-color-border, #333);
+      border-radius: 3px;
+      color: var(--pf-color-text-main, #e0e0e0);
+      font-size: 11px;
+      font-family: monospace;
+    }
+
+    .hex-input:focus {
+      outline: none;
+      border-color: var(--pf-color-accent, #4a9eff);
+    }
+
+    .hex-input.invalid {
+      border-color: var(--pf-color-accent-red, #e53935);
+    }
+
+    .color-picker {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 1px solid var(--pf-color-border, #333);
+      border-radius: 3px;
+      cursor: pointer;
+      background: none;
+    }
+
+    .color-picker::-webkit-color-swatch-wrapper {
+      padding: 2px;
+    }
+
+    .color-picker::-webkit-color-swatch {
+      border: none;
+      border-radius: 2px;
     }
 
     .toolbar-btn {
@@ -27,20 +66,15 @@ export class PFPalettePanel extends BaseComponent {
       border-radius: 3px;
       color: var(--pf-color-text-muted, #808080);
       font-size: 10px;
-      padding: 3px 8px;
+      padding: 4px 8px;
       cursor: pointer;
       transition: all 0.15s ease;
+      white-space: nowrap;
     }
 
     .toolbar-btn:hover {
       background: var(--pf-color-bg-panel, #141414);
       color: var(--pf-color-text-main, #e0e0e0);
-    }
-
-    .toolbar-btn.active {
-      background: var(--pf-color-accent, #4a9eff);
-      color: white;
-      border-color: var(--pf-color-accent, #4a9eff);
     }
 
     .palette-grid {
@@ -81,30 +115,14 @@ export class PFPalettePanel extends BaseComponent {
       transition: opacity 0.15s ease;
     }
 
-    .swatch:hover .remove-btn,
-    .swatch .remove-btn:focus {
+    .swatch:hover .remove-btn {
       opacity: 1;
-    }
-
-    .add-swatch {
-      aspect-ratio: 1;
-      cursor: pointer;
-      background: var(--pf-color-bg-surface, #1e1e1e);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--pf-color-text-muted, #808080);
-      font-size: 16px;
-      transition: all 0.15s ease;
-    }
-
-    .add-swatch:hover {
-      background: var(--pf-color-bg-panel, #141414);
-      color: var(--pf-color-accent, #4a9eff);
     }
   `;
 
   @state() private lightnessTarget: { color: string; x: number; y: number } | null = null;
+  @state() private hexInput = '';
+  @state() private hexInvalid = false;
 
   private selectColor(color: string) {
     colorStore.setPrimaryColor(color);
@@ -124,46 +142,82 @@ export class PFPalettePanel extends BaseComponent {
     this.lightnessTarget = null;
   }
 
-  private addCurrentColor() {
-    const currentColor = colorStore.primaryColor.value;
-    paletteStore.addColor(currentColor);
-  }
-
   private removeColor(index: number, e: MouseEvent) {
     e.stopPropagation();
     paletteStore.removeColor(index);
-  }
-
-  private toggleEditMode() {
-    paletteStore.toggleEditMode();
   }
 
   private resetPalette() {
     paletteStore.resetToDefault();
   }
 
+  private handleHexInput(e: Event) {
+    const value = (e.target as HTMLInputElement).value;
+    this.hexInput = value;
+    this.hexInvalid = false;
+  }
+
+  private handleHexKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      this.addHexColor();
+    }
+  }
+
+  private addHexColor() {
+    let hex = this.hexInput.trim();
+
+    // Add # if missing
+    if (hex && !hex.startsWith('#')) {
+      hex = '#' + hex;
+    }
+
+    // Validate hex format
+    if (!/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/.test(hex)) {
+      this.hexInvalid = true;
+      return;
+    }
+
+    // Expand 3-char hex to 6-char
+    if (hex.length === 4) {
+      hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    }
+
+    paletteStore.addColor(hex.toLowerCase());
+    this.hexInput = '';
+    this.hexInvalid = false;
+  }
+
+  private handleColorPicker(e: Event) {
+    const color = (e.target as HTMLInputElement).value;
+    paletteStore.addColor(color);
+  }
+
   render() {
     const colors = paletteStore.colors.value;
-    const editMode = paletteStore.editMode.value;
 
     return html`
       <div class="toolbar">
+        <input
+          type="text"
+          class="hex-input ${this.hexInvalid ? 'invalid' : ''}"
+          placeholder="#hex"
+          .value=${this.hexInput}
+          @input=${this.handleHexInput}
+          @keydown=${this.handleHexKeydown}
+        />
+        <input
+          type="color"
+          class="color-picker"
+          title="Pick a color to add"
+          @change=${this.handleColorPicker}
+        />
         <button
-          class="toolbar-btn ${editMode ? 'active' : ''}"
-          @click=${this.toggleEditMode}
-          title="Toggle edit mode"
+          class="toolbar-btn"
+          @click=${this.resetPalette}
+          title="Reset to default DB32 palette"
         >
-          ${editMode ? 'Done' : 'Edit'}
+          Reset
         </button>
-        ${editMode ? html`
-          <button
-            class="toolbar-btn"
-            @click=${this.resetPalette}
-            title="Reset to default DB32 palette"
-          >
-            Reset
-          </button>
-        ` : ''}
       </div>
 
       <div class="palette-grid">
@@ -175,22 +229,13 @@ export class PFPalettePanel extends BaseComponent {
             @click=${() => this.selectColor(color)}
             @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color)}
           >
-            ${editMode ? html`
-              <span
-                class="remove-btn"
-                @click=${(e: MouseEvent) => this.removeColor(index, e)}
-                title="Remove color"
-              >×</span>
-            ` : ''}
+            <span
+              class="remove-btn"
+              @click=${(e: MouseEvent) => this.removeColor(index, e)}
+              title="Remove color"
+            >×</span>
           </div>
         `)}
-        ${editMode ? html`
-          <div
-            class="add-swatch"
-            @click=${this.addCurrentColor}
-            title="Add current primary color"
-          >+</div>
-        ` : ''}
       </div>
 
       ${this.lightnessTarget ? html`
