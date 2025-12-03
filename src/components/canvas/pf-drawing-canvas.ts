@@ -146,6 +146,14 @@ export class PFDrawingCanvas extends BaseComponent {
         const { TransformTool } = await import('../../tools/transform-tool');
         ToolClass = TransformTool;
         break;
+      case 'hand':
+        const { HandTool } = await import('../../tools/hand-tool');
+        ToolClass = HandTool;
+        break;
+      case 'zoom':
+        const { ZoomTool } = await import('../../tools/zoom-tool');
+        ToolClass = ZoomTool;
+        break;
       default:
         console.warn(`Unknown tool: ${toolName}`);
         return;

@@ -274,6 +274,55 @@ class AnimationStore {
     newFrames[frameIndex] = updatedFrame;
     this.frames.value = newFrames;
   }
+
+  /**
+   * Go to the next frame.
+   */
+  nextFrame() {
+    const frames = this.frames.value;
+    const currentIndex = frames.findIndex(f => f.id === this.currentFrameId.value);
+    if (currentIndex < frames.length - 1) {
+      this.goToFrame(frames[currentIndex + 1].id);
+    }
+  }
+
+  /**
+   * Go to the previous frame.
+   */
+  prevFrame() {
+    const frames = this.frames.value;
+    const currentIndex = frames.findIndex(f => f.id === this.currentFrameId.value);
+    if (currentIndex > 0) {
+      this.goToFrame(frames[currentIndex - 1].id);
+    }
+  }
+
+  /**
+   * Go to the first frame.
+   */
+  goToFirstFrame() {
+    const frames = this.frames.value;
+    if (frames.length > 0) {
+      this.goToFrame(frames[0].id);
+    }
+  }
+
+  /**
+   * Go to the last frame.
+   */
+  goToLastFrame() {
+    const frames = this.frames.value;
+    if (frames.length > 0) {
+      this.goToFrame(frames[frames.length - 1].id);
+    }
+  }
+
+  /**
+   * Toggle playback on/off.
+   */
+  togglePlayback() {
+    this.isPlaying.value = !this.isPlaying.value;
+  }
 }
 
 export const animationStore = new AnimationStore();

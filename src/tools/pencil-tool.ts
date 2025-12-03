@@ -51,14 +51,25 @@ export class PencilTool extends BaseTool {
     this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
 
     // Shift+Click: draw line from last stroke end to current position
+    // Ctrl+Shift+Click: angle-snapped line (45 degree increments)
     if (modifiers?.shift && PencilTool.lastStrokeEnd) {
       const start = PencilTool.lastStrokeEnd;
+      let endX = currentX;
+      let endY = currentY;
+
+      // If Ctrl is also held, snap to 45-degree angles
+      if (modifiers?.ctrl) {
+        const snapped = constrainTo45Degrees(start.x, start.y, currentX, currentY);
+        endX = snapped.x;
+        endY = snapped.y;
+      }
+
       this.drawnPoints = [{ x: start.x, y: start.y }];
-      this.drawLineBetweenPoints(start.x, start.y, currentX, currentY);
-      this.lastX = currentX;
-      this.lastY = currentY;
+      this.drawLineBetweenPoints(start.x, start.y, endX, endY);
+      this.lastX = endX;
+      this.lastY = endY;
       // Update last stroke end immediately for chained shift-clicks
-      PencilTool.lastStrokeEnd = { x: currentX, y: currentY };
+      PencilTool.lastStrokeEnd = { x: endX, y: endY };
       return;
     }
 
