@@ -1,26 +1,28 @@
-import { signal } from '../core/signal';
+import { signal } from "../core/signal";
 
 export type PanelId =
-  | 'color-sliders'
-  | 'brush'
-  | 'palette'
-  | 'preview'
-  | 'layers'
-  | 'history'
-  | 'shape-options';
+  | "color-sliders"
+  | "brush"
+  | "palette"
+  | "preview"
+  | "layers"
+  | "history"
+  | "shape-options"
+  | "palette-generator";
 
 interface PanelState {
   collapsed: boolean;
 }
 
 const DEFAULT_STATES: Record<PanelId, PanelState> = {
-  'color-sliders': { collapsed: false },
-  'brush': { collapsed: false },
-  'palette': { collapsed: false },
-  'preview': { collapsed: false },
-  'layers': { collapsed: false },
-  'history': { collapsed: true },
-  'shape-options': { collapsed: false },
+  "color-sliders": { collapsed: false },
+  brush: { collapsed: false },
+  palette: { collapsed: false },
+  preview: { collapsed: false },
+  layers: { collapsed: false },
+  history: { collapsed: true },
+  "shape-options": { collapsed: false },
+  "palette-generator": { collapsed: false },
 };
 
 class PanelStore {
@@ -53,7 +55,7 @@ class PanelStore {
   }
 
   private loadFromStorage() {
-    const saved = localStorage.getItem('pf-panel-states');
+    const saved = localStorage.getItem("pf-panel-states");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -66,7 +68,10 @@ class PanelStore {
   }
 
   private saveToStorage() {
-    localStorage.setItem('pf-panel-states', JSON.stringify(this.panelStates.value));
+    localStorage.setItem(
+      "pf-panel-states",
+      JSON.stringify(this.panelStates.value)
+    );
   }
 
   reset() {
