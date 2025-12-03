@@ -5,6 +5,7 @@ import { viewportStore } from "../../stores/viewport";
 import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
 import { colorStore } from "../../stores/colors";
+import "./pf-marching-ants-overlay";
 
 @customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
@@ -155,6 +156,7 @@ export class PFCanvasViewport extends BaseComponent {
         <slot></slot>
       </div>
       <canvas id="grid-overlay"></canvas>
+      <pf-marching-ants-overlay></pf-marching-ants-overlay>
     `;
   }
 
