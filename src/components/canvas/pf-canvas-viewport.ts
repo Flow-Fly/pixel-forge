@@ -5,6 +5,7 @@ import { viewportStore } from "../../stores/viewport";
 import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
 import { colorStore } from "../../stores/colors";
+import { brushStore } from "../../stores/brush";
 import "./pf-marching-ants-overlay";
 import "./pf-brush-cursor-overlay";
 
@@ -505,11 +506,14 @@ export class PFCanvasViewport extends BaseComponent {
   private handleWheel(e: WheelEvent) {
     e.preventDefault();
 
-    // Shift+scroll for horizontal pan
+    // Shift+scroll for brush size adjustment
+    // Note: macOS swaps deltaY to deltaX when Shift is held, so check both
     if (e.shiftKey) {
-      viewportStore.panBy(-e.deltaY, 0);
-      viewportStore.clampPanToBounds();
-      this.requestUpdate();
+      const currentSize = brushStore.activeBrush.value.size;
+      const scrollDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      const delta = scrollDelta < 0 ? 1 : -1;
+      const newSize = Math.max(1, Math.min(50, currentSize + delta));
+      brushStore.updateActiveBrushSettings({ size: newSize });
       return;
     }
 
