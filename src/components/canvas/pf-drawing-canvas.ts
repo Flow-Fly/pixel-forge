@@ -42,6 +42,14 @@ export class PFDrawingCanvas extends BaseComponent {
       /* Cursor is set dynamically based on active tool */
       cursor: crosshair;
     }
+
+    /* Inherit cursor from host during pan mode (set by viewport) */
+    :host([pan-cursor="grab"]) canvas {
+      cursor: grab !important;
+    }
+    :host([pan-cursor="grabbing"]) canvas {
+      cursor: grabbing !important;
+    }
   `;
 
   private ctx!: CanvasRenderingContext2D;
@@ -138,6 +146,14 @@ export class PFDrawingCanvas extends BaseComponent {
         const { TransformTool } = await import('../../tools/transform-tool');
         ToolClass = TransformTool;
         break;
+      case 'hand':
+        const { HandTool } = await import('../../tools/hand-tool');
+        ToolClass = HandTool;
+        break;
+      case 'zoom':
+        const { ZoomTool } = await import('../../tools/zoom-tool');
+        ToolClass = ZoomTool;
+        break;
       default:
         console.warn(`Unknown tool: ${toolName}`);
         return;
@@ -146,7 +162,7 @@ export class PFDrawingCanvas extends BaseComponent {
     if (ToolClass) {
       this.activeTool = new ToolClass(this.ctx);
 
-      // Set cursor based on tool
+      // Set cursor based on tool (brush preview overlay shows alongside cursor)
       if (this.canvas && this.activeTool.cursor) {
         this.canvas.style.cursor = this.activeTool.cursor;
       }
@@ -374,12 +390,10 @@ export class PFDrawingCanvas extends BaseComponent {
   private handleMouseMove(e: MouseEvent) {
     const { x, y } = this.getCanvasCoordinates(e);
 
-    // Emit cursor position for status bar
-    this.dispatchEvent(
+    // Emit cursor position for status bar and brush cursor overlay
+    window.dispatchEvent(
       new CustomEvent('canvas-cursor', {
         detail: { x: Math.floor(x), y: Math.floor(y) },
-        bubbles: true,
-        composed: true,
       })
     );
 
@@ -400,6 +414,14 @@ export class PFDrawingCanvas extends BaseComponent {
       this.activeTool.onMove(x, y, modifiers);
     }
   }
+
+  private handleMouseLeave = (e: MouseEvent) => {
+    // Notify brush cursor overlay that cursor left canvas
+    window.dispatchEvent(new CustomEvent('canvas-cursor-leave'));
+
+    // Also end any active drawing operations
+    this.handleMouseUp(e);
+  };
 
   private handleMouseUp(e: MouseEvent) {
     if (!this.activeTool) return;
@@ -517,7 +539,7 @@ export class PFDrawingCanvas extends BaseComponent {
         @mousedown=${this.handleMouseDown}
         @mousemove=${this.handleMouseMove}
         @mouseup=${this.handleMouseUp}
-        @mouseleave=${this.handleMouseUp}
+        @mouseleave=${this.handleMouseLeave}
       ></canvas>
     `;
   }

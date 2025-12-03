@@ -65,42 +65,53 @@ class ProjectStore {
     this.setSize(file.width, file.height);
 
     // 2. Restore Layers
-    while(layerStore.layers.value.length > 0) {
+    // Clear all layers (layerStore.removeLayer doesn't have a "last layer" guard)
+    while (layerStore.layers.value.length > 0) {
       layerStore.removeLayer(layerStore.layers.value[0].id);
     }
 
     for (const l of file.layers) {
-      const layer = layerStore.addLayer(l.name);
+      const layer = layerStore.addLayer(l.name, file.width, file.height);
       layer.id = l.id;
       layer.visible = l.visible;
       layer.opacity = l.opacity;
-      await this.loadImageToCanvas(l.data, layer.canvas);
+      if (l.data) {
+        await this.loadImageToCanvas(l.data, layer.canvas);
+      }
     }
 
     // 3. Restore Frames
-    while(animationStore.frames.value.length > 0) {
-       animationStore.deleteFrame(animationStore.frames.value[0].id);
+    // Delete all frames except the last one (deleteFrame guards against deleting last)
+    while (animationStore.frames.value.length > 1) {
+      animationStore.deleteFrame(animationStore.frames.value[0].id);
     }
 
-    // Add frames
+    // Now we have exactly 1 frame left - we'll replace it with loaded frames
+    const placeholderFrameId = animationStore.frames.value[0]?.id;
+
+    // Add frames from file
     for (const f of file.frames) {
-      // Add a new frame
       animationStore.addFrame(false); // false = don't duplicate content
       const newFrame = animationStore.frames.value[animationStore.frames.value.length - 1];
       newFrame.duration = f.duration;
-      
+
       // Populate cels
       for (const c of f.cels) {
         const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
-        if (canvas) {
+        if (canvas && c.data) {
           await this.loadImageToCanvas(c.data, canvas);
         }
       }
     }
-    
+
+    // Delete the placeholder frame (now we have loaded frames)
+    if (placeholderFrameId && animationStore.frames.value.length > 1) {
+      animationStore.deleteFrame(placeholderFrameId);
+    }
+
     // 4. Animation Settings
     animationStore.fps.value = file.animation.fps;
-    
+
     const targetFrame = animationStore.frames.value[file.animation.currentFrameIndex];
     if (targetFrame) {
       animationStore.goToFrame(targetFrame.id);

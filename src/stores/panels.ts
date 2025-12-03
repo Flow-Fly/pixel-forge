@@ -8,7 +8,8 @@ export type PanelId =
   | "layers"
   | "history"
   | "shape-options"
-  | "palette-generator";
+  | "palette-generator"
+  | "timeline";
 
 interface PanelState {
   collapsed: boolean;
@@ -23,6 +24,7 @@ const DEFAULT_STATES: Record<PanelId, PanelState> = {
   history: { collapsed: true },
   "shape-options": { collapsed: false },
   "palette-generator": { collapsed: false },
+  "timeline": { collapsed: false },
 };
 
 class PanelStore {

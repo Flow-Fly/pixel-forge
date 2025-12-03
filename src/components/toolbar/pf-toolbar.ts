@@ -72,9 +72,9 @@ export class PFToolbar extends BaseComponent {
           ?active=${activeTool === 'marquee-rect'}
           @click=${() => this.selectTool('marquee-rect')}
         ></pf-tool-button>
-        <pf-tool-button 
-          tool="lasso" 
-          shortcut="L" 
+        <pf-tool-button
+          tool="lasso"
+          shortcut="Q"
           ?active=${activeTool === 'lasso'}
           @click=${() => this.selectTool('lasso')}
         ></pf-tool-button>
@@ -86,21 +86,21 @@ export class PFToolbar extends BaseComponent {
         ></pf-tool-button>
       </div>
       <div class="group">
-        <pf-tool-button 
-          tool="line" 
-          shortcut="U" 
+        <pf-tool-button
+          tool="line"
+          shortcut="L"
           ?active=${activeTool === 'line'}
           @click=${() => this.selectTool('line')}
         ></pf-tool-button>
-        <pf-tool-button 
-          tool="rectangle" 
-          shortcut="R" 
+        <pf-tool-button
+          tool="rectangle"
+          shortcut="U"
           ?active=${activeTool === 'rectangle'}
           @click=${() => this.selectTool('rectangle')}
         ></pf-tool-button>
-        <pf-tool-button 
-          tool="ellipse" 
-          shortcut="O" 
+        <pf-tool-button
+          tool="ellipse"
+          shortcut="⇧U"
           ?active=${activeTool === 'ellipse'}
           @click=${() => this.selectTool('ellipse')}
         ></pf-tool-button>
@@ -114,15 +114,29 @@ export class PFToolbar extends BaseComponent {
         ></pf-tool-button>
         <pf-tool-button
           tool="gradient"
-          shortcut="H"
+          shortcut="⇧G"
           ?active=${activeTool === 'gradient'}
           @click=${() => this.selectTool('gradient')}
         ></pf-tool-button>
         <pf-tool-button
           tool="transform"
-          shortcut="T"
+          shortcut="V"
           ?active=${activeTool === 'transform'}
           @click=${() => this.selectTool('transform')}
+        ></pf-tool-button>
+      </div>
+      <div class="group">
+        <pf-tool-button
+          tool="hand"
+          shortcut="H"
+          ?active=${activeTool === 'hand'}
+          @click=${() => this.selectTool('hand')}
+        ></pf-tool-button>
+        <pf-tool-button
+          tool="zoom"
+          shortcut="Z"
+          ?active=${activeTool === 'zoom'}
+          @click=${() => this.selectTool('zoom')}
         ></pf-tool-button>
       </div>
 

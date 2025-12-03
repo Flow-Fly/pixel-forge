@@ -21,6 +21,12 @@ export class OptimizedDrawingCommand implements Command {
   // Estimated memory usage in bytes (for history limit tracking)
   readonly memorySize: number;
 
+  // Public getters for accessing private drawing data (used by history preview)
+  get drawBounds(): Rect { return { ...this.bounds }; }
+  get drawPreviousData(): Uint8ClampedArray { return this.previousData; }
+  get drawNewData(): Uint8ClampedArray { return this.newData; }
+  get drawLayerId(): string { return this.layerId; }
+
   constructor(
     layerId: string,
     bounds: Rect,
