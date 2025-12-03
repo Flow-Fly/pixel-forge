@@ -7,9 +7,6 @@ import {
   isLShape,
 } from '../services/drawing/algorithms';
 
-// Default spacing multiplier (0.25 = stamp every size/4 pixels)
-const SPACING_MULTIPLIER = 0.25;
-
 export class PencilTool extends BaseTool {
   name = 'pencil';
   cursor = 'crosshair';
@@ -31,6 +28,9 @@ export class PencilTool extends BaseTool {
   // Track distance since last stamp for brush spacing
   private distanceSinceLastStamp = 0;
 
+  // Track stamp positions for pixel-perfect at stamp level
+  private stampPositions: Point[] = [];
+
   // Snapshot of canvas before current stroke (for pixel-perfect restore)
   private strokeStartSnapshot: ImageData | null = null;
 
@@ -43,8 +43,15 @@ export class PencilTool extends BaseTool {
     if (!this.context) return;
 
     this.isDrawing = true;
-    const currentX = Math.floor(x);
-    const currentY = Math.floor(y);
+    let currentX = Math.floor(x);
+    let currentY = Math.floor(y);
+
+    // Snap to spacing grid when spacing > 1 (align to grid cell top-left)
+    const spacing = this.getSpacing();
+    if (spacing > 1) {
+      currentX = Math.floor(currentX / spacing) * spacing;
+      currentY = Math.floor(currentY / spacing) * spacing;
+    }
 
     // Capture canvas state before stroke for pixel-perfect restore
     const canvas = this.context.canvas;
@@ -67,6 +74,7 @@ export class PencilTool extends BaseTool {
     this.dragStartX = currentX;
     this.dragStartY = currentY;
     this.drawnPoints = [{ x: this.lastX, y: this.lastY }];
+    this.stampPositions = []; // Reset stamp tracking for pixel-perfect at stamp level
     this.distanceSinceLastStamp = 0;
     this.drawPoint(this.lastX, this.lastY);
   }
@@ -104,17 +112,15 @@ export class PencilTool extends BaseTool {
     }
     this.isDrawing = false;
     this.drawnPoints = [];
+    this.stampPositions = [];
     this.strokeStartSnapshot = null; // Free memory
   }
 
   /**
-   * Calculate brush spacing based on size
+   * Calculate brush spacing based on brush settings
    */
   private getSpacing(): number {
-    const brush = brushStore.activeBrush.value;
-    // For size 1, always use spacing of 1 (pixel-by-pixel)
-    // For larger brushes, use spacing based on size
-    return Math.max(1, Math.floor(brush.size * SPACING_MULTIPLIER));
+    return brushStore.getEffectiveSpacing();
   }
 
   /**
@@ -124,13 +130,13 @@ export class PencilTool extends BaseTool {
     const brush = brushStore.activeBrush.value;
     const spacing = this.getSpacing();
 
-    // For 1px brush, use pixel-by-pixel drawing (supports pixel-perfect mode)
-    if (brush.size === 1) {
+    // For 1px brush with 1px spacing, use pixel-by-pixel drawing (supports pixel-perfect mode)
+    if (brush.size === 1 && spacing === 1) {
       this.drawLinePixelByPixel(x1, y1, x2, y2);
       return;
     }
 
-    // For larger brushes, use spacing-based stamping
+    // For larger brushes or spacing > 1, use spacing-based stamping
     const dx = x2 - x1;
     const dy = y2 - y1;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -144,6 +150,9 @@ export class PencilTool extends BaseTool {
     // Add to accumulated distance
     this.distanceSinceLastStamp += distance;
 
+    // Check if we should apply pixel-perfect at stamp level (when spacing matches brush size)
+    const pixelPerfectStamps = brush.pixelPerfect && brush.spacing === 'match';
+
     // Calculate starting position along the line
     let traveled = 0;
 
@@ -153,13 +162,94 @@ export class PencilTool extends BaseTool {
       const stampDistance = spacing - (this.distanceSinceLastStamp - distance + traveled);
 
       if (stampDistance > 0 && stampDistance <= distance) {
-        const stampX = Math.round(x1 + dirX * stampDistance);
-        const stampY = Math.round(y1 + dirY * stampDistance);
+        let stampX = Math.round(x1 + dirX * stampDistance);
+        let stampY = Math.round(y1 + dirY * stampDistance);
+
+        // Snap to spacing grid for consistent placement when spacing > 1 (align to grid cell top-left)
+        if (spacing > 1) {
+          stampX = Math.floor(stampX / spacing) * spacing;
+          stampY = Math.floor(stampY / spacing) * spacing;
+        }
+
+        // Pixel-perfect at stamp level: detect L-shapes in stamp positions
+        if (pixelPerfectStamps && this.stampPositions.length >= 2) {
+          const p1 = this.stampPositions[this.stampPositions.length - 2];
+          const p2 = this.stampPositions[this.stampPositions.length - 1];
+          const p3 = { x: stampX, y: stampY };
+
+          if (this.isStampLShape(p1, p2, p3, spacing)) {
+            // Restore the stamp at p2
+            this.restoreStamp(p2.x, p2.y);
+            this.stampPositions.pop();
+          }
+        }
+
         this.drawPoint(stampX, stampY);
+        if (pixelPerfectStamps) {
+          this.stampPositions.push({ x: stampX, y: stampY });
+        }
         traveled = stampDistance;
       }
 
       this.distanceSinceLastStamp -= spacing;
+    }
+  }
+
+  /**
+   * Check if three stamp positions form an L-shape at stamp level.
+   */
+  private isStampLShape(p1: Point, p2: Point, p3: Point, spacing: number): boolean {
+    // Normalize positions to "stamp grid" coordinates
+    const g1 = { x: Math.round(p1.x / spacing), y: Math.round(p1.y / spacing) };
+    const g2 = { x: Math.round(p2.x / spacing), y: Math.round(p2.y / spacing) };
+    const g3 = { x: Math.round(p3.x / spacing), y: Math.round(p3.y / spacing) };
+
+    return isLShape(g1, g2, g3);
+  }
+
+  /**
+   * Restore a stamp area to its pre-stroke state (for pixel-perfect L-shape removal at stamp level)
+   */
+  private restoreStamp(x: number, y: number) {
+    if (!this.context || !this.strokeStartSnapshot) return;
+
+    const brush = brushStore.activeBrush.value;
+    const size = brush.size;
+    // When spacing > 1, x/y is already the top-left corner
+    const startX = x;
+    const startY = y;
+    const canvas = this.context.canvas;
+
+    // Restore each pixel in the stamp region
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const pixelX = startX + px;
+        const pixelY = startY + py;
+
+        if (pixelX < 0 || pixelY < 0 || pixelX >= canvas.width || pixelY >= canvas.height) continue;
+
+        // Check if this pixel is within the brush shape (for circle brushes)
+        if (brush.shape === 'circle') {
+          const dx = px - size / 2 + 0.5;
+          const dy = py - size / 2 + 0.5;
+          if (dx * dx + dy * dy > (size / 2) * (size / 2)) continue;
+        }
+
+        // Get original pixel from snapshot
+        const index = (pixelY * this.strokeStartSnapshot.width + pixelX) * 4;
+        const r = this.strokeStartSnapshot.data[index];
+        const g = this.strokeStartSnapshot.data[index + 1];
+        const b = this.strokeStartSnapshot.data[index + 2];
+        const a = this.strokeStartSnapshot.data[index + 3];
+
+        if (a === 0) {
+          this.context.clearRect(pixelX, pixelY, 1, 1);
+        } else {
+          this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+          this.context.globalAlpha = 1;
+          this.context.fillRect(pixelX, pixelY, 1, 1);
+        }
+      }
     }
   }
 
@@ -201,18 +291,34 @@ export class PencilTool extends BaseTool {
 
     const brush = brushStore.activeBrush.value;
     const size = brush.size;
-    const halfSize = Math.floor(size / 2);
+    const spacing = this.getSpacing();
 
     this.context.globalAlpha = brush.opacity;
     this.context.fillStyle = colorStore.primaryColor.value;
 
-    if (brush.shape === 'square') {
-      this.context.fillRect(x - halfSize, y - halfSize, size, size);
+    // When spacing > 1, x/y is the top-left corner of the grid cell
+    // Otherwise, x/y is the center of the brush
+    if (spacing > 1) {
+      // Grid-aligned mode: draw from top-left
+      if (brush.shape === 'square') {
+        this.context.fillRect(x, y, size, size);
+      } else {
+        // Circle
+        this.context.beginPath();
+        this.context.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+        this.context.fill();
+      }
     } else {
-      // Circle
-      this.context.beginPath();
-      this.context.arc(x, y, size / 2, 0, Math.PI * 2);
-      this.context.fill();
+      // Normal mode: draw centered on x/y
+      const halfSize = Math.floor(size / 2);
+      if (brush.shape === 'square') {
+        this.context.fillRect(x - halfSize, y - halfSize, size, size);
+      } else {
+        // Circle
+        this.context.beginPath();
+        this.context.arc(x, y, size / 2, 0, Math.PI * 2);
+        this.context.fill();
+      }
     }
 
     this.context.globalAlpha = 1;

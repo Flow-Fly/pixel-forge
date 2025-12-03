@@ -128,6 +128,7 @@ export class PFBrushCursorOverlay extends BaseComponent {
     const brush = brushStore.activeBrush.value;
     const size = brush.size;
     const shape = brush.shape;
+    const spacing = brushStore.getEffectiveSpacing();
 
     // Get color based on tool
     const color = tool === 'eraser'
@@ -139,10 +140,22 @@ export class PFBrushCursorOverlay extends BaseComponent {
     const panX = viewportStore.panX.value;
     const panY = viewportStore.panY.value;
 
-    // Calculate screen position (center of brush on pixel)
-    const halfSize = Math.floor(size / 2);
-    const screenX = (this.cursorPos.x - halfSize) * zoom + panX;
-    const screenY = (this.cursorPos.y - halfSize) * zoom + panY;
+    // Calculate screen position
+    let screenX: number;
+    let screenY: number;
+
+    if (spacing > 1) {
+      // Snap to grid: brush top-left aligns with grid cell
+      const gridX = Math.floor(this.cursorPos.x / spacing) * spacing;
+      const gridY = Math.floor(this.cursorPos.y / spacing) * spacing;
+      screenX = gridX * zoom + panX;
+      screenY = gridY * zoom + panY;
+    } else {
+      // Normal mode: brush centered on cursor
+      const halfSize = Math.floor(size / 2);
+      screenX = (this.cursorPos.x - halfSize) * zoom + panX;
+      screenY = (this.cursorPos.y - halfSize) * zoom + panY;
+    }
     const screenSize = size * zoom;
 
     // Minimum visible size for outline

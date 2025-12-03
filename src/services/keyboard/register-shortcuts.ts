@@ -1,6 +1,7 @@
 import { keyboardService } from './shortcuts';
 import { toolStore, type ToolType } from '../../stores/tools';
 import { historyStore } from '../../stores/history';
+import { brushStore } from '../../stores/brush';
 
 export function registerShortcuts() {
   // Tool shortcuts
@@ -31,4 +32,8 @@ export function registerShortcuts() {
   keyboardService.register('y', ['ctrl'], () => historyStore.redo(), 'Redo');
   keyboardService.register('z', ['ctrl', 'shift'], () => historyStore.redo(), 'Redo');
   keyboardService.register('z', ['meta', 'shift'], () => historyStore.redo(), 'Redo');
+
+  // Big Pixel Mode: Ctrl+Shift+B / Cmd+Shift+B
+  keyboardService.register('b', ['ctrl', 'shift'], () => brushStore.toggleBigPixelMode(), 'Toggle Big Pixel Mode');
+  keyboardService.register('b', ['meta', 'shift'], () => brushStore.toggleBigPixelMode(), 'Toggle Big Pixel Mode');
 }
