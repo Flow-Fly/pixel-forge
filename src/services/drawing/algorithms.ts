@@ -70,6 +70,71 @@ export function isLShape(p1: Point, p2: Point, p3: Point): boolean {
   return (p1.x === p2.x && p2.y === p3.y) || (p1.y === p2.y && p2.x === p3.x);
 }
 
+// All 24 angles at 15-degree increments
+const ANGLE_INCREMENTS = [
+  0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165,
+  180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345
+] as const;
+
+// Sticky angles (cardinal + diagonal) - easier to hit
+const STICKY_ANGLES = new Set([0, 45, 90, 135, 180, 225, 270, 315]);
+
+/**
+ * Constrain a point to 15-degree angle increments with sticky zones.
+ * Cardinal (0°/90°/180°/270°) and diagonal (45°/135°/225°/315°) angles
+ * have larger capture zones, making them easier to hit.
+ *
+ * @param originX - Starting X coordinate
+ * @param originY - Starting Y coordinate
+ * @param targetX - Target X coordinate (unconstrained)
+ * @param targetY - Target Y coordinate (unconstrained)
+ * @param stickyStrength - Multiplier for sticky angles (lower = stickier). Default: 0.7
+ * @returns Constrained point at the nearest 15-degree angle
+ */
+export function constrainWithStickyAngles(
+  originX: number,
+  originY: number,
+  targetX: number,
+  targetY: number,
+  stickyStrength = 0.7
+): Point {
+  const dx = targetX - originX;
+  const dy = targetY - originY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance === 0) return { x: originX, y: originY };
+
+  // Calculate raw angle, convert to degrees [0, 360)
+  const rawAngleRad = Math.atan2(dy, dx);
+  const angleDeg = ((rawAngleRad * 180 / Math.PI) + 360) % 360;
+
+  // Find best angle using weighted distance
+  let bestAngle = 0;
+  let bestScore = Infinity;
+
+  for (const candidate of ANGLE_INCREMENTS) {
+    const diff = Math.abs(angleDeg - candidate);
+    const angularDist = Math.min(diff, 360 - diff);
+
+    // Apply sticky weight to cardinal/diagonal angles
+    const effectiveDist = STICKY_ANGLES.has(candidate)
+      ? angularDist * stickyStrength
+      : angularDist;
+
+    if (effectiveDist < bestScore) {
+      bestScore = effectiveDist;
+      bestAngle = candidate;
+    }
+  }
+
+  // Calculate new position
+  const snappedAngleRad = bestAngle * Math.PI / 180;
+  const newX = Math.round(originX + Math.cos(snappedAngleRad) * distance);
+  const newY = Math.round(originY + Math.sin(snappedAngleRad) * distance);
+
+  return { x: newX, y: newY };
+}
+
 /**
  * Constrain a point to the dominant axis (horizontal or vertical) from an origin.
  * Used for Shift+Drag to create straight horizontal/vertical lines without drift.

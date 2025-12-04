@@ -3,7 +3,7 @@ import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import {
   bresenhamLine,
-  constrainTo45Degrees,
+  constrainWithStickyAngles,
   isLShape,
 } from '../services/drawing/algorithms';
 
@@ -67,9 +67,9 @@ export class PencilTool extends BaseTool {
       let endX = currentX;
       let endY = currentY;
 
-      // If Ctrl is also held, snap to 45-degree angles
+      // If Ctrl is also held, snap to 15-degree angles with sticky zones
       if (modifiers?.ctrl) {
-        const snapped = constrainTo45Degrees(start.x, start.y, currentX, currentY);
+        const snapped = constrainWithStickyAngles(start.x, start.y, currentX, currentY);
         endX = snapped.x;
         endY = snapped.y;
       }

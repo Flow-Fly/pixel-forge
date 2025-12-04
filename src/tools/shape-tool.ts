@@ -1,6 +1,7 @@
 import { BaseTool, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { shapeSettings } from '../stores/tool-settings';
+import { constrainWithStickyAngles } from '../services/drawing/algorithms';
 
 export abstract class ShapeTool extends BaseTool {
   cursor = 'crosshair';
@@ -134,6 +135,50 @@ export abstract class ShapeTool extends BaseTool {
 
 export class LineTool extends ShapeTool {
   name = 'line';
+
+  // Override: Shift = angle snapping (not aspect ratio like other shapes)
+  onDrag(x: number, y: number, modifiers?: ModifierKeys) {
+    if (!this.isDrawing || !this.ctx || !this.imageData) return;
+
+    this.ctx.putImageData(this.imageData, 0, 0);
+
+    let currentX = Math.floor(x);
+    let currentY = Math.floor(y);
+
+    // Shift = Constrain to 15° angles with sticky zones
+    if (modifiers?.shift) {
+      const constrained = constrainWithStickyAngles(
+        this.startX, this.startY, currentX, currentY
+      );
+      currentX = constrained.x;
+      currentY = constrained.y;
+    }
+
+    this.drawShape(this.startX, this.startY, currentX, currentY, false, shapeSettings.thickness.value);
+  }
+
+  // Override: Shift = angle snapping (not aspect ratio like other shapes)
+  onUp(x: number, y: number, modifiers?: ModifierKeys) {
+    if (!this.isDrawing || !this.ctx || !this.imageData) return;
+
+    this.ctx.putImageData(this.imageData, 0, 0);
+
+    let currentX = Math.floor(x);
+    let currentY = Math.floor(y);
+
+    if (modifiers?.shift) {
+      const constrained = constrainWithStickyAngles(
+        this.startX, this.startY, currentX, currentY
+      );
+      currentX = constrained.x;
+      currentY = constrained.y;
+    }
+
+    this.drawShape(this.startX, this.startY, currentX, currentY, false, shapeSettings.thickness.value);
+
+    this.isDrawing = false;
+    this.imageData = null;
+  }
 
   protected drawShape(x1: number, y1: number, x2: number, y2: number, _filled: boolean, thickness: number) {
     // Bresenham's Line Algorithm (filled doesn't apply to lines)
