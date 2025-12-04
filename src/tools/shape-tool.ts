@@ -1,6 +1,6 @@
 import { BaseTool, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
-import { shapeStore } from '../stores/shape';
+import { shapeSettings } from '../stores/tool-settings';
 
 export abstract class ShapeTool extends BaseTool {
   cursor = 'crosshair';
@@ -60,7 +60,7 @@ export abstract class ShapeTool extends BaseTool {
       currentY = this.startY + (currentY >= this.startY ? halfHeight : -halfHeight);
     }
 
-    this.drawShape(effectiveStartX, effectiveStartY, currentX, currentY, shapeStore.filled.value);
+    this.drawShape(effectiveStartX, effectiveStartY, currentX, currentY, shapeSettings.fill.value, shapeSettings.thickness.value);
   }
 
   onUp(x: number, y: number, modifiers?: ModifierKeys) {
@@ -96,19 +96,27 @@ export abstract class ShapeTool extends BaseTool {
       currentY = this.startY + (currentY >= this.startY ? halfHeight : -halfHeight);
     }
 
-    this.drawShape(effectiveStartX, effectiveStartY, currentX, currentY, shapeStore.filled.value);
+    this.drawShape(effectiveStartX, effectiveStartY, currentX, currentY, shapeSettings.fill.value, shapeSettings.thickness.value);
 
     this.isDrawing = false;
     this.imageData = null;
   }
 
-  protected abstract drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean): void;
+  protected abstract drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean, thickness: number): void;
 
   protected setPixel(x: number, y: number) {
     if (!this.ctx) return;
     const color = colorStore.primaryColor.value;
     this.ctx.fillStyle = color;
     this.ctx.fillRect(x, y, 1, 1);
+  }
+
+  protected setThickPixel(x: number, y: number, thickness: number) {
+    if (!this.ctx || thickness <= 0) return;
+    const color = colorStore.primaryColor.value;
+    this.ctx.fillStyle = color;
+    const offset = Math.floor((thickness - 1) / 2);
+    this.ctx.fillRect(x - offset, y - offset, thickness, thickness);
   }
 
   protected fillRect(x1: number, y1: number, x2: number, y2: number) {
@@ -127,7 +135,7 @@ export abstract class ShapeTool extends BaseTool {
 export class LineTool extends ShapeTool {
   name = 'line';
 
-  protected drawShape(x1: number, y1: number, x2: number, y2: number, _filled: boolean) {
+  protected drawShape(x1: number, y1: number, x2: number, y2: number, _filled: boolean, thickness: number) {
     // Bresenham's Line Algorithm (filled doesn't apply to lines)
     let dx = Math.abs(x2 - x1);
     let dy = Math.abs(y2 - y1);
@@ -136,7 +144,7 @@ export class LineTool extends ShapeTool {
     let err = dx - dy;
 
     while (true) {
-      this.setPixel(x1, y1);
+      this.setThickPixel(x1, y1, thickness);
 
       if ((x1 === x2) && (y1 === y2)) break;
       let e2 = 2 * err;
@@ -149,7 +157,7 @@ export class LineTool extends ShapeTool {
 export class RectangleTool extends ShapeTool {
   name = 'rectangle';
 
-  protected drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean) {
+  protected drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean, thickness: number) {
     const minX = Math.min(x1, x2);
     const maxX = Math.max(x1, x2);
     const minY = Math.min(y1, y2);
@@ -160,14 +168,14 @@ export class RectangleTool extends ShapeTool {
     } else {
       // Draw horizontal lines
       for (let x = minX; x <= maxX; x++) {
-        this.setPixel(x, minY);
-        this.setPixel(x, maxY);
+        this.setThickPixel(x, minY, thickness);
+        this.setThickPixel(x, maxY, thickness);
       }
 
       // Draw vertical lines
       for (let y = minY; y <= maxY; y++) {
-        this.setPixel(minX, y);
-        this.setPixel(maxX, y);
+        this.setThickPixel(minX, y, thickness);
+        this.setThickPixel(maxX, y, thickness);
       }
     }
   }
@@ -176,7 +184,7 @@ export class RectangleTool extends ShapeTool {
 export class EllipseTool extends ShapeTool {
   name = 'ellipse';
 
-  protected drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean) {
+  protected drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean, thickness: number) {
     let minX = Math.min(x1, x2);
     let maxX = Math.max(x1, x2);
     let minY = Math.min(y1, y2);
@@ -189,22 +197,22 @@ export class EllipseTool extends ShapeTool {
 
     // If width or height is 0, draw line
     if (a === 0) {
-      for (let y = minY; y <= maxY; y++) this.setPixel(xc, y);
+      for (let y = minY; y <= maxY; y++) this.setThickPixel(xc, y, thickness);
       return;
     }
     if (b === 0) {
-      for (let x = minX; x <= maxX; x++) this.setPixel(x, yc);
+      for (let x = minX; x <= maxX; x++) this.setThickPixel(x, yc, thickness);
       return;
     }
 
     if (filled) {
       this.drawFilledEllipse(xc, yc, a, b);
     } else {
-      this.drawEllipseOutline(xc, yc, a, b);
+      this.drawEllipseOutline(xc, yc, a, b, thickness);
     }
   }
 
-  private drawEllipseOutline(xc: number, yc: number, a: number, b: number) {
+  private drawEllipseOutline(xc: number, yc: number, a: number, b: number, thickness: number) {
     let x = 0;
     let y = b;
     let d1 = (b * b) - (a * a * b) + (0.25 * a * a);
@@ -212,7 +220,7 @@ export class EllipseTool extends ShapeTool {
     let dy = 2 * a * a * y;
 
     while (dx < dy) {
-      this.plotEllipsePoints(xc, yc, x, y);
+      this.plotEllipsePoints(xc, yc, x, y, thickness);
 
       if (d1 < 0) {
         x++;
@@ -232,7 +240,7 @@ export class EllipseTool extends ShapeTool {
              (a * a * b * b);
 
     while (y >= 0) {
-      this.plotEllipsePoints(xc, yc, x, y);
+      this.plotEllipsePoints(xc, yc, x, y, thickness);
 
       if (d2 > 0) {
         y--;
@@ -261,10 +269,10 @@ export class EllipseTool extends ShapeTool {
     }
   }
 
-  private plotEllipsePoints(xc: number, yc: number, x: number, y: number) {
-    this.setPixel(xc + x, yc + y);
-    this.setPixel(xc - x, yc + y);
-    this.setPixel(xc + x, yc - y);
-    this.setPixel(xc - x, yc - y);
+  private plotEllipsePoints(xc: number, yc: number, x: number, y: number, thickness: number) {
+    this.setThickPixel(xc + x, yc + y, thickness);
+    this.setThickPixel(xc - x, yc + y, thickness);
+    this.setThickPixel(xc + x, yc - y, thickness);
+    this.setThickPixel(xc - x, yc - y, thickness);
   }
 }
