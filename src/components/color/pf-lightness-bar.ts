@@ -9,21 +9,19 @@ const STORAGE_KEY = 'pf-lightness-bar-collapsed';
 export class PFLightnessBar extends BaseComponent {
   static styles = css`
     :host {
-      display: block;
-      background: var(--pf-color-bg-panel, #252525);
-      border-bottom: 1px solid var(--pf-color-border, #333);
+      display: flex;
+      align-items: center;
     }
 
     .container {
       display: flex;
       align-items: center;
-      height: 20px;
       padding: 0 4px;
-      transition: height 0.15s ease, opacity 0.15s ease;
+      transition: opacity 0.15s ease;
     }
 
     .container.collapsed {
-      height: 4px;
+      /* Keep minimal width when collapsed */
     }
 
     .chevron {
@@ -61,13 +59,13 @@ export class PFLightnessBar extends BaseComponent {
     }
 
     .swatch {
-      width: 24px;
-      height: 16px;
+      width: 20px;
+      height: 14px;
       cursor: pointer;
       border-radius: 2px;
       transition: transform 0.1s ease, outline-color 0.1s ease, background-color 0.1s ease;
-      outline: 2px solid transparent;
-      outline-offset: -2px;
+      outline: 1px solid transparent;
+      outline-offset: -1px;
     }
 
     .swatch:hover {
