@@ -69,3 +69,25 @@ export function constrainTo45Degrees(
 export function isLShape(p1: Point, p2: Point, p3: Point): boolean {
   return (p1.x === p2.x && p2.y === p3.y) || (p1.y === p2.y && p2.x === p3.x);
 }
+
+/**
+ * Constrain a point to the dominant axis (horizontal or vertical) from an origin.
+ * Used for Shift+Drag to create straight horizontal/vertical lines without drift.
+ */
+export function constrainToAxis(
+  originX: number,
+  originY: number,
+  targetX: number,
+  targetY: number
+): Point {
+  const dx = Math.abs(targetX - originX);
+  const dy = Math.abs(targetY - originY);
+
+  if (dx >= dy) {
+    // Horizontal - keep X movement, lock Y
+    return { x: targetX, y: originY };
+  } else {
+    // Vertical - keep Y movement, lock X
+    return { x: originX, y: targetY };
+  }
+}
