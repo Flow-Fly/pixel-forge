@@ -2,8 +2,9 @@ import { html, css, type PropertyValueMap } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { layerStore } from '../../stores/layers';
-import { selectionStore } from '../../stores/selection';
 import { toolStore, type ToolType } from '../../stores/tools';
+import { selectionStore } from '../../stores/selection';
+import { CommitFloatCommand } from '../../commands/selection-commands';
 import { animationStore } from '../../stores/animation';
 import { historyStore } from '../../stores/history';
 import { dirtyRectStore } from '../../stores/dirty-rect';
@@ -95,8 +96,30 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private async loadTool(toolName: ToolType) {
+    // Auto-commit floating selection when switching to drawing tools
+    const drawingTools = ['pencil', 'eraser', 'fill', 'gradient', 'line', 'rectangle', 'ellipse'];
+    if (drawingTools.includes(toolName)) {
+      const state = selectionStore.state.value;
+      if (state.type === 'floating') {
+        const activeLayerId = layerStore.activeLayerId.value;
+        const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+        if (layer?.canvas) {
+          const command = new CommitFloatCommand(
+            layer.canvas,
+            layer.id,
+            state.imageData,
+            state.originalBounds,
+            state.currentOffset,
+            state.shape,
+            state.mask
+          );
+          historyStore.execute(command);
+        }
+      }
+    }
+
     let ToolClass;
-    
+
     switch (toolName) {
       case 'pencil':
         const { PencilTool } = await import('../../tools/pencil-tool');
@@ -316,22 +339,8 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   drawSelection() {
-    const selection = selectionStore.selection.value;
-    if (selection.type === 'none' || !selection.bounds) return;
-
-    const { x, y, w, h } = selection.bounds;
-    
-    // Draw marching ants
-    this.ctx.save();
-    this.ctx.strokeStyle = 'white';
-    this.ctx.lineWidth = 1;
-    this.ctx.setLineDash([4, 4]);
-    this.ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    
-    this.ctx.strokeStyle = 'black';
-    this.ctx.lineDashOffset = 4;
-    this.ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    this.ctx.restore();
+    // Selection rendering is now handled by pf-selection-overlay component
+    // This method is kept for backwards compatibility but does nothing
   }
 
   private getCanvasCoordinates(e: MouseEvent): { x: number; y: number } {

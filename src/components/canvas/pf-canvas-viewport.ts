@@ -6,6 +6,7 @@ import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
 import { colorStore } from "../../stores/colors";
 import { brushStore } from "../../stores/brush";
+import "./pf-selection-overlay";
 import "./pf-marching-ants-overlay";
 import "./pf-brush-cursor-overlay";
 
@@ -176,6 +177,7 @@ export class PFCanvasViewport extends BaseComponent {
         <slot></slot>
       </div>
       <canvas id="grid-overlay"></canvas>
+      <pf-selection-overlay></pf-selection-overlay>
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
       <pf-brush-cursor-overlay></pf-brush-cursor-overlay>
     `;

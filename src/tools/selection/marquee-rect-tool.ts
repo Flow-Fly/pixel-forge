@@ -1,69 +1,114 @@
 import { BaseTool, type ModifierKeys } from '../base-tool';
 import { selectionStore } from '../../stores/selection';
+import { historyStore } from '../../stores/history';
+import { layerStore } from '../../stores/layers';
+import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
 
 export class MarqueeRectTool extends BaseTool {
   name = 'marquee-rect';
   cursor = 'crosshair';
 
-  private startX = 0;
-  private startY = 0;
-  private isSelecting = false;
+  private mode: 'idle' | 'selecting' | 'dragging' = 'idle';
+  private lastDragX = 0;
+  private lastDragY = 0;
+
   constructor(_context: CanvasRenderingContext2D) {
     super();
   }
 
-  onDown(x: number, y: number, modifiers?: ModifierKeys) {
-    this.isSelecting = true;
-    this.startX = Math.floor(x);
-    this.startY = Math.floor(y);
+  onDown(x: number, y: number, _modifiers?: ModifierKeys) {
+    const canvasX = Math.floor(x);
+    const canvasY = Math.floor(y);
 
-    // Determine selection mode based on modifiers
-    if (modifiers?.shift) {
-      // Shift = add to selection
-      selectionStore.setMode('add');
-    } else if (modifiers?.alt) {
-      // Alt = subtract from selection
-      selectionStore.setMode('subtract');
+    // Check if clicking inside existing selection
+    if (selectionStore.isPointInSelection(canvasX, canvasY)) {
+      this.startDragging(canvasX, canvasY);
     } else {
-      // No modifiers = replace selection
-      selectionStore.setMode('replace');
-      selectionStore.clearSelection();
+      // Clicking outside - commit any floating selection first, then start new
+      this.commitIfFloating();
+      this.startNewSelection(canvasX, canvasY);
     }
   }
 
-  onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
-    if (!this.isSelecting) return;
+  onDrag(x: number, y: number, modifiers?: ModifierKeys) {
+    const canvasX = Math.floor(x);
+    const canvasY = Math.floor(y);
 
-    const currentX = Math.floor(x);
-    const currentY = Math.floor(y);
-
-    const w = Math.abs(currentX - this.startX) + 1;
-    const h = Math.abs(currentY - this.startY) + 1;
-    const rx = Math.min(this.startX, currentX);
-    const ry = Math.min(this.startY, currentY);
-
-    // Update selection store with new bounds
-    // In a real app, we would also generate the mask here and combine with existing selection
-    // based on the current mode (add/subtract/replace)
-    selectionStore.setSelection({
-      type: 'rectangle',
-      mask: null, // TODO: Generate mask and apply mode (add/subtract/replace)
-      bounds: { x: rx, y: ry, w, h }
-    });
-
-    // TODO: Draw selection overlay (marching ants)
-    this.drawSelectionOverlay(rx, ry, w, h);
+    if (this.mode === 'selecting') {
+      selectionStore.updateSelection({ x: canvasX, y: canvasY }, { shift: modifiers?.shift });
+    } else if (this.mode === 'dragging') {
+      const dx = canvasX - this.lastDragX;
+      const dy = canvasY - this.lastDragY;
+      selectionStore.moveFloat(dx, dy);
+      this.lastDragX = canvasX;
+      this.lastDragY = canvasY;
+    }
   }
 
   onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
-    this.isSelecting = false;
-    // Reset mode to 'replace' after selection is finalized
-    selectionStore.resetMode();
+    if (this.mode === 'selecting') {
+      selectionStore.finalizeSelection();
+    }
+    // If dragging, stay floating (wait for commit)
+
+    this.mode = 'idle';
   }
 
-  private drawSelectionOverlay(x: number, y: number, w: number, h: number) {
-    // This is a temporary visualization
-    // In reality, the canvas component should listen to selectionStore and render the overlay
-    console.log(`Selection: ${x}, ${y}, ${w}x${h}`);
+  private startNewSelection(x: number, y: number) {
+    this.mode = 'selecting';
+    selectionStore.startSelection('rectangle', { x, y });
+  }
+
+  private startDragging(x: number, y: number) {
+    const state = selectionStore.state.value;
+
+    // If selected (not floating), cut to float first
+    if (state.type === 'selected') {
+      this.cutToFloat();
+    }
+
+    this.mode = 'dragging';
+    this.lastDragX = x;
+    this.lastDragY = y;
+  }
+
+  private cutToFloat() {
+    const state = selectionStore.state.value;
+    if (state.type !== 'selected') return;
+
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (!layer?.canvas) return;
+
+    const command = new CutToFloatCommand(
+      layer.canvas,
+      layer.id,
+      state.bounds,
+      state.shape,
+      state.shape === 'freeform' ? (state as { mask: Uint8Array }).mask : undefined
+    );
+
+    historyStore.execute(command);
+  }
+
+  private commitIfFloating() {
+    const state = selectionStore.state.value;
+    if (state.type !== 'floating') return;
+
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (!layer?.canvas) return;
+
+    const command = new CommitFloatCommand(
+      layer.canvas,
+      layer.id,
+      state.imageData,
+      state.originalBounds,
+      state.currentOffset,
+      state.shape,
+      state.mask
+    );
+
+    historyStore.execute(command);
   }
 }

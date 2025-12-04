@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { toolStore, type ToolType } from '../../stores/tools';
+import { brushStore } from '../../stores/brush';
 import './pf-tool-button';
 import '../color/pf-color-selector-compact';
 
@@ -36,6 +37,38 @@ export class PFToolbar extends BaseComponent {
       display: flex;
       justify-content: center;
     }
+
+    .big-pixel-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 8px;
+      margin: 0 var(--pf-spacing-2) var(--pf-spacing-2);
+      background: transparent;
+      border: 1px solid var(--pf-color-border);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-size: 10px;
+      color: var(--pf-color-text-muted);
+      text-align: center;
+    }
+
+    .big-pixel-toggle:hover {
+      background: var(--pf-color-bg-hover);
+    }
+
+    .big-pixel-toggle.active {
+      background: var(--pf-color-primary);
+      border-color: var(--pf-color-primary);
+      color: white;
+    }
+
+    .big-pixel-toggle svg {
+      width: 14px;
+      height: 14px;
+      margin-right: 4px;
+    }
   `;
 
   selectTool(tool: ToolType) {
@@ -44,6 +77,8 @@ export class PFToolbar extends BaseComponent {
 
   render() {
     const activeTool = toolStore.activeTool.value;
+    const bigPixelMode = brushStore.bigPixelMode.value;
+
     return html`
       <div class="group">
         <pf-tool-button 
@@ -138,6 +173,20 @@ export class PFToolbar extends BaseComponent {
           ?active=${activeTool === 'zoom'}
           @click=${() => this.selectTool('zoom')}
         ></pf-tool-button>
+      </div>
+
+      <div
+        class="big-pixel-toggle ${bigPixelMode ? 'active' : ''}"
+        @click=${() => brushStore.toggleBigPixelMode()}
+        title="Big Pixel Mode (Ctrl+Shift+B)"
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <rect x="1" y="1" width="6" height="6"/>
+          <rect x="9" y="1" width="6" height="6"/>
+          <rect x="1" y="9" width="6" height="6"/>
+          <rect x="9" y="9" width="6" height="6"/>
+        </svg>
+        BIG
       </div>
 
       <div class="spacer"></div>
