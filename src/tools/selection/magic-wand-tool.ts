@@ -1,4 +1,4 @@
-import { BaseTool } from '../base-tool';
+import { BaseTool, type ModifierKeys } from '../base-tool';
 import { selectionStore } from '../../stores/selection';
 import { layerStore } from '../../stores/layers';
 
@@ -11,13 +11,28 @@ export class MagicWandTool extends BaseTool {
     this.setContext(context);
   }
 
-  onDown(x: number, y: number) {
+  onDown(x: number, y: number, modifiers?: ModifierKeys) {
+    // Determine selection mode based on modifiers
+    if (modifiers?.shift) {
+      // Shift = add to selection
+      selectionStore.setMode('add');
+    } else if (modifiers?.alt) {
+      // Alt = subtract from selection
+      selectionStore.setMode('subtract');
+    } else {
+      // No modifiers = replace selection
+      selectionStore.setMode('replace');
+    }
+
     this.selectRegion(x, y);
   }
 
-  onDrag(_x: number, _y: number) {}
+  onDrag(_x: number, _y: number, _modifiers?: ModifierKeys) {}
 
-  onUp(_x: number, _y: number) {}
+  onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
+    // Reset mode to 'replace' after selection is finalized
+    selectionStore.resetMode();
+  }
 
   private selectRegion(x: number, y: number) {
     // Need access to active layer data

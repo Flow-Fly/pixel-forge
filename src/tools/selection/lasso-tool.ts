@@ -1,4 +1,4 @@
-import { BaseTool, type Point } from '../base-tool';
+import { BaseTool, type Point, type ModifierKeys } from '../base-tool';
 import { selectionStore } from '../../stores/selection';
 
 export class LassoTool extends BaseTool {
@@ -12,13 +12,13 @@ export class LassoTool extends BaseTool {
     super();
   }
 
-  onDown(x: number, y: number) {
+  onDown(x: number, y: number, modifiers?: ModifierKeys) {
     this.isSelecting = true;
     this.points = [{ x: Math.floor(x), y: Math.floor(y) }];
     selectionStore.clear();
   }
 
-  onDrag(x: number, y: number) {
+  onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
     if (!this.isSelecting) return;
     this.points.push({ x: Math.floor(x), y: Math.floor(y) });
 
@@ -45,7 +45,7 @@ export class LassoTool extends BaseTool {
     };
   }
 
-  onUp(_x: number, _y: number) {
+  onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
     this.isSelecting = false;
     // Finalize selection (close loop, generate mask)
     // For now, just clear since freeform mask generation is not implemented

@@ -2,6 +2,8 @@ import { signal } from '../core/signal';
 import { type SelectionState, type SelectionShape } from '../types/selection';
 import { type Rect } from '../types/geometry';
 
+export type SelectionMode = 'replace' | 'add' | 'subtract';
+
 class SelectionStore {
   state = signal<SelectionState>({ type: 'none' });
 
@@ -224,6 +226,20 @@ class SelectionStore {
 
   getActiveLayerId(): string | null {
     return this.activeLayerId;
+  }
+
+  /**
+   * Set the selection mode for the next selection operation.
+   */
+  setMode(mode: SelectionMode) {
+    this.mode.value = mode;
+  }
+
+  /**
+   * Reset mode to 'replace' after selection is finalized.
+   */
+  resetMode() {
+    this.mode.value = 'replace';
   }
 }
 
