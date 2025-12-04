@@ -6,11 +6,15 @@
   
   --pf-color-text-main: #e0e0e0;
   --pf-color-text-muted: #808080;
-  
+  --pf-color-text-secondary: #a0a0a0;
+
+  --pf-color-bg-tertiary: #282828;
+
   --pf-color-accent-cyan: #00ffff;
   --pf-color-accent-magenta: #ff00ff;
   --pf-color-accent-yellow: #ffff00;
-  
+  --pf-color-accent: var(--pf-color-accent-cyan);
+
   --pf-color-border: #333333;
   --pf-color-grid: #2a2a2a;
 
