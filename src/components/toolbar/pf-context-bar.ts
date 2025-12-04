@@ -1,12 +1,16 @@
-import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { toolStore } from '../../stores/tools';
-import { brushStore } from '../../stores/brush';
-import { EraserTool, type EraserMode } from '../../tools/eraser-tool';
-import { magicWandSettings } from '../../tools/selection/magic-wand-tool';
+import { html, css } from "lit";
+import { customElement } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { toolStore } from "../../stores/tools";
+import { getToolMeta } from "../../tools/tool-registry";
+import type { ToolOption } from "../../types/tool-meta";
+import "./options/pf-option-slider";
+import "./options/pf-option-checkbox";
+import "./options/pf-option-select";
+import "./pf-alternative-tools";
+import "../color/pf-lightness-bar";
 
-@customElement('pf-context-bar')
+@customElement("pf-context-bar")
 export class PFContextBar extends BaseComponent {
   static styles = css`
     :host {
@@ -16,185 +20,137 @@ export class PFContextBar extends BaseComponent {
       padding: 0 var(--pf-spacing-2);
       gap: var(--pf-spacing-2);
       font-size: 12px;
+      background-color: var(--pf-color-bg-panel);
+      border-bottom: 1px solid var(--pf-color-border);
+    }
+
+    .tool-name {
+      font-weight: bold;
+      color: var(--pf-color-text-muted);
+      white-space: nowrap;
     }
 
     .separator {
       width: 1px;
       height: 16px;
       background-color: var(--pf-color-border);
+      flex-shrink: 0;
     }
-    
-    .option {
+
+    .options-section {
+      display: flex;
+      align-items: center;
+      gap: var(--pf-spacing-2);
+      flex: 1;
+      min-width: 0;
+    }
+
+    .alternatives-section {
       display: flex;
       align-items: center;
       gap: 4px;
+    }
+
+    .lightness-section {
+      margin-left: auto;
+    }
+
+    .no-options {
+      color: var(--pf-color-text-muted);
+      font-style: italic;
+      font-size: 11px;
     }
   `;
 
   render() {
     const tool = toolStore.activeTool.value;
-    
+    const meta = getToolMeta(tool);
+
+    if (!meta) {
+      return html`
+        <span class="tool-name">${this._formatToolName(tool)}</span>
+        <div class="separator"></div>
+        <span class="no-options">Unknown tool</span>
+      `;
+    }
+
     return html`
-      <span style="font-weight: bold; color: var(--pf-color-text-muted);">${this.formatToolName(tool)}</span>
+      <span class="tool-name">${meta.name}</span>
       <div class="separator"></div>
-      ${this.renderToolOptions(tool)}
+
+      <div class="options-section">${this._renderOptions(meta.options)}</div>
+
+      ${meta.alternatives.length > 0
+        ? html`
+            <div class="separator"></div>
+            <div class="alternatives-section">
+              <pf-alternative-tools .alternatives=${meta.alternatives}></pf-alternative-tools>
+            </div>
+          `
+        : ""}
+
+      <div class="separator"></div>
+      <div class="lightness-section">
+        <pf-lightness-bar></pf-lightness-bar>
+      </div>
     `;
   }
 
-  formatToolName(tool: string) {
-    return tool.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  _formatToolName(tool: string): string {
+    return tool
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   }
 
-  renderToolOptions(tool: string) {
-    switch (tool) {
-      case 'pencil':
+  _renderOptions(options: ToolOption[]) {
+    if (options.length === 0) {
+      return html`<span class="no-options">No options</span>`;
+    }
+
+    return options.map((option, index) => {
+      const showSeparator = index < options.length - 1;
+      return html` ${this._renderOption(option)} ${showSeparator ? html`<div class="separator"></div>` : ""} `;
+    });
+  }
+
+  _renderOption(option: ToolOption) {
+    switch (option.type) {
+      case "slider": {
+        const isOpacity = option.storeKey === "opacity";
+        const multiplier = isOpacity ? 100 : 1;
         return html`
-          <div class="option">
-            <label>Size:</label>
-            <input
-              type="range"
-              min="1"
-              max="50"
-              .value=${brushStore.activeBrush.value.size}
-              @input=${(e: Event) => brushStore.updateActiveBrushSettings({ size: parseInt((e.target as HTMLInputElement).value) })}
-              style="width: 60px"
-            >
-            <span>${brushStore.activeBrush.value.size}px</span>
-          </div>
-          <div class="separator"></div>
-          <div class="option">
-            <label>Opacity:</label>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              .value=${brushStore.activeBrush.value.opacity * 100}
-              @input=${(e: Event) => brushStore.updateActiveBrushSettings({ opacity: parseInt((e.target as HTMLInputElement).value) / 100 })}
-              style="width: 60px"
-            >
-            <span>${Math.round(brushStore.activeBrush.value.opacity * 100)}%</span>
-          </div>
-          <div class="separator"></div>
-          <div class="option">
-            <input
-              type="checkbox"
-              id="pixel-perfect"
-              .checked=${brushStore.activeBrush.value.pixelPerfect}
-              @change=${(e: Event) => brushStore.updateActiveBrushSettings({ pixelPerfect: (e.target as HTMLInputElement).checked })}
-            >
-            <label for="pixel-perfect" title="Remove L-shaped artifacts from 1px strokes">Pixel Perfect</label>
-          </div>
+          <pf-option-slider
+            label=${option.label}
+            store=${option.store}
+            storeKey=${option.storeKey}
+            min=${option.min}
+            max=${option.max}
+            step=${option.step || 1}
+            unit=${option.unit || ""}
+            multiplier=${multiplier}
+          ></pf-option-slider>
         `;
-      case 'eraser':
+      }
+      case "checkbox":
         return html`
-          <div class="option">
-            <label>Size:</label>
-            <input
-              type="range"
-              min="1"
-              max="50"
-              .value=${brushStore.activeBrush.value.size}
-              @input=${(e: Event) => brushStore.updateActiveBrushSettings({ size: parseInt((e.target as HTMLInputElement).value) })}
-              style="width: 60px"
-            >
-            <span>${brushStore.activeBrush.value.size}px</span>
-          </div>
-          <div class="separator"></div>
-          <div class="option">
-            <label>Mode:</label>
-            <select
-              @change=${(e: Event) => EraserTool.setMode((e.target as HTMLSelectElement).value as EraserMode)}
-            >
-              <option value="transparent" ?selected=${EraserTool.getMode() === 'transparent'}>To Transparent</option>
-              <option value="background" ?selected=${EraserTool.getMode() === 'background'}>To Background</option>
-            </select>
-          </div>
-          <div class="separator"></div>
-          <div class="option">
-            <input
-              type="checkbox"
-              id="eraser-pixel-perfect"
-              .checked=${brushStore.activeBrush.value.pixelPerfect}
-              @change=${(e: Event) => brushStore.updateActiveBrushSettings({ pixelPerfect: (e.target as HTMLInputElement).checked })}
-            >
-            <label for="eraser-pixel-perfect" title="Remove L-shaped artifacts from 1px eraser">Pixel Perfect</label>
-          </div>
+          <pf-option-checkbox
+            label=${option.label}
+            store=${option.store}
+            storeKey=${option.storeKey}
+          ></pf-option-checkbox>
         `;
-      case 'fill':
+      case "select":
         return html`
-          <div class="option">
-            <input type="checkbox" id="contiguous" checked>
-            <label for="contiguous">Contiguous</label>
-          </div>
-        `;
-      case 'gradient':
-        return html`
-          <div class="option">
-            <label>Type:</label>
-            <select>
-              <option value="linear">Linear</option>
-              <option value="radial">Radial</option>
-            </select>
-          </div>
-        `;
-      case 'line':
-      case 'rectangle':
-      case 'ellipse':
-        return html`
-          <div class="option">
-            <input type="checkbox" id="fill-shape">
-            <label for="fill-shape">Fill</label>
-          </div>
-          <div class="option">
-            <label>Thickness:</label>
-            <input type="number" value="1" min="1" max="10" style="width: 40px">
-          </div>
-        `;
-      case 'magic-wand':
-        return html`
-          <div class="option">
-            <label>Tolerance:</label>
-            <input
-              type="range"
-              min="0"
-              max="255"
-              .value=${magicWandSettings.tolerance.value}
-              @input=${(e: Event) => magicWandSettings.tolerance.value = parseInt((e.target as HTMLInputElement).value)}
-              style="width: 60px"
-            >
-            <span>${magicWandSettings.tolerance.value}</span>
-          </div>
-          <div class="separator"></div>
-          <div class="option">
-            <input
-              type="checkbox"
-              id="contiguous-wand"
-              .checked=${magicWandSettings.contiguous.value}
-              @change=${(e: Event) => magicWandSettings.contiguous.value = (e.target as HTMLInputElement).checked}
-            >
-            <label for="contiguous-wand" title="Only select connected pixels of the same color">Contiguous</label>
-          </div>
-          <div class="separator"></div>
-          <div class="option">
-            <input
-              type="checkbox"
-              id="diagonal-wand"
-              .checked=${magicWandSettings.diagonal.value}
-              @change=${(e: Event) => magicWandSettings.diagonal.value = (e.target as HTMLInputElement).checked}
-            >
-            <label for="diagonal-wand" title="Include diagonally connected pixels (8-way instead of 4-way)">Diagonal</label>
-          </div>
-        `;
-      case 'lasso':
-      case 'polygonal-lasso':
-      case 'marquee-rect':
-        return html`
-          <span style="color: var(--pf-color-text-muted); font-style: italic;">
-            Shift: Add | Alt: Subtract
-          </span>
+          <pf-option-select
+            label=${option.label}
+            store=${option.store}
+            storeKey=${option.storeKey}
+            .options=${option.options}
+          ></pf-option-select>
         `;
       default:
-        return html`<span style="color: var(--pf-color-text-muted); font-style: italic;">No options</span>`;
+        return html``;
     }
   }
 }

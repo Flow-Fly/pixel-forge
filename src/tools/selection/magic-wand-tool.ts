@@ -2,16 +2,12 @@ import { BaseTool, type ModifierKeys } from '../base-tool';
 import { selectionStore } from '../../stores/selection';
 import { layerStore } from '../../stores/layers';
 import { historyStore } from '../../stores/history';
+import { magicWandSettings } from '../../stores/tool-settings';
 import { floodFillSelect, type FloodFillOptions } from '../../utils/mask-utils';
-import { signal } from '../../core/signal';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
 
-// Tool settings (accessible from context bar)
-export const magicWandSettings = {
-  tolerance: signal(0), // 0-255, 0 = exact match
-  contiguous: signal(true), // true = connected pixels only
-  diagonal: signal(false), // true = 8-way connectivity (includes diagonals)
-};
+// Re-export for backward compatibility
+export { magicWandSettings };
 
 export class MagicWandTool extends BaseTool {
   name = 'magic-wand';

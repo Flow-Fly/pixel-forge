@@ -1,6 +1,7 @@
 import { BaseTool, type Point, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
+import { eraserSettings, type EraserMode } from '../stores/tool-settings';
 import {
   bresenhamLine,
   constrainTo45Degrees,
@@ -10,7 +11,8 @@ import {
 // Default spacing multiplier (0.25 = stamp every size/4 pixels)
 const SPACING_MULTIPLIER = 0.25;
 
-export type EraserMode = 'transparent' | 'background';
+// Re-export for backward compatibility
+export type { EraserMode };
 
 export class EraserTool extends BaseTool {
   name = 'eraser';
@@ -36,20 +38,17 @@ export class EraserTool extends BaseTool {
   // Snapshot of canvas before current stroke (for pixel-perfect restore)
   private strokeStartSnapshot: ImageData | null = null;
 
-  // Eraser mode: transparent (default) or background color
-  private static eraserMode: EraserMode = 'transparent';
-
   constructor(context: CanvasRenderingContext2D) {
     super();
     this.setContext(context);
   }
 
   static setMode(mode: EraserMode) {
-    EraserTool.eraserMode = mode;
+    eraserSettings.mode.value = mode;
   }
 
   static getMode(): EraserMode {
-    return EraserTool.eraserMode;
+    return eraserSettings.mode.value;
   }
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
@@ -216,7 +215,7 @@ export class EraserTool extends BaseTool {
     const size = brush.size;
     const halfSize = Math.floor(size / 2);
 
-    if (EraserTool.eraserMode === 'background') {
+    if (eraserSettings.mode.value === 'background') {
       // Fill with secondary (background) color
       this.context.fillStyle = colorStore.secondaryColor.value;
       this.context.globalAlpha = brush.opacity;

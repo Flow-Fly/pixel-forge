@@ -10,8 +10,9 @@ import "../color/pf-color-selector";
 import "../color/pf-color-sliders";
 import "../color/pf-palette-panel";
 import "../color/pf-palette-generator";
-import "../color/pf-lightness-bar";
+import "../toolbar/pf-context-bar";
 import "../timeline/pf-timeline";
+import "../ui/pf-shortcuts-overlay";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../preview/pf-preview-overlay";
@@ -122,7 +123,7 @@ export class PixelForgeApp extends BaseComponent {
       </header>
 
       <div class="context-bar">
-        <pf-lightness-bar></pf-lightness-bar>
+        <pf-context-bar></pf-context-bar>
       </div>
 
       <aside class="toolbar">
@@ -137,6 +138,7 @@ export class PixelForgeApp extends BaseComponent {
           ></pf-drawing-canvas>
         </pf-canvas-viewport>
         <pf-preview-overlay></pf-preview-overlay>
+        <pf-shortcuts-overlay></pf-shortcuts-overlay>
         <div class="timeline-container">
           <pf-timeline></pf-timeline>
         </div>
