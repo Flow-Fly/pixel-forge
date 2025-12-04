@@ -141,6 +141,10 @@ export class PFDrawingCanvas extends BaseComponent {
         const { LassoTool } = await import('../../tools/selection/lasso-tool');
         ToolClass = LassoTool;
         break;
+      case 'polygonal-lasso':
+        const { PolygonalLassoTool } = await import('../../tools/selection/polygonal-lasso-tool');
+        ToolClass = PolygonalLassoTool;
+        break;
       case 'magic-wand':
         const { MagicWandTool } = await import('../../tools/selection/magic-wand-tool');
         ToolClass = MagicWandTool;

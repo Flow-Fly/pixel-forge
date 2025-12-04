@@ -36,6 +36,14 @@ export class CutToFloatCommand implements Command {
     // Capture the pixels we're about to cut
     const ctx = canvas.getContext('2d')!;
     this.cutImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+
+    // For non-rectangle shapes, mask out pixels outside the selection
+    // This ensures only selected pixels are moved, not the entire bounding box
+    if (shape === 'ellipse') {
+      this.applyEllipseMask();
+    } else if (shape === 'freeform' && mask) {
+      this.applyMask();
+    }
   }
 
   execute() {
@@ -45,10 +53,10 @@ export class CutToFloatCommand implements Command {
     if (this.shape === 'rectangle') {
       ctx.clearRect(this.bounds.x, this.bounds.y, this.bounds.width, this.bounds.height);
     } else if (this.shape === 'ellipse') {
-      // Clear ellipse region
       this.clearEllipse(ctx);
+    } else if (this.shape === 'freeform' && this.mask) {
+      this.clearWithMask(ctx);
     }
-    // freeform would use mask
 
     // Set selection store to floating state with the cut pixels
     selectionStore.setFloating(this.cutImageData, this.bounds, this.shape, this.mask);
@@ -89,6 +97,71 @@ export class CutToFloatCommand implements Command {
     }
 
     ctx.putImageData(imageData, x, y);
+  }
+
+  private clearWithMask(ctx: CanvasRenderingContext2D) {
+    const { x, y, width, height } = this.bounds;
+    const imageData = ctx.getImageData(x, y, width, height);
+    const data = imageData.data;
+
+    // Clear pixels where mask is selected
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const maskIdx = py * width + px;
+        if (this.mask![maskIdx] === 255) {
+          const idx = maskIdx * 4;
+          data[idx] = 0;
+          data[idx + 1] = 0;
+          data[idx + 2] = 0;
+          data[idx + 3] = 0;
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, x, y);
+  }
+
+  /**
+   * Mask out pixels outside the ellipse in cutImageData.
+   * Sets alpha to 0 for pixels outside the ellipse shape.
+   */
+  private applyEllipseMask() {
+    const { width, height } = this.bounds;
+    const data = this.cutImageData.data;
+    const rx = width / 2;
+    const ry = height / 2;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const dx = (px + 0.5 - width / 2) / rx;
+        const dy = (py + 0.5 - height / 2) / ry;
+        // If OUTSIDE ellipse, make transparent
+        if (dx * dx + dy * dy > 1) {
+          const idx = (py * width + px) * 4;
+          data[idx + 3] = 0;
+        }
+      }
+    }
+  }
+
+  /**
+   * Mask out pixels outside the freeform mask in cutImageData.
+   * Sets alpha to 0 for pixels not selected in the mask.
+   */
+  private applyMask() {
+    const { width, height } = this.bounds;
+    const data = this.cutImageData.data;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const maskIdx = py * width + px;
+        // If NOT selected in mask, make transparent
+        if (this.mask![maskIdx] !== 255) {
+          const idx = maskIdx * 4;
+          data[idx + 3] = 0;
+        }
+      }
+    }
   }
 }
 
@@ -146,13 +219,14 @@ export class CommitFloatCommand implements Command {
   execute() {
     const ctx = this.canvas.getContext('2d')!;
 
-    // Paste the floating pixels at destination
+    // Paste the floating pixels at destination (only non-transparent pixels)
     if (this.shape === 'rectangle') {
-      ctx.putImageData(this.floatingImageData, this.destinationBounds.x, this.destinationBounds.y);
+      this.pasteWithAlpha(ctx);
     } else if (this.shape === 'ellipse') {
       this.pasteEllipse(ctx);
+    } else if (this.shape === 'freeform') {
+      this.pasteWithMask(ctx);
     }
-    // freeform would use mask
 
     // Clear selection state
     selectionStore.clearAfterCommit();
@@ -187,13 +261,69 @@ export class CommitFloatCommand implements Command {
     const srcData = this.floatingImageData.data;
     const dstData = destData.data;
 
-    // Only paste pixels inside ellipse
+    // Only paste pixels inside ellipse (with alpha)
     for (let py = 0; py < height; py++) {
       for (let px = 0; px < width; px++) {
         const dx = (px + 0.5 - width / 2) / (width / 2);
         const dy = (py + 0.5 - height / 2) / (height / 2);
         if (dx * dx + dy * dy <= 1) {
           const idx = (py * width + px) * 4;
+          const srcAlpha = srcData[idx + 3];
+          if (srcAlpha > 0) {
+            dstData[idx] = srcData[idx];
+            dstData[idx + 1] = srcData[idx + 1];
+            dstData[idx + 2] = srcData[idx + 2];
+            dstData[idx + 3] = srcData[idx + 3];
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(destData, x, y);
+  }
+
+  private pasteWithAlpha(ctx: CanvasRenderingContext2D) {
+    const { x, y, width, height } = this.destinationBounds;
+
+    // Get destination image data
+    const destData = ctx.getImageData(x, y, width, height);
+    const srcData = this.floatingImageData.data;
+    const dstData = destData.data;
+
+    // Only paste non-transparent pixels
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const idx = (py * width + px) * 4;
+        const srcAlpha = srcData[idx + 3];
+        if (srcAlpha > 0) {
+          dstData[idx] = srcData[idx];
+          dstData[idx + 1] = srcData[idx + 1];
+          dstData[idx + 2] = srcData[idx + 2];
+          dstData[idx + 3] = srcData[idx + 3];
+        }
+      }
+    }
+
+    ctx.putImageData(destData, x, y);
+  }
+
+  private pasteWithMask(ctx: CanvasRenderingContext2D) {
+    const { x, y, width, height } = this.destinationBounds;
+
+    // Get destination image data
+    const destData = ctx.getImageData(x, y, width, height);
+    const srcData = this.floatingImageData.data;
+    const dstData = destData.data;
+
+    // Only paste pixels where mask is selected AND source has alpha
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const maskIdx = py * width + px;
+        const idx = maskIdx * 4;
+        const srcAlpha = srcData[idx + 3];
+
+        // Paste if source has alpha (mask check is implicit - source was cut with mask)
+        if (srcAlpha > 0) {
           dstData[idx] = srcData[idx];
           dstData[idx + 1] = srcData[idx + 1];
           dstData[idx + 2] = srcData[idx + 2];
@@ -247,6 +377,8 @@ export class DeleteSelectionCommand implements Command {
       ctx.clearRect(this.bounds.x, this.bounds.y, this.bounds.width, this.bounds.height);
     } else if (this.shape === 'ellipse') {
       this.clearEllipse(ctx);
+    } else if (this.shape === 'freeform' && this.mask) {
+      this.clearWithMask(ctx);
     }
 
     selectionStore.clear();
@@ -271,6 +403,28 @@ export class DeleteSelectionCommand implements Command {
         const dy = (py + 0.5 - height / 2) / (height / 2);
         if (dx * dx + dy * dy <= 1) {
           const idx = (py * width + px) * 4;
+          data[idx] = 0;
+          data[idx + 1] = 0;
+          data[idx + 2] = 0;
+          data[idx + 3] = 0;
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, x, y);
+  }
+
+  private clearWithMask(ctx: CanvasRenderingContext2D) {
+    const { x, y, width, height } = this.bounds;
+    const imageData = ctx.getImageData(x, y, width, height);
+    const data = imageData.data;
+
+    // Clear pixels where mask is selected
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const maskIdx = py * width + px;
+        if (this.mask![maskIdx] === 255) {
+          const idx = maskIdx * 4;
           data[idx] = 0;
           data[idx + 1] = 0;
           data[idx + 2] = 0;

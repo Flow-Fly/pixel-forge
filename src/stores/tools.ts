@@ -6,6 +6,7 @@ export type ToolType =
   | 'eyedropper'
   | 'marquee-rect'
   | 'lasso'
+  | 'polygonal-lasso'
   | 'magic-wand'
   | 'line'
   | 'rectangle'

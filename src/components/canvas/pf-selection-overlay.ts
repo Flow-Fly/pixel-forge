@@ -3,6 +3,8 @@ import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { selectionStore } from '../../stores/selection';
 import { viewportStore } from '../../stores/viewport';
+import { traceMaskOutline, connectSegments, type Point } from '../../utils/mask-utils';
+import { type SelectionState } from '../../types/selection';
 
 /**
  * Transparent canvas overlay that renders:
@@ -33,6 +35,10 @@ export class PFSelectionOverlay extends BaseComponent {
   private animationFrameId = 0;
   private dashOffset = 0;
   private lastTimestamp = 0;
+
+  // Cache for freeform outline paths
+  private cachedOutlinePaths: Point[][] | null = null;
+  private cachedStateId: string | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -97,33 +103,74 @@ export class PFSelectionOverlay extends BaseComponent {
     ctx.scale(dpr, dpr);
 
     const state = selectionStore.state.value;
-    if (state.type === 'none') return;
+    if (state.type === 'none') {
+      this.cachedOutlinePaths = null;
+      this.cachedStateId = null;
+      return;
+    }
 
     const zoom = viewportStore.zoom.value;
     const panX = viewportStore.panX.value;
     const panY = viewportStore.panY.value;
 
-    if (state.type === 'selecting' || state.type === 'selected') {
-      const bounds = state.type === 'selecting' ? state.currentBounds : state.bounds;
-      this.drawMarchingAnts(ctx, bounds, zoom, panX, panY);
-    }
-
-    if (state.type === 'floating') {
+    if (state.type === 'selecting') {
+      // Draw preview path if available (lasso tools), otherwise fall back to bounding box
+      if (state.previewPath && state.previewPath.length >= 2) {
+        this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
+      } else {
+        this.drawRectMarchingAnts(ctx, state.currentBounds, zoom, panX, panY);
+      }
+    } else if (state.type === 'selected') {
+      this.drawSelectedState(ctx, state, zoom, panX, panY);
+    } else if (state.type === 'floating') {
       // Draw floating pixels
       this.drawFloatingPixels(ctx, state, zoom, panX, panY);
 
       // Draw marching ants around floating selection
-      const floatBounds = {
-        x: state.originalBounds.x + state.currentOffset.x,
-        y: state.originalBounds.y + state.currentOffset.y,
-        width: state.originalBounds.width,
-        height: state.originalBounds.height,
-      };
-      this.drawMarchingAnts(ctx, floatBounds, zoom, panX, panY);
+      this.drawFloatingState(ctx, state, zoom, panX, panY);
     }
   }
 
-  private drawMarchingAnts(
+  private drawSelectedState(
+    ctx: CanvasRenderingContext2D,
+    state: SelectionState & { type: 'selected' },
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    if (state.shape === 'freeform' && 'mask' in state) {
+      this.drawFreeformMarchingAnts(ctx, state.bounds, state.mask, zoom, panX, panY);
+    } else if (state.shape === 'ellipse') {
+      this.drawEllipseMarchingAnts(ctx, state.bounds, zoom, panX, panY);
+    } else {
+      this.drawRectMarchingAnts(ctx, state.bounds, zoom, panX, panY);
+    }
+  }
+
+  private drawFloatingState(
+    ctx: CanvasRenderingContext2D,
+    state: SelectionState & { type: 'floating' },
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    const floatBounds = {
+      x: state.originalBounds.x + state.currentOffset.x,
+      y: state.originalBounds.y + state.currentOffset.y,
+      width: state.originalBounds.width,
+      height: state.originalBounds.height,
+    };
+
+    if (state.shape === 'freeform' && state.mask) {
+      this.drawFreeformMarchingAnts(ctx, floatBounds, state.mask, zoom, panX, panY);
+    } else if (state.shape === 'ellipse') {
+      this.drawEllipseMarchingAnts(ctx, floatBounds, zoom, panX, panY);
+    } else {
+      this.drawRectMarchingAnts(ctx, floatBounds, zoom, panX, panY);
+    }
+  }
+
+  private drawRectMarchingAnts(
     ctx: CanvasRenderingContext2D,
     bounds: { x: number; y: number; width: number; height: number },
     zoom: number,
@@ -158,6 +205,164 @@ export class PFSelectionOverlay extends BaseComponent {
       Math.round(screenWidth) - 1,
       Math.round(screenHeight) - 1
     );
+
+    ctx.restore();
+  }
+
+  private drawEllipseMarchingAnts(
+    ctx: CanvasRenderingContext2D,
+    bounds: { x: number; y: number; width: number; height: number },
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    const screenX = bounds.x * zoom + panX;
+    const screenY = bounds.y * zoom + panY;
+    const screenWidth = bounds.width * zoom;
+    const screenHeight = bounds.height * zoom;
+
+    const cx = screenX + screenWidth / 2;
+    const cy = screenY + screenHeight / 2;
+    const rx = screenWidth / 2 - 0.5;
+    const ry = screenHeight / 2 - 0.5;
+
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    // White dashes
+    ctx.strokeStyle = 'white';
+    ctx.lineDashOffset = -this.dashOffset;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Black dashes
+    ctx.strokeStyle = 'black';
+    ctx.lineDashOffset = -this.dashOffset + 4;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  private drawFreeformMarchingAnts(
+    ctx: CanvasRenderingContext2D,
+    bounds: { x: number; y: number; width: number; height: number },
+    mask: Uint8Array,
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    // Generate state ID for caching
+    const stateId = `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${mask.length}`;
+
+    // Check if we need to regenerate outline paths
+    if (this.cachedStateId !== stateId) {
+      const segments = traceMaskOutline(mask, bounds);
+      this.cachedOutlinePaths = connectSegments(segments);
+      this.cachedStateId = stateId;
+    }
+
+    if (!this.cachedOutlinePaths || this.cachedOutlinePaths.length === 0) {
+      // Fallback to rectangle if no paths
+      this.drawRectMarchingAnts(ctx, bounds, zoom, panX, panY);
+      return;
+    }
+
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    // Draw each path
+    for (const path of this.cachedOutlinePaths) {
+      if (path.length < 2) continue;
+
+      // White dashes
+      ctx.strokeStyle = 'white';
+      ctx.lineDashOffset = -this.dashOffset;
+      ctx.beginPath();
+      ctx.moveTo(
+        Math.round(path[0].x * zoom + panX) + 0.5,
+        Math.round(path[0].y * zoom + panY) + 0.5
+      );
+      for (let i = 1; i < path.length; i++) {
+        ctx.lineTo(
+          Math.round(path[i].x * zoom + panX) + 0.5,
+          Math.round(path[i].y * zoom + panY) + 0.5
+        );
+      }
+      ctx.stroke();
+
+      // Black dashes
+      ctx.strokeStyle = 'black';
+      ctx.lineDashOffset = -this.dashOffset + 4;
+      ctx.beginPath();
+      ctx.moveTo(
+        Math.round(path[0].x * zoom + panX) + 0.5,
+        Math.round(path[0].y * zoom + panY) + 0.5
+      );
+      for (let i = 1; i < path.length; i++) {
+        ctx.lineTo(
+          Math.round(path[i].x * zoom + panX) + 0.5,
+          Math.round(path[i].y * zoom + panY) + 0.5
+        );
+      }
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Draw preview path during lasso selection (before finalization).
+   * Shows the actual path being drawn, not just the bounding box.
+   */
+  private drawPathPreview(
+    ctx: CanvasRenderingContext2D,
+    path: { x: number; y: number }[],
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    if (path.length < 2) return;
+
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    // White dashes
+    ctx.strokeStyle = 'white';
+    ctx.lineDashOffset = -this.dashOffset;
+    ctx.beginPath();
+    ctx.moveTo(
+      Math.round(path[0].x * zoom + panX) + 0.5,
+      Math.round(path[0].y * zoom + panY) + 0.5
+    );
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(
+        Math.round(path[i].x * zoom + panX) + 0.5,
+        Math.round(path[i].y * zoom + panY) + 0.5
+      );
+    }
+    ctx.stroke();
+
+    // Black dashes (offset to fill gaps)
+    ctx.strokeStyle = 'black';
+    ctx.lineDashOffset = -this.dashOffset + 4;
+    ctx.beginPath();
+    ctx.moveTo(
+      Math.round(path[0].x * zoom + panX) + 0.5,
+      Math.round(path[0].y * zoom + panY) + 0.5
+    );
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(
+        Math.round(path[i].x * zoom + panX) + 0.5,
+        Math.round(path[i].y * zoom + panY) + 0.5
+      );
+    }
+    ctx.stroke();
 
     ctx.restore();
   }

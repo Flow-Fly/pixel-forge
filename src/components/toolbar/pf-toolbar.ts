@@ -113,9 +113,15 @@ export class PFToolbar extends BaseComponent {
           ?active=${activeTool === 'lasso'}
           @click=${() => this.selectTool('lasso')}
         ></pf-tool-button>
-        <pf-tool-button 
-          tool="magic-wand" 
-          shortcut="W" 
+        <pf-tool-button
+          tool="polygonal-lasso"
+          shortcut="Shift+Q"
+          ?active=${activeTool === 'polygonal-lasso'}
+          @click=${() => this.selectTool('polygonal-lasso')}
+        ></pf-tool-button>
+        <pf-tool-button
+          tool="magic-wand"
+          shortcut="W"
           ?active=${activeTool === 'magic-wand'}
           @click=${() => this.selectTool('magic-wand')}
         ></pf-tool-button>
