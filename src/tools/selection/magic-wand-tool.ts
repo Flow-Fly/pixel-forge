@@ -5,7 +5,7 @@ import { layerStore } from '../../stores/layers';
 export class MagicWandTool extends BaseTool {
   name = 'magic-wand';
   cursor = 'crosshair';
-  
+
   constructor(context: CanvasRenderingContext2D) {
     super();
     this.setContext(context);
@@ -22,8 +22,8 @@ export class MagicWandTool extends BaseTool {
   private selectRegion(x: number, y: number) {
     // Need access to active layer data
     const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
-    
+    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+
     if (!activeLayer || !activeLayer.canvas) return;
 
     const ctx = activeLayer.canvas.getContext('2d');
@@ -47,16 +47,18 @@ export class MagicWandTool extends BaseTool {
 
     // Flood fill to find connected pixels
     // This is a simplified version, real one would generate a mask
-    // For now, let's just select the bounds of the connected region
-    
+    // For now, let's just select the clicked pixel as a placeholder
+
     // TODO: Implement proper flood fill and mask generation
-    // For this prototype, we'll just select the clicked pixel as a placeholder
-    selectionStore.setSelection({
-      type: 'magic',
-      mask: null,
-      bounds: { x: startX, y: startY, w: 1, h: 1 }
-    });
-    
-    console.log(`Magic Wand: Selected color rgba(${targetR},${targetG},${targetB},${targetA}) at ${startX},${startY}`);
+    // For this prototype, we'll just select a single pixel region
+    selectionStore.state.value = {
+      type: 'selected',
+      shape: 'rectangle',
+      bounds: { x: startX, y: startY, width: 1, height: 1 },
+    };
+
+    console.log(
+      `Magic Wand: Selected color rgba(${targetR},${targetG},${targetB},${targetA}) at ${startX},${startY}`
+    );
   }
 }
