@@ -25,6 +25,9 @@ export class PencilTool extends BaseTool {
   private dragStartX = 0;
   private dragStartY = 0;
 
+  // Locked axis for shift-drag (null = not yet determined, 'h' = horizontal, 'v' = vertical)
+  private lockedAxis: 'h' | 'v' | null = null;
+
   // Track distance since last stamp for brush spacing
   private distanceSinceLastStamp = 0;
 
@@ -84,6 +87,7 @@ export class PencilTool extends BaseTool {
     this.lastY = currentY;
     this.dragStartX = currentX;
     this.dragStartY = currentY;
+    this.lockedAxis = null; // Reset axis lock for new stroke
     this.drawnPoints = [{ x: this.lastX, y: this.lastY }];
     this.stampPositions = []; // Reset stamp tracking for pixel-perfect at stamp level
     this.distanceSinceLastStamp = 0;
@@ -96,16 +100,22 @@ export class PencilTool extends BaseTool {
     let currentX = Math.floor(x);
     let currentY = Math.floor(y);
 
-    // Shift+Drag: constrain to 45-degree angles from drag start
+    // Shift+Drag: constrain to locked axis (determined on first significant movement)
     if (modifiers?.shift) {
-      const constrained = constrainTo45Degrees(
-        this.dragStartX,
-        this.dragStartY,
-        currentX,
-        currentY
-      );
-      currentX = constrained.x;
-      currentY = constrained.y;
+      const dx = Math.abs(currentX - this.dragStartX);
+      const dy = Math.abs(currentY - this.dragStartY);
+
+      // Lock axis on first significant movement (>= 1 pixel)
+      if (this.lockedAxis === null && (dx >= 1 || dy >= 1)) {
+        this.lockedAxis = dx >= dy ? 'h' : 'v';
+      }
+
+      // Apply constraint based on locked axis
+      if (this.lockedAxis === 'h') {
+        currentY = this.dragStartY;
+      } else if (this.lockedAxis === 'v') {
+        currentX = this.dragStartX;
+      }
     }
 
     if (this.lastX === currentX && this.lastY === currentY) return;
@@ -125,6 +135,20 @@ export class PencilTool extends BaseTool {
     this.drawnPoints = [];
     this.stampPositions = [];
     this.strokeStartSnapshot = null; // Free memory
+  }
+
+  onMove(x: number, y: number, modifiers?: ModifierKeys) {
+    // Emit preview line when shift held + lastStrokeEnd exists (for shift-click preview)
+    if (modifiers?.shift && PencilTool.lastStrokeEnd) {
+      window.dispatchEvent(new CustomEvent('line-preview', {
+        detail: {
+          start: PencilTool.lastStrokeEnd,
+          end: { x: Math.floor(x), y: Math.floor(y) }
+        }
+      }));
+    } else {
+      window.dispatchEvent(new CustomEvent('line-preview-clear'));
+    }
   }
 
   /**

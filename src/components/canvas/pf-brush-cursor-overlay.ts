@@ -5,6 +5,8 @@ import { brushStore } from '../../stores/brush';
 import { colorStore } from '../../stores/colors';
 import { toolStore } from '../../stores/tools';
 import { viewportStore } from '../../stores/viewport';
+import { PencilTool } from '../../tools/pencil-tool';
+import { EraserTool } from '../../tools/eraser-tool';
 
 @customElement('pf-brush-cursor-overlay')
 export class PFBrushCursorOverlay extends BaseComponent {
@@ -27,6 +29,7 @@ export class PFBrushCursorOverlay extends BaseComponent {
 
   @query('canvas') canvas!: HTMLCanvasElement;
   @state() private cursorPos: { x: number; y: number } | null = null;
+  @state() private linePreview: { start: { x: number; y: number }; end: { x: number; y: number } } | null = null;
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId = 0;
@@ -38,6 +41,14 @@ export class PFBrushCursorOverlay extends BaseComponent {
     // Listen for cursor position from drawing canvas
     window.addEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
     window.addEventListener('canvas-cursor-leave', this.handleCanvasCursorLeave);
+
+    // Listen for line preview events (shift+click ghost line)
+    window.addEventListener('line-preview', this.handleLinePreview as EventListener);
+    window.addEventListener('line-preview-clear', this.handleLinePreviewClear);
+
+    // Listen for shift key to show/hide preview immediately
+    window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
   }
 
   disconnectedCallback() {
@@ -45,6 +56,10 @@ export class PFBrushCursorOverlay extends BaseComponent {
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
     window.removeEventListener('canvas-cursor-leave', this.handleCanvasCursorLeave);
+    window.removeEventListener('line-preview', this.handleLinePreview as EventListener);
+    window.removeEventListener('line-preview-clear', this.handleLinePreviewClear);
+    window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
 
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
@@ -90,6 +105,52 @@ export class PFBrushCursorOverlay extends BaseComponent {
     this.clearCanvas();
   };
 
+  private handleLinePreview = (e: CustomEvent<{ start: { x: number; y: number }; end: { x: number; y: number } }>) => {
+    this.linePreview = e.detail;
+    this.scheduleDraw();
+  };
+
+  private handleLinePreviewClear = () => {
+    this.linePreview = null;
+    this.scheduleDraw();
+  };
+
+  private handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') {
+      this.updateShiftPreview();
+    }
+  };
+
+  private handleKeyUp = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') {
+      // Clear preview when shift is released
+      this.linePreview = null;
+      this.scheduleDraw();
+    }
+  };
+
+  private updateShiftPreview() {
+    // Only show preview for pencil/eraser tools
+    const tool = toolStore.activeTool.value;
+    if (tool !== 'pencil' && tool !== 'eraser') return;
+
+    // Only if cursor is on canvas
+    if (!this.cursorPos) return;
+
+    // Get last stroke end from the active tool
+    const lastStrokeEnd = tool === 'pencil'
+      ? PencilTool.getLastStrokeEnd()
+      : EraserTool.getLastStrokeEnd();
+
+    if (lastStrokeEnd) {
+      this.linePreview = {
+        start: lastStrokeEnd,
+        end: { x: Math.floor(this.cursorPos.x), y: Math.floor(this.cursorPos.y) }
+      };
+      this.scheduleDraw();
+    }
+  }
+
   private scheduleDraw() {
     // Single frame redraw - cursor moves and signal changes both trigger this
     if (!this.animationFrameId) {
@@ -107,7 +168,8 @@ export class PFBrushCursorOverlay extends BaseComponent {
   }
 
   private draw() {
-    if (!this.ctx || !this.canvas || !this.cursorPos) return;
+    if (!this.ctx || !this.canvas) return;
+    if (!this.cursorPos && !this.linePreview) return;
 
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
@@ -124,49 +186,92 @@ export class PFBrushCursorOverlay extends BaseComponent {
     // Check if in pan mode
     if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) return;
 
-    // Get brush settings
-    const brush = brushStore.activeBrush.value;
-    const size = brush.size;
-    const shape = brush.shape;
-    const spacing = brushStore.getEffectiveSpacing();
+    // Get viewport transform
+    const zoom = viewportStore.zoom.value;
+    const panX = viewportStore.panX.value;
+    const panY = viewportStore.panY.value;
 
     // Get color based on tool
     const color = tool === 'eraser'
       ? colorStore.secondaryColor.value
       : colorStore.primaryColor.value;
 
-    // Convert canvas coords to screen coords
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-
-    // Calculate screen position
-    let screenX: number;
-    let screenY: number;
-
-    if (spacing > 1) {
-      // Snap to grid: brush top-left aligns with grid cell
-      const gridX = Math.floor(this.cursorPos.x / spacing) * spacing;
-      const gridY = Math.floor(this.cursorPos.y / spacing) * spacing;
-      screenX = gridX * zoom + panX;
-      screenY = gridY * zoom + panY;
-    } else {
-      // Normal mode: brush centered on cursor
-      const halfSize = Math.floor(size / 2);
-      screenX = (this.cursorPos.x - halfSize) * zoom + panX;
-      screenY = (this.cursorPos.y - halfSize) * zoom + panY;
+    // Draw ghost line preview for shift+click
+    if (this.linePreview) {
+      this.drawLinePreview(ctx, this.linePreview.start, this.linePreview.end, zoom, panX, panY, color);
     }
-    const screenSize = size * zoom;
 
-    // Minimum visible size for outline
-    const minOutlineSize = Math.max(screenSize, 3);
+    // Draw brush cursor if we have cursor position
+    if (this.cursorPos) {
+      // Get brush settings
+      const brush = brushStore.activeBrush.value;
+      const size = brush.size;
+      const shape = brush.shape;
+      const spacing = brushStore.getEffectiveSpacing();
 
-    // Draw the brush preview
-    if (shape === 'square') {
-      this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
-    } else {
-      this.drawCircleBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
+      // Calculate screen position
+      let screenX: number;
+      let screenY: number;
+
+      if (spacing > 1) {
+        // Snap to grid: brush top-left aligns with grid cell
+        const gridX = Math.floor(this.cursorPos.x / spacing) * spacing;
+        const gridY = Math.floor(this.cursorPos.y / spacing) * spacing;
+        screenX = gridX * zoom + panX;
+        screenY = gridY * zoom + panY;
+      } else {
+        // Normal mode: brush centered on cursor
+        const halfSize = Math.floor(size / 2);
+        screenX = (this.cursorPos.x - halfSize) * zoom + panX;
+        screenY = (this.cursorPos.y - halfSize) * zoom + panY;
+      }
+      const screenSize = size * zoom;
+
+      // Minimum visible size for outline
+      const minOutlineSize = Math.max(screenSize, 3);
+
+      // Draw the brush preview
+      if (shape === 'square') {
+        this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
+      } else {
+        this.drawCircleBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
+      }
     }
+  }
+
+  private drawLinePreview(
+    ctx: CanvasRenderingContext2D,
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    zoom: number,
+    panX: number,
+    panY: number,
+    color: string
+  ) {
+    const startScreenX = start.x * zoom + panX + zoom / 2;
+    const startScreenY = start.y * zoom + panY + zoom / 2;
+    const endScreenX = end.x * zoom + panX + zoom / 2;
+    const endScreenY = end.y * zoom + panY + zoom / 2;
+
+    // Draw dashed semi-transparent line
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(startScreenX, startScreenY);
+    ctx.lineTo(endScreenX, endScreenY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    // Draw small circle at start point to indicate origin
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(startScreenX, startScreenY, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   private drawSquareBrush(
