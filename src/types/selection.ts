@@ -9,6 +9,7 @@ export type SelectionState =
       shape: SelectionShape;
       startPoint: { x: number; y: number };
       currentBounds: Rect;
+      previewPath?: { x: number; y: number }[];
     }
   | {
       type: 'selected';

@@ -4,6 +4,7 @@ import { BaseComponent } from '../../core/base-component';
 import { toolStore } from '../../stores/tools';
 import { brushStore } from '../../stores/brush';
 import { EraserTool, type EraserMode } from '../../tools/eraser-tool';
+import { magicWandSettings } from '../../tools/selection/magic-wand-tool';
 
 @customElement('pf-context-bar')
 export class PFContextBar extends BaseComponent {
@@ -148,6 +149,49 @@ export class PFContextBar extends BaseComponent {
             <label>Thickness:</label>
             <input type="number" value="1" min="1" max="10" style="width: 40px">
           </div>
+        `;
+      case 'magic-wand':
+        return html`
+          <div class="option">
+            <label>Tolerance:</label>
+            <input
+              type="range"
+              min="0"
+              max="255"
+              .value=${magicWandSettings.tolerance.value}
+              @input=${(e: Event) => magicWandSettings.tolerance.value = parseInt((e.target as HTMLInputElement).value)}
+              style="width: 60px"
+            >
+            <span>${magicWandSettings.tolerance.value}</span>
+          </div>
+          <div class="separator"></div>
+          <div class="option">
+            <input
+              type="checkbox"
+              id="contiguous-wand"
+              .checked=${magicWandSettings.contiguous.value}
+              @change=${(e: Event) => magicWandSettings.contiguous.value = (e.target as HTMLInputElement).checked}
+            >
+            <label for="contiguous-wand" title="Only select connected pixels of the same color">Contiguous</label>
+          </div>
+          <div class="separator"></div>
+          <div class="option">
+            <input
+              type="checkbox"
+              id="diagonal-wand"
+              .checked=${magicWandSettings.diagonal.value}
+              @change=${(e: Event) => magicWandSettings.diagonal.value = (e.target as HTMLInputElement).checked}
+            >
+            <label for="diagonal-wand" title="Include diagonally connected pixels (8-way instead of 4-way)">Diagonal</label>
+          </div>
+        `;
+      case 'lasso':
+      case 'polygonal-lasso':
+      case 'marquee-rect':
+        return html`
+          <span style="color: var(--pf-color-text-muted); font-style: italic;">
+            Shift: Add | Alt: Subtract
+          </span>
         `;
       default:
         return html`<span style="color: var(--pf-color-text-muted); font-style: italic;">No options</span>`;

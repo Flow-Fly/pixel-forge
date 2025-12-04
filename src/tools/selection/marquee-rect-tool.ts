@@ -24,8 +24,11 @@ export class MarqueeRectTool extends BaseTool {
     if (selectionStore.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
     } else {
-      // Clicking outside - commit any floating selection first, then start new
-      this.commitIfFloating();
+      // Clicking outside - commit any floating selection first
+      // If we committed, don't immediately start a new selection
+      if (this.commitIfFloating()) {
+        return;
+      }
       this.startNewSelection(canvasX, canvasY);
     }
   }
@@ -91,13 +94,13 @@ export class MarqueeRectTool extends BaseTool {
     historyStore.execute(command);
   }
 
-  private commitIfFloating() {
+  private commitIfFloating(): boolean {
     const state = selectionStore.state.value;
-    if (state.type !== 'floating') return;
+    if (state.type !== 'floating') return false;
 
     const activeLayerId = layerStore.activeLayerId.value;
     const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    if (!layer?.canvas) return;
+    if (!layer?.canvas) return false;
 
     const command = new CommitFloatCommand(
       layer.canvas,
@@ -110,5 +113,6 @@ export class MarqueeRectTool extends BaseTool {
     );
 
     historyStore.execute(command);
+    return true;
   }
 }

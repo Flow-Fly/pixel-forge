@@ -1,77 +1,213 @@
-import { BaseTool, type ModifierKeys } from '../base-tool';
+import { BaseTool, type Point, type ModifierKeys } from '../base-tool';
 import { selectionStore } from '../../stores/selection';
-import { layerStore } from '../../stores/layers';
+import { projectStore } from '../../stores/project';
 import { historyStore } from '../../stores/history';
-import { floodFillSelect, type FloodFillOptions } from '../../utils/mask-utils';
-import { signal } from '../../core/signal';
+import { layerStore } from '../../stores/layers';
+import { polygonToMask } from '../../utils/mask-utils';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
 
-// Tool settings (accessible from context bar)
-export const magicWandSettings = {
-  tolerance: signal(0), // 0-255, 0 = exact match
-  contiguous: signal(true), // true = connected pixels only
-  diagonal: signal(false), // true = 8-way connectivity (includes diagonals)
-};
-
-export class MagicWandTool extends BaseTool {
-  name = 'magic-wand';
+/**
+ * Polygonal Lasso Tool
+ * Click to add vertices, double-click or Enter to close.
+ * Click near start point (< 5px) to close.
+ */
+export class PolygonalLassoTool extends BaseTool {
+  name = 'polygonal-lasso';
   cursor = 'crosshair';
 
-  private mode: 'idle' | 'dragging' = 'idle';
+  private vertices: Point[] = [];
+  private currentMousePos: Point | null = null;
+  private isActive = false;
+  private lastClickTime = 0;
+  private mode: 'idle' | 'selecting' | 'dragging' = 'idle';
   private lastDragX = 0;
   private lastDragY = 0;
 
-  constructor(context: CanvasRenderingContext2D) {
+  constructor(_context: CanvasRenderingContext2D) {
     super();
-    this.setContext(context);
   }
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
     const canvasX = Math.floor(x);
     const canvasY = Math.floor(y);
+    const point = { x: canvasX, y: canvasY };
+    const now = Date.now();
 
-    // Check if clicking inside existing selection (for dragging)
-    if (selectionStore.isPointInSelection(canvasX, canvasY)) {
+    // If not actively drawing a polygon, check if clicking inside selection (for dragging)
+    if (!this.isActive && selectionStore.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
       return;
     }
 
-    // Clicking outside - commit any floating selection first
-    // If we committed, don't immediately make a new selection
-    if (this.commitIfFloating()) {
+    // Check for double-click (< 300ms between clicks)
+    if (now - this.lastClickTime < 300 && this.vertices.length >= 3) {
+      this.closePolygon();
+      this.lastClickTime = 0;
       return;
     }
+    this.lastClickTime = now;
 
-    // Determine selection mode based on modifiers
-    if (modifiers?.shift) {
-      selectionStore.setMode('add');
-    } else if (modifiers?.alt) {
-      selectionStore.setMode('subtract');
+    if (!this.isActive) {
+      // Clicking outside - commit any floating selection first
+      // If we committed, don't immediately start a new selection
+      if (this.commitIfFloating()) {
+        return;
+      }
+
+      // Start new polygon
+      this.isActive = true;
+      this.mode = 'selecting';
+      this.vertices = [point];
+
+      // Set selection mode based on modifiers
+      if (modifiers?.shift) {
+        selectionStore.setMode('add');
+      } else if (modifiers?.alt) {
+        selectionStore.setMode('subtract');
+      } else {
+        selectionStore.setMode('replace');
+      }
+
+      this.updateSelectingState();
     } else {
-      selectionStore.setMode('replace');
-    }
+      // Check if clicking near start point to close
+      if (this.vertices.length >= 3) {
+        const start = this.vertices[0];
+        const dx = point.x - start.x;
+        const dy = point.y - start.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-    this.selectRegion(x, y);
+        if (dist < 5) {
+          this.closePolygon();
+          return;
+        }
+      }
+
+      // Add new vertex
+      this.vertices.push(point);
+      this.updateSelectingState();
+    }
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
+    const canvasX = Math.floor(x);
+    const canvasY = Math.floor(y);
+
     if (this.mode === 'dragging') {
-      const canvasX = Math.floor(x);
-      const canvasY = Math.floor(y);
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
       selectionStore.moveFloat(dx, dy);
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
+    } else {
+      // Update current mouse position for preview line
+      this.currentMousePos = { x: canvasX, y: canvasY };
     }
   }
 
   onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
+    // If dragging, stay floating (wait for commit on next click outside)
     if (this.mode === 'dragging') {
       this.mode = 'idle';
-    } else {
-      selectionStore.resetMode();
     }
+    // For selecting mode, wait for polygon to be closed (via double-click, Enter, or click near start)
+  }
+
+  onMove(x: number, y: number) {
+    if (this.isActive) {
+      this.currentMousePos = { x: Math.floor(x), y: Math.floor(y) };
+      // Update state to trigger re-render with new cursor position
+      this.updateSelectingState();
+    }
+  }
+
+  /**
+   * Handle keyboard events (Enter to close, Escape to cancel)
+   */
+  onKeyDown(key: string) {
+    if (key === 'Enter' && this.vertices.length >= 3) {
+      this.closePolygon();
+    } else if (key === 'Escape') {
+      this.cancel();
+    }
+  }
+
+  /**
+   * Get current vertices for visual preview.
+   */
+  getVertices(): Point[] {
+    return this.vertices;
+  }
+
+  /**
+   * Get current mouse position for preview line.
+   */
+  getCurrentMousePos(): Point | null {
+    return this.currentMousePos;
+  }
+
+  /**
+   * Check if tool is actively drawing.
+   */
+  getIsActive(): boolean {
+    return this.isActive;
+  }
+
+  /**
+   * Cancel the current polygon.
+   */
+  cancel() {
+    this.isActive = false;
+    this.mode = 'idle';
+    this.vertices = [];
+    this.currentMousePos = null;
+    selectionStore.clear();
+    selectionStore.resetMode();
+  }
+
+  private closePolygon() {
+    if (this.vertices.length < 3) {
+      this.cancel();
+      return;
+    }
+
+    // Get canvas dimensions
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+
+    // Convert polygon to mask
+    const result = polygonToMask(this.vertices, canvasWidth, canvasHeight);
+
+    if (!result) {
+      this.cancel();
+      return;
+    }
+
+    const { mask, bounds } = result;
+
+    // Handle selection modes
+    const currentState = selectionStore.state.value;
+    const mode = selectionStore.mode.value;
+
+    // For add/subtract, we need to combine with existing selection
+    if (mode !== 'replace' && currentState.type === 'selected') {
+      const combined = this.combineMasks(currentState, bounds, mask, mode);
+      if (combined) {
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask);
+      } else {
+        selectionStore.clear();
+      }
+    } else {
+      selectionStore.finalizeFreeformSelection(bounds, mask);
+    }
+
+    selectionStore.resetMode();
+
+    // Reset state
+    this.isActive = false;
+    this.mode = 'idle';
+    this.vertices = [];
+    this.currentMousePos = null;
   }
 
   private startDragging(x: number, y: number) {
@@ -128,70 +264,34 @@ export class MagicWandTool extends BaseTool {
     return true;
   }
 
-  private selectRegion(x: number, y: number) {
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+  private updateSelectingState() {
+    if (this.vertices.length === 0) return;
 
-    if (!activeLayer || !activeLayer.canvas) return;
-
-    const ctx = activeLayer.canvas.getContext('2d');
-    if (!ctx) return;
-
-    const startX = Math.floor(x);
-    const startY = Math.floor(y);
-    const width = activeLayer.canvas.width;
-    const height = activeLayer.canvas.height;
-
-    // Bounds check
-    if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
-      return;
+    // Build preview path: all vertices + current mouse position (for live preview line)
+    const previewPath = [...this.vertices];
+    if (this.currentMousePos) {
+      previewPath.push(this.currentMousePos);
     }
 
-    // Get image data from layer
-    const imageData = ctx.getImageData(0, 0, width, height);
+    const xs = previewPath.map((p) => p.x);
+    const ys = previewPath.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
 
-    // Get current settings
-    const options: FloodFillOptions = {
-      tolerance: magicWandSettings.tolerance.value,
-      contiguous: magicWandSettings.contiguous.value,
-      diagonal: magicWandSettings.diagonal.value,
+    selectionStore.state.value = {
+      type: 'selecting',
+      shape: 'freeform',
+      startPoint: this.vertices[0],
+      currentBounds: {
+        x: minX,
+        y: minY,
+        width: Math.max(1, maxX - minX + 1),
+        height: Math.max(1, maxY - minY + 1),
+      },
+      previewPath,
     };
-
-    // Perform flood fill selection
-    const result = floodFillSelect(imageData, startX, startY, options);
-
-    if (!result) {
-      // No pixels selected (clicked outside bounds or no matching pixels)
-      if (selectionStore.mode.value === 'replace') {
-        selectionStore.clear();
-      }
-      return;
-    }
-
-    const { mask, bounds } = result;
-
-    // Handle selection modes (add/subtract/replace)
-    const currentState = selectionStore.state.value;
-    const mode = selectionStore.mode.value;
-
-    if (mode === 'replace' || currentState.type === 'none') {
-      // Simple replace
-      selectionStore.finalizeFreeformSelection(bounds, mask);
-    } else if (mode === 'add' && currentState.type === 'selected') {
-      // Add to existing selection
-      const combined = this.combineMasks(currentState, bounds, mask, 'add');
-      if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask);
-      }
-    } else if (mode === 'subtract' && currentState.type === 'selected') {
-      // Subtract from existing selection
-      const combined = this.combineMasks(currentState, bounds, mask, 'subtract');
-      if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask);
-      } else {
-        selectionStore.clear();
-      }
-    }
   }
 
   /**
@@ -201,8 +301,12 @@ export class MagicWandTool extends BaseTool {
     currentState: { bounds: { x: number; y: number; width: number; height: number }; shape: string; mask?: Uint8Array },
     newBounds: { x: number; y: number; width: number; height: number },
     newMask: Uint8Array,
-    operation: 'add' | 'subtract'
+    operation: 'add' | 'subtract' | 'replace'
   ): { mask: Uint8Array; bounds: { x: number; y: number; width: number; height: number } } | null {
+    if (operation === 'replace') {
+      return { mask: newMask, bounds: newBounds };
+    }
+
     const oldBounds = currentState.bounds;
 
     // Calculate combined bounds

@@ -1,11 +1,13 @@
 import { signal } from '../core/signal';
 import { type SelectionState, type SelectionShape } from '../types/selection';
 import { type Rect } from '../types/geometry';
+import { isPointInMask } from '../utils/mask-utils';
 
 export type SelectionMode = 'replace' | 'add' | 'subtract';
 
 class SelectionStore {
   state = signal<SelectionState>({ type: 'none' });
+  mode = signal<SelectionMode>('replace');
 
   // Track the layer we're operating on
   private activeLayerId: string | null = null;
@@ -85,7 +87,7 @@ class SelectionStore {
     }
 
     if (s.shape === 'freeform') {
-      // Freeform would need mask - not implemented yet
+      // Freeform needs finalizeFreeformSelection() with mask
       this.clear();
       return;
     }
@@ -94,6 +96,26 @@ class SelectionStore {
       type: 'selected',
       shape: s.shape as 'rectangle' | 'ellipse',
       bounds: s.currentBounds,
+    };
+  }
+
+  /**
+   * Finalize a freeform selection with a mask.
+   * Called by lasso and magic wand tools.
+   */
+  finalizeFreeformSelection(bounds: Rect, mask: Uint8Array) {
+    // Validate mask size matches bounds
+    if (mask.length !== bounds.width * bounds.height) {
+      console.error('Mask size does not match bounds');
+      this.clear();
+      return;
+    }
+
+    this.state.value = {
+      type: 'selected',
+      shape: 'freeform',
+      bounds,
+      mask,
     };
   }
 
@@ -178,7 +200,8 @@ class SelectionStore {
     const s = this.state.value;
 
     if (s.type === 'selected') {
-      return this.isPointInBounds(x, y, s.bounds, s.shape);
+      const mask = s.shape === 'freeform' ? s.mask : undefined;
+      return this.isPointInBounds(x, y, s.bounds, s.shape, mask);
     }
 
     if (s.type === 'floating') {
@@ -188,13 +211,19 @@ class SelectionStore {
         width: s.originalBounds.width,
         height: s.originalBounds.height,
       };
-      return this.isPointInBounds(x, y, floatBounds, s.shape);
+      return this.isPointInBounds(x, y, floatBounds, s.shape, s.mask);
     }
 
     return false;
   }
 
-  private isPointInBounds(x: number, y: number, bounds: Rect, shape: SelectionShape): boolean {
+  private isPointInBounds(
+    x: number,
+    y: number,
+    bounds: Rect,
+    shape: SelectionShape,
+    mask?: Uint8Array
+  ): boolean {
     const { x: bx, y: by, width: bw, height: bh } = bounds;
 
     if (x < bx || x >= bx + bw || y < by || y >= by + bh) {
@@ -216,7 +245,11 @@ class SelectionStore {
       return dx * dx + dy * dy <= 1;
     }
 
-    // For freeform, would check mask - not implemented
+    if (shape === 'freeform' && mask) {
+      return isPointInMask(x, y, mask, bounds);
+    }
+
+    // Fallback: treat as rectangle
     return true;
   }
 
