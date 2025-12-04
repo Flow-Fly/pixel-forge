@@ -136,7 +136,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       },
     ],
     alternatives: ["rectangle", "ellipse"],
-    shortcuts: [{ key: "shift", action: "Constrain to 45\u00b0", when: "drawing" }],
+    shortcuts: [{ key: "shift", action: "Constrain to 15\u00b0 angles", when: "drawing" }],
   },
 
   rectangle: {
