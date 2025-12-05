@@ -19,7 +19,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcutKey: "B",
     group: "drawing",
     options: [
-      { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "brush", storeKey: "size" },
+      { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "toolSizes", storeKey: "pencil" },
       {
         type: "slider",
         key: "opacity",
@@ -37,20 +37,11 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
         store: "brush",
         storeKey: "pixelPerfect",
       },
-      {
-        type: "checkbox",
-        key: "bigPixelMode",
-        label: "Big Pixel",
-        store: "brush",
-        storeKey: "bigPixelMode",
-      },
     ],
     alternatives: ["eraser", "eyedropper"],
     shortcuts: [
       { key: "shift", action: "Draw straight line", when: "drawing" },
-      { key: "[", action: "Decrease size" },
-      { key: "]", action: "Increase size" },
-      { key: "alt", action: "Eyedropper" },
+      { key: "ctrl+wheel", action: "Change size" },
     ],
   },
 
@@ -61,38 +52,13 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcutKey: "E",
     group: "drawing",
     options: [
-      { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "brush", storeKey: "size" },
-      {
-        type: "select",
-        key: "mode",
-        label: "Mode",
-        store: "eraser",
-        storeKey: "mode",
-        options: [
-          { value: "transparent", label: "To Transparent" },
-          { value: "background", label: "To Background" },
-        ],
-      },
-      {
-        type: "checkbox",
-        key: "pixelPerfect",
-        label: "Pixel Perfect",
-        store: "brush",
-        storeKey: "pixelPerfect",
-      },
-      {
-        type: "checkbox",
-        key: "bigPixelMode",
-        label: "Big Pixel",
-        store: "brush",
-        storeKey: "bigPixelMode",
-      },
+      { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "toolSizes", storeKey: "eraser" },
     ],
     alternatives: ["pencil", "eyedropper"],
     shortcuts: [
       { key: "shift", action: "Erase straight line", when: "drawing" },
-      { key: "[", action: "Decrease size" },
-      { key: "]", action: "Increase size" },
+      { key: "ctrl+wheel", action: "Change size" },
+      { key: "right-click", action: "Erase to background" },
     ],
   },
 
@@ -104,7 +70,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     group: "drawing",
     options: [],
     alternatives: ["pencil", "eraser"],
-    shortcuts: [{ key: "alt", action: "Sample from any layer" }],
+    shortcuts: [],
   },
 
   fill: {
@@ -168,7 +134,10 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       },
     ],
     alternatives: ["rectangle", "ellipse"],
-    shortcuts: [{ key: "shift", action: "Constrain to 15\u00b0 angles", when: "drawing" }],
+    shortcuts: [
+      { key: "shift", action: "Constrain to 15\u00b0 angles", when: "drawing" },
+      { key: "ctrl+wheel", action: "Change thickness" },
+    ],
   },
 
   rectangle: {
@@ -200,6 +169,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcuts: [
       { key: "shift", action: "Constrain to square", when: "drawing" },
       { key: "alt", action: "Draw from center", when: "drawing" },
+      { key: "ctrl+wheel", action: "Change thickness" },
     ],
   },
 
@@ -232,6 +202,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcuts: [
       { key: "shift", action: "Constrain to circle", when: "drawing" },
       { key: "alt", action: "Draw from center", when: "drawing" },
+      { key: "ctrl+wheel", action: "Change thickness" },
     ],
   },
 

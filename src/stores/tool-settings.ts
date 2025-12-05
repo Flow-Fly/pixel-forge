@@ -6,6 +6,44 @@
  */
 
 import { signal } from "../core/signal";
+import { shapeStore } from "./shape";
+import type { ToolType } from "./tools";
+
+/**
+ * Per-tool size storage
+ * Each drawing tool remembers its own size independently
+ */
+export const toolSizes = {
+  pencil: signal(1),
+  eraser: signal(1),
+  // Shapes use shapeStore.strokeWidth
+};
+
+/**
+ * Get the current size for a tool
+ */
+export function getToolSize(tool: ToolType): number {
+  if (tool === "pencil") return toolSizes.pencil.value;
+  if (tool === "eraser") return toolSizes.eraser.value;
+  if (tool === "line" || tool === "rectangle" || tool === "ellipse") {
+    return shapeStore.strokeWidth.value;
+  }
+  return 1;
+}
+
+/**
+ * Set the size for a tool
+ */
+export function setToolSize(tool: ToolType, size: number): void {
+  const clamped = Math.max(1, Math.min(50, size));
+  if (tool === "pencil") {
+    toolSizes.pencil.value = clamped;
+  } else if (tool === "eraser") {
+    toolSizes.eraser.value = clamped;
+  } else if (tool === "line" || tool === "rectangle" || tool === "ellipse") {
+    shapeStore.setStrokeWidth(clamped);
+  }
+}
 
 /**
  * Eraser tool settings

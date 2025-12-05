@@ -11,6 +11,7 @@ export interface ModifierKeys {
   shift: boolean;
   ctrl: boolean;
   alt: boolean;
+  button: number; // 0 = left, 1 = middle, 2 = right
 }
 
 export abstract class BaseTool {
