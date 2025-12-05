@@ -13,6 +13,7 @@ import "../color/pf-palette-generator";
 import "../toolbar/pf-context-bar";
 import "../timeline/pf-timeline";
 import "../ui/pf-shortcuts-overlay";
+import "../ui/pf-shortcuts-toggle";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../preview/pf-preview-overlay";
@@ -144,6 +145,7 @@ export class PixelForgeApp extends BaseComponent {
         </pf-canvas-viewport>
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
+        <pf-shortcuts-toggle></pf-shortcuts-toggle>
         <div class="timeline-container">
           <pf-timeline></pf-timeline>
         </div>

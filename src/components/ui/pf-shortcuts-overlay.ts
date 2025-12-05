@@ -142,24 +142,8 @@ export class PfShortcutsOverlay extends BaseComponent {
       text-align: right;
     }
 
-    .toggle-btn {
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      background: var(--pf-color-bg-panel);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      padding: 4px 8px;
-      font-size: 10px;
-      color: var(--pf-color-text-muted);
-      cursor: pointer;
-      pointer-events: auto;
-      z-index: 100;
-    }
-
-    .toggle-btn:hover {
-      background: var(--pf-color-bg-hover);
-      color: var(--pf-color-text-primary);
+    .overlay.hidden {
+      display: none;
     }
   `;
 
@@ -174,8 +158,10 @@ export class PfShortcutsOverlay extends BaseComponent {
   connectedCallback() {
     super.connectedCallback();
     this.loadState();
-    // Listen for external toggle events (from View menu)
+    // Listen for external toggle events (from View menu and toggle button)
     window.addEventListener("toggle-shortcuts-overlay", this.handleExternalToggle);
+    // Re-clamp position on window resize
+    window.addEventListener("resize", this.handleResize);
   }
 
   disconnectedCallback() {
@@ -184,6 +170,7 @@ export class PfShortcutsOverlay extends BaseComponent {
     window.removeEventListener("mousemove", this.handleMouseMove);
     window.removeEventListener("mouseup", this.handleMouseUp);
     window.removeEventListener("toggle-shortcuts-overlay", this.handleExternalToggle);
+    window.removeEventListener("resize", this.handleResize);
   }
 
   firstUpdated() {
@@ -195,6 +182,8 @@ export class PfShortcutsOverlay extends BaseComponent {
         this.posY = parent.clientHeight - 200;
       }
     }
+    // Ensure position is within bounds
+    this.clampPosition();
   }
 
   private loadState() {
@@ -220,6 +209,24 @@ export class PfShortcutsOverlay extends BaseComponent {
   private savePosition() {
     localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify({ x: this.posX, y: this.posY }));
   }
+
+  /**
+   * Clamp position to keep overlay within parent bounds
+   */
+  private clampPosition() {
+    const parent = this.parentElement;
+    if (!parent) return;
+
+    const maxX = Math.max(0, parent.clientWidth - 160);
+    const maxY = Math.max(0, parent.clientHeight - 200);
+
+    this.posX = Math.max(0, Math.min(this.posX, maxX));
+    this.posY = Math.max(0, Math.min(this.posY, maxY));
+  }
+
+  private handleResize = () => {
+    this.clampPosition();
+  };
 
   private handleExternalToggle = () => {
     this.toggleVisibility();
@@ -294,16 +301,6 @@ export class PfShortcutsOverlay extends BaseComponent {
   }
 
   render() {
-    if (!this.visible) {
-      return html`
-        <button
-          class="toggle-btn"
-          @click=${this.toggleVisibility}
-          title="Show shortcuts (View > Shortcuts Preview)"
-        >?</button>
-      `;
-    }
-
     const toolShortcuts = this.getToolShortcuts();
     const contextSections = this.getContextShortcuts();
     const tool = toolStore.activeTool.value;
@@ -311,7 +308,7 @@ export class PfShortcutsOverlay extends BaseComponent {
 
     return html`
       <div
-        class="overlay"
+        class="overlay ${this.visible ? "" : "hidden"}"
         style="transform: translate(${this.posX}px, ${this.posY}px)"
       >
         <div class="header" @mousedown=${this.handleHeaderMouseDown}>
