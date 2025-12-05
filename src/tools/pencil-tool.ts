@@ -1,6 +1,7 @@
 import { BaseTool, type Point, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
+import { toolSizes } from '../stores/tool-settings';
 import {
   bresenhamLine,
   constrainWithStickyAngles,
@@ -163,10 +164,11 @@ export class PencilTool extends BaseTool {
    */
   private drawLineBetweenPoints(x1: number, y1: number, x2: number, y2: number) {
     const brush = brushStore.activeBrush.value;
+    const size = toolSizes.pencil.value;
     const spacing = this.getSpacing();
 
     // For 1px brush with 1px spacing, use pixel-by-pixel drawing (supports pixel-perfect mode)
-    if (brush.size === 1 && spacing === 1) {
+    if (size === 1 && spacing === 1) {
       this.drawLinePixelByPixel(x1, y1, x2, y2);
       return;
     }
@@ -249,7 +251,7 @@ export class PencilTool extends BaseTool {
     if (!this.context || !this.strokeStartSnapshot) return;
 
     const brush = brushStore.activeBrush.value;
-    const size = brush.size;
+    const size = toolSizes.pencil.value;
     // When spacing > 1, x/y is already the top-left corner
     const startX = x;
     const startY = y;
@@ -325,7 +327,7 @@ export class PencilTool extends BaseTool {
     if (!this.context) return;
 
     const brush = brushStore.activeBrush.value;
-    const size = brush.size;
+    const size = toolSizes.pencil.value;
     const spacing = this.getSpacing();
 
     this.context.globalAlpha = brush.opacity;

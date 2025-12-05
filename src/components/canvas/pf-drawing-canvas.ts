@@ -368,6 +368,7 @@ export class PFDrawingCanvas extends BaseComponent {
       shift: e.shiftKey,
       ctrl: e.ctrlKey || e.metaKey,
       alt: e.altKey,
+      button: e.button,
     };
   }
 

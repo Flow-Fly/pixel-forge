@@ -1,7 +1,7 @@
 import { BaseTool, type Point, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
-import { eraserSettings, type EraserMode } from '../stores/tool-settings';
+import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-settings';
 import {
   bresenhamLine,
   constrainTo45Degrees,
@@ -56,6 +56,13 @@ export class EraserTool extends BaseTool {
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
     if (!this.context) return;
+
+    // Set eraser mode based on mouse button: left = transparent, right = background
+    if (modifiers?.button === 2) {
+      EraserTool.setMode('background');
+    } else {
+      EraserTool.setMode('transparent');
+    }
 
     this.isDrawing = true;
     const currentX = Math.floor(x);
@@ -147,21 +154,21 @@ export class EraserTool extends BaseTool {
    * Calculate brush spacing based on size
    */
   private getSpacing(): number {
-    const brush = brushStore.activeBrush.value;
+    const size = toolSizes.eraser.value;
     // For size 1, always use spacing of 1 (pixel-by-pixel)
     // For larger brushes, use spacing based on size
-    return Math.max(1, Math.floor(brush.size * SPACING_MULTIPLIER));
+    return Math.max(1, Math.floor(size * SPACING_MULTIPLIER));
   }
 
   /**
    * Erase a line between two points, respecting brush settings and spacing
    */
   private eraseLineBetweenPoints(x1: number, y1: number, x2: number, y2: number) {
-    const brush = brushStore.activeBrush.value;
+    const size = toolSizes.eraser.value;
     const spacing = this.getSpacing();
 
     // For 1px brush, use pixel-by-pixel erasing (supports pixel-perfect mode)
-    if (brush.size === 1) {
+    if (size === 1) {
       this.eraseLinePixelByPixel(x1, y1, x2, y2);
       return;
     }
@@ -236,7 +243,7 @@ export class EraserTool extends BaseTool {
     if (!this.context) return;
 
     const brush = brushStore.activeBrush.value;
-    const size = brush.size;
+    const size = toolSizes.eraser.value;
     const halfSize = Math.floor(size / 2);
 
     if (eraserSettings.mode.value === 'background') {

@@ -11,6 +11,7 @@ import {
   shapeSettings,
   fillSettings,
   gradientSettings,
+  toolSizes,
   type EraserMode,
 } from "../../../stores/tool-settings";
 import type { ToolOption } from "../../../types/tool-meta";
@@ -47,6 +48,11 @@ export function getOptionValue(store: StoreType, storeKey: string): unknown {
 
     case "gradient":
       if (storeKey === "type") return gradientSettings.type.value;
+      return undefined;
+
+    case "toolSizes":
+      if (storeKey === "pencil") return toolSizes.pencil.value;
+      if (storeKey === "eraser") return toolSizes.eraser.value;
       return undefined;
 
     default:
@@ -89,6 +95,11 @@ export function setOptionValue(store: StoreType, storeKey: string, value: unknow
 
     case "gradient":
       if (storeKey === "type") gradientSettings.type.value = value as "linear" | "radial";
+      break;
+
+    case "toolSizes":
+      if (storeKey === "pencil") toolSizes.pencil.value = value as number;
+      else if (storeKey === "eraser") toolSizes.eraser.value = value as number;
       break;
   }
 }

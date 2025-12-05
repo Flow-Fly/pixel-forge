@@ -11,7 +11,7 @@
 export interface ToolOptionBase {
   key: string;
   label: string;
-  store: "brush" | "magicWand" | "shape" | "fill" | "gradient" | "eraser";
+  store: "brush" | "magicWand" | "shape" | "fill" | "gradient" | "eraser" | "toolSizes";
   storeKey: string;
 }
 

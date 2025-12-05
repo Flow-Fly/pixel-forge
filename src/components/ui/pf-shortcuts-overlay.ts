@@ -8,6 +8,7 @@ import { formatShortcut } from "../../utils/platform";
 import type { ToolShortcut } from "../../types/tool-meta";
 
 const STORAGE_KEY = "pf-shortcuts-visible";
+const POSITION_STORAGE_KEY = "pf-shortcuts-position";
 
 /**
  * Context-aware shortcuts that appear based on application state
@@ -45,10 +46,8 @@ export class PfShortcutsOverlay extends BaseComponent {
   static styles = css`
     :host {
       position: absolute;
-      bottom: 16px;
-      right: 16px;
       z-index: 100;
-      pointer-events: none;
+      user-select: none;
     }
 
     .overlay {
@@ -59,13 +58,8 @@ export class PfShortcutsOverlay extends BaseComponent {
       font-size: 11px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       opacity: 0.9;
-      pointer-events: auto;
       min-width: 140px;
       max-width: 200px;
-    }
-
-    .overlay.hidden {
-      display: none;
     }
 
     .header {
@@ -75,6 +69,11 @@ export class PfShortcutsOverlay extends BaseComponent {
       margin-bottom: 6px;
       padding-bottom: 4px;
       border-bottom: 1px solid var(--pf-color-border);
+      cursor: grab;
+    }
+
+    .header:active {
+      cursor: grabbing;
     }
 
     .title {
@@ -144,9 +143,9 @@ export class PfShortcutsOverlay extends BaseComponent {
     }
 
     .toggle-btn {
-      position: absolute;
-      bottom: 0;
-      right: 0;
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
       background: var(--pf-color-bg-panel);
       border: 1px solid var(--pf-color-border);
       border-radius: 4px;
@@ -155,6 +154,7 @@ export class PfShortcutsOverlay extends BaseComponent {
       color: var(--pf-color-text-muted);
       cursor: pointer;
       pointer-events: auto;
+      z-index: 100;
     }
 
     .toggle-btn:hover {
@@ -164,19 +164,107 @@ export class PfShortcutsOverlay extends BaseComponent {
   `;
 
   @state() private visible = true;
+  @state() private posX = 0;
+  @state() private posY = 0;
+  @state() private isDragging = false;
+
+  private dragOffsetX = 0;
+  private dragOffsetY = 0;
 
   connectedCallback() {
     super.connectedCallback();
+    this.loadState();
+    // Listen for external toggle events (from View menu)
+    window.addEventListener("toggle-shortcuts-overlay", this.handleExternalToggle);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    // Clean up event listeners
+    window.removeEventListener("mousemove", this.handleMouseMove);
+    window.removeEventListener("mouseup", this.handleMouseUp);
+    window.removeEventListener("toggle-shortcuts-overlay", this.handleExternalToggle);
+  }
+
+  firstUpdated() {
+    // Set default position (bottom-right) if not loaded from storage
+    if (this.posX === 0 && this.posY === 0) {
+      const parent = this.parentElement;
+      if (parent) {
+        this.posX = parent.clientWidth - 180;
+        this.posY = parent.clientHeight - 200;
+      }
+    }
+  }
+
+  private loadState() {
     // Load visibility preference from localStorage
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored !== null) {
       this.visible = stored === "true";
     }
+
+    // Load position from localStorage
+    const storedPosition = localStorage.getItem(POSITION_STORAGE_KEY);
+    if (storedPosition) {
+      try {
+        const { x, y } = JSON.parse(storedPosition);
+        this.posX = x;
+        this.posY = y;
+      } catch {
+        // Invalid JSON, use default position
+      }
+    }
   }
+
+  private savePosition() {
+    localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify({ x: this.posX, y: this.posY }));
+  }
+
+  private handleExternalToggle = () => {
+    this.toggleVisibility();
+  };
+
+  private handleHeaderMouseDown = (e: MouseEvent) => {
+    // Don't start drag if clicking the close button
+    if ((e.target as HTMLElement).classList.contains("close-btn")) return;
+
+    this.isDragging = true;
+    this.dragOffsetX = e.clientX - this.posX;
+    this.dragOffsetY = e.clientY - this.posY;
+
+    window.addEventListener("mousemove", this.handleMouseMove);
+    window.addEventListener("mouseup", this.handleMouseUp);
+  };
+
+  private handleMouseMove = (e: MouseEvent) => {
+    if (!this.isDragging) return;
+
+    this.posX = e.clientX - this.dragOffsetX;
+    this.posY = e.clientY - this.dragOffsetY;
+
+    // Keep within bounds
+    const parent = this.parentElement;
+    if (parent) {
+      const maxX = parent.clientWidth - 140;
+      const maxY = parent.clientHeight - 50;
+      this.posX = Math.max(0, Math.min(this.posX, maxX));
+      this.posY = Math.max(0, Math.min(this.posY, maxY));
+    }
+  };
+
+  private handleMouseUp = () => {
+    this.isDragging = false;
+    this.savePosition();
+    window.removeEventListener("mousemove", this.handleMouseMove);
+    window.removeEventListener("mouseup", this.handleMouseUp);
+  };
 
   private toggleVisibility() {
     this.visible = !this.visible;
     localStorage.setItem(STORAGE_KEY, String(this.visible));
+    // Dispatch event so menu can update its checkmark
+    window.dispatchEvent(new CustomEvent("shortcuts-visibility-changed", { detail: { visible: this.visible } }));
   }
 
   private getToolShortcuts(): ToolShortcut[] {
@@ -208,7 +296,11 @@ export class PfShortcutsOverlay extends BaseComponent {
   render() {
     if (!this.visible) {
       return html`
-        <button class="toggle-btn" @click=${this.toggleVisibility} title="Show shortcuts (F1)">?</button>
+        <button
+          class="toggle-btn"
+          @click=${this.toggleVisibility}
+          title="Show shortcuts (View > Shortcuts Preview)"
+        >?</button>
       `;
     }
 
@@ -218,10 +310,13 @@ export class PfShortcutsOverlay extends BaseComponent {
     const meta = getToolMeta(tool);
 
     return html`
-      <div class="overlay">
-        <div class="header">
+      <div
+        class="overlay"
+        style="transform: translate(${this.posX}px, ${this.posY}px)"
+      >
+        <div class="header" @mousedown=${this.handleHeaderMouseDown}>
           <span class="title">Shortcuts</span>
-          <button class="close-btn" @click=${this.toggleVisibility} title="Hide (F1)">\u00d7</button>
+          <button class="close-btn" @click=${this.toggleVisibility} title="Hide (View > Shortcuts Preview)">\u00d7</button>
         </div>
 
         ${toolShortcuts.length > 0

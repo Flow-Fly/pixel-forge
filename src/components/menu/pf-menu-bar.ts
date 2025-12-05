@@ -1,5 +1,5 @@
 import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
@@ -11,8 +11,12 @@ import { FileService } from '../../services/file-service';
 import { openAseFile, exportAseFile } from '../../services/aseprite-service';
 import { type ProjectFile } from '../../types/project';
 
+const SHORTCUTS_STORAGE_KEY = 'pf-shortcuts-visible';
+
 @customElement('pf-menu-bar')
 export class PFMenuBar extends BaseComponent {
+  @state() private shortcutsVisible = true;
+
   static styles = css`
     :host {
       display: flex;
@@ -108,6 +112,25 @@ export class PFMenuBar extends BaseComponent {
     }
   `;
 
+  connectedCallback() {
+    super.connectedCallback();
+    // Load initial state from localStorage
+    const stored = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
+    this.shortcutsVisible = stored === null || stored === 'true';
+    // Listen for visibility changes from the overlay
+    window.addEventListener('shortcuts-visibility-changed', this.handleShortcutsVisibilityChanged);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener('shortcuts-visibility-changed', this.handleShortcutsVisibilityChanged);
+  }
+
+  private handleShortcutsVisibilityChanged = (e: Event) => {
+    const event = e as CustomEvent<{ visible: boolean }>;
+    this.shortcutsVisible = event.detail.visible;
+  };
+
   flipLayer(direction: 'horizontal' | 'vertical') {
     const activeLayerId = layerStore.activeLayerId.value;
     if (activeLayerId) {
@@ -152,6 +175,10 @@ export class PFMenuBar extends BaseComponent {
     this.dispatchEvent(new CustomEvent('show-export-dialog', { bubbles: true, composed: true }));
   }
 
+  toggleShortcutsOverlay() {
+    window.dispatchEvent(new CustomEvent('toggle-shortcuts-overlay'));
+  }
+
   render() {
     return html`
       <button id="btn-file" class="menu-btn" popovertarget="menu-file">File</button>
@@ -181,6 +208,7 @@ export class PFMenuBar extends BaseComponent {
         <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>${gridStore.pixelGridEnabled.value ? '✓ ' : '   '}Pixel Grid <span class="shortcut">Ctrl+G</span></div>
         <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>${gridStore.tileGridEnabled.value ? '✓ ' : '   '}Tile Grid <span class="shortcut">Ctrl+Shift+G</span></div>
         <div class="menu-item">Grid Settings...</div>
+        <div class="menu-item" @click=${this.toggleShortcutsOverlay}>${this.shortcutsVisible ? '✓ ' : '   '}Shortcuts Preview</div>
       </div>
 
       <button id="btn-image" class="menu-btn" popovertarget="menu-image">Image</button>

@@ -5,7 +5,8 @@ import { viewportStore } from "../../stores/viewport";
 import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
 import { colorStore } from "../../stores/colors";
-import { brushStore } from "../../stores/brush";
+import { toolStore } from "../../stores/tools";
+import { getToolSize, setToolSize } from "../../stores/tool-settings";
 import "./pf-selection-overlay";
 import "./pf-marching-ants-overlay";
 import "./pf-brush-cursor-overlay";
@@ -508,14 +509,15 @@ export class PFCanvasViewport extends BaseComponent {
   private handleWheel(e: WheelEvent) {
     e.preventDefault();
 
-    // Shift+scroll for brush size adjustment
-    // Note: macOS swaps deltaY to deltaX when Shift is held, so check both
-    if (e.shiftKey) {
-      const currentSize = brushStore.activeBrush.value.size;
+    // Ctrl+scroll for tool size adjustment (Aseprite-style)
+    // Note: macOS swaps deltaY to deltaX when modifiers are held, so check both
+    if (e.ctrlKey || e.metaKey) {
+      const tool = toolStore.activeTool.value;
+      const currentSize = getToolSize(tool);
       const scrollDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      // Scroll up = increase, scroll down = decrease (Aseprite convention)
       const delta = scrollDelta < 0 ? 1 : -1;
-      const newSize = Math.max(1, Math.min(50, currentSize + delta));
-      brushStore.updateActiveBrushSettings({ size: newSize });
+      setToolSize(tool, currentSize + delta);
       return;
     }
 
