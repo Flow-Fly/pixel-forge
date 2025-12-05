@@ -5,6 +5,12 @@ export class FillTool extends BaseTool {
   name = 'fill';
   cursor = 'crosshair'; // Or bucket icon if available
 
+  // Bounds tracking for dirty rect
+  private boundsMinX = Infinity;
+  private boundsMaxX = -Infinity;
+  private boundsMinY = Infinity;
+  private boundsMaxY = -Infinity;
+
   onDown(x: number, y: number) {
     if (!this.ctx) return;
 
@@ -17,7 +23,7 @@ export class FillTool extends BaseTool {
 
     const imageData = this.ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
-    
+
     // Get target color
     const targetPos = (startY * width + startX) * 4;
     const targetR = data[targetPos];
@@ -34,15 +40,21 @@ export class FillTool extends BaseTool {
 
     if (targetR === r && targetG === g && targetB === b && targetA === a) return;
 
+    // Reset bounds tracking
+    this.boundsMinX = Infinity;
+    this.boundsMaxX = -Infinity;
+    this.boundsMinY = Infinity;
+    this.boundsMaxY = -Infinity;
+
     // Flood fill (Stack-based)
     const stack = [[startX, startY]];
-    
+
     while (stack.length) {
       const [cx, cy] = stack.pop()!;
       const pos = (cy * width + cx) * 4;
 
       if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-      
+
       // Check if matches target
       if (data[pos] === targetR && data[pos + 1] === targetG && data[pos + 2] === targetB && data[pos + 3] === targetA) {
         // Fill
@@ -50,6 +62,12 @@ export class FillTool extends BaseTool {
         data[pos + 1] = g;
         data[pos + 2] = b;
         data[pos + 3] = a;
+
+        // Track bounds
+        this.boundsMinX = Math.min(this.boundsMinX, cx);
+        this.boundsMaxX = Math.max(this.boundsMaxX, cx);
+        this.boundsMinY = Math.min(this.boundsMinY, cy);
+        this.boundsMaxY = Math.max(this.boundsMaxY, cy);
 
         stack.push([cx + 1, cy]);
         stack.push([cx - 1, cy]);
@@ -59,6 +77,16 @@ export class FillTool extends BaseTool {
     }
 
     this.ctx.putImageData(imageData, 0, 0);
+
+    // Mark dirty region once with accumulated bounds
+    if (this.boundsMinX !== Infinity) {
+      this.markDirty(
+        this.boundsMinX,
+        this.boundsMinY,
+        this.boundsMaxX - this.boundsMinX + 1,
+        this.boundsMaxY - this.boundsMinY + 1
+      );
+    }
   }
 
   onMove(x: number, y: number) {}

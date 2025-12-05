@@ -10,10 +10,43 @@ export abstract class ShapeTool extends BaseTool {
   protected isDrawing = false;
   protected imageData: ImageData | null = null;
 
+  // Bounds tracking for dirty rect
+  protected boundsMinX = Infinity;
+  protected boundsMaxX = -Infinity;
+  protected boundsMinY = Infinity;
+  protected boundsMaxY = -Infinity;
+
+  protected resetBounds(): void {
+    this.boundsMinX = Infinity;
+    this.boundsMaxX = -Infinity;
+    this.boundsMinY = Infinity;
+    this.boundsMaxY = -Infinity;
+  }
+
+  protected expandBounds(x: number, y: number, size: number = 1): void {
+    const offset = Math.floor((size - 1) / 2);
+    this.boundsMinX = Math.min(this.boundsMinX, x - offset);
+    this.boundsMaxX = Math.max(this.boundsMaxX, x - offset + size - 1);
+    this.boundsMinY = Math.min(this.boundsMinY, y - offset);
+    this.boundsMaxY = Math.max(this.boundsMaxY, y - offset + size - 1);
+  }
+
+  protected flushBounds(): void {
+    if (this.boundsMinX !== Infinity) {
+      this.markDirty(
+        this.boundsMinX,
+        this.boundsMinY,
+        this.boundsMaxX - this.boundsMinX + 1,
+        this.boundsMaxY - this.boundsMinY + 1
+      );
+    }
+  }
+
   onDown(x: number, y: number, _modifiers?: ModifierKeys) {
     this.startX = Math.floor(x);
     this.startY = Math.floor(y);
     this.isDrawing = true;
+    this.resetBounds();
 
     // Capture canvas state for preview
     if (this.ctx) {
@@ -101,6 +134,7 @@ export abstract class ShapeTool extends BaseTool {
 
     this.isDrawing = false;
     this.imageData = null;
+    this.flushBounds();
   }
 
   protected abstract drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean, thickness: number): void;
@@ -110,6 +144,7 @@ export abstract class ShapeTool extends BaseTool {
     const color = colorStore.primaryColor.value;
     this.ctx.fillStyle = color;
     this.ctx.fillRect(x, y, 1, 1);
+    this.expandBounds(x, y, 1);
   }
 
   protected setThickPixel(x: number, y: number, thickness: number) {
@@ -118,6 +153,7 @@ export abstract class ShapeTool extends BaseTool {
     this.ctx.fillStyle = color;
     const offset = Math.floor((thickness - 1) / 2);
     this.ctx.fillRect(x - offset, y - offset, thickness, thickness);
+    this.expandBounds(x, y, thickness);
   }
 
   protected fillRect(x1: number, y1: number, x2: number, y2: number) {
@@ -130,6 +166,12 @@ export abstract class ShapeTool extends BaseTool {
     const color = colorStore.primaryColor.value;
     this.ctx.fillStyle = color;
     this.ctx.fillRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
+
+    // Track bounds of filled rectangle
+    this.boundsMinX = Math.min(this.boundsMinX, minX);
+    this.boundsMaxX = Math.max(this.boundsMaxX, maxX);
+    this.boundsMinY = Math.min(this.boundsMinY, minY);
+    this.boundsMaxY = Math.max(this.boundsMaxY, maxY);
   }
 }
 
@@ -178,6 +220,7 @@ export class LineTool extends ShapeTool {
 
     this.isDrawing = false;
     this.imageData = null;
+    this.flushBounds();
   }
 
   protected drawShape(x1: number, y1: number, x2: number, y2: number, _filled: boolean, thickness: number) {
