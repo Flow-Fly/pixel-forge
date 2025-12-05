@@ -25,6 +25,14 @@ class DirtyRectStore {
   }
 
   /**
+   * Reset stroke dirty region (call at start of new stroke).
+   * Prevents pollution from execute/undo operations that also call markDirty.
+   */
+  resetStroke(): void {
+    this.strokeDirty = null;
+  }
+
+  /**
    * Flush stroke dirty rect (call on mouseup).
    * Returns the accumulated dirty region for the entire stroke.
    */

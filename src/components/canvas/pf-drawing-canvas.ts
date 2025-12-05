@@ -426,6 +426,9 @@ export class PFDrawingCanvas extends BaseComponent {
         // Capture state before drawing
         this.previousImageData = layerCtx.getImageData(0, 0, this.width, this.height);
 
+        // Reset stroke dirty region to prevent pollution from previous execute/undo
+        dirtyRectStore.resetStroke();
+
         // Update tool context to layer context
         this.activeTool.setContext(layerCtx);
 
