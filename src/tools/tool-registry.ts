@@ -14,6 +14,9 @@ import type { ToolType } from "../stores/tools";
 export const toolRegistry: Record<ToolType, ToolMeta> = {
   pencil: {
     name: "Pencil",
+    icon: "✏️",
+    label: "P",
+    shortcutKey: "B",
     group: "drawing",
     options: [
       { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "brush", storeKey: "size" },
@@ -53,6 +56,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   eraser: {
     name: "Eraser",
+    icon: "🧹",
+    label: "E",
+    shortcutKey: "E",
     group: "drawing",
     options: [
       { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "brush", storeKey: "size" },
@@ -92,6 +98,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   eyedropper: {
     name: "Eyedropper",
+    icon: "💧",
+    label: "I",
+    shortcutKey: "I",
     group: "drawing",
     options: [],
     alternatives: ["pencil", "eraser"],
@@ -100,6 +109,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   fill: {
     name: "Fill",
+    icon: "🪣",
+    label: "F",
+    shortcutKey: "G",
     group: "fill",
     options: [
       {
@@ -116,6 +128,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   gradient: {
     name: "Gradient",
+    icon: "▤",
+    label: "G",
+    shortcutKey: "shift+G",
     group: "fill",
     options: [
       {
@@ -136,6 +151,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   line: {
     name: "Line",
+    icon: "╱",
+    label: "L",
+    shortcutKey: "L",
     group: "shape",
     options: [
       {
@@ -155,6 +173,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   rectangle: {
     name: "Rectangle",
+    icon: "▢",
+    label: "R",
+    shortcutKey: "U",
     group: "shape",
     options: [
       {
@@ -184,6 +205,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   ellipse: {
     name: "Ellipse",
+    icon: "◯",
+    label: "O",
+    shortcutKey: "shift+U",
     group: "shape",
     options: [
       {
@@ -213,6 +237,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "marquee-rect": {
     name: "Marquee",
+    icon: "⬚",
+    label: "M",
+    shortcutKey: "M",
     group: "selection",
     options: [],
     alternatives: ["lasso", "magic-wand"],
@@ -227,6 +254,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   lasso: {
     name: "Lasso",
+    icon: "◯",
+    label: "Q",
+    shortcutKey: "Q",
     group: "selection",
     options: [],
     alternatives: ["polygonal-lasso", "marquee-rect", "magic-wand"],
@@ -239,6 +269,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "polygonal-lasso": {
     name: "Polygonal Lasso",
+    icon: "⬡",
+    label: "PL",
+    shortcutKey: "shift+Q",
     group: "selection",
     options: [],
     alternatives: ["lasso", "marquee-rect", "magic-wand"],
@@ -252,6 +285,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "magic-wand": {
     name: "Magic Wand",
+    icon: "✨",
+    label: "W",
+    shortcutKey: "W",
     group: "selection",
     options: [
       {
@@ -288,6 +324,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   transform: {
     name: "Transform",
+    icon: "⤡",
+    label: "V",
+    shortcutKey: "V",
     group: "utility",
     options: [],
     alternatives: [],
@@ -300,6 +339,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   hand: {
     name: "Hand",
+    icon: "✋",
+    label: "H",
+    shortcutKey: "H",
     group: "navigation",
     options: [],
     alternatives: ["zoom"],
@@ -308,6 +350,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   zoom: {
     name: "Zoom",
+    icon: "🔍",
+    label: "Z",
+    shortcutKey: "Z",
     group: "navigation",
     options: [],
     alternatives: ["hand"],
@@ -325,4 +370,25 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
  */
 export function getToolMeta(tool: ToolType): ToolMeta | undefined {
   return toolRegistry[tool];
+}
+
+/**
+ * Get the icon for a tool
+ */
+export function getToolIcon(tool: ToolType): string {
+  return toolRegistry[tool]?.icon ?? tool[0].toUpperCase();
+}
+
+/**
+ * Get the short label for a tool (1-2 chars)
+ */
+export function getToolLabel(tool: ToolType): string {
+  return toolRegistry[tool]?.label ?? tool[0].toUpperCase();
+}
+
+/**
+ * Get the primary keyboard shortcut key for a tool
+ */
+export function getToolShortcutKey(tool: ToolType): string {
+  return toolRegistry[tool]?.shortcutKey ?? "";
 }

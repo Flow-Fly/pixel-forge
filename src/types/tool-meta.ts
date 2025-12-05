@@ -64,6 +64,12 @@ export interface ToolShortcut {
 export interface ToolMeta {
   /** Display name for the tool */
   name: string;
+  /** Emoji icon for the tool */
+  icon: string;
+  /** Short label (1-2 chars) for compact display */
+  label: string;
+  /** Primary keyboard shortcut key (e.g., "B" for pencil) */
+  shortcutKey: string;
   /** Tool group for categorization */
   group: "drawing" | "selection" | "shape" | "fill" | "navigation" | "utility";
   /** Tool options to display in context bar */

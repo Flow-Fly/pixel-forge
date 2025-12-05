@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { toolStore, type ToolType } from '../../stores/tools';
 import { toolGroups, getActiveToolForGroup, setLastSelectedTool, getToolGroup } from '../../stores/tool-groups';
+import { getToolShortcutKey } from '../../tools/tool-registry';
 import './pf-tool-button';
 import '../color/pf-color-selector-compact';
 
@@ -66,20 +67,6 @@ export class PFToolbar extends BaseComponent {
     this.groupDisplayTools = new Map(this.groupDisplayTools.set(groupId, tool));
   }
 
-  private getShortcutForGroup(groupId: string): string {
-    const shortcuts: Record<string, string> = {
-      'pencil': 'B',
-      'eraser': 'E',
-      'eyedropper': 'I',
-      'selection': 'M',
-      'shapes': 'U',
-      'fill': 'G',
-      'transform': 'V',
-      'navigation': 'H',
-    };
-    return shortcuts[groupId] || '';
-  }
-
   private isGroupActive(groupId: string): boolean {
     const activeTool = toolStore.activeTool.value;
     const group = toolGroups.find(g => g.id === groupId);
@@ -126,7 +113,8 @@ export class PFToolbar extends BaseComponent {
 
     const displayTool = this.groupDisplayTools.get(groupId) || group.defaultTool;
     const isActive = this.isGroupActive(groupId);
-    const shortcut = this.getShortcutForGroup(groupId);
+    // Get shortcut from the displayed tool via registry
+    const shortcut = getToolShortcutKey(displayTool);
 
     return html`
       <pf-tool-button

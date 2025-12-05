@@ -1,48 +1,7 @@
 import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { toolStore, type ToolType } from "../../stores/tools";
-
-/**
- * Display names for tools (for tooltips)
- */
-const toolNames: Record<string, string> = {
-  pencil: "Pencil",
-  eraser: "Eraser",
-  eyedropper: "Eyedropper",
-  fill: "Fill",
-  gradient: "Gradient",
-  line: "Line",
-  rectangle: "Rectangle",
-  ellipse: "Ellipse",
-  "marquee-rect": "Marquee",
-  lasso: "Lasso",
-  "polygonal-lasso": "Polygonal Lasso",
-  "magic-wand": "Magic Wand",
-  transform: "Transform",
-  hand: "Hand",
-  zoom: "Zoom",
-};
-
-/**
- * Short labels for tools (single char or abbreviated)
- */
-const toolLabels: Record<string, string> = {
-  pencil: "P",
-  eraser: "E",
-  eyedropper: "I",
-  fill: "F",
-  gradient: "G",
-  line: "L",
-  rectangle: "R",
-  ellipse: "O",
-  "marquee-rect": "M",
-  lasso: "Q",
-  "polygonal-lasso": "PL",
-  "magic-wand": "W",
-  transform: "V",
-  hand: "H",
-  zoom: "Z",
-};
+import { getToolMeta, getToolLabel } from "../../tools/tool-registry";
 
 @customElement("pf-alternative-tools")
 export class PfAlternativeTools extends LitElement {
@@ -93,17 +52,18 @@ export class PfAlternativeTools extends LitElement {
     }
 
     return html`
-      ${this.alternatives.map(
-        (tool) => html`
+      ${this.alternatives.map((tool) => {
+        const meta = getToolMeta(tool as ToolType);
+        return html`
           <button
             class="alt-tool-btn"
-            title=${toolNames[tool] || tool}
+            title=${meta?.name || tool}
             @click=${() => this.handleClick(tool)}
           >
-            ${toolLabels[tool] || tool[0].toUpperCase()}
+            ${getToolLabel(tool as ToolType)}
           </button>
-        `
-      )}
+        `;
+      })}
     `;
   }
 }
