@@ -34,6 +34,13 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
         store: "brush",
         storeKey: "pixelPerfect",
       },
+      {
+        type: "checkbox",
+        key: "bigPixelMode",
+        label: "Big Pixel",
+        store: "brush",
+        storeKey: "bigPixelMode",
+      },
     ],
     alternatives: ["eraser", "eyedropper"],
     shortcuts: [
@@ -66,6 +73,13 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
         label: "Pixel Perfect",
         store: "brush",
         storeKey: "pixelPerfect",
+      },
+      {
+        type: "checkbox",
+        key: "bigPixelMode",
+        label: "Big Pixel",
+        store: "brush",
+        storeKey: "bigPixelMode",
       },
     ],
     alternatives: ["pencil", "eyedropper"],

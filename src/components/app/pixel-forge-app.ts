@@ -56,6 +56,8 @@ export class PixelForgeApp extends BaseComponent {
       grid-row: 3;
       background-color: var(--pf-color-bg-panel);
       border-right: 1px solid var(--pf-color-border);
+      overflow: hidden;
+      min-height: 0;
     }
 
     .workspace {
@@ -66,15 +68,18 @@ export class PixelForgeApp extends BaseComponent {
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      min-height: 0;
     }
 
     pf-canvas-viewport {
       flex: 1;
       overflow: hidden;
+      min-height: 0;
     }
 
     .timeline-container {
       height: 200px;
+      flex-shrink: 0;
       border-top: 1px solid var(--pf-color-border);
     }
 
