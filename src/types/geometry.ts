@@ -34,14 +34,18 @@ export function rectIntersect(a: Rect, b: Rect): Rect | null {
 
 /**
  * Expand a rectangle by brush size (accounts for brush radius).
+ * For a brush of size N centered at a point:
+ * - 1px brush: no expansion needed (just the point)
+ * - 2px brush: expands 1 right/down
+ * - 3px brush: expands 1 in all directions
  */
 export function rectExpand(rect: Rect, brushSize: number): Rect {
-  const half = Math.ceil(brushSize / 2);
+  const half = Math.floor((brushSize - 1) / 2);
   return {
     x: rect.x - half,
     y: rect.y - half,
-    width: rect.width + brushSize,
-    height: rect.height + brushSize
+    width: rect.width + brushSize - 1,
+    height: rect.height + brushSize - 1
   };
 }
 

@@ -4,6 +4,7 @@ import { BaseComponent } from '../../core/base-component';
 import { brushStore } from '../../stores/brush';
 import { colorStore } from '../../stores/colors';
 import { toolStore } from '../../stores/tools';
+import { toolSizes } from '../../stores/tool-settings';
 import { viewportStore } from '../../stores/viewport';
 import { PencilTool } from '../../tools/pencil-tool';
 import { EraserTool } from '../../tools/eraser-tool';
@@ -205,7 +206,8 @@ export class PFBrushCursorOverlay extends BaseComponent {
     if (this.cursorPos) {
       // Get brush settings
       const brush = brushStore.activeBrush.value;
-      const size = brush.size;
+      // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore
+      const size = tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
       const shape = brush.shape;
       const spacing = brushStore.getEffectiveSpacing();
 
@@ -345,6 +347,8 @@ export class PFBrushCursorOverlay extends BaseComponent {
     void colorStore.primaryColor.value;
     void colorStore.secondaryColor.value;
     void toolStore.activeTool.value;
+    void toolSizes.pencil.value;
+    void toolSizes.eraser.value;
     void viewportStore.zoom.value;
     void viewportStore.panX.value;
     void viewportStore.panY.value;
