@@ -1,13 +1,17 @@
-import { html, css, LitElement } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import type { ToolType } from '../../stores/tools';
-import { getToolMeta } from '../../tools/tool-registry';
+import { html, css, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import type { ToolType } from "../../stores/tools";
+import {
+  getToolMeta,
+  getToolIcon,
+  getToolShortcutKey,
+} from "../../tools/tool-registry";
 
 /**
  * Popover menu showing all tools in a group
  * Appears on right-click of a tool button
  */
-@customElement('pf-tool-group-menu')
+@customElement("pf-tool-group-menu")
 export class PFToolGroupMenu extends LitElement {
   static styles = css`
     :host {
@@ -37,7 +41,7 @@ export class PFToolGroupMenu extends LitElement {
     }
 
     .menu-item:hover {
-      background: var(--pf-color-bg-hover);
+      background: var(--pf-color-bg-surface);
     }
 
     .menu-item.active {
@@ -64,62 +68,30 @@ export class PFToolGroupMenu extends LitElement {
   `;
 
   @property({ type: Array }) tools: ToolType[] = [];
-  @property({ type: String }) activeTool: ToolType = 'pencil';
+  @property({ type: String }) activeTool: ToolType = "pencil";
   @property({ type: Number }) x = 0;
   @property({ type: Number }) y = 0;
 
-  private getToolIcon(tool: ToolType): string {
-    const icons: Record<string, string> = {
-      'pencil': '✏️',
-      'eraser': '🧹',
-      'eyedropper': '💧',
-      'marquee-rect': '⬚',
-      'lasso': '◯',
-      'polygonal-lasso': '⬡',
-      'magic-wand': '✨',
-      'line': '╱',
-      'rectangle': '▢',
-      'ellipse': '◯',
-      'fill': '🪣',
-      'gradient': '▤',
-      'transform': '⤡',
-      'hand': '✋',
-      'zoom': '🔍',
-    };
-    return icons[tool] || '•';
-  }
-
-  private getShortcut(tool: ToolType): string {
-    const shortcuts: Record<string, string> = {
-      'pencil': 'B',
-      'eraser': 'E',
-      'eyedropper': 'I',
-      'marquee-rect': 'M',
-      'lasso': 'Q',
-      'polygonal-lasso': '⇧Q',
-      'magic-wand': 'W',
-      'line': 'L',
-      'rectangle': 'U',
-      'ellipse': '⇧U',
-      'fill': 'G',
-      'gradient': '⇧G',
-      'transform': 'V',
-      'hand': 'H',
-      'zoom': 'Z',
-    };
-    return shortcuts[tool] || '';
+  private formatShortcut(shortcutKey: string): string {
+    // Convert shortcut key format for display (e.g., "shift+Q" -> "⇧Q")
+    if (shortcutKey.toLowerCase().startsWith("shift+")) {
+      return "⇧" + shortcutKey.slice(6);
+    }
+    return shortcutKey;
   }
 
   private selectTool(tool: ToolType) {
-    this.dispatchEvent(new CustomEvent('tool-selected', {
-      detail: { tool },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent("tool-selected", {
+        detail: { tool },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   updated(changedProperties: Map<string, unknown>) {
-    if (changedProperties.has('x') || changedProperties.has('y')) {
+    if (changedProperties.has("x") || changedProperties.has("y")) {
       this.style.left = `${this.x}px`;
       this.style.top = `${this.y}px`;
     }
@@ -127,19 +99,20 @@ export class PFToolGroupMenu extends LitElement {
 
   render() {
     return html`
-      ${this.tools.map(tool => {
+      ${this.tools.map((tool) => {
         const meta = getToolMeta(tool);
         const name = meta?.name || tool;
         const isActive = tool === this.activeTool;
+        const shortcut = this.formatShortcut(getToolShortcutKey(tool));
 
         return html`
           <button
-            class="menu-item ${isActive ? 'active' : ''}"
+            class="menu-item ${isActive ? "active" : ""}"
             @click=${() => this.selectTool(tool)}
           >
-            <span class="tool-icon">${this.getToolIcon(tool)}</span>
+            <span class="tool-icon">${getToolIcon(tool)}</span>
             <span class="tool-name">${name}</span>
-            <span class="shortcut">${this.getShortcut(tool)}</span>
+            <span class="shortcut">${shortcut}</span>
           </button>
         `;
       })}

@@ -15,45 +15,30 @@ import { viewportStore } from "../../stores/viewport";
 import { panelStore } from "../../stores/panels";
 import { shapeStore } from "../../stores/shape";
 import { AddFrameCommand } from "../../commands/animation-commands";
+import { toolRegistry } from "../../tools/tool-registry";
 
 export function registerShortcuts() {
   // ============================================
-  // TOOL SHORTCUTS (Aseprite-compatible)
+  // TOOL SHORTCUTS (from tool registry)
   // ============================================
 
-  const tools: Array<{ key: string; tool: ToolType; shift?: boolean }> = [
-    { key: "b", tool: "pencil" },
-    { key: "e", tool: "eraser" },
-    { key: "i", tool: "eyedropper" },
-    { key: "g", tool: "fill" },
-    { key: "g", tool: "gradient", shift: true }, // Shift+G
-    { key: "l", tool: "line" }, // Was lasso, now line (Aseprite)
-    { key: "q", tool: "lasso" }, // Moved from L to Q (Aseprite)
-    { key: "u", tool: "rectangle" }, // Was line, now rectangle (Aseprite)
-    { key: "m", tool: "marquee-rect" },
-    { key: "w", tool: "magic-wand" },
-    { key: "v", tool: "transform" }, // Was T, now V (Aseprite)
-    { key: "h", tool: "hand" }, // Pan tool
-    { key: "z", tool: "zoom" }, // Zoom tool
-  ];
+  // Register shortcuts dynamically from tool registry
+  for (const [toolName, meta] of Object.entries(toolRegistry)) {
+    const shortcutKey = meta.shortcutKey;
+    if (!shortcutKey) continue;
 
-  for (const { key, tool, shift } of tools) {
-    const modifiers = shift ? ["shift"] : [];
+    // Parse shortcut key (e.g., "shift+G" -> key: "g", modifiers: ["shift"])
+    const parts = shortcutKey.toLowerCase().split("+");
+    const key = parts.pop() || "";
+    const modifiers = parts; // Any remaining parts are modifiers
+
     keyboardService.register(
       key,
       modifiers,
-      () => toolStore.setActiveTool(tool),
-      `${tool} tool`
+      () => toolStore.setActiveTool(toolName as ToolType),
+      `${meta.name} tool`
     );
   }
-
-  // Shift+U for ellipse (Aseprite uses U to cycle, we use Shift+U)
-  keyboardService.register(
-    "u",
-    ["shift"],
-    () => toolStore.setActiveTool("ellipse"),
-    "ellipse tool"
-  );
 
   // ============================================
   // QUICK TOOLS (hold to temporarily switch)

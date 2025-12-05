@@ -1,13 +1,13 @@
-import { html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { toolStore, type ToolType } from '../../stores/tools';
-import { setLastSelectedTool } from '../../stores/tool-groups';
-import { getToolMeta } from '../../tools/tool-registry';
-import './pf-tool-options-popover';
-import './pf-tool-group-menu';
+import { html, css } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { toolStore, type ToolType } from "../../stores/tools";
+import { setLastSelectedTool } from "../../stores/tool-groups";
+import { getToolMeta, getToolIcon } from "../../tools/tool-registry";
+import "./pf-tool-options-popover";
+import "./pf-tool-group-menu";
 
-@customElement('pf-tool-button')
+@customElement("pf-tool-button")
 export class PFToolButton extends BaseComponent {
   static styles = css`
     :host {
@@ -66,47 +66,48 @@ export class PFToolButton extends BaseComponent {
       border-bottom-color: var(--pf-color-accent-cyan);
     }
 
-    .gear-icon {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      width: 12px;
-      height: 12px;
-      font-size: 8px;
-      background: var(--pf-color-bg-panel, #141414);
-      border: 1px solid var(--pf-color-border, #333);
-      border-radius: 2px;
-      color: var(--pf-color-text-muted, #808080);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      opacity: 0;
-      transition: opacity 0.15s ease;
-    }
+    // .gear-icon {
+    //   position: absolute;
+    //   bottom: 0;
+    //   right: 0;
+    //   width: 12px;
+    //   height: 12px;
+    //   font-size: 8px;
+    //   background: var(--pf-color-bg-panel, #141414);
+    //   border: 1px solid var(--pf-color-border, #333);
+    //   border-radius: 2px;
+    //   color: var(--pf-color-text-muted, #808080);
+    //   cursor: pointer;
+    //   display: flex;
+    //   align-items: center;
+    //   justify-content: center;
+    //   opacity: 0;
+    //   transition: opacity 0.15s ease;
+    // }
 
-    .button-container:hover .gear-icon {
-      opacity: 1;
-    }
+    // .button-container:hover .gear-icon {
+    //   opacity: 1;
+    // }
 
-    .gear-icon:hover {
-      background: var(--pf-color-bg-surface, #1e1e1e);
-      color: var(--pf-color-text-main, #e0e0e0);
-    }
+    // .gear-icon:hover {
+    //   background: var(--pf-color-bg-surface, #1e1e1e);
+    //   color: var(--pf-color-text-main, #e0e0e0);
+    // }
 
-    /* Hide gear icon when showing group indicator */
-    :host([has-group]) .gear-icon {
-      display: none;
-    }
+    // /* Hide gear icon when showing group indicator */
+    // :host([has-group]) .gear-icon {
+    //   display: none;
+    // }
   `;
 
-  @property({ type: String }) tool: ToolType = 'pencil';
-  @property({ type: String }) icon = '';
-  @property({ type: String }) shortcut = '';
+  @property({ type: String }) tool: ToolType = "pencil";
+  @property({ type: String }) icon = "";
+  @property({ type: String }) shortcut = "";
   @property({ type: Boolean, reflect: true }) active = false;
   @property({ type: Array }) groupTools: ToolType[] = [];
-  @property({ type: String }) groupId = '';
-  @property({ type: Boolean, reflect: true, attribute: 'has-group' }) hasGroup = false;
+  @property({ type: String }) groupId = "";
+  @property({ type: Boolean, reflect: true, attribute: "has-group" }) hasGroup =
+    false;
 
   @state() private showOptions = false;
   @state() private showGroupMenu = false;
@@ -117,33 +118,12 @@ export class PFToolButton extends BaseComponent {
   private documentClickHandler = (e: MouseEvent) => {
     if (this.showGroupMenu && !this.contains(e.target as Node)) {
       this.showGroupMenu = false;
-      document.removeEventListener('click', this.documentClickHandler);
+      document.removeEventListener("click", this.documentClickHandler);
     }
   };
 
-  private getToolIcon(tool: ToolType): string {
-    const icons: Record<string, string> = {
-      'pencil': '✏️',
-      'eraser': '🧹',
-      'eyedropper': '💧',
-      'marquee-rect': '⬚',
-      'lasso': '◯',
-      'polygonal-lasso': '⬡',
-      'magic-wand': '✨',
-      'line': '╱',
-      'rectangle': '▢',
-      'ellipse': '◯',
-      'fill': '🪣',
-      'gradient': '▤',
-      'transform': '⤡',
-      'hand': '✋',
-      'zoom': '🔍',
-    };
-    return icons[tool] || tool[0].toUpperCase();
-  }
-
   updated(changedProperties: Map<string, unknown>) {
-    if (changedProperties.has('groupTools')) {
+    if (changedProperties.has("groupTools")) {
       this.hasGroup = this.groupTools.length > 1;
     }
   }
@@ -155,37 +135,29 @@ export class PFToolButton extends BaseComponent {
     return html`
       <div class="button-container">
         <button
-          title="${toolName} (${this.shortcut})${this.hasGroup ? ' - Right-click for more tools' : ''}"
+          title="${toolName} (${this.shortcut})${this.hasGroup
+            ? " - Right-click for more tools"
+            : ""}"
           @contextmenu=${this.handleContextMenu}
         >
-          ${this.icon ? html`<span class="icon">${this.icon}</span>` : html`<span>${this.getToolIcon(this.tool)}</span>`}
+          ${this.icon
+            ? html`<span class="icon">${this.icon}</span>`
+            : html`<span>${getToolIcon(this.tool)}</span>`}
         </button>
-        ${this.hasGroup ? html`<div class="group-indicator"></div>` : ''}
-        ${!this.hasGroup ? html`
-          <div class="gear-icon" @click=${this.handleGearClick} title="Tool options">
-            ⚙
-          </div>
-        ` : ''}
+        ${this.hasGroup ? html`<div class="group-indicator"></div>` : ""}
       </div>
 
-      ${this.hasGroup && this.showGroupMenu ? html`
-        <pf-tool-group-menu
-          .tools=${this.groupTools}
-          .activeTool=${toolStore.activeTool.value}
-          .x=${this.menuX}
-          .y=${this.menuY}
-          @tool-selected=${this.handleToolSelected}
-        ></pf-tool-group-menu>
-      ` : ''}
-
-      ${!this.hasGroup ? html`
-        <pf-tool-options-popover
-          .tool=${this.tool}
-          ?open=${this.showOptions}
-          .anchorRect=${this.anchorRect}
-          @close=${() => this.showOptions = false}
-        ></pf-tool-options-popover>
-      ` : ''}
+      ${this.hasGroup && this.showGroupMenu
+        ? html`
+            <pf-tool-group-menu
+              .tools=${this.groupTools}
+              .activeTool=${toolStore.activeTool.value}
+              .x=${this.menuX}
+              .y=${this.menuY}
+              @tool-selected=${this.handleToolSelected}
+            ></pf-tool-group-menu>
+          `
+        : ""}
     `;
   }
 
@@ -201,7 +173,7 @@ export class PFToolButton extends BaseComponent {
 
       // Close on outside click
       setTimeout(() => {
-        document.addEventListener('click', this.documentClickHandler);
+        document.addEventListener("click", this.documentClickHandler);
       }, 0);
     } else {
       // Show options popover for single tools
@@ -233,18 +205,20 @@ export class PFToolButton extends BaseComponent {
 
     // Close menu
     this.showGroupMenu = false;
-    document.removeEventListener('click', this.documentClickHandler);
+    document.removeEventListener("click", this.documentClickHandler);
 
     // Dispatch event for parent to update displayed tool
-    this.dispatchEvent(new CustomEvent('group-tool-changed', {
-      detail: { tool, groupId: this.groupId },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent("group-tool-changed", {
+        detail: { tool, groupId: this.groupId },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener('click', this.documentClickHandler);
+    document.removeEventListener("click", this.documentClickHandler);
   }
 }
