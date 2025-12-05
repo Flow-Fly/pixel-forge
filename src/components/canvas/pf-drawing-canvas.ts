@@ -57,6 +57,11 @@ export class PFDrawingCanvas extends BaseComponent {
   private activeTool: any; // TODO: Type properly
   private previousImageData: ImageData | null = null;
 
+  // Document-level event handlers for out-of-canvas tracking
+  private boundDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
+  private isStrokeActive = false;
+
   protected firstUpdated(_changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>): void {
     super.firstUpdated(_changedProperties);
 
@@ -366,6 +371,37 @@ export class PFDrawingCanvas extends BaseComponent {
     };
   }
 
+  /**
+   * Clamp coordinates to canvas bounds for out-of-canvas tracking.
+   */
+  private clampToCanvas(x: number, y: number): { x: number; y: number } {
+    return {
+      x: Math.max(0, Math.min(this.canvas.width - 1, x)),
+      y: Math.max(0, Math.min(this.canvas.height - 1, y)),
+    };
+  }
+
+  /**
+   * Clean up document-level listeners.
+   */
+  private cleanupDocumentListeners() {
+    if (this.boundDocumentMouseMove) {
+      document.removeEventListener('mousemove', this.boundDocumentMouseMove);
+      this.boundDocumentMouseMove = null;
+    }
+    if (this.boundDocumentMouseUp) {
+      document.removeEventListener('mouseup', this.boundDocumentMouseUp);
+      this.boundDocumentMouseUp = null;
+    }
+    this.isStrokeActive = false;
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    // Clean up any active document listeners when component is destroyed
+    this.cleanupDocumentListeners();
+  }
+
   private handleMouseDown(e: MouseEvent) {
     // Skip drawing during pan operations:
     // - Middle mouse button (button 1) is for panning
@@ -394,52 +430,63 @@ export class PFDrawingCanvas extends BaseComponent {
 
         this.activeTool.onDown(x, y, modifiers);
 
+        // Mark stroke as active and attach document-level listeners
+        // This allows us to track mouse movement even outside the canvas
+        this.isStrokeActive = true;
+        this.boundDocumentMouseMove = this.handleDocumentMouseMove.bind(this);
+        this.boundDocumentMouseUp = this.handleDocumentMouseUp.bind(this);
+        document.addEventListener('mousemove', this.boundDocumentMouseMove);
+        document.addEventListener('mouseup', this.boundDocumentMouseUp);
+
         // Schedule render instead of immediate call
         renderScheduler.scheduleRender(() => this.renderCanvas());
       }
     }
   }
 
-  private handleMouseMove(e: MouseEvent) {
-    const { x, y } = this.getCanvasCoordinates(e);
+  /**
+   * Document-level mouse move handler for out-of-canvas tracking.
+   * Coordinates are clamped to canvas bounds.
+   */
+  private handleDocumentMouseMove(e: MouseEvent) {
+    if (!this.isStrokeActive || !this.activeTool) return;
 
-    // Emit cursor position for status bar and brush cursor overlay
+    // Skip during pan operations
+    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
+      return;
+    }
+
+    const rawCoords = this.getCanvasCoordinates(e);
+    const { x, y } = this.clampToCanvas(rawCoords.x, rawCoords.y);
+    const modifiers = this.getModifiers(e);
+
+    // Emit cursor position (clamped) for brush overlay
     window.dispatchEvent(
       new CustomEvent('canvas-cursor', {
         detail: { x: Math.floor(x), y: Math.floor(y) },
       })
     );
 
-    // Skip tool interaction during pan operations
-    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
-      return;
-    }
-
-    if (!this.activeTool) return;
-    const modifiers = this.getModifiers(e);
-
-    if (e.buttons === 1) {
-      this.activeTool.onDrag(x, y, modifiers);
-
-      // Schedule render instead of immediate call
-      renderScheduler.scheduleRender(() => this.renderCanvas());
-    } else {
-      this.activeTool.onMove(x, y, modifiers);
-    }
+    this.activeTool.onDrag(x, y, modifiers);
+    renderScheduler.scheduleRender(() => this.renderCanvas());
   }
 
-  private handleMouseLeave = (e: MouseEvent) => {
-    // Notify brush cursor overlay that cursor left canvas
-    window.dispatchEvent(new CustomEvent('canvas-cursor-leave'));
+  /**
+   * Document-level mouse up handler for out-of-canvas tracking.
+   * Finalizes the stroke regardless of cursor position.
+   */
+  private handleDocumentMouseUp(e: MouseEvent) {
+    if (!this.isStrokeActive) return;
 
-    // Also end any active drawing operations
-    this.handleMouseUp(e);
-  };
+    // Clean up document listeners first
+    this.cleanupDocumentListeners();
 
-  private handleMouseUp(e: MouseEvent) {
     if (!this.activeTool) return;
-    const { x, y } = this.getCanvasCoordinates(e);
+
+    const rawCoords = this.getCanvasCoordinates(e);
+    const { x, y } = this.clampToCanvas(rawCoords.x, rawCoords.y);
     const modifiers = this.getModifiers(e);
+
     this.activeTool.onUp(x, y, modifiers);
 
     // Get stroke bounds before flushing
@@ -491,6 +538,49 @@ export class PFDrawingCanvas extends BaseComponent {
         this.previousImageData = null;
       }
     }
+  }
+
+  private handleMouseMove(e: MouseEvent) {
+    // When stroke is active, document-level handler handles all movement
+    // This avoids duplicate processing
+    if (this.isStrokeActive) return;
+
+    const { x, y } = this.getCanvasCoordinates(e);
+
+    // Emit cursor position for status bar and brush cursor overlay
+    window.dispatchEvent(
+      new CustomEvent('canvas-cursor', {
+        detail: { x: Math.floor(x), y: Math.floor(y) },
+      })
+    );
+
+    // Skip tool interaction during pan operations
+    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
+      return;
+    }
+
+    if (!this.activeTool) return;
+    const modifiers = this.getModifiers(e);
+
+    // Only handle hover (onMove) since drag is handled by document listener when stroke is active
+    this.activeTool.onMove(x, y, modifiers);
+  }
+
+  private handleMouseLeave = (_e: MouseEvent) => {
+    // Notify brush cursor overlay that cursor left canvas
+    window.dispatchEvent(new CustomEvent('canvas-cursor-leave'));
+
+    // Don't commit stroke here - document-level listeners handle out-of-canvas tracking
+    // The stroke will be finalized when mouse is released anywhere
+  };
+
+  private handleMouseUp(_e: MouseEvent) {
+    // When stroke is active, document-level handler handles mouseup
+    // This avoids duplicate processing since both canvas and document receive the event
+    if (this.isStrokeActive) return;
+
+    // This handles cases where mouseup happens without a prior mousedown on this canvas
+    // (e.g., tool was not active, or layer was locked)
   }
 
   /**

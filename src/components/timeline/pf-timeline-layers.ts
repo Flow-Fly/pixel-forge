@@ -1,5 +1,5 @@
 import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { layerStore } from '../../stores/layers';
 import { historyStore } from '../../stores/history';
@@ -9,9 +9,7 @@ import { AddLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../c
 export class PFTimelineLayers extends BaseComponent {
   static styles = css`
     :host {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
+      display: block;
     }
 
     .toolbar {
@@ -48,8 +46,7 @@ export class PFTimelineLayers extends BaseComponent {
     }
 
     .layer-list {
-      flex: 1;
-      overflow-y: auto;
+      /* Renders at natural height - parent scroll container handles overflow */
     }
 
     .layer-row {
@@ -148,6 +145,8 @@ export class PFTimelineLayers extends BaseComponent {
       opacity: 1;
     }
   `;
+
+  @property({ type: Boolean, attribute: 'no-toolbar' }) noToolbar = false;
 
   @state() private editingLayerId: string | null = null;
   @state() private editingName: string = '';
@@ -278,12 +277,14 @@ export class PFTimelineLayers extends BaseComponent {
     const canMoveDown = activeIndex > 0;
 
     return html`
-      <div class="toolbar">
-        <button @click=${this.addLayer} title="Add Layer">+</button>
-        <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>-</button>
-        <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>↑</button>
-        <button @click=${() => this.moveLayer('down')} title="Move Down" ?disabled=${!canMoveDown}>↓</button>
-      </div>
+      ${!this.noToolbar ? html`
+        <div class="toolbar">
+          <button @click=${this.addLayer} title="Add Layer">+</button>
+          <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>-</button>
+          <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>↑</button>
+          <button @click=${() => this.moveLayer('down')} title="Move Down" ?disabled=${!canMoveDown}>↓</button>
+        </div>
+      ` : ''}
       <div class="layer-list">
         ${layers.map(layer => html`
           <div
