@@ -75,10 +75,22 @@ export class PFCanvasViewport extends BaseComponent {
   @state() private lastMouseX = 0;
   @state() private lastMouseY = 0;
 
+  // Zoom easing for trackpad - accumulate delta before changing level
+  private zoomAccumulatedDelta = 0;
+  private zoomDecayTimeout?: number;
+  private readonly ZOOM_THRESHOLD = 10; // Pixels of scroll before zoom changes
+  private readonly ZOOM_DECAY_MS = 150; // Reset accumulator after this idle time
+
+  // Track actual modifier key presses to distinguish from macOS pinch gestures
+  // macOS injects ctrlKey=true for pinch-to-zoom, but we want pinch=zoom, Ctrl+scroll=brush
+  private isCtrlActuallyPressed = false;
+  private isMetaActuallyPressed = false;
+
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("keyup", this.handleKeyUp);
+    window.addEventListener("blur", this.handleWindowBlur);
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions();
@@ -118,12 +130,24 @@ export class PFCanvasViewport extends BaseComponent {
     super.disconnectedCallback();
     window.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("blur", this.handleWindowBlur);
     window.removeEventListener("resize", this.handleResize);
 
     // Clean up any active drag listeners
     window.removeEventListener("mousemove", this.handleGlobalMouseMove);
     window.removeEventListener("mouseup", this.handleGlobalMouseUp);
+
+    // Clean up zoom decay timeout
+    if (this.zoomDecayTimeout) {
+      clearTimeout(this.zoomDecayTimeout);
+    }
   }
+
+  // Reset modifier tracking when window loses focus (prevents stuck state)
+  private handleWindowBlur = () => {
+    this.isCtrlActuallyPressed = false;
+    this.isMetaActuallyPressed = false;
+  };
 
   private updateContainerDimensions = () => {
     viewportStore.containerWidth.value = this.clientWidth;
@@ -151,14 +175,14 @@ export class PFCanvasViewport extends BaseComponent {
     this.toggleAttribute("panning", isPanning);
 
     // Update slotted drawing canvas cursor for pan mode
-    const drawingCanvas = this.querySelector('pf-drawing-canvas');
+    const drawingCanvas = this.querySelector("pf-drawing-canvas");
     if (drawingCanvas) {
       if (isPanning) {
-        drawingCanvas.setAttribute('pan-cursor', 'grabbing');
+        drawingCanvas.setAttribute("pan-cursor", "grabbing");
       } else if (isSpaceDown) {
-        drawingCanvas.setAttribute('pan-cursor', 'grab');
+        drawingCanvas.setAttribute("pan-cursor", "grab");
       } else {
-        drawingCanvas.removeAttribute('pan-cursor');
+        drawingCanvas.removeAttribute("pan-cursor");
       }
     }
 
@@ -340,6 +364,10 @@ export class PFCanvasViewport extends BaseComponent {
   }
 
   private handleKeyDown = (e: KeyboardEvent) => {
+    // Track actual modifier key presses (to distinguish from macOS pinch injection)
+    if (e.key === "Control") this.isCtrlActuallyPressed = true;
+    if (e.key === "Meta") this.isMetaActuallyPressed = true;
+
     // Skip if typing in an input
     if (
       e.target instanceof HTMLInputElement ||
@@ -394,6 +422,10 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private handleKeyUp = (e: KeyboardEvent) => {
+    // Track actual modifier key releases
+    if (e.key === "Control") this.isCtrlActuallyPressed = false;
+    if (e.key === "Meta") this.isMetaActuallyPressed = false;
+
     if (e.code === "Space") {
       viewportStore.isSpacebarDown.value = false;
 
@@ -500,18 +532,25 @@ export class PFCanvasViewport extends BaseComponent {
   }
 
   private handleContextMenu(e: MouseEvent) {
-    // Prevent context menu when Ctrl+RightClick is used for lightness shifting
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-    }
+    // Always prevent context menu on canvas - right-click is used for:
+    // - Drawing with secondary color (pencil)
+    // - Erasing to background color (eraser)
+    // - Ctrl+RightClick lightness shifting
+    e.preventDefault();
   }
 
   private handleWheel(e: WheelEvent) {
     e.preventDefault();
 
-    // Ctrl+scroll for tool size adjustment (Aseprite-style)
-    // Note: macOS swaps deltaY to deltaX when modifiers are held, so check both
-    if (e.ctrlKey || e.metaKey) {
+    // Distinguish between actual Ctrl/Cmd+scroll vs macOS pinch gesture
+    // macOS injects ctrlKey=true for pinch-to-zoom, but we want:
+    // - Pinch → zoom (universal expectation)
+    // - Actual Ctrl/Cmd + scroll → brush size (Aseprite-style)
+    const isActualModifierHeld =
+      this.isCtrlActuallyPressed || this.isMetaActuallyPressed;
+
+    // Only adjust brush size if user actually pressed Ctrl/Cmd
+    if (isActualModifierHeld) {
       const tool = toolStore.activeTool.value;
       const currentSize = getToolSize(tool);
       const scrollDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
@@ -521,16 +560,36 @@ export class PFCanvasViewport extends BaseComponent {
       return;
     }
 
+    // Everything else is zoom (regular scroll or pinch gesture)
+    // Accumulate scroll delta for smoother trackpad zoom
+    this.zoomAccumulatedDelta += e.deltaY;
+
+    // Reset decay timeout - accumulator clears after idle period
+    if (this.zoomDecayTimeout) {
+      clearTimeout(this.zoomDecayTimeout);
+    }
+    this.zoomDecayTimeout = window.setTimeout(() => {
+      this.zoomAccumulatedDelta = 0;
+    }, this.ZOOM_DECAY_MS);
+
+    // Only change zoom level when threshold is exceeded
+    if (Math.abs(this.zoomAccumulatedDelta) < this.ZOOM_THRESHOLD) {
+      return;
+    }
+
     // Zoom at cursor position
     const rect = this.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
 
-    if (e.deltaY < 0) {
+    if (this.zoomAccumulatedDelta < 0) {
       viewportStore.zoomInAt(screenX, screenY);
     } else {
       viewportStore.zoomOutAt(screenX, screenY);
     }
+
+    // Reset accumulator after zoom change
+    this.zoomAccumulatedDelta = 0;
     this.requestUpdate();
   }
 }
