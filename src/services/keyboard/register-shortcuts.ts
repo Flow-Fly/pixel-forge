@@ -8,6 +8,7 @@ import { projectStore } from "../../stores/project";
 import {
   DeleteSelectionCommand,
   CommitFloatCommand,
+  CutToFloatCommand,
 } from "../../commands/selection-commands";
 import { colorStore } from "../../stores/colors";
 import { animationStore } from "../../stores/animation";
@@ -130,18 +131,126 @@ export function registerShortcuts() {
   // ANIMATION / FRAME NAVIGATION
   // ============================================
 
-  // Arrow keys = Previous/Next frame
+  // Helper: Move selection by arrow key (auto-floats if needed)
+  const moveSelectionByArrow = (dx: number, dy: number) => {
+    const state = selectionStore.state.value;
+
+    if (state.type === "selected") {
+      // Auto-float: cut pixels first, then move
+      const activeLayerId = layerStore.activeLayerId.value;
+      const layer = layerStore.layers.value.find(
+        (l) => l.id === activeLayerId
+      );
+      if (!layer?.canvas) return;
+
+      const mask =
+        state.shape === "freeform"
+          ? (state as { mask: Uint8Array }).mask
+          : undefined;
+
+      const cutCommand = new CutToFloatCommand(
+        layer.canvas,
+        layer.id,
+        state.bounds,
+        state.shape,
+        mask
+      );
+      historyStore.execute(cutCommand);
+
+      // Now move the floating selection
+      selectionStore.moveFloat(dx, dy);
+    } else if (state.type === "floating") {
+      // Already floating, just move
+      selectionStore.moveFloat(dx, dy);
+    }
+  };
+
+  // Arrow keys = Move selection (if active) or Previous/Next frame
   keyboardService.register(
     "ArrowLeft",
     [],
-    () => animationStore.prevFrame(),
-    "Previous frame"
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(-1, 0);
+      } else {
+        animationStore.prevFrame();
+      }
+    },
+    "Move selection left / Previous frame"
   );
   keyboardService.register(
     "ArrowRight",
     [],
-    () => animationStore.nextFrame(),
-    "Next frame"
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(1, 0);
+      } else {
+        animationStore.nextFrame();
+      }
+    },
+    "Move selection right / Next frame"
+  );
+  keyboardService.register(
+    "ArrowUp",
+    [],
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(0, -1);
+      }
+    },
+    "Move selection up"
+  );
+  keyboardService.register(
+    "ArrowDown",
+    [],
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(0, 1);
+      }
+    },
+    "Move selection down"
+  );
+
+  // Shift+Arrow = Move selection by 10px
+  keyboardService.register(
+    "ArrowLeft",
+    ["shift"],
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(-10, 0);
+      }
+    },
+    "Move selection left 10px"
+  );
+  keyboardService.register(
+    "ArrowRight",
+    ["shift"],
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(10, 0);
+      }
+    },
+    "Move selection right 10px"
+  );
+  keyboardService.register(
+    "ArrowUp",
+    ["shift"],
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(0, -10);
+      }
+    },
+    "Move selection up 10px"
+  );
+  keyboardService.register(
+    "ArrowDown",
+    ["shift"],
+    () => {
+      if (selectionStore.isActive) {
+        moveSelectionByArrow(0, 10);
+      }
+    },
+    "Move selection down 10px"
   );
 
   // Home/End = First/Last frame
