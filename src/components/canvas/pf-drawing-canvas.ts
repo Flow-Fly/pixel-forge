@@ -404,11 +404,18 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
-    // Skip drawing during pan operations:
-    // - Middle mouse button (button 1) is for panning
-    // - Alt+click is for panning
+    // Skip drawing when:
+    // - Middle mouse button (panning)
+    // - Alt/Cmd+click (quick eyedropper, handled by viewport)
+    // - Ctrl+click (lightness shift, handled by viewport)
     // - Spacebar pan mode
-    if (e.button === 1 || e.altKey || viewportStore.isSpacebarDown.value) {
+    if (
+      e.button === 1 ||
+      e.altKey ||
+      e.metaKey ||
+      e.ctrlKey ||
+      viewportStore.isSpacebarDown.value
+    ) {
       return;
     }
 
