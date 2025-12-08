@@ -4,6 +4,11 @@
   padding: 0;
 }
 
+html, body {
+  /* Prevent Chrome's back/forward navigation gesture on horizontal swipe */
+  overscroll-behavior-x: none;
+}
+
 body {
   background-color: var(--pf-color-bg-dark);
   color: var(--pf-color-text-main);

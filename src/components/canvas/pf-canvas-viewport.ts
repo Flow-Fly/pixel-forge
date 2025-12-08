@@ -21,6 +21,9 @@ export class PFCanvasViewport extends BaseComponent {
       overflow: hidden;
       background-color: #1a1a1a;
       position: relative;
+      /* Prevent browser back/forward gesture on two-finger horizontal swipe */
+      overscroll-behavior: none;
+      touch-action: none;
     }
 
     .viewport-content {
@@ -441,8 +444,17 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private handleMouseDown(e: MouseEvent) {
-    // Ctrl+Click for lightness shifting
-    if (e.ctrlKey || e.metaKey) {
+    // Alt or Cmd/Meta + Click = Quick Eyedropper
+    // Left click: pick to foreground, Right click: pick to background
+    if (e.altKey || e.metaKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.triggerQuickEyedropper(e);
+      return;
+    }
+
+    // Ctrl+Click for lightness shifting (Ctrl only, not Meta)
+    if (e.ctrlKey) {
       if (e.button === 0) {
         // Left click: shift darker
         e.preventDefault();
@@ -465,9 +477,48 @@ export class PFCanvasViewport extends BaseComponent {
       return;
     }
 
-    // Middle click or Alt+Click to pan
-    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    // Middle click to pan (Alt is now used for eyedropper)
+    if (e.button === 1) {
       this.startDragging(e);
+    }
+  }
+
+  /**
+   * Quick eyedropper: pick color from canvas at mouse position.
+   * Left click = primary/foreground color, Right click = secondary/background color.
+   */
+  private triggerQuickEyedropper(e: MouseEvent) {
+    const drawingCanvas = this.querySelector("pf-drawing-canvas") as any;
+    if (!drawingCanvas?.canvas) return;
+
+    const canvasEl = drawingCanvas.canvas as HTMLCanvasElement;
+    const rect = canvasEl.getBoundingClientRect();
+    const scaleX = canvasEl.width / rect.width;
+    const scaleY = canvasEl.height / rect.height;
+
+    const x = Math.floor((e.clientX - rect.left) * scaleX);
+    const y = Math.floor((e.clientY - rect.top) * scaleY);
+
+    // Bounds check
+    if (x < 0 || x >= canvasEl.width || y < 0 || y >= canvasEl.height) return;
+
+    const ctx = canvasEl.getContext("2d");
+    if (!ctx) return;
+
+    const pixel = ctx.getImageData(x, y, 1, 1).data;
+    const hex =
+      "#" +
+      pixel[0].toString(16).padStart(2, "0") +
+      pixel[1].toString(16).padStart(2, "0") +
+      pixel[2].toString(16).padStart(2, "0");
+
+    if (e.button === 2) {
+      // Right click: pick to secondary/background color
+      colorStore.setSecondaryColor(hex);
+    } else {
+      // Left click: pick to primary/foreground color
+      colorStore.setPrimaryColor(hex);
+      colorStore.updateLightnessVariations(hex);
     }
   }
 
@@ -546,8 +597,10 @@ export class PFCanvasViewport extends BaseComponent {
     // macOS injects ctrlKey=true for pinch-to-zoom, but we want:
     // - Pinch → zoom (universal expectation)
     // - Actual Ctrl/Cmd + scroll → brush size (Aseprite-style)
+    // - Regular two-finger scroll → pan
     const isActualModifierHeld =
       this.isCtrlActuallyPressed || this.isMetaActuallyPressed;
+    const isPinchGesture = e.ctrlKey && !this.isCtrlActuallyPressed;
 
     // Only adjust brush size if user actually pressed Ctrl/Cmd
     if (isActualModifierHeld) {
@@ -560,36 +613,43 @@ export class PFCanvasViewport extends BaseComponent {
       return;
     }
 
-    // Everything else is zoom (regular scroll or pinch gesture)
-    // Accumulate scroll delta for smoother trackpad zoom
-    this.zoomAccumulatedDelta += e.deltaY;
+    // Pinch gesture = zoom
+    if (isPinchGesture) {
+      // Accumulate scroll delta for smoother trackpad zoom
+      this.zoomAccumulatedDelta += e.deltaY;
 
-    // Reset decay timeout - accumulator clears after idle period
-    if (this.zoomDecayTimeout) {
-      clearTimeout(this.zoomDecayTimeout);
-    }
-    this.zoomDecayTimeout = window.setTimeout(() => {
+      // Reset decay timeout - accumulator clears after idle period
+      if (this.zoomDecayTimeout) {
+        clearTimeout(this.zoomDecayTimeout);
+      }
+      this.zoomDecayTimeout = window.setTimeout(() => {
+        this.zoomAccumulatedDelta = 0;
+      }, this.ZOOM_DECAY_MS);
+
+      // Only change zoom level when threshold is exceeded
+      if (Math.abs(this.zoomAccumulatedDelta) < this.ZOOM_THRESHOLD) {
+        return;
+      }
+
+      // Zoom at cursor position
+      const rect = this.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+
+      if (this.zoomAccumulatedDelta < 0) {
+        viewportStore.zoomInAt(screenX, screenY);
+      } else {
+        viewportStore.zoomOutAt(screenX, screenY);
+      }
+
+      // Reset accumulator after zoom change
       this.zoomAccumulatedDelta = 0;
-    }, this.ZOOM_DECAY_MS);
-
-    // Only change zoom level when threshold is exceeded
-    if (Math.abs(this.zoomAccumulatedDelta) < this.ZOOM_THRESHOLD) {
+      this.requestUpdate();
       return;
     }
 
-    // Zoom at cursor position
-    const rect = this.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-
-    if (this.zoomAccumulatedDelta < 0) {
-      viewportStore.zoomInAt(screenX, screenY);
-    } else {
-      viewportStore.zoomOutAt(screenX, screenY);
-    }
-
-    // Reset accumulator after zoom change
-    this.zoomAccumulatedDelta = 0;
+    // Regular two-finger scroll = pan
+    viewportStore.panBy(-e.deltaX, -e.deltaY);
     this.requestUpdate();
   }
 }
