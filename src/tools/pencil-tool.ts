@@ -8,6 +8,42 @@ import {
   isLShape,
 } from '../services/drawing/algorithms';
 
+// Distance threshold as percentage of spacing (0.3 = within 30% of spacing distance)
+const DISTANCE_THRESHOLD = 0.3;
+
+/**
+ * Find the nearest grid point to a cursor position.
+ */
+function getNearestGridPoint(
+  x: number,
+  y: number,
+  originX: number,
+  originY: number,
+  spacing: number
+): { x: number; y: number } {
+  const nearestX = Math.round((x - originX) / spacing) * spacing + originX;
+  const nearestY = Math.round((y - originY) / spacing) * spacing + originY;
+  return { x: nearestX, y: nearestY };
+}
+
+/**
+ * Check if cursor is close enough to a grid point to trigger a stamp.
+ * Uses Euclidean distance, not independent axis checks.
+ */
+function isWithinThreshold(
+  cursorX: number,
+  cursorY: number,
+  gridX: number,
+  gridY: number,
+  spacing: number
+): boolean {
+  const dx = cursorX - gridX;
+  const dy = cursorY - gridY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const threshold = spacing * DISTANCE_THRESHOLD;
+  return distance <= threshold;
+}
+
 export class PencilTool extends BaseTool {
   name = 'pencil';
   cursor = 'crosshair';
@@ -29,8 +65,13 @@ export class PencilTool extends BaseTool {
   // Locked axis for shift-drag (null = not yet determined, 'h' = horizontal, 'v' = vertical)
   private lockedAxis: 'h' | 'v' | null = null;
 
-  // Track distance since last stamp for brush spacing
-  private distanceSinceLastStamp = 0;
+  // Grid-based spacing: origin point defines grid anchor
+  private strokeOriginX = 0;
+  private strokeOriginY = 0;
+
+  // Track last stamp position for grid-based spacing
+  private lastStampX = 0;
+  private lastStampY = 0;
 
   // Track stamp positions for pixel-perfect at stamp level
   private stampPositions: Point[] = [];
@@ -47,15 +88,8 @@ export class PencilTool extends BaseTool {
     if (!this.context) return;
 
     this.isDrawing = true;
-    let currentX = Math.floor(x);
-    let currentY = Math.floor(y);
-
-    // Snap to spacing grid when spacing > 1 (align to grid cell top-left)
-    const spacing = this.getSpacing();
-    if (spacing > 1) {
-      currentX = Math.floor(currentX / spacing) * spacing;
-      currentY = Math.floor(currentY / spacing) * spacing;
-    }
+    const currentX = Math.floor(x);
+    const currentY = Math.floor(y);
 
     // Capture canvas state before stroke for pixel-perfect restore
     const canvas = this.context.canvas;
@@ -91,7 +125,13 @@ export class PencilTool extends BaseTool {
     this.lockedAxis = null; // Reset axis lock for new stroke
     this.drawnPoints = [{ x: this.lastX, y: this.lastY }];
     this.stampPositions = []; // Reset stamp tracking for pixel-perfect at stamp level
-    this.distanceSinceLastStamp = 0;
+
+    // Initialize grid-based spacing: first click defines grid origin
+    this.strokeOriginX = currentX;
+    this.strokeOriginY = currentY;
+    this.lastStampX = currentX;
+    this.lastStampY = currentY;
+
     this.drawPoint(this.lastX, this.lastY);
   }
 
@@ -173,62 +213,95 @@ export class PencilTool extends BaseTool {
       return;
     }
 
-    // For larger brushes or spacing > 1, use spacing-based stamping
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    if (distance === 0) return;
-
-    // Normalize direction
-    const dirX = dx / distance;
-    const dirY = dy / distance;
-
-    // Add to accumulated distance
-    this.distanceSinceLastStamp += distance;
-
-    // Check if we should apply pixel-perfect at stamp level (when spacing matches brush size)
+    // For larger brushes or spacing > 1, use grid-aligned stamping
+    // Grid is anchored to stroke origin, stamps placed at grid intersections
     const pixelPerfectStamps = brush.pixelPerfect && brush.spacing === 'match';
 
-    // Calculate starting position along the line
-    let traveled = 0;
+    // Find the nearest grid point to current cursor position
+    const { x: gridX, y: gridY } = getNearestGridPoint(
+      x2, y2,
+      this.strokeOriginX, this.strokeOriginY,
+      spacing
+    );
 
-    // Place stamps at spacing intervals
-    while (this.distanceSinceLastStamp >= spacing) {
-      // Calculate how far along the line to place this stamp
-      const stampDistance = spacing - (this.distanceSinceLastStamp - distance + traveled);
+    // Only draw if:
+    // 1. It's a new grid position (not already stamped)
+    // 2. Cursor is close enough to that grid point (within distance threshold)
+    if (gridX === this.lastStampX && gridY === this.lastStampY) {
+      return;
+    }
 
-      if (stampDistance > 0 && stampDistance <= distance) {
-        let stampX = Math.round(x1 + dirX * stampDistance);
-        let stampY = Math.round(y1 + dirY * stampDistance);
+    if (!isWithinThreshold(x2, y2, gridX, gridY, spacing)) {
+      return;
+    }
 
-        // Snap to spacing grid for consistent placement when spacing > 1 (align to grid cell top-left)
-        if (spacing > 1) {
-          stampX = Math.floor(stampX / spacing) * spacing;
-          stampY = Math.floor(stampY / spacing) * spacing;
-        }
+    // For fast movements, we may need to fill in intermediate grid points
+    // Calculate how many grid steps we've moved
+    const gridDx = (gridX - this.lastStampX) / spacing;
+    const gridDy = (gridY - this.lastStampY) / spacing;
+    // Cap gridSteps to prevent freeze when cursor goes out of bounds
+    const gridSteps = Math.min(
+      Math.max(Math.abs(gridDx), Math.abs(gridDy)),
+      100 // Safety cap - prevents runaway loops
+    );
 
-        // Pixel-perfect at stamp level: detect L-shapes in stamp positions
-        if (pixelPerfectStamps && this.stampPositions.length >= 2) {
-          const p1 = this.stampPositions[this.stampPositions.length - 2];
-          const p2 = this.stampPositions[this.stampPositions.length - 1];
-          const p3 = { x: stampX, y: stampY };
+    if (gridSteps <= 1) {
+      // Single step - just draw at the new grid position
+      this.placeStamp(gridX, gridY, pixelPerfectStamps, spacing);
+    } else {
+      // Multiple steps - interpolate to fill gaps
+      // Use movement direction to determine order
+      const stepX = gridDx / gridSteps;
+      const stepY = gridDy / gridSteps;
 
-          if (this.isStampLShape(p1, p2, p3, spacing)) {
-            // Restore the stamp at p2
-            this.restoreStamp(p2.x, p2.y);
-            this.stampPositions.pop();
-          }
-        }
+      // Track the starting position for interpolation
+      const startX = this.lastStampX;
+      const startY = this.lastStampY;
 
-        this.drawPoint(stampX, stampY);
-        if (pixelPerfectStamps) {
-          this.stampPositions.push({ x: stampX, y: stampY });
-        }
-        traveled = stampDistance;
+      for (let i = 1; i <= gridSteps; i++) {
+        // Calculate intermediate grid position
+        const interpX = startX + Math.round(stepX * i) * spacing;
+        const interpY = startY + Math.round(stepY * i) * spacing;
+
+        this.placeStamp(interpX, interpY, pixelPerfectStamps, spacing);
       }
+    }
+  }
 
-      this.distanceSinceLastStamp -= spacing;
+  /**
+   * Place a stamp at the given grid position
+   */
+  private placeStamp(x: number, y: number, pixelPerfect: boolean, spacing: number) {
+    // Skip if same as last stamp
+    if (x === this.lastStampX && y === this.lastStampY) {
+      return;
+    }
+
+    // Pixel-perfect at stamp level: detect L-shapes in stamp positions
+    if (pixelPerfect && this.stampPositions.length >= 2) {
+      const p1 = this.stampPositions[this.stampPositions.length - 2];
+      const p2 = this.stampPositions[this.stampPositions.length - 1];
+      const p3 = { x, y };
+
+      if (this.isStampLShape(p1, p2, p3, spacing)) {
+        // Restore the stamp at p2
+        this.restoreStamp(p2.x, p2.y);
+        this.stampPositions.pop();
+        // Update lastStamp to p1 since p2 was removed
+        if (this.stampPositions.length > 0) {
+          const prev = this.stampPositions[this.stampPositions.length - 1];
+          this.lastStampX = prev.x;
+          this.lastStampY = prev.y;
+        }
+      }
+    }
+
+    this.drawPoint(x, y);
+    this.lastStampX = x;
+    this.lastStampY = y;
+
+    if (pixelPerfect) {
+      this.stampPositions.push({ x, y });
     }
   }
 
@@ -252,9 +325,10 @@ export class PencilTool extends BaseTool {
 
     const brush = brushStore.activeBrush.value;
     const size = toolSizes.pencil.value;
-    // When spacing > 1, x/y is already the top-left corner
-    const startX = x;
-    const startY = y;
+    // x/y is the center of the stamp
+    const halfSize = Math.floor(size / 2);
+    const startX = x - halfSize;
+    const startY = y - halfSize;
     const canvas = this.context.canvas;
 
     // Restore each pixel in the stamp region
@@ -321,47 +395,34 @@ export class PencilTool extends BaseTool {
   }
 
   /**
-   * Draw a single point/brush stamp
+   * Draw a single point/brush stamp centered at (x, y)
    */
   private drawPoint(x: number, y: number) {
     if (!this.context) return;
 
     const brush = brushStore.activeBrush.value;
     const size = toolSizes.pencil.value;
-    const spacing = this.getSpacing();
 
     this.context.globalAlpha = brush.opacity;
     this.context.fillStyle = colorStore.primaryColor.value;
 
-    // When spacing > 1, x/y is the top-left corner of the grid cell
-    // Otherwise, x/y is the center of the brush
-    if (spacing > 1) {
-      // Grid-aligned mode: draw from top-left
-      if (brush.shape === 'square') {
-        this.context.fillRect(x, y, size, size);
-      } else {
-        // Circle
-        this.context.beginPath();
-        this.context.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
-        this.context.fill();
-      }
+    // Always draw centered on x/y
+    const halfSize = Math.floor(size / 2);
+    if (brush.shape === 'square') {
+      this.context.fillRect(x - halfSize, y - halfSize, size, size);
     } else {
-      // Normal mode: draw centered on x/y
-      const halfSize = Math.floor(size / 2);
-      if (brush.shape === 'square') {
-        this.context.fillRect(x - halfSize, y - halfSize, size, size);
-      } else {
-        // Circle
-        this.context.beginPath();
-        this.context.arc(x, y, size / 2, 0, Math.PI * 2);
-        this.context.fill();
-      }
+      // Circle
+      this.context.beginPath();
+      this.context.arc(x, y, size / 2, 0, Math.PI * 2);
+      this.context.fill();
     }
 
     this.context.globalAlpha = 1;
 
-    // Mark dirty region for partial redraw
-    this.markDirty(x, y);
+    // Mark dirty region for partial redraw (convert center to top-left)
+    const dirtyX = x - halfSize;
+    const dirtyY = y - halfSize;
+    this.markDirty(dirtyX, dirtyY, size);
   }
 
   /**

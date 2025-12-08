@@ -277,8 +277,10 @@ export class EraserTool extends BaseTool {
       }
     }
 
-    // Mark dirty region for partial redraw
-    this.markDirty(x, y);
+    // Mark dirty region for partial redraw (convert center to top-left)
+    const dirtyX = x - halfSize;
+    const dirtyY = y - halfSize;
+    this.markDirty(dirtyX, dirtyY, size);
   }
 
   /**
