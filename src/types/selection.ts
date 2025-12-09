@@ -29,6 +29,16 @@ export type SelectionState =
       currentOffset: { x: number; y: number };
       shape: SelectionShape;
       mask?: Uint8Array;
+    }
+  | {
+      type: 'transforming';
+      imageData: ImageData;           // Original pixels (unrotated)
+      originalBounds: Rect;           // Where it was cut from
+      currentBounds: Rect;            // Expanded bounds after rotation
+      rotation: number;               // Degrees (0-360)
+      previewData: ImageData | null;  // Nearest-neighbor preview (null until first rotation)
+      shape: SelectionShape;
+      mask?: Uint8Array;              // Original mask (for freeform)
     };
 
 // Helper type guards
@@ -40,6 +50,10 @@ export function isFloating(state: SelectionState): state is SelectionState & { t
   return state.type === 'floating';
 }
 
+export function isTransforming(state: SelectionState): state is SelectionState & { type: 'transforming' } {
+  return state.type === 'transforming';
+}
+
 export function hasSelection(state: SelectionState): boolean {
-  return state.type === 'selected' || state.type === 'floating' || state.type === 'selecting';
+  return state.type === 'selected' || state.type === 'floating' || state.type === 'selecting' || state.type === 'transforming';
 }

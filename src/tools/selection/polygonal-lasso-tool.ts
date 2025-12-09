@@ -48,9 +48,9 @@ export class PolygonalLassoTool extends BaseTool {
     this.lastClickTime = now;
 
     if (!this.isActive) {
-      // Clicking outside - commit any floating selection first
+      // Clicking outside - commit any transform/floating selection first
       // If we committed, don't immediately start a new selection
-      if (this.commitIfFloating()) {
+      if (this.commitIfTransforming() || this.commitIfFloating()) {
         return;
       }
 
@@ -185,6 +185,11 @@ export class PolygonalLassoTool extends BaseTool {
 
     const { mask, bounds } = result;
 
+    // Get active layer canvas for content-aware trimming
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    const canvas = layer?.canvas;
+
     // Handle selection modes
     const currentState = selectionStore.state.value;
     const mode = selectionStore.mode.value;
@@ -193,12 +198,12 @@ export class PolygonalLassoTool extends BaseTool {
     if (mode !== 'replace' && currentState.type === 'selected') {
       const combined = this.combineMasks(currentState, bounds, mask, mode);
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
       } else {
         selectionStore.clear();
       }
     } else {
-      selectionStore.finalizeFreeformSelection(bounds, mask);
+      selectionStore.finalizeFreeformSelection(bounds, mask, canvas);
     }
 
     selectionStore.resetMode();
@@ -240,6 +245,15 @@ export class PolygonalLassoTool extends BaseTool {
     );
 
     historyStore.execute(command);
+  }
+
+  private commitIfTransforming(): boolean {
+    const state = selectionStore.state.value;
+    if (state.type !== 'transforming') return false;
+
+    // Dispatch event to trigger commit in viewport
+    window.dispatchEvent(new CustomEvent('commit-transform'));
+    return true;
   }
 
   private commitIfFloating(): boolean {

@@ -39,15 +39,24 @@ export class PFSelectionOverlay extends BaseComponent {
   // Cache for freeform outline paths
   private cachedOutlinePaths: Point[][] | null = null;
   private cachedStateId: string | null = null;
+  private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-    window.addEventListener('resize', this.handleResize);
+    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
+    this.resizeObserver = new ResizeObserver(() => {
+      this.handleResize();
+    });
+    this.resizeObserver.observe(this);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener('resize', this.handleResize);
+    // Clean up ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = 0;
@@ -128,7 +137,51 @@ export class PFSelectionOverlay extends BaseComponent {
 
       // Draw marching ants around floating selection
       this.drawFloatingState(ctx, state, zoom, panX, panY);
+    } else if (state.type === 'transforming') {
+      // Draw the preview pixels (rotated)
+      this.drawTransformingPixels(ctx, state, zoom, panX, panY);
+
+      // Draw rotated marching ants around the original bounds
+      this.drawRotatedMarchingAnts(ctx, state.originalBounds, state.rotation, zoom, panX, panY);
     }
+  }
+
+  private drawTransformingPixels(
+    ctx: CanvasRenderingContext2D,
+    state: SelectionState & { type: 'transforming' },
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    // Use previewData which is already rotated with CleanEdge
+    const previewData = state.previewData ?? state.imageData;
+    const originalBounds = state.originalBounds;
+
+    // Calculate center of original bounds (rotation pivot point)
+    const centerX = (originalBounds.x + originalBounds.width / 2) * zoom + panX;
+    const centerY = (originalBounds.y + originalBounds.height / 2) * zoom + panY;
+
+    // Preview dimensions in screen space
+    const screenWidth = previewData.width * zoom;
+    const screenHeight = previewData.height * zoom;
+
+    // Create temporary canvas to hold the pre-rotated pixels
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = previewData.width;
+    tempCanvas.height = previewData.height;
+    const tempCtx = tempCanvas.getContext('2d')!;
+    tempCtx.putImageData(previewData, 0, 0);
+
+    // Draw centered on the original selection's center
+    // No CSS rotation - the previewData is already rotated
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      tempCanvas,
+      Math.round(centerX - screenWidth / 2),
+      Math.round(centerY - screenHeight / 2),
+      Math.round(screenWidth),
+      Math.round(screenHeight)
+    );
   }
 
   private drawSelectedState(
@@ -243,6 +296,47 @@ export class PFSelectionOverlay extends BaseComponent {
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.stroke();
+
+    ctx.restore();
+  }
+
+  private drawRotatedMarchingAnts(
+    ctx: CanvasRenderingContext2D,
+    bounds: { x: number; y: number; width: number; height: number },
+    rotation: number,
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    // Calculate center in screen coordinates
+    const centerX = (bounds.x + bounds.width / 2) * zoom + panX;
+    const centerY = (bounds.y + bounds.height / 2) * zoom + panY;
+
+    // Screen dimensions
+    const screenWidth = bounds.width * zoom;
+    const screenHeight = bounds.height * zoom;
+
+    // Half dimensions for drawing from center
+    const halfW = screenWidth / 2 - 0.5;
+    const halfH = screenHeight / 2 - 0.5;
+
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    // Translate to center and rotate
+    ctx.translate(centerX, centerY);
+    ctx.rotate((rotation * Math.PI) / 180);
+
+    // White dashes
+    ctx.strokeStyle = 'white';
+    ctx.lineDashOffset = -this.dashOffset;
+    ctx.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1);
+
+    // Black dashes (offset to fill gaps)
+    ctx.strokeStyle = 'black';
+    ctx.lineDashOffset = -this.dashOffset + 4;
+    ctx.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1);
 
     ctx.restore();
   }

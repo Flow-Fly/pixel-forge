@@ -32,15 +32,24 @@ export class PFMarchingAntsOverlay extends BaseComponent {
   private animationFrameId = 0;
   private dashOffset = 0;
   private lastTimestamp = 0;
+  private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-    window.addEventListener('resize', this.handleResize);
+    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
+    this.resizeObserver = new ResizeObserver(() => {
+      this.handleResize();
+    });
+    this.resizeObserver.observe(this);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener('resize', this.handleResize);
+    // Clean up ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = 0;
