@@ -491,4 +491,15 @@ export function registerShortcuts() {
     },
     "Toggle Pixel Perfect Mode"
   );
+
+  // ============================================
+  // FILE SHORTCUTS
+  // ============================================
+
+  // Ctrl+N / Cmd+N = New Project
+  const openNewProjectDialog = () => {
+    window.dispatchEvent(new CustomEvent('show-new-project-dialog'));
+  };
+  keyboardService.register("n", ["ctrl"], openNewProjectDialog, "New project");
+  keyboardService.register("n", ["meta"], openNewProjectDialog, "New project");
 }

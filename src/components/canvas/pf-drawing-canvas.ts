@@ -471,12 +471,14 @@ export class PFDrawingCanvas extends BaseComponent {
     const { x, y } = this.clampToCanvas(rawCoords.x, rawCoords.y);
     const modifiers = this.getModifiers(e);
 
-    // Emit cursor position (clamped) for brush overlay
-    window.dispatchEvent(
-      new CustomEvent('canvas-cursor', {
-        detail: { x: Math.floor(x), y: Math.floor(y) },
-      })
-    );
+    // Emit cursor position (clamped) for brush overlay and status bar
+    const cursorEvent = new CustomEvent('canvas-cursor', {
+      detail: { x: Math.floor(x), y: Math.floor(y) },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(cursorEvent);
+    window.dispatchEvent(cursorEvent);
 
     this.activeTool.onDrag(x, y, modifiers);
     renderScheduler.scheduleRender(() => this.renderCanvas());
@@ -559,11 +561,13 @@ export class PFDrawingCanvas extends BaseComponent {
     const { x, y } = this.getCanvasCoordinates(e);
 
     // Emit cursor position for status bar and brush cursor overlay
-    window.dispatchEvent(
-      new CustomEvent('canvas-cursor', {
-        detail: { x: Math.floor(x), y: Math.floor(y) },
-      })
-    );
+    const cursorEvent = new CustomEvent('canvas-cursor', {
+      detail: { x: Math.floor(x), y: Math.floor(y) },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(cursorEvent);
+    window.dispatchEvent(cursorEvent);
 
     // Skip tool interaction during pan operations
     if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {

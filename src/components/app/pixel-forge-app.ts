@@ -16,12 +16,15 @@ import "../ui/pf-shortcuts-overlay";
 import "../ui/pf-shortcuts-toggle";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
+import "../dialogs/pf-new-project-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-collapsible-panel";
 import "../shape/pf-shape-options";
 import { projectStore } from "../../stores/project";
+import { historyStore } from "../../stores/history";
+import { persistenceService } from "../../services/persistence/indexed-db";
 import { type ToolType } from "../../stores/tools";
 
 @customElement("pixel-forge-app")
@@ -141,6 +144,7 @@ export class PixelForgeApp extends BaseComponent {
 
   @state() showResizeDialog = false;
   @state() showExportDialog = false;
+  @state() showNewProjectDialog = false;
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
@@ -155,12 +159,35 @@ export class PixelForgeApp extends BaseComponent {
     if (savedHeight) {
       this.timelineHeight = Math.max(100, Math.min(500, parseInt(savedHeight, 10)));
     }
+
+    // Load saved project from IndexedDB
+    this.loadSavedProject();
+
+    // Listen for keyboard shortcut to open new project dialog
+    window.addEventListener('show-new-project-dialog', this.handleShowNewProjectDialog);
+  }
+
+  private handleShowNewProjectDialog = () => {
+    this.showNewProjectDialog = true;
+  };
+
+  private async loadSavedProject() {
+    try {
+      const savedProject = await persistenceService.loadCurrentProject();
+      if (savedProject) {
+        await projectStore.loadProject(savedProject);
+        historyStore.clear();
+      }
+    } catch (error) {
+      console.warn('Failed to load saved project, starting fresh:', error);
+    }
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener('mousemove', this.handleTimelineResizeMove);
     document.removeEventListener('mouseup', this.handleTimelineResizeEnd);
+    window.removeEventListener('show-new-project-dialog', this.handleShowNewProjectDialog);
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -205,6 +232,7 @@ export class PixelForgeApp extends BaseComponent {
         <pf-menu-bar
           @resize-canvas=${() => (this.showResizeDialog = true)}
           @show-export-dialog=${() => (this.showExportDialog = true)}
+          @show-new-project-dialog=${() => (this.showNewProjectDialog = true)}
         ></pf-menu-bar>
       </header>
 
@@ -275,6 +303,11 @@ export class PixelForgeApp extends BaseComponent {
         ?open=${this.showExportDialog}
         @close=${() => (this.showExportDialog = false)}
       ></pf-export-dialog>
+
+      <pf-new-project-dialog
+        ?open=${this.showNewProjectDialog}
+        @close=${() => (this.showNewProjectDialog = false)}
+      ></pf-new-project-dialog>
     `;
   }
 }

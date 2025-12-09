@@ -5,7 +5,6 @@ import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
 import { gridStore } from '../../stores/grid';
-import { viewportStore } from '../../stores/viewport';
 import { FlipLayerCommand, RotateLayerCommand } from '../../commands/layer-commands';
 import { FileService } from '../../services/file-service';
 import { openAseFile, exportAseFile } from '../../services/aseprite-service';
@@ -16,12 +15,55 @@ const SHORTCUTS_STORAGE_KEY = 'pf-shortcuts-visible';
 @customElement('pf-menu-bar')
 export class PFMenuBar extends BaseComponent {
   @state() private shortcutsVisible = true;
+  @state() private isEditingName = false;
 
   static styles = css`
     :host {
       display: flex;
       height: 100%;
       align-items: center;
+      width: 100%;
+    }
+
+    .menus {
+      display: flex;
+      align-items: center;
+      height: 100%;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .project-name {
+      display: flex;
+      align-items: center;
+      margin-right: var(--pf-spacing-4);
+    }
+
+    .project-name-display {
+      padding: 2px 8px;
+      font-size: var(--pf-font-size-sm);
+      color: var(--pf-color-text-muted);
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid transparent;
+    }
+
+    .project-name-display:hover {
+      color: var(--pf-color-text-main);
+      background-color: var(--pf-color-bg-surface);
+    }
+
+    .project-name-input {
+      padding: 2px 8px;
+      font-size: var(--pf-font-size-sm);
+      color: var(--pf-color-text-main);
+      background-color: var(--pf-color-bg-dark);
+      border: 1px solid var(--pf-color-primary);
+      border-radius: 4px;
+      outline: none;
+      width: 150px;
     }
 
     .menu-btn {
@@ -175,49 +217,103 @@ export class PFMenuBar extends BaseComponent {
     this.dispatchEvent(new CustomEvent('show-export-dialog', { bubbles: true, composed: true }));
   }
 
+  showNewProjectDialog() {
+    this.dispatchEvent(new CustomEvent('show-new-project-dialog', { bubbles: true, composed: true }));
+  }
+
   toggleShortcutsOverlay() {
     window.dispatchEvent(new CustomEvent('toggle-shortcuts-overlay'));
   }
 
+  private startEditingName() {
+    this.isEditingName = true;
+    // Focus the input after render
+    this.updateComplete.then(() => {
+      const input = this.shadowRoot?.querySelector('.project-name-input') as HTMLInputElement;
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  private handleNameKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      this.commitNameEdit(e);
+    } else if (e.key === 'Escape') {
+      this.isEditingName = false;
+    }
+  }
+
+  private commitNameEdit(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const newName = input.value.trim() || 'Untitled';
+    projectStore.name.value = newName;
+    this.isEditingName = false;
+  }
+
   render() {
+    const projectName = projectStore.name.value;
+
     return html`
-      <button id="btn-file" class="menu-btn" popovertarget="menu-file">File</button>
-      <div id="menu-file" popover>
-        <div class="menu-item">New... <span class="shortcut">Ctrl+N</span></div>
-        <div class="menu-item" @click=${this.openProject}>Open... <span class="shortcut">Ctrl+O</span></div>
-        <div class="menu-item" @click=${this.saveProject}>Save <span class="shortcut">Ctrl+S</span></div>
-        <div class="menu-item" @click=${this.openAseprite}>Import Aseprite...</div>
-        <div class="menu-item" @click=${this.showExportDialog}>Export... <span class="shortcut">Ctrl+E</span></div>
-        <div class="menu-item" @click=${this.exportAseprite}>Export Aseprite...</div>
+      <div class="menus">
+        <button id="btn-file" class="menu-btn" popovertarget="menu-file">File</button>
+        <div id="menu-file" popover>
+          <div class="menu-item" @click=${this.showNewProjectDialog}>New... <span class="shortcut">Ctrl+N</span></div>
+          <div class="menu-item" @click=${this.openProject}>Open... <span class="shortcut">Ctrl+O</span></div>
+          <div class="menu-item" @click=${this.saveProject}>Save <span class="shortcut">Ctrl+S</span></div>
+          <div class="menu-item" @click=${this.openAseprite}>Import Aseprite...</div>
+          <div class="menu-item" @click=${this.showExportDialog}>Export... <span class="shortcut">Ctrl+E</span></div>
+          <div class="menu-item" @click=${this.exportAseprite}>Export Aseprite...</div>
+        </div>
+
+        <button id="btn-edit" class="menu-btn" popovertarget="menu-edit">Edit</button>
+        <div id="menu-edit" popover>
+          <div class="menu-item" @click=${() => historyStore.undo()}>Undo <span class="shortcut">Ctrl+Z</span></div>
+          <div class="menu-item" @click=${() => historyStore.redo()}>Redo <span class="shortcut">Ctrl+Y</span></div>
+          <div class="menu-item">Cut <span class="shortcut">Ctrl+X</span></div>
+          <div class="menu-item">Copy <span class="shortcut">Ctrl+C</span></div>
+          <div class="menu-item">Paste <span class="shortcut">Ctrl+V</span></div>
+        </div>
+
+        <button id="btn-view" class="menu-btn" popovertarget="menu-view">View</button>
+        <div id="menu-view" popover>
+          <div class="menu-item">Zoom In <span class="shortcut">Ctrl++</span></div>
+          <div class="menu-item">Zoom Out <span class="shortcut">Ctrl+-</span></div>
+          <div class="menu-item">Fit on Screen <span class="shortcut">Ctrl+0</span></div>
+          <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>${gridStore.pixelGridEnabled.value ? '✓ ' : '   '}Pixel Grid <span class="shortcut">Ctrl+G</span></div>
+          <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>${gridStore.tileGridEnabled.value ? '✓ ' : '   '}Tile Grid <span class="shortcut">Ctrl+Shift+G</span></div>
+          <div class="menu-item">Grid Settings...</div>
+          <div class="menu-item" @click=${this.toggleShortcutsOverlay}>${this.shortcutsVisible ? '✓ ' : '   '}Shortcuts Preview</div>
+        </div>
+
+        <button id="btn-image" class="menu-btn" popovertarget="menu-image">Image</button>
+        <div id="menu-image" popover>
+          <div class="menu-item" @click=${() => this.dispatchEvent(new CustomEvent('resize-canvas', { bubbles: true, composed: true }))}>Resize Canvas...</div>
+          <div class="menu-item" @click=${() => this.flipLayer('horizontal')}>Flip Horizontal</div>
+          <div class="menu-item" @click=${() => this.flipLayer('vertical')}>Flip Vertical</div>
+          <div class="menu-item" @click=${() => this.rotateLayer(90)}>Rotate 90° CW</div>
+          <div class="menu-item" @click=${() => this.rotateLayer(-90)}>Rotate 90° CCW</div>
+        </div>
       </div>
 
-      <button id="btn-edit" class="menu-btn" popovertarget="menu-edit">Edit</button>
-      <div id="menu-edit" popover>
-        <div class="menu-item" @click=${() => historyStore.undo()}>Undo <span class="shortcut">Ctrl+Z</span></div>
-        <div class="menu-item" @click=${() => historyStore.redo()}>Redo <span class="shortcut">Ctrl+Y</span></div>
-        <div class="menu-item">Cut <span class="shortcut">Ctrl+X</span></div>
-        <div class="menu-item">Copy <span class="shortcut">Ctrl+C</span></div>
-        <div class="menu-item">Paste <span class="shortcut">Ctrl+V</span></div>
-      </div>
+      <div class="spacer"></div>
 
-      <button id="btn-view" class="menu-btn" popovertarget="menu-view">View</button>
-      <div id="menu-view" popover>
-        <div class="menu-item">Zoom In <span class="shortcut">Ctrl++</span></div>
-        <div class="menu-item">Zoom Out <span class="shortcut">Ctrl+-</span></div>
-        <div class="menu-item">Fit on Screen <span class="shortcut">Ctrl+0</span></div>
-        <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>${gridStore.pixelGridEnabled.value ? '✓ ' : '   '}Pixel Grid <span class="shortcut">Ctrl+G</span></div>
-        <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>${gridStore.tileGridEnabled.value ? '✓ ' : '   '}Tile Grid <span class="shortcut">Ctrl+Shift+G</span></div>
-        <div class="menu-item">Grid Settings...</div>
-        <div class="menu-item" @click=${this.toggleShortcutsOverlay}>${this.shortcutsVisible ? '✓ ' : '   '}Shortcuts Preview</div>
-      </div>
-
-      <button id="btn-image" class="menu-btn" popovertarget="menu-image">Image</button>
-      <div id="menu-image" popover>
-        <div class="menu-item" @click=${() => this.dispatchEvent(new CustomEvent('resize-canvas', { bubbles: true, composed: true }))}>Resize Canvas...</div>
-        <div class="menu-item" @click=${() => this.flipLayer('horizontal')}>Flip Horizontal</div>
-        <div class="menu-item" @click=${() => this.flipLayer('vertical')}>Flip Vertical</div>
-        <div class="menu-item" @click=${() => this.rotateLayer(90)}>Rotate 90° CW</div>
-        <div class="menu-item" @click=${() => this.rotateLayer(-90)}>Rotate 90° CCW</div>
+      <div class="project-name">
+        ${this.isEditingName
+          ? html`
+              <input
+                class="project-name-input"
+                type="text"
+                .value=${projectName}
+                @blur=${this.commitNameEdit}
+                @keydown=${this.handleNameKeydown}
+              />
+            `
+          : html`
+              <span class="project-name-display" @click=${this.startEditingName} title="Click to rename">
+                ${projectName}
+              </span>
+            `
+        }
       </div>
     `;
   }

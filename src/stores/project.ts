@@ -1,6 +1,8 @@
 import { signal } from '../core/signal';
 import { layerStore } from './layers';
 import { animationStore } from './animation';
+import { historyStore } from './history';
+import { persistenceService } from '../services/persistence/indexed-db';
 import type { ProjectFile } from '../types/project';
 
 class ProjectStore {
@@ -8,6 +10,10 @@ class ProjectStore {
   height = signal(64);
   /** Background color for export. null = transparent (default) */
   backgroundColor = signal<string | null>(null);
+  /** Project name for display */
+  name = signal('Untitled');
+  /** Timestamp of last auto-save */
+  lastSaved = signal<number | null>(null);
 
   setSize(width: number, height: number) {
     this.width.value = width;
@@ -49,6 +55,7 @@ class ProjectStore {
 
     return {
       version: '1.0.0',
+      name: this.name.value,
       width: this.width.value,
       height: this.height.value,
       layers,
@@ -61,8 +68,9 @@ class ProjectStore {
   }
 
   async loadProject(file: ProjectFile) {
-    // 1. Set dimensions
+    // 1. Set dimensions and name
     this.setSize(file.width, file.height);
+    this.name.value = file.name || 'Untitled';
 
     // 2. Restore Layers
     // Clear all layers (layerStore.removeLayer doesn't have a "last layer" guard)
@@ -116,6 +124,52 @@ class ProjectStore {
     if (targetFrame) {
       animationStore.goToFrame(targetFrame.id);
     }
+  }
+
+  /**
+   * Create a new blank project with the specified dimensions.
+   * Clears all existing content and resets to a fresh state.
+   */
+  async newProject(width: number, height: number) {
+    // 1. Set new dimensions and reset name
+    this.setSize(width, height);
+    this.name.value = 'Untitled';
+    this.lastSaved.value = null;
+
+    // 2. Clear all layers
+    while (layerStore.layers.value.length > 0) {
+      layerStore.removeLayer(layerStore.layers.value[0].id);
+    }
+
+    // 3. Clear all frames except one (deleteFrame guards against last)
+    while (animationStore.frames.value.length > 1) {
+      animationStore.deleteFrame(animationStore.frames.value[0].id);
+    }
+
+    // 4. Clear the remaining frame's cels and resize
+    const remainingFrame = animationStore.frames.value[0];
+    if (remainingFrame) {
+      remainingFrame.cels = [];
+    }
+
+    // 5. Create a fresh layer with new dimensions
+    layerStore.addLayer('Layer 1', width, height);
+
+    // 6. Ensure animation store syncs with the new layer
+    animationStore.syncLayerCanvases();
+
+    // 7. Clear undo/redo history
+    historyStore.clear();
+
+    // 8. Reset animation settings
+    animationStore.fps.value = 12;
+    if (remainingFrame) {
+      animationStore.goToFrame(remainingFrame.id);
+    }
+
+    // 9. Save the fresh state immediately
+    const projectData = await this.saveProject();
+    await persistenceService.saveCurrentProject(projectData);
   }
 
   private loadImageToCanvas(dataUrl: string, canvas: HTMLCanvasElement): Promise<void> {

@@ -1,9 +1,12 @@
 import { signal } from '../core/signal';
 import { userStore } from './user';
+import { persistenceService } from '../services/persistence/indexed-db';
+import { projectStore } from './project';
 
 // Configuration constants for history limits
 const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 const MAX_HISTORY_COUNT = 100;
+const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
 export interface Command {
   id: string;
@@ -29,10 +32,69 @@ class HistoryStore {
   // Track total memory usage
   private memoryUsage = 0;
 
+  // Auto-save state
+  private isDirty = false;
+  private saveTimeout: ReturnType<typeof setTimeout> | null = null;
+
   constructor() {
     // Update computed signals when stacks change
     // Since we don't have true computed signals in our simple implementation yet,
     // we'll update them manually in the methods.
+
+    // Set up blur listener for immediate save
+    if (typeof window !== 'undefined') {
+      window.addEventListener('blur', () => this.saveOnBlur());
+      window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          this.saveOnBlur();
+        }
+      });
+    }
+  }
+
+  /**
+   * Schedule a debounced auto-save.
+   */
+  private scheduleAutoSave() {
+    this.isDirty = true;
+
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+    }
+
+    this.saveTimeout = setTimeout(() => {
+      this.performAutoSave();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Perform the actual save to IndexedDB.
+   */
+  private async performAutoSave() {
+    if (!this.isDirty) return;
+
+    try {
+      const projectData = await projectStore.saveProject();
+      await persistenceService.saveCurrentProject(projectData);
+      this.isDirty = false;
+      projectStore.lastSaved.value = Date.now();
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+    }
+  }
+
+  /**
+   * Save immediately on blur/visibility change if dirty.
+   */
+  private saveOnBlur() {
+    if (this.isDirty) {
+      // Cancel pending debounced save
+      if (this.saveTimeout) {
+        clearTimeout(this.saveTimeout);
+        this.saveTimeout = null;
+      }
+      this.performAutoSave();
+    }
   }
 
   async execute(command: Command) {
@@ -57,6 +119,7 @@ class HistoryStore {
     // Enforce limits
     this.enforceHistoryLimits();
     this.updateComputed();
+    this.scheduleAutoSave();
   }
 
   /**
@@ -120,6 +183,7 @@ class HistoryStore {
     this.redoStack.value = [...this.redoStack.value, command];
 
     this.updateComputed();
+    this.scheduleAutoSave();
   }
 
   async redo() {
@@ -150,6 +214,7 @@ class HistoryStore {
     this.undoStack.value = [...this.undoStack.value, command];
 
     this.updateComputed();
+    this.scheduleAutoSave();
   }
 
   private updateComputed() {
