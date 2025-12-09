@@ -12,7 +12,14 @@ dist
 dist-ssr
 *.local
 
-/docs/plans/*.md
+# Documentation and notes
+/docs/
+/ux/
+CLAUDE.md
+feature.md
+readme.md
+research.md
+tasks.md
 
 # Editor directories and files
 .vscode/*

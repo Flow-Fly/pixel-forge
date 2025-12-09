@@ -78,10 +78,38 @@ export class PixelForgeApp extends BaseComponent {
       min-height: 0;
     }
 
+    .timeline-resize-handle {
+      height: 6px;
+      cursor: ns-resize;
+      background: transparent;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .timeline-resize-handle::before {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 3px;
+      background: var(--pf-color-border);
+      border-radius: 2px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .timeline-resize-handle:hover::before,
+    .timeline-resize-handle.resizing::before {
+      opacity: 1;
+    }
+
     .timeline-container {
-      height: 200px;
       flex-shrink: 0;
       border-top: 1px solid var(--pf-color-border);
+      min-height: 100px;
+      max-height: 500px;
     }
 
     .panels {
@@ -114,9 +142,61 @@ export class PixelForgeApp extends BaseComponent {
   @state() showResizeDialog = false;
   @state() showExportDialog = false;
   @state() cursorPosition = { x: 0, y: 0 };
+  @state() timelineHeight = 200;
+  @state() private isResizingTimeline = false;
+
+  private resizeStartY = 0;
+  private resizeStartHeight = 0;
+
+  connectedCallback() {
+    super.connectedCallback();
+    // Load saved timeline height
+    const savedHeight = localStorage.getItem('pf-timeline-height');
+    if (savedHeight) {
+      this.timelineHeight = Math.max(100, Math.min(500, parseInt(savedHeight, 10)));
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener('mousemove', this.handleTimelineResizeMove);
+    document.removeEventListener('mouseup', this.handleTimelineResizeEnd);
+  }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
     this.cursorPosition = e.detail;
+  };
+
+  private handleTimelineResizeStart = (e: MouseEvent) => {
+    e.preventDefault();
+    this.isResizingTimeline = true;
+    this.resizeStartY = e.clientY;
+    this.resizeStartHeight = this.timelineHeight;
+
+    document.addEventListener('mousemove', this.handleTimelineResizeMove);
+    document.addEventListener('mouseup', this.handleTimelineResizeEnd);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  private handleTimelineResizeMove = (e: MouseEvent) => {
+    if (!this.isResizingTimeline) return;
+
+    // Dragging up increases height (inverse delta)
+    const deltaY = this.resizeStartY - e.clientY;
+    const newHeight = Math.max(100, Math.min(500, this.resizeStartHeight + deltaY));
+    this.timelineHeight = newHeight;
+  };
+
+  private handleTimelineResizeEnd = () => {
+    this.isResizingTimeline = false;
+    document.removeEventListener('mousemove', this.handleTimelineResizeMove);
+    document.removeEventListener('mouseup', this.handleTimelineResizeEnd);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+
+    // Save to localStorage
+    localStorage.setItem('pf-timeline-height', String(this.timelineHeight));
   };
 
   render() {
@@ -146,7 +226,11 @@ export class PixelForgeApp extends BaseComponent {
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
         <pf-shortcuts-toggle></pf-shortcuts-toggle>
-        <div class="timeline-container">
+        <div
+          class="timeline-resize-handle ${this.isResizingTimeline ? 'resizing' : ''}"
+          @mousedown=${this.handleTimelineResizeStart}
+        ></div>
+        <div class="timeline-container" style="height: ${this.timelineHeight}px;">
           <pf-timeline></pf-timeline>
         </div>
       </main>
