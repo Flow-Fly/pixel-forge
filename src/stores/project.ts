@@ -3,7 +3,8 @@ import { layerStore } from './layers';
 import { animationStore } from './animation';
 import { historyStore } from './history';
 import { persistenceService } from '../services/persistence/indexed-db';
-import type { ProjectFile } from '../types/project';
+import { canvasToPngBytes, loadImageDataToCanvas } from '../utils/canvas-binary';
+import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 
 class ProjectStore {
   width = signal(64);
@@ -26,35 +27,48 @@ class ProjectStore {
   }
 
   async saveProject(): Promise<ProjectFile> {
-    const layers = layerStore.layers.value.map(layer => ({
-      id: layer.id,
-      name: layer.name,
-      visible: layer.visible,
-      opacity: layer.opacity,
-      data: layer.canvas ? layer.canvas.toDataURL() : ''
-    }));
+    // Convert layers to binary format
+    const layers = await Promise.all(
+      layerStore.layers.value.map(async layer => ({
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        data: layer.canvas
+          ? await canvasToPngBytes(layer.canvas)
+          : new Uint8Array(0)
+      }))
+    );
 
-    const frames = await Promise.all(animationStore.frames.value.map(async frame => {
-      // Get cels for this frame by iterating layers
-      const cels = await Promise.all(layerStore.layers.value.map(async layer => {
-        const canvas = animationStore.getCelCanvas(frame.id, layer.id);
+    // Convert frames/cels to binary format
+    const frames = await Promise.all(
+      animationStore.frames.value.map(async frame => {
+        const cels = await Promise.all(
+          layerStore.layers.value.map(async layer => {
+            const canvas = animationStore.getCelCanvas(frame.id, layer.id);
+            return {
+              layerId: layer.id,
+              data: canvas
+                ? await canvasToPngBytes(canvas)
+                : new Uint8Array(0)
+            };
+          })
+        );
+
         return {
-          layerId: layer.id,
-          data: canvas ? canvas.toDataURL() : ''
+          id: frame.id,
+          duration: frame.duration,
+          cels
         };
-      }));
+      })
+    );
 
-      return {
-        id: frame.id,
-        duration: frame.duration,
-        cels: cels.filter(c => c.data !== '') // Only save cels with data? Or all? Let's save all for structure.
-      };
-    }));
-
-    const currentFrameIndex = animationStore.frames.value.findIndex(f => f.id === animationStore.currentFrameId.value);
+    const currentFrameIndex = animationStore.frames.value.findIndex(
+      f => f.id === animationStore.currentFrameId.value
+    );
 
     return {
-      version: '1.0.0',
+      version: PROJECT_VERSION,
       name: this.name.value,
       width: this.width.value,
       height: this.height.value,
@@ -63,7 +77,8 @@ class ProjectStore {
       animation: {
         fps: animationStore.fps.value,
         currentFrameIndex: currentFrameIndex === -1 ? 0 : currentFrameIndex
-      }
+      },
+      tags: animationStore.tags.value
     };
   }
 
@@ -83,8 +98,10 @@ class ProjectStore {
       layer.id = l.id;
       layer.visible = l.visible;
       layer.opacity = l.opacity;
-      if (l.data) {
-        await this.loadImageToCanvas(l.data, layer.canvas);
+      // Handle both Base64 (v1.x) and binary (v2.0+) formats
+      const hasData = typeof l.data === 'string' ? l.data.length > 0 : l.data.length > 0;
+      if (hasData) {
+        await loadImageDataToCanvas(l.data, layer.canvas);
       }
     }
 
@@ -106,8 +123,10 @@ class ProjectStore {
       // Populate cels
       for (const c of f.cels) {
         const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
-        if (canvas && c.data) {
-          await this.loadImageToCanvas(c.data, canvas);
+        // Handle both Base64 (v1.x) and binary (v2.0+) formats
+        const hasData = typeof c.data === 'string' ? c.data.length > 0 : c.data.length > 0;
+        if (canvas && hasData) {
+          await loadImageDataToCanvas(c.data, canvas);
         }
       }
     }
@@ -123,6 +142,13 @@ class ProjectStore {
     const targetFrame = animationStore.frames.value[file.animation.currentFrameIndex];
     if (targetFrame) {
       animationStore.goToFrame(targetFrame.id);
+    }
+
+    // 5. Restore Tags (v2.0+)
+    if (file.tags && Array.isArray(file.tags)) {
+      animationStore.tags.value = file.tags;
+    } else {
+      animationStore.tags.value = [];
     }
   }
 
@@ -161,28 +187,18 @@ class ProjectStore {
     // 7. Clear undo/redo history
     historyStore.clear();
 
-    // 8. Reset animation settings
+    // 8. Clear tags
+    animationStore.tags.value = [];
+
+    // 9. Reset animation settings
     animationStore.fps.value = 12;
     if (remainingFrame) {
       animationStore.goToFrame(remainingFrame.id);
     }
 
-    // 9. Save the fresh state immediately
+    // 10. Save the fresh state immediately
     const projectData = await this.saveProject();
     await persistenceService.saveCurrentProject(projectData);
-  }
-
-  private loadImageToCanvas(dataUrl: string, canvas: HTMLCanvasElement): Promise<void> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const ctx = canvas.getContext('2d');
-        ctx?.clearRect(0, 0, canvas.width, canvas.height);
-        ctx?.drawImage(img, 0, 0);
-        resolve();
-      };
-      img.src = dataUrl;
-    });
   }
 }
 
