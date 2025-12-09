@@ -29,6 +29,12 @@ export abstract class BaseTool {
   // Called when mouse moves without being down (for hover effects)
   onMove(_x: number, _y: number, _modifiers?: ModifierKeys): void {}
 
+  // Called when a key is pressed (for tool-specific shortcuts)
+  onKeyDown(_e: KeyboardEvent): void {}
+
+  // Called when a key is released
+  onKeyUp(_e: KeyboardEvent): void {}
+
   protected context: CanvasRenderingContext2D | null = null;
 
   setContext(ctx: CanvasRenderingContext2D) {

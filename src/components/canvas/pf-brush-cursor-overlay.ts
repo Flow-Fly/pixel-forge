@@ -34,10 +34,16 @@ export class PFBrushCursorOverlay extends BaseComponent {
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId = 0;
+  private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-    window.addEventListener('resize', this.handleResize);
+
+    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
+    this.resizeObserver = new ResizeObserver(() => {
+      this.handleResize();
+    });
+    this.resizeObserver.observe(this);
 
     // Listen for cursor position from drawing canvas
     window.addEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
@@ -54,7 +60,13 @@ export class PFBrushCursorOverlay extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener('resize', this.handleResize);
+
+    // Clean up ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+
     window.removeEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
     window.removeEventListener('canvas-cursor-leave', this.handleCanvasCursorLeave);
     window.removeEventListener('line-preview', this.handleLinePreview as EventListener);

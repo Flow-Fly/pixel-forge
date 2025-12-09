@@ -6,10 +6,15 @@ import { gridStore } from "../../stores/grid";
 import { projectStore } from "../../stores/project";
 import { colorStore } from "../../stores/colors";
 import { toolStore } from "../../stores/tools";
+import { selectionStore } from "../../stores/selection";
+import { historyStore } from "../../stores/history";
 import { getToolSize, setToolSize } from "../../stores/tool-settings";
+import { CutToFloatCommand, TransformSelectionCommand } from "../../commands/selection-commands";
+import { layerStore } from "../../stores/layers";
 import "./pf-selection-overlay";
 import "./pf-marching-ants-overlay";
 import "./pf-brush-cursor-overlay";
+import "./pf-transform-handles";
 
 @customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
@@ -89,15 +94,25 @@ export class PFCanvasViewport extends BaseComponent {
   private isCtrlActuallyPressed = false;
   private isMetaActuallyPressed = false;
 
+  // ResizeObserver to detect flex layout changes (e.g., timeline resize)
+  private resizeObserver: ResizeObserver | null = null;
+
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("keyup", this.handleKeyUp);
     window.addEventListener("blur", this.handleWindowBlur);
+    window.addEventListener("commit-transform", this.handleCommitTransform);
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions();
-    window.addEventListener("resize", this.handleResize);
+
+    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
+    // This replaces window resize listener which doesn't fire for flex changes
+    this.resizeObserver = new ResizeObserver(() => {
+      this.handleResize();
+    });
+    this.resizeObserver.observe(this);
 
     // Center canvas on launch
     requestAnimationFrame(() => {
@@ -116,6 +131,8 @@ export class PFCanvasViewport extends BaseComponent {
   private handleResize = () => {
     this.updateContainerDimensions();
     this.resizeGridCanvas();
+    // Trigger re-render to redraw grids after resize
+    this.requestUpdate();
   };
 
   private resizeGridCanvas() {
@@ -134,7 +151,13 @@ export class PFCanvasViewport extends BaseComponent {
     window.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("keyup", this.handleKeyUp);
     window.removeEventListener("blur", this.handleWindowBlur);
-    window.removeEventListener("resize", this.handleResize);
+    window.removeEventListener("commit-transform", this.handleCommitTransform);
+
+    // Clean up ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
 
     // Clean up any active drag listeners
     window.removeEventListener("mousemove", this.handleGlobalMouseMove);
@@ -208,6 +231,10 @@ export class PFCanvasViewport extends BaseComponent {
       <pf-selection-overlay></pf-selection-overlay>
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
       <pf-brush-cursor-overlay></pf-brush-cursor-overlay>
+      <pf-transform-handles
+        @rotation-start=${this.handleRotationStart}
+        @rotation-end=${this.handleRotationEnd}
+      ></pf-transform-handles>
     `;
   }
 
@@ -421,6 +448,18 @@ export class PFCanvasViewport extends BaseComponent {
       e.preventDefault();
       gridStore.toggleTileGrid();
       return;
+    }
+
+    // Handle transform state Enter/Escape
+    const selectionState = selectionStore.state.value;
+    if (selectionState.type === 'transforming') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.commitTransform();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        selectionStore.cancelTransform();
+      }
     }
   };
 
@@ -648,8 +687,139 @@ export class PFCanvasViewport extends BaseComponent {
       return;
     }
 
-    // Regular two-finger scroll = pan
-    viewportStore.panBy(-e.deltaX, -e.deltaY);
+    // Distinguish mouse wheel from trackpad two-finger scroll:
+    // - deltaMode === 1 (LINE) = mouse wheel → zoom
+    // - deltaMode === 0 (PIXEL) with horizontal component = trackpad pan → pan
+    // - deltaMode === 0 (PIXEL) Y-only with large delta = likely mouse wheel → zoom
+    const isMouseWheel =
+      e.deltaMode === 1 || // LINE mode is definitely mouse wheel
+      (e.deltaMode === 0 && e.deltaX === 0 && Math.abs(e.deltaY) >= 50); // Large discrete Y-only in pixel mode
+
+    if (isMouseWheel) {
+      // Mouse wheel = zoom at cursor position
+      const rect = this.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+
+      if (e.deltaY < 0) {
+        viewportStore.zoomInAt(screenX, screenY);
+      } else if (e.deltaY > 0) {
+        viewportStore.zoomOutAt(screenX, screenY);
+      }
+    } else {
+      // Trackpad two-finger scroll = pan
+      viewportStore.panBy(-e.deltaX, -e.deltaY);
+    }
+
     this.requestUpdate();
+  }
+
+  // ============================================
+  // Rotation handlers
+  // ============================================
+
+  private handleRotationStart = (e: CustomEvent) => {
+    const state = selectionStore.state.value;
+
+    // If we're in floating state, we need to transition to transforming
+    if (state.type === 'floating') {
+      selectionStore.startTransform(
+        state.imageData,
+        {
+          x: state.originalBounds.x + state.currentOffset.x,
+          y: state.originalBounds.y + state.currentOffset.y,
+          width: state.originalBounds.width,
+          height: state.originalBounds.height,
+        },
+        state.shape,
+        state.mask
+      );
+    } else if (state.type === 'selected') {
+      // For selected state, we need to cut to floating first, then transform
+      // Use the active layer's canvas, not the composited drawing canvas
+      const activeLayerId = layerStore.activeLayerId.value;
+      const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
+      if (!activeLayer?.canvas) return;
+
+      const canvas = activeLayer.canvas;
+      const bounds = state.bounds;
+      const shape = state.shape;
+      const mask = state.shape === 'freeform' ? state.mask : undefined;
+
+      // Cut to float from the active layer
+      const cutCommand = new CutToFloatCommand(canvas, activeLayerId || '', bounds, shape, mask);
+      historyStore.execute(cutCommand);
+
+      // Now we should be in floating state - start transform
+      const floatingState = selectionStore.state.value;
+      if (floatingState.type === 'floating') {
+        selectionStore.startTransform(
+          floatingState.imageData,
+          floatingState.originalBounds,
+          floatingState.shape,
+          floatingState.mask
+        );
+      }
+    }
+    // If already transforming, do nothing (drag tracking continues in transform-handles)
+  };
+
+  private handleRotationEnd = () => {
+    // Rotation drag ended - the transform will be committed when user
+    // clicks outside or presses Enter
+  };
+
+  /**
+   * Handle commit-transform event from context bar Apply button.
+   */
+  private handleCommitTransform = () => {
+    this.commitTransform();
+  };
+
+  /**
+   * Commit the current transform (rotation) to the canvas.
+   * Called when user presses Enter or clicks Apply.
+   */
+  private commitTransform() {
+    const transformState = selectionStore.getTransformState();
+    if (!transformState) return;
+
+    const { imageData, originalBounds, currentBounds, rotation, shape, mask } = transformState;
+
+    // If rotation is 0, just cancel (no change needed)
+    if (rotation === 0) {
+      selectionStore.cancelTransform();
+      return;
+    }
+
+    // Get the active layer's canvas
+    const activeLayerId = layerStore.activeLayerId.value;
+    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
+    if (!activeLayer?.canvas) {
+      console.error('Active layer canvas not found');
+      selectionStore.cancelTransform();
+      return;
+    }
+
+    // Use already-computed preview data (same CleanEdge algorithm)
+    const rotatedImageData = selectionStore.getTransformPreview();
+    if (!rotatedImageData) {
+      selectionStore.cancelTransform();
+      return;
+    }
+
+    // Create and execute the transform command on the active layer
+    const command = new TransformSelectionCommand(
+      activeLayer.canvas,
+      imageData,
+      originalBounds,
+      rotatedImageData,
+      currentBounds,
+      rotation,
+      shape,
+      mask
+    );
+
+    historyStore.execute(command);
   }
 }
