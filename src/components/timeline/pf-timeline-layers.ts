@@ -1,9 +1,14 @@
 import { html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { layerStore } from '../../stores/layers';
+import { animationStore } from '../../stores/animation';
+import { projectStore } from '../../stores/project';
 import { historyStore } from '../../stores/history';
 import { AddLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../commands/layer-commands';
+import { compositeLayer } from '../../utils/canvas-utils';
+import './pf-timeline-tooltip';
+import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 
 @customElement('pf-timeline-layers')
 export class PFTimelineLayers extends BaseComponent {
@@ -153,6 +158,36 @@ export class PFTimelineLayers extends BaseComponent {
   @state() private draggedLayerId: string | null = null;
   @state() private dragOverLayerId: string | null = null;
 
+  @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
+
+  private handleLayerMouseEnter(e: MouseEvent, layerId: string, layerName: string) {
+    const target = e.currentTarget as HTMLElement;
+    if (!this.tooltip) return;
+
+    const currentFrameId = animationStore.currentFrameId.value;
+
+    // Update tooltip - layer preview doesn't need secondary text
+    this.tooltip.primaryText = layerName;
+    this.tooltip.secondaryText = '';
+    this.tooltip.canvasWidth = projectStore.width.value;
+    this.tooltip.canvasHeight = projectStore.height.value;
+
+    // Render the layer preview
+    this.tooltip.show(target);
+    requestAnimationFrame(() => {
+      const ctx = this.tooltip.getContext();
+      if (ctx) {
+        compositeLayer(layerId, currentFrameId, ctx);
+      }
+    });
+  }
+
+  private handleLayerMouseLeave() {
+    if (this.tooltip) {
+      this.tooltip.hide();
+    }
+  }
+
   private addLayer() {
     historyStore.execute(new AddLayerCommand());
   }
@@ -290,6 +325,8 @@ export class PFTimelineLayers extends BaseComponent {
           <div
             class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${this.draggedLayerId === layer.id ? 'dragging' : ''} ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
             @click=${() => this.selectLayer(layer.id)}
+            @mouseenter=${(e: MouseEvent) => this.handleLayerMouseEnter(e, layer.id, layer.name)}
+            @mouseleave=${this.handleLayerMouseLeave}
             draggable="true"
             @dragstart=${(e: DragEvent) => this.handleDragStart(layer.id, e)}
             @dragend=${this.handleDragEnd}
@@ -333,6 +370,7 @@ export class PFTimelineLayers extends BaseComponent {
           </div>
         `)}
       </div>
+      <pf-timeline-tooltip></pf-timeline-tooltip>
     `;
   }
 }

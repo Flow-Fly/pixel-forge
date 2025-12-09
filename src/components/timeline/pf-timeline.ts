@@ -9,6 +9,7 @@ import './pf-onion-skin-controls';
 import './pf-timeline-header';
 import './pf-timeline-layers';
 import './pf-timeline-grid';
+import type { PFTimelineHeader } from './pf-timeline-header';
 
 @customElement('pf-timeline')
 export class PFTimeline extends BaseComponent {
@@ -85,6 +86,35 @@ export class PFTimeline extends BaseComponent {
       display: flex;
       overflow: auto;
       background-color: var(--pf-color-bg-dark);
+
+      /* Firefox scrollbar styling */
+      scrollbar-width: thin;
+      scrollbar-color: var(--pf-color-scrollbar-thumb, #555) var(--pf-color-scrollbar-track, #2a2a2a);
+    }
+
+    /* Webkit (Chrome, Safari, Edge) scrollbar styling */
+    .scroll-container::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    .scroll-container::-webkit-scrollbar-track {
+      background: var(--pf-color-scrollbar-track, #2a2a2a);
+      border-radius: 4px;
+    }
+
+    .scroll-container::-webkit-scrollbar-thumb {
+      background: var(--pf-color-scrollbar-thumb, #555);
+      border-radius: 4px;
+      border: 2px solid var(--pf-color-scrollbar-track, #2a2a2a);
+    }
+
+    .scroll-container::-webkit-scrollbar-thumb:hover {
+      background: var(--pf-color-scrollbar-thumb-hover, #777);
+    }
+
+    .scroll-container::-webkit-scrollbar-corner {
+      background: var(--pf-color-scrollbar-track, #2a2a2a);
     }
 
     .layers-column {
@@ -102,6 +132,13 @@ export class PFTimeline extends BaseComponent {
 
   @query('.scroll-container') scrollContainer!: HTMLElement;
   @query('.header-frames') headerFrames!: HTMLElement;
+  @query('pf-timeline-header') timelineHeader!: PFTimelineHeader;
+
+  private handleUnitChange = (e: CustomEvent<{ unit: 'ms' | 'fps' }>) => {
+    if (this.timelineHeader) {
+      this.timelineHeader.setDurationUnit(e.detail.unit);
+    }
+  };
 
   private addLayer() {
     historyStore.execute(new AddLayerCommand());
@@ -144,7 +181,7 @@ export class PFTimeline extends BaseComponent {
 
     return html`
       <div class="controls-area">
-        <pf-playback-controls></pf-playback-controls>
+        <pf-playback-controls @unit-change=${this.handleUnitChange}></pf-playback-controls>
         <pf-onion-skin-controls></pf-onion-skin-controls>
       </div>
       <div class="header-row">

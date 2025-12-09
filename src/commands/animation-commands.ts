@@ -7,18 +7,20 @@ export class AddFrameCommand implements Command {
   name = 'Add Frame';
   private frameId: string | null = null;
   private duplicate: boolean;
+  private sourceFrameId?: string;
 
-  constructor(duplicate: boolean = true) {
+  constructor(duplicate: boolean = true, sourceFrameId?: string) {
     this.duplicate = duplicate;
+    this.sourceFrameId = sourceFrameId;
   }
 
   execute() {
     // We need to capture the ID of the created frame
     // animationStore.addFrame doesn't return it currently
     // We should modify animationStore or just check the last frame
-    
+
     const countBefore = animationStore.frames.value.length;
-    animationStore.addFrame(this.duplicate);
+    animationStore.addFrame(this.duplicate, this.sourceFrameId);
     const frames = animationStore.frames.value;
     if (frames.length > countBefore) {
       this.frameId = frames[frames.length - 1].id;
@@ -82,5 +84,54 @@ export class DeleteFrameCommand implements Command {
     animationStore.cels.value = storeCels;
 
     animationStore.goToFrame(this.frameId);
+  }
+}
+
+export class SetFrameDurationCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Set Frame Duration';
+  private frameId: string;
+  private newDuration: number;
+  private oldDuration: number;
+
+  constructor(frameId: string, newDuration: number, oldDuration?: number) {
+    this.frameId = frameId;
+    this.newDuration = newDuration;
+    // Use provided oldDuration or get from current state
+    if (oldDuration !== undefined) {
+      this.oldDuration = oldDuration;
+    } else {
+      const frame = animationStore.frames.value.find(f => f.id === frameId);
+      this.oldDuration = frame?.duration ?? 100;
+    }
+  }
+
+  execute() {
+    animationStore.setFrameDuration(this.frameId, this.newDuration);
+  }
+
+  undo() {
+    animationStore.setFrameDuration(this.frameId, this.oldDuration);
+  }
+}
+
+export class ReorderFrameCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Reorder Frame';
+  private fromIndex: number;
+  private toIndex: number;
+
+  constructor(fromIndex: number, toIndex: number) {
+    this.fromIndex = fromIndex;
+    this.toIndex = toIndex;
+  }
+
+  execute() {
+    animationStore.reorderFrame(this.fromIndex, this.toIndex);
+  }
+
+  undo() {
+    // Reverse the reorder
+    animationStore.reorderFrame(this.toIndex, this.fromIndex);
   }
 }

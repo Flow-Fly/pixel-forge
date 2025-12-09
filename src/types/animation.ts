@@ -11,6 +11,19 @@ export interface AnimationTag {
   color: string;
 }
 
+/**
+ * Frame tag that spans a range of frames.
+ * Used for grouping frames and looping within sections.
+ */
+export interface FrameTag {
+  id: string;
+  name: string;
+  color: string;
+  startFrameIndex: number;
+  endFrameIndex: number;
+  collapsed: boolean;
+}
+
 export interface OnionSkinSettings {
   enabled: boolean;
   prevFrames: number;
@@ -24,6 +37,8 @@ export interface Cel {
   layerId: string;
   frameId: string;
   canvas: HTMLCanvasElement;
+  linkedCelId?: string;  // Group identifier for linked cels (share same canvas)
+  opacity?: number;      // Cel-level opacity (0-100, default 100)
 }
 
 export interface AnimationState {

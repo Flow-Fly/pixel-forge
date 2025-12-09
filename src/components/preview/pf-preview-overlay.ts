@@ -5,6 +5,7 @@ import { animationStore } from '../../stores/animation';
 import { layerStore } from '../../stores/layers';
 import { viewportStore } from '../../stores/viewport';
 import { projectStore } from '../../stores/project';
+import { renderFrameToCanvas } from '../../utils/preview-renderer';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -207,7 +208,6 @@ export class PFPreviewOverlay extends BaseComponent {
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number = 0;
-  private lastFrameTime: number = 0;
   private previewScale = 2; // Preview canvas scale factor
 
   connectedCallback() {
@@ -328,63 +328,27 @@ export class PFPreviewOverlay extends BaseComponent {
   }
 
   private togglePlay() {
-    animationStore.isPlaying.value = !animationStore.isPlaying.value;
+    // Delegate to store's playback engine
+    animationStore.togglePlayback();
   }
 
   private startAnimationLoop() {
-    const loop = (timestamp: number) => {
-      if (!this.lastFrameTime) this.lastFrameTime = timestamp;
-      const elapsed = timestamp - this.lastFrameTime;
-      const fps = animationStore.fps.value;
-      const interval = 1000 / fps;
-
-      if (animationStore.isPlaying.value && elapsed > interval) {
-        this.advanceFrame();
-        this.lastFrameTime = timestamp;
-      }
-
+    // This loop only handles rendering - playback is managed by animationStore
+    const loop = () => {
       this.renderPreview();
       this.animationFrameId = requestAnimationFrame(loop);
     };
     this.animationFrameId = requestAnimationFrame(loop);
   }
 
-  private advanceFrame() {
-    const frames = animationStore.frames.value;
-    const currentId = animationStore.currentFrameId.value;
-    const currentIndex = frames.findIndex(f => f.id === currentId);
-    const nextIndex = (currentIndex + 1) % frames.length;
-    animationStore.currentFrameId.value = frames[nextIndex].id;
-  }
-
   private renderPreview() {
     if (!this.ctx || !this.previewCanvas) return;
-
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
-
-    // Clear
-    this.ctx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
 
     const currentFrameId = animationStore.currentFrameId.value;
     const layers = layerStore.layers.value;
     const cels = animationStore.cels.value;
 
-    // Render layers for current frame
-    for (const layer of layers) {
-      if (layer.visible) {
-        const key = animationStore.getCelKey(layer.id, currentFrameId);
-        const cel = cels.get(key);
-        if (cel && cel.canvas) {
-          this.ctx.globalAlpha = layer.opacity / 255;
-          this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
-          this.ctx.drawImage(cel.canvas, 0, 0);
-        }
-      }
-    }
-
-    this.ctx.globalAlpha = 1;
-    this.ctx.globalCompositeOperation = 'source-over';
+    renderFrameToCanvas(this.ctx, currentFrameId, layers, cels);
   }
 
   private getViewportIndicatorStyle() {
