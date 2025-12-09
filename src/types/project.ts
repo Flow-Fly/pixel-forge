@@ -1,5 +1,6 @@
 export interface ProjectFile {
   version: string;
+  name?: string; // Optional for backwards compatibility
   width: number;
   height: number;
   layers: {

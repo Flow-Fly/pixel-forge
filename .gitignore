@@ -19,7 +19,7 @@ CLAUDE.md
 feature.md
 readme.md
 research.md
-tasks.md
+# tasks.md
 
 # Editor directories and files
 .vscode/*

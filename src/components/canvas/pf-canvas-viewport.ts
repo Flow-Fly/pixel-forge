@@ -196,6 +196,10 @@ export class PFCanvasViewport extends BaseComponent {
     void gridStore.tileGridColor.value;
     void gridStore.tileGridOpacity.value;
 
+    // Access project dimensions for grid redraw on project load
+    void projectStore.width.value;
+    void projectStore.height.value;
+
     // Update host attributes for cursor styling
     this.toggleAttribute("space-down", isSpaceDown && !isPanning);
     this.toggleAttribute("panning", isPanning);
