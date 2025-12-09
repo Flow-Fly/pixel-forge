@@ -28,6 +28,7 @@ class AnimationStore {
 
   // Cel selection state
   selectedCelKeys = signal<Set<string>>(new Set());
+  selectionAnchor = signal<{ layerId: string; frameId: string } | null>(null);
 
   // Playback internals
   private animationFrameId: number | null = null;
@@ -628,6 +629,66 @@ class AnimationStore {
    */
   clearCelSelection() {
     this.selectedCelKeys.value = new Set();
+  }
+
+  /**
+   * Set the selection anchor point.
+   */
+  setSelectionAnchor(layerId: string, frameId: string) {
+    this.selectionAnchor.value = { layerId, frameId };
+  }
+
+  /**
+   * Toggle a cel in/out of selection without affecting anchor.
+   */
+  toggleCel(layerId: string, frameId: string) {
+    const key = this.getCelKey(layerId, frameId);
+    const newSelection = new Set(this.selectedCelKeys.value);
+
+    if (newSelection.has(key)) {
+      newSelection.delete(key);
+    } else {
+      newSelection.add(key);
+    }
+
+    this.selectedCelKeys.value = newSelection;
+  }
+
+  /**
+   * Select all cels in a rectangular range between two cells.
+   */
+  selectCelRange(
+    fromLayerId: string,
+    fromFrameId: string,
+    toLayerId: string,
+    toFrameId: string
+  ) {
+    const layers = layerStore.layers.value;
+    const frames = this.frames.value;
+
+    const fromLayerIndex = layers.findIndex(l => l.id === fromLayerId);
+    const toLayerIndex = layers.findIndex(l => l.id === toLayerId);
+    const fromFrameIndex = frames.findIndex(f => f.id === fromFrameId);
+    const toFrameIndex = frames.findIndex(f => f.id === toFrameId);
+
+    const minLayerIndex = Math.min(fromLayerIndex, toLayerIndex);
+    const maxLayerIndex = Math.max(fromLayerIndex, toLayerIndex);
+    const minFrameIndex = Math.min(fromFrameIndex, toFrameIndex);
+    const maxFrameIndex = Math.max(fromFrameIndex, toFrameIndex);
+
+    const newSelection = new Set<string>();
+
+    for (let li = minLayerIndex; li <= maxLayerIndex; li++) {
+      for (let fi = minFrameIndex; fi <= maxFrameIndex; fi++) {
+        const layer = layers[li];
+        const frame = frames[fi];
+        if (layer && frame) {
+          newSelection.add(this.getCelKey(layer.id, frame.id));
+        }
+      }
+    }
+
+    this.selectedCelKeys.value = newSelection;
   }
 
   /**

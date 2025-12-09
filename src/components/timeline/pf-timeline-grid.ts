@@ -1,11 +1,12 @@
-import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { animationStore } from '../../stores/animation';
-import { layerStore } from '../../stores/layers';
-import type { FrameTag } from '../../types/animation';
+import { html, css } from "lit";
+import { customElement } from "lit/decorators.js";
+import { classMap } from "lit/directives/class-map.js";
+import { BaseComponent } from "../../core/base-component";
+import { animationStore } from "../../stores/animation";
+import { layerStore } from "../../stores/layers";
+import type { FrameTag } from "../../types/animation";
 
-@customElement('pf-timeline-grid')
+@customElement("pf-timeline-grid")
 export class PFTimelineGrid extends BaseComponent {
   static styles = css`
     :host {
@@ -40,11 +41,13 @@ export class PFTimelineGrid extends BaseComponent {
     }
 
     .cel.selected {
+      background-color: rgba(74, 158, 255, 0.15);
       box-shadow: inset 0 0 0 2px var(--pf-color-accent, #4a9eff);
     }
 
     .cel.active.selected {
-      box-shadow: inset 0 0 0 2px var(--pf-color-primary), inset 0 0 0 4px var(--pf-color-accent, #4a9eff);
+      background-color: rgba(74, 158, 255, 0.25);
+      // box-shadow: inset 0 0 0 2px var(--pf-color-primary), 0 0 0 2px var(--pf-color-accent, #4a9eff);
     }
 
     .cel-content {
@@ -64,7 +67,7 @@ export class PFTimelineGrid extends BaseComponent {
     }
 
     .cel.tag-tinted::before {
-      content: '';
+      content: "";
       position: absolute;
       inset: 0;
       pointer-events: none;
@@ -110,17 +113,29 @@ export class PFTimelineGrid extends BaseComponent {
   `;
 
   selectCel(layerId: string, frameId: string, e: MouseEvent) {
-    // Set active layer and frame
+    const anchor = animationStore.selectionAnchor.value;
+
+    if (e.shiftKey && anchor) {
+      // Range select from anchor to clicked cell
+      animationStore.selectCelRange(
+        anchor.layerId,
+        anchor.frameId,
+        layerId,
+        frameId
+      );
+    } else if (e.metaKey || e.ctrlKey) {
+      // Toggle individual cell (anchor unchanged)
+      animationStore.toggleCel(layerId, frameId);
+    } else {
+      // Normal click: clear selection, select this cell, set anchor
+      animationStore.clearCelSelection();
+      animationStore.selectCel(layerId, frameId, false);
+      animationStore.setSelectionAnchor(layerId, frameId);
+    }
+
+    // Always navigate to clicked cell
     layerStore.setActiveLayer(layerId);
     animationStore.goToFrame(frameId);
-
-    // Handle selection with shift key for multi-select
-    if (e.shiftKey) {
-      animationStore.selectCel(layerId, frameId, true);
-    } else {
-      // Clear selection when clicking without shift
-      animationStore.clearCelSelection();
-    }
   }
 
   private handleCollapsedTagClick(tag: FrameTag) {
@@ -131,9 +146,15 @@ export class PFTimelineGrid extends BaseComponent {
    * Get the tag color for a frame index (for column tinting).
    * Returns null if frame is not in any tag.
    */
-  private getTagColorForFrame(frameIndex: number, tags: FrameTag[]): string | null {
+  private getTagColorForFrame(
+    frameIndex: number,
+    tags: FrameTag[]
+  ): string | null {
     for (const tag of tags) {
-      if (frameIndex >= tag.startFrameIndex && frameIndex <= tag.endFrameIndex) {
+      if (
+        frameIndex >= tag.startFrameIndex &&
+        frameIndex <= tag.endFrameIndex
+      ) {
         return tag.color;
       }
     }
@@ -145,8 +166,17 @@ export class PFTimelineGrid extends BaseComponent {
    * For collapsed tags, only the first frame should be rendered,
    * subsequent frames in the range are hidden.
    */
-  private getFrameRenderInfo(tags: FrameTag[], totalFrames: number): Map<number, { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }> {
-    const info = new Map<number, { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }>();
+  private getFrameRenderInfo(
+    tags: FrameTag[],
+    totalFrames: number
+  ): Map<
+    number,
+    { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }
+  > {
+    const info = new Map<
+      number,
+      { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }
+    >();
 
     // Initialize all frames as normal (not hidden, no tag)
     for (let i = 0; i < totalFrames; i++) {
@@ -179,64 +209,84 @@ export class PFTimelineGrid extends BaseComponent {
     const cels = animationStore.cels.value;
     const tags = animationStore.tags.value;
     // Read selection signal to trigger re-renders on selection change
-    const _selectedCels = animationStore.selectedCelKeys.value;
+    const selectedCels = animationStore.selectedCelKeys.value;
 
     // Get frame render info (which frames are collapsed/hidden)
     const frameRenderInfo = this.getFrameRenderInfo(tags, frames.length);
 
     return html`
-      ${layers.map(layer => html`
-        <div class="grid-row">
-          ${frames.map((frame, frameIndex) => {
-            const renderInfo = frameRenderInfo.get(frameIndex);
+      ${layers.map(
+        (layer) => html`
+          <div class="grid-row">
+            ${frames.map((frame, frameIndex) => {
+              const renderInfo = frameRenderInfo.get(frameIndex);
 
-            // Skip hidden frames (part of a collapsed tag but not the first)
-            if (renderInfo?.isHidden) {
-              return '';
-            }
+              // Skip hidden frames (part of a collapsed tag but not the first)
+              if (renderInfo?.isHidden) {
+                return "";
+              }
 
-            // Render collapsed tag cell
-            if (renderInfo?.isFirstOfCollapsed && renderInfo.tag) {
-              const tag = renderInfo.tag;
+              // Render collapsed tag cell
+              if (renderInfo?.isFirstOfCollapsed && renderInfo.tag) {
+                const tag = renderInfo.tag;
+                return html`
+                  <div
+                    class="cel collapsed-tag"
+                    @click=${() => this.handleCollapsedTagClick(tag)}
+                    title="${tag.name} - Click to expand"
+                  >
+                    <div
+                      class="collapsed-tag-block"
+                      style="background-color: ${tag.color};"
+                    ></div>
+                  </div>
+                `;
+              }
+
+              // Normal cel rendering
+              const key = animationStore.getCelKey(layer.id, frame.id);
+              const cel = cels.get(key);
+              const isActive =
+                layer.id === activeLayerId && frame.id === currentFrameId;
+              const isSelected = selectedCels.has(key);
+              const isLinked = cel?.linkedCelId != null;
+              const linkColor = isLinked
+                ? animationStore.getLinkColor(cel!.linkedCelId!)
+                : null;
+              // TODO: Check if cel has content (non-empty canvas)
+              const hasContent = !!cel;
+              const tagColor = this.getTagColorForFrame(frameIndex, tags);
+              const hasTint = tagColor !== null;
+
+              const celClasses = {
+                cel: true,
+                active: isActive,
+                selected: isSelected,
+                "has-content": hasContent,
+                "tag-tinted": hasTint,
+                linked: isLinked,
+              };
+
               return html`
                 <div
-                  class="cel collapsed-tag"
-                  @click=${() => this.handleCollapsedTagClick(tag)}
-                  title="${tag.name} - Click to expand"
+                  class=${classMap(celClasses)}
+                  style="${hasTint ? `--tag-tint-color: ${tagColor}` : ""}"
+                  @click=${(e: MouseEvent) =>
+                    this.selectCel(layer.id, frame.id, e)}
                 >
-                  <div
-                    class="collapsed-tag-block"
-                    style="background-color: ${tag.color};"
-                  ></div>
+                  <div class="cel-content"></div>
+                  ${isLinked
+                    ? html`<div
+                        class="link-badge"
+                        style="background-color: ${linkColor}"
+                      ></div>`
+                    : ""}
                 </div>
               `;
-            }
-
-            // Normal cel rendering
-            const key = animationStore.getCelKey(layer.id, frame.id);
-            const cel = cels.get(key);
-            const isActive = layer.id === activeLayerId && frame.id === currentFrameId;
-            const isSelected = animationStore.isCelSelected(layer.id, frame.id);
-            const isLinked = cel?.linkedCelId != null;
-            const linkColor = isLinked ? animationStore.getLinkColor(cel!.linkedCelId!) : null;
-            // TODO: Check if cel has content (non-empty canvas)
-            const hasContent = !!cel;
-            const tagColor = this.getTagColorForFrame(frameIndex, tags);
-            const hasTint = tagColor !== null;
-
-            return html`
-              <div
-                class="cel ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${hasContent ? 'has-content' : ''} ${hasTint ? 'tag-tinted' : ''} ${isLinked ? 'linked' : ''}"
-                style="${hasTint ? `--tag-tint-color: ${tagColor}` : ''}"
-                @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
-              >
-                <div class="cel-content"></div>
-                ${isLinked ? html`<div class="link-badge" style="background-color: ${linkColor}"></div>` : ''}
-              </div>
-            `;
-          })}
-        </div>
-      `)}
+            })}
+          </div>
+        `
+      )}
     `;
   }
 }
