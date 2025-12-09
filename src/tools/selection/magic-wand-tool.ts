@@ -32,9 +32,9 @@ export class MagicWandTool extends BaseTool {
       return;
     }
 
-    // Clicking outside - commit any floating selection first
+    // Clicking outside - commit any transform/floating selection first
     // If we committed, don't immediately make a new selection
-    if (this.commitIfFloating()) {
+    if (this.commitIfTransforming() || this.commitIfFloating()) {
       return;
     }
 
@@ -100,6 +100,15 @@ export class MagicWandTool extends BaseTool {
     );
 
     historyStore.execute(command);
+  }
+
+  private commitIfTransforming(): boolean {
+    const state = selectionStore.state.value;
+    if (state.type !== 'transforming') return false;
+
+    // Dispatch event to trigger commit in viewport
+    window.dispatchEvent(new CustomEvent('commit-transform'));
+    return true;
   }
 
   private commitIfFloating(): boolean {
@@ -170,20 +179,23 @@ export class MagicWandTool extends BaseTool {
     const currentState = selectionStore.state.value;
     const mode = selectionStore.mode.value;
 
+    // Pass canvas for content-aware trimming
+    const canvas = activeLayer.canvas;
+
     if (mode === 'replace' || currentState.type === 'none') {
       // Simple replace
-      selectionStore.finalizeFreeformSelection(bounds, mask);
+      selectionStore.finalizeFreeformSelection(bounds, mask, canvas);
     } else if (mode === 'add' && currentState.type === 'selected') {
       // Add to existing selection
       const combined = this.combineMasks(currentState, bounds, mask, 'add');
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
       }
     } else if (mode === 'subtract' && currentState.type === 'selected') {
       // Subtract from existing selection
       const combined = this.combineMasks(currentState, bounds, mask, 'subtract');
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
       } else {
         selectionStore.clear();
       }

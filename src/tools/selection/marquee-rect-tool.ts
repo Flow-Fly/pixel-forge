@@ -24,9 +24,9 @@ export class MarqueeRectTool extends BaseTool {
     if (selectionStore.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
     } else {
-      // Clicking outside - commit any floating selection first
+      // Clicking outside - commit any transform/floating selection first
       // If we committed, don't immediately start a new selection
-      if (this.commitIfFloating()) {
+      if (this.commitIfTransforming() || this.commitIfFloating()) {
         return;
       }
       this.startNewSelection(canvasX, canvasY);
@@ -50,7 +50,10 @@ export class MarqueeRectTool extends BaseTool {
 
   onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
     if (this.mode === 'selecting') {
-      selectionStore.finalizeSelection();
+      // Get active layer canvas for content-aware trimming
+      const activeLayerId = layerStore.activeLayerId.value;
+      const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+      selectionStore.finalizeSelection(layer?.canvas);
     }
     // If dragging, stay floating (wait for commit)
 
@@ -92,6 +95,15 @@ export class MarqueeRectTool extends BaseTool {
     );
 
     historyStore.execute(command);
+  }
+
+  private commitIfTransforming(): boolean {
+    const state = selectionStore.state.value;
+    if (state.type !== 'transforming') return false;
+
+    // Dispatch event to trigger commit in viewport
+    window.dispatchEvent(new CustomEvent('commit-transform'));
+    return true;
   }
 
   private commitIfFloating(): boolean {
