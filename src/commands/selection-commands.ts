@@ -597,7 +597,8 @@ export class TransformSelectionCommand implements Command {
     rotatedBounds: Rect,
     rotation: number,
     shape: SelectionShape,
-    originalMask?: Uint8Array
+    originalMask?: Uint8Array,
+    offset: { x: number; y: number } = { x: 0, y: 0 }
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
@@ -613,12 +614,12 @@ export class TransformSelectionCommand implements Command {
     this.rotatedImageData = rotatedImageData;
     this.rotation = rotation;
 
-    // Calculate actual destination position
-    // IMPORTANT: Use originalBounds center, not rotatedBounds (which has preview dimensions)
+    // Calculate actual destination position (including offset from movement during transform)
+    // IMPORTANT: Use originalBounds center + offset, not rotatedBounds (which has preview dimensions)
     // Both preview (nearest-neighbor) and RotSprite may produce slightly different dimensions
     // due to rounding, but both should be centered on the same original center point.
-    const originalCenterX = originalBounds.x + originalBounds.width / 2;
-    const originalCenterY = originalBounds.y + originalBounds.height / 2;
+    const originalCenterX = originalBounds.x + offset.x + originalBounds.width / 2;
+    const originalCenterY = originalBounds.y + offset.y + originalBounds.height / 2;
     this.actualDestX = Math.round(originalCenterX - rotatedImageData.width / 2);
     this.actualDestY = Math.round(originalCenterY - rotatedImageData.height / 2);
 

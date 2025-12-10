@@ -86,6 +86,9 @@ export class TransformTool extends BaseTool {
       if (state.type === 'floating') {
         // Move floating selection
         selectionStore.moveFloat(dx, dy);
+      } else if (state.type === 'transforming') {
+        // Move selection during rotation
+        selectionStore.moveTransform(dx, dy);
       }
       // For 'selected' state, would need to cut to float first
     }
@@ -152,10 +155,10 @@ export class TransformTool extends BaseTool {
     const transformState = selectionStore.getTransformState();
     if (!transformState) return;
 
-    const { imageData, originalBounds, currentBounds, rotation, shape, mask } = transformState;
+    const { imageData, originalBounds, currentBounds, currentOffset, rotation, shape, mask } = transformState;
 
-    // If rotation is 0, just cancel (no change)
-    if (rotation === 0) {
+    // If no rotation and no movement, just cancel (no change)
+    if (rotation === 0 && currentOffset.x === 0 && currentOffset.y === 0) {
       selectionStore.cancelTransform();
       return;
     }
@@ -178,7 +181,7 @@ export class TransformTool extends BaseTool {
 
     const canvas = activeLayer.canvas;
 
-    // Create and execute the transform command
+    // Create and execute the transform command (with offset for movement during transform)
     const command = new TransformSelectionCommand(
       canvas,
       imageData,
@@ -187,7 +190,8 @@ export class TransformTool extends BaseTool {
       currentBounds,
       rotation,
       shape,
-      mask
+      mask,
+      currentOffset
     );
 
     historyStore.execute(command);

@@ -162,6 +162,9 @@ export function registerShortcuts() {
     } else if (state.type === "floating") {
       // Already floating, just move
       selectionStore.moveFloat(dx, dy);
+    } else if (state.type === "transforming") {
+      // In transforming state (rotation mode), use moveTransform
+      selectionStore.moveTransform(dx, dy);
     }
   };
 

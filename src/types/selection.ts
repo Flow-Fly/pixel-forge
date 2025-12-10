@@ -35,6 +35,7 @@ export type SelectionState =
       imageData: ImageData;           // Original pixels (unrotated)
       originalBounds: Rect;           // Where it was cut from
       currentBounds: Rect;            // Expanded bounds after rotation
+      currentOffset: { x: number; y: number };  // Movement offset during transform
       rotation: number;               // Degrees (0-360)
       previewData: ImageData | null;  // Nearest-neighbor preview (null until first rotation)
       shape: SelectionShape;
