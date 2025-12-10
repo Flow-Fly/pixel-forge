@@ -250,31 +250,11 @@ export class EraserTool extends BaseTool {
       // Fill with secondary (background) color
       this.context.fillStyle = colorStore.secondaryColor.value;
       this.context.globalAlpha = brush.opacity;
-
-      if (brush.shape === 'square') {
-        this.context.fillRect(x - halfSize, y - halfSize, size, size);
-      } else {
-        // Circle
-        this.context.beginPath();
-        this.context.arc(x, y, size / 2, 0, Math.PI * 2);
-        this.context.fill();
-      }
-
+      this.context.fillRect(x - halfSize, y - halfSize, size, size);
       this.context.globalAlpha = 1;
     } else {
       // Transparent mode - clear pixels
-      if (brush.shape === 'square') {
-        this.context.clearRect(x - halfSize, y - halfSize, size, size);
-      } else {
-        // For circle eraser, we need to clear individual pixels in circle pattern
-        // Use a clipping path approach
-        this.context.save();
-        this.context.beginPath();
-        this.context.arc(x, y, size / 2, 0, Math.PI * 2);
-        this.context.clip();
-        this.context.clearRect(x - halfSize - 1, y - halfSize - 1, size + 2, size + 2);
-        this.context.restore();
-      }
+      this.context.clearRect(x - halfSize, y - halfSize, size, size);
     }
 
     // Mark dirty region for partial redraw (convert center to top-left)

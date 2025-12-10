@@ -339,13 +339,6 @@ export class PencilTool extends BaseTool {
 
         if (pixelX < 0 || pixelY < 0 || pixelX >= canvas.width || pixelY >= canvas.height) continue;
 
-        // Check if this pixel is within the brush shape (for circle brushes)
-        if (brush.shape === 'circle') {
-          const dx = px - size / 2 + 0.5;
-          const dy = py - size / 2 + 0.5;
-          if (dx * dx + dy * dy > (size / 2) * (size / 2)) continue;
-        }
-
         // Get original pixel from snapshot
         const index = (pixelY * this.strokeStartSnapshot.width + pixelX) * 4;
         const r = this.strokeStartSnapshot.data[index];
@@ -408,14 +401,7 @@ export class PencilTool extends BaseTool {
 
     // Always draw centered on x/y
     const halfSize = Math.floor(size / 2);
-    if (brush.shape === 'square') {
-      this.context.fillRect(x - halfSize, y - halfSize, size, size);
-    } else {
-      // Circle
-      this.context.beginPath();
-      this.context.arc(x, y, size / 2, 0, Math.PI * 2);
-      this.context.fill();
-    }
+    this.context.fillRect(x - halfSize, y - halfSize, size, size);
 
     this.context.globalAlpha = 1;
 

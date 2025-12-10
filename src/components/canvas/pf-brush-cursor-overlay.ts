@@ -217,10 +217,8 @@ export class PFBrushCursorOverlay extends BaseComponent {
     // Draw brush cursor if we have cursor position
     if (this.cursorPos) {
       // Get brush settings
-      const brush = brushStore.activeBrush.value;
       // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore
       const size = tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
-      const shape = brush.shape;
 
       // Calculate screen position - always center brush on cursor
       const halfSize = Math.floor(size / 2);
@@ -231,12 +229,8 @@ export class PFBrushCursorOverlay extends BaseComponent {
       // Minimum visible size for outline
       const minOutlineSize = Math.max(screenSize, 3);
 
-      // Draw the brush preview
-      if (shape === 'square') {
-        this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
-      } else {
-        this.drawCircleBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
-      }
+      // Draw the brush preview (always square)
+      this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
     }
   }
 
@@ -301,42 +295,6 @@ export class PFBrushCursorOverlay extends BaseComponent {
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.5;
     ctx.fillRect(x, y, size, size);
-    ctx.globalAlpha = 1;
-  }
-
-  private drawCircleBrush(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    size: number,
-    outlineSize: number,
-    color: string
-  ) {
-    const centerX = x + size / 2;
-    const centerY = y + size / 2;
-    const radius = size / 2;
-    const outlineRadius = outlineSize / 2;
-
-    // Outer black stroke (2px)
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, outlineRadius + 1.5, 0, Math.PI * 2);
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Inner white stroke (1px)
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, outlineRadius + 0.5, 0, Math.PI * 2);
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Semi-transparent fill
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.5;
-    ctx.fill();
     ctx.globalAlpha = 1;
   }
 

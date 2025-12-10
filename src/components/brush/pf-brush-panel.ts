@@ -126,7 +126,7 @@ export class PFBrushPanel extends BaseComponent {
                 style="
                 width: ${Math.min(24, brush.size * 2)}px; 
                 height: ${Math.min(24, brush.size * 2)}px;
-                border-radius: ${brush.shape === "circle" ? "50%" : "0"};
+                border-radius: 0;
                 background-color: whitesmoke;
               "
               ></div>
