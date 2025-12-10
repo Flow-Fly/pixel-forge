@@ -5,7 +5,7 @@ export interface Brush {
   id: string;
   name: string;
   size: number;
-  shape: 'circle' | 'square';
+  shape: 'square';
   opacity: number;
   pixelPerfect: boolean;
   spacing: BrushSpacing; // Distance between brush stamps (1 = standard, 'match' = brush size)
