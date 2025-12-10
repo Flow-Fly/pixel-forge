@@ -11,6 +11,7 @@ import {
   shapeSettings,
   fillSettings,
   gradientSettings,
+  textSettings,
   toolSizes,
   type EraserMode,
 } from "../../../stores/tool-settings";
@@ -53,6 +54,11 @@ export function getOptionValue(store: StoreType, storeKey: string): unknown {
     case "toolSizes":
       if (storeKey === "pencil") return toolSizes.pencil.value;
       if (storeKey === "eraser") return toolSizes.eraser.value;
+      return undefined;
+
+    case "text":
+      if (storeKey === "font") return textSettings.font.value;
+      if (storeKey === "color") return textSettings.color.value;
       return undefined;
 
     default:
@@ -100,6 +106,11 @@ export function setOptionValue(store: StoreType, storeKey: string, value: unknow
     case "toolSizes":
       if (storeKey === "pencil") toolSizes.pencil.value = value as number;
       else if (storeKey === "eraser") toolSizes.eraser.value = value as number;
+      break;
+
+    case "text":
+      if (storeKey === "font") textSettings.font.value = value as string;
+      else if (storeKey === "color") textSettings.color.value = value as string;
       break;
   }
 }

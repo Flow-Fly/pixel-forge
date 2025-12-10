@@ -1,0 +1,32 @@
+import { type Command } from './index';
+import { animationStore } from '../stores/animation';
+
+/**
+ * Command for moving text layer position.
+ * Supports undo/redo for text repositioning.
+ */
+export class MoveTextCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Move Text';
+
+  constructor(
+    private layerId: string,
+    private frameId: string,
+    private oldPosition: { x: number; y: number },
+    private newPosition: { x: number; y: number }
+  ) {}
+
+  execute() {
+    animationStore.updateTextCelData(this.layerId, this.frameId, {
+      x: this.newPosition.x,
+      y: this.newPosition.y
+    });
+  }
+
+  undo() {
+    animationStore.updateTextCelData(this.layerId, this.frameId, {
+      x: this.oldPosition.x,
+      y: this.oldPosition.y
+    });
+  }
+}

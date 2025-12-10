@@ -88,6 +88,16 @@ export class PFLayerItem extends BaseComponent {
       outline: none;
       border-color: var(--pf-color-accent);
     }
+
+    .layer-type-badge {
+      font-size: 9px;
+      font-weight: bold;
+      padding: 1px 3px;
+      border-radius: 2px;
+      margin-right: 4px;
+      background: var(--pf-color-accent-cyan);
+      color: var(--pf-color-bg-dark);
+    }
   `;
 
   @property({ type: Object }) layer!: Layer;
@@ -199,7 +209,9 @@ export class PFLayerItem extends BaseComponent {
       <div class="lock-toggle" @click=${this.toggleLock}>
         ${this.layer.locked ? '🔒' : ''}
       </div>
-      <span class="name">${this.layer.name}</span>
+      <span class="name">
+        ${this.layer.type === 'text' ? html`<span class="layer-type-badge">T</span>` : ''}${this.layer.name}
+      </span>
       <div class="opacity-control" @click=${(e: Event) => e.stopPropagation()}>
         ${this.isEditingOpacity ? html`
           <input

@@ -54,6 +54,11 @@ export const toolGroups: ToolGroup[] = [
     defaultTool: 'transform',
   },
   {
+    id: 'text',
+    tools: ['text'],
+    defaultTool: 'text',
+  },
+  {
     id: 'navigation',
     tools: ['hand', 'zoom'],
     defaultTool: 'hand',

@@ -1,5 +1,6 @@
 import { signal } from '../core/signal';
 import { type Frame, type Cel, type OnionSkinSettings, type AnimationTag, type FrameTag } from '../types/animation';
+import type { TextCelData } from '../types/text';
 import { layerStore } from './layers';
 
 export type PlaybackMode = 'all' | 'tag';
@@ -822,6 +823,87 @@ class AnimationStore {
       hash = hash & hash;
     }
     return linkColors[Math.abs(hash) % linkColors.length];
+  }
+
+  // ===== Text Cel Data =====
+
+  /**
+   * Get text cel data for a specific cel.
+   */
+  getTextCelData(layerId: string, frameId: string): TextCelData | undefined {
+    const key = this.getCelKey(layerId, frameId);
+    return this.cels.value.get(key)?.textCelData;
+  }
+
+  /**
+   * Set text cel data for a specific cel.
+   * Creates a cel if one doesn't exist (for text layers).
+   */
+  setTextCelData(layerId: string, frameId: string, textCelData: TextCelData): void {
+    const key = this.getCelKey(layerId, frameId);
+    const cels = new Map(this.cels.value);
+    const cel = cels.get(key);
+
+    if (cel) {
+      cels.set(key, {
+        ...cel,
+        textCelData
+      });
+    } else {
+      // Create a new cel for text layer (no canvas needed)
+      cels.set(key, {
+        layerId,
+        frameId,
+        canvas: null as unknown as HTMLCanvasElement, // Text layers don't use canvas
+        opacity: 255,
+        textCelData
+      });
+    }
+    this.cels.value = cels;
+  }
+
+  /**
+   * Update text cel data (partial update).
+   * Creates a cel if one doesn't exist.
+   */
+  updateTextCelData(layerId: string, frameId: string, updates: Partial<TextCelData>): void {
+    const key = this.getCelKey(layerId, frameId);
+    const cels = new Map(this.cels.value);
+    const cel = cels.get(key);
+
+    if (cel) {
+      const currentData = cel.textCelData || { content: '', x: 0, y: 0 };
+      cels.set(key, {
+        ...cel,
+        textCelData: { ...currentData, ...updates }
+      });
+    } else {
+      // Create a new cel for text layer
+      const defaultData: TextCelData = { content: '', x: 0, y: 0 };
+      cels.set(key, {
+        layerId,
+        frameId,
+        canvas: null as unknown as HTMLCanvasElement,
+        opacity: 255,
+        textCelData: { ...defaultData, ...updates }
+      });
+    }
+    this.cels.value = cels;
+  }
+
+  /**
+   * Clear text cel data (e.g., when deleting text content).
+   */
+  clearTextCelData(layerId: string, frameId: string): void {
+    const key = this.getCelKey(layerId, frameId);
+    const cels = new Map(this.cels.value);
+    const cel = cels.get(key);
+
+    if (cel) {
+      const { textCelData: _, ...celWithoutText } = cel;
+      cels.set(key, celWithoutText as Cel);
+      this.cels.value = cels;
+    }
   }
 }
 

@@ -94,6 +94,11 @@ export class PFToolbar extends BaseComponent {
 
         <div class="separator"></div>
 
+        <!-- Text Tools -->
+        ${this.renderToolGroup('text')}
+
+        <div class="separator"></div>
+
         <!-- Utility Tools -->
         ${this.renderToolGroup('transform')}
         ${this.renderToolGroup('navigation')}

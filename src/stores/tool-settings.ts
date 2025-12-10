@@ -84,3 +84,11 @@ export const fillSettings = {
 export const gradientSettings = {
   type: signal<"linear" | "radial">("linear"),
 };
+
+/**
+ * Text tool settings
+ */
+export const textSettings = {
+  font: signal("small-5x7"), // Default font
+  color: signal("#ffffff"),  // Default text color (uses foreground if not set)
+};

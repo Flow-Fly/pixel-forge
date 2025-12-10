@@ -13,6 +13,8 @@ import { renderScheduler } from '../../services/render-scheduler';
 import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
 import type { ModifierKeys } from '../../tools/base-tool';
 import { rectClamp, type Rect } from '../../types/geometry';
+import { getFont, renderText, getCursorX, renderCursor, getDefaultFont } from '../../utils/pixel-fonts';
+import { TextTool } from '../../tools/text-tool';
 
 @customElement('pf-drawing-canvas')
 export class PFDrawingCanvas extends BaseComponent {
@@ -178,6 +180,10 @@ export class PFDrawingCanvas extends BaseComponent {
         const { TransformTool } = await import('../../tools/transform-tool');
         ToolClass = TransformTool;
         break;
+      case 'text':
+        const { TextTool } = await import('../../tools/text-tool');
+        ToolClass = TextTool;
+        break;
       case 'hand':
         const { HandTool } = await import('../../tools/hand-tool');
         ToolClass = HandTool;
@@ -263,12 +269,19 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private renderLayers(dirtyRect: Rect | null) {
     const layers = layerStore.layers.value;
+    const currentFrameId = animationStore.currentFrameId.value;
 
     for (const layer of layers) {
-      if (layer.visible && layer.canvas) {
-        this.ctx.globalAlpha = layer.opacity / 255;
-        this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+      if (!layer.visible) continue;
 
+      this.ctx.globalAlpha = layer.opacity / 255;
+      this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+
+      if (layer.type === 'text') {
+        // Render text layer using pixel font
+        this.renderTextLayer(layer.id, currentFrameId);
+      } else if (layer.canvas) {
+        // Render raster layer
         if (dirtyRect) {
           // Draw only the dirty region from layer
           this.ctx.drawImage(
@@ -285,6 +298,35 @@ export class PFDrawingCanvas extends BaseComponent {
     // Reset composite operation
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /**
+   * Render a text layer using pixel fonts.
+   */
+  private renderTextLayer(layerId: string, frameId: string) {
+    const layer = layerStore.layers.value.find(l => l.id === layerId);
+    if (!layer || layer.type !== 'text' || !layer.textData) return;
+
+    const textCelData = animationStore.getTextCelData(layerId, frameId);
+    if (!textCelData) return;
+
+    const { content, x, y } = textCelData;
+    const { font: fontId, color } = layer.textData;
+
+    // Get the font
+    const font = getFont(fontId) || getDefaultFont();
+
+    // Render the text
+    if (content) {
+      renderText(this.ctx, content, x, y, font, color);
+    }
+
+    // Render cursor if editing this layer
+    const editingState = TextTool.editingState.value;
+    if (editingState.isEditing && editingState.layerId === layerId && editingState.cursorVisible) {
+      const cursorX = getCursorX(content || '', editingState.cursorPosition, font, x);
+      renderCursor(this.ctx, cursorX, y, font.charHeight, color);
+    }
   }
 
   private drawOnionSkins() {
@@ -651,6 +693,8 @@ export class PFDrawingCanvas extends BaseComponent {
     void historyStore.version.value;
     void layerStore.layers.value;
     void animationStore.currentFrameId.value;
+    void animationStore.cels.value; // For text cel updates
+    void TextTool.editingState.value; // For cursor blinking and text updates
 
     return html`
       <canvas
