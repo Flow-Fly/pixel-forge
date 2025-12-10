@@ -6,6 +6,17 @@ import { persistenceService } from '../services/persistence/indexed-db';
 import { canvasToPngBytes, loadImageDataToCanvas } from '../utils/canvas-binary';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 
+/**
+ * Check if image data has content.
+ * Handles string (Base64), Uint8Array, and serialized Uint8Array (object with numeric keys from JSON).
+ */
+function hasImageData(data: string | Uint8Array | Record<string, number>): boolean {
+  if (typeof data === 'string') return data.length > 0;
+  if (data instanceof Uint8Array) return data.length > 0;
+  // Serialized Uint8Array from JSON has numeric keys
+  return Object.keys(data).length > 0;
+}
+
 class ProjectStore {
   width = signal(64);
   height = signal(64);
@@ -119,8 +130,7 @@ class ProjectStore {
       layer.blendMode = l.blendMode || 'normal';
 
       // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
-      const hasData = typeof l.data === 'string' ? l.data.length > 0 : l.data.length > 0;
-      if (hasData && layer.canvas) {
+      if (hasImageData(l.data) && layer.canvas) {
         await loadImageDataToCanvas(l.data, layer.canvas);
       }
     }
@@ -144,8 +154,7 @@ class ProjectStore {
       for (const c of f.cels) {
         const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
         // Handle both Base64 (v1.x) and binary (v2.0+) formats
-        const hasData = typeof c.data === 'string' ? c.data.length > 0 : c.data.length > 0;
-        if (canvas && hasData) {
+        if (canvas && hasImageData(c.data)) {
           await loadImageDataToCanvas(c.data, canvas);
         }
 

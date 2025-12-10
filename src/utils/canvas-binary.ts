@@ -65,10 +65,32 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Check if data is a Uint8Array (binary) or string (Base64).
+ * Check if data is binary (Uint8Array or serialized object from JSON).
+ * JSON.stringify converts Uint8Array to {"0": 137, "1": 80, ...} format,
+ * so we need to handle both cases.
  */
-export function isBinaryData(data: string | Uint8Array): data is Uint8Array {
-  return data instanceof Uint8Array;
+export function isBinaryData(data: string | Uint8Array | Record<string, number>): data is Uint8Array | Record<string, number> {
+  if (data instanceof Uint8Array) return true;
+  // Check if it's an object with numeric keys (serialized Uint8Array from JSON)
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const keys = Object.keys(data);
+    return keys.length > 0 && keys.every(k => /^\d+$/.test(k));
+  }
+  return false;
+}
+
+/**
+ * Convert a serialized Uint8Array (from JSON) back to a real Uint8Array.
+ */
+function toUint8Array(data: Uint8Array | Record<string, number>): Uint8Array {
+  if (data instanceof Uint8Array) return data;
+  // Convert object with numeric keys to Uint8Array
+  const keys = Object.keys(data).map(Number).sort((a, b) => a - b);
+  const arr = new Uint8Array(keys.length);
+  for (let i = 0; i < keys.length; i++) {
+    arr[i] = data[keys[i]];
+  }
+  return arr;
 }
 
 /**
@@ -76,7 +98,7 @@ export function isBinaryData(data: string | Uint8Array): data is Uint8Array {
  * Provides backward compatibility for old Base64-format projects.
  */
 export async function loadImageDataToCanvas(
-  data: string | Uint8Array,
+  data: string | Uint8Array | Record<string, number>,
   canvas: HTMLCanvasElement
 ): Promise<void> {
   const ctx = canvas.getContext('2d');
@@ -84,7 +106,9 @@ export async function loadImageDataToCanvas(
 
   if (isBinaryData(data)) {
     // Binary format (v2.0.0+) - decode via Blob
-    const blob = new Blob([data], { type: 'image/png' });
+    // Convert to Uint8Array if it's a serialized object from JSON
+    const bytes = toUint8Array(data);
+    const blob = new Blob([bytes], { type: 'image/png' });
     const url = URL.createObjectURL(blob);
     try {
       const img = await loadImage(url);
@@ -103,7 +127,7 @@ export async function loadImageDataToCanvas(
         resolve();
       };
       img.onerror = () => resolve(); // Silently fail for corrupt data
-      img.src = data;
+      img.src = data as string;
     });
   }
 }
