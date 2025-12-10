@@ -48,6 +48,7 @@ export class PfShortcutsOverlay extends BaseComponent {
       position: absolute;
       z-index: 100;
       user-select: none;
+      pointer-events: none;
     }
 
     .overlay {
@@ -58,6 +59,7 @@ export class PfShortcutsOverlay extends BaseComponent {
       font-size: 11px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       opacity: 0.9;
+      pointer-events: auto;
       min-width: 140px;
       max-width: 200px;
     }
