@@ -1,5 +1,6 @@
 import { signal } from '../core/signal';
 import { type Layer } from '../types/layer';
+import type { TextLayerData } from '../types/text';
 import { v4 as uuidv4 } from 'uuid';
 
 class LayerStore {
@@ -42,6 +43,72 @@ class LayerStore {
     this.layers.value = [...this.layers.value, newLayer];
     this.activeLayerId.value = newLayer.id;
     return newLayer;
+  }
+
+  /**
+   * Add a new text layer.
+   * Text layers render text using pixel fonts instead of storing pixel data directly.
+   */
+  addTextLayer(textData: TextLayerData, name?: string, width = 64, height = 64): Layer {
+    // Text layers still have a canvas for rendering, but content is generated from text data
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d', {
+      alpha: true,
+      willReadFrequently: true
+    });
+
+    if (ctx) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    const newLayer: Layer = {
+      id: uuidv4(),
+      name: name || `Text ${this.layers.value.filter(l => l.type === 'text').length + 1}`,
+      type: 'text',
+      visible: true,
+      locked: false,
+      opacity: 255,
+      blendMode: 'normal',
+      parentId: null,
+      canvas,
+      textData,
+    };
+
+    this.layers.value = [...this.layers.value, newLayer];
+    this.activeLayerId.value = newLayer.id;
+    return newLayer;
+  }
+
+  /**
+   * Check if a layer is a text layer.
+   */
+  isTextLayer(id: string): boolean {
+    const layer = this.layers.value.find(l => l.id === id);
+    return layer?.type === 'text';
+  }
+
+  /**
+   * Get text data for a text layer.
+   */
+  getTextData(id: string): TextLayerData | undefined {
+    const layer = this.layers.value.find(l => l.id === id);
+    return layer?.textData;
+  }
+
+  /**
+   * Update text layer style (font, color).
+   */
+  updateTextData(id: string, updates: Partial<TextLayerData>): void {
+    const layer = this.layers.value.find(l => l.id === id);
+    if (layer?.type === 'text' && layer.textData) {
+      this.updateLayer(id, {
+        textData: { ...layer.textData, ...updates }
+      });
+    }
   }
 
   removeLayer(id: string) {

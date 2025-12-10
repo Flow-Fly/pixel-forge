@@ -1,3 +1,5 @@
+import type { TextCelData } from './text';
+
 export interface Frame {
   id: string;
   order: number;
@@ -39,6 +41,8 @@ export interface Cel {
   canvas: HTMLCanvasElement;
   linkedCelId?: string;  // Group identifier for linked cels (share same canvas)
   opacity?: number;      // Cel-level opacity (0-100, default 100)
+  // Text cel specific (only present for text layers)
+  textCelData?: TextCelData;
 }
 
 export interface AnimationState {

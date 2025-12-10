@@ -15,6 +15,7 @@ import "./pf-selection-overlay";
 import "./pf-marching-ants-overlay";
 import "./pf-brush-cursor-overlay";
 import "./pf-transform-handles";
+import "./pf-text-input";
 
 @customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
@@ -239,6 +240,7 @@ export class PFCanvasViewport extends BaseComponent {
         @rotation-start=${this.handleRotationStart}
         @rotation-end=${this.handleRotationEnd}
       ></pf-transform-handles>
+      <pf-text-input></pf-text-input>
     `;
   }
 

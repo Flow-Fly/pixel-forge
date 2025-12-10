@@ -2,7 +2,9 @@ import { BaseTool } from './base-tool';
 import { selectionStore } from '../stores/selection';
 import { historyStore } from '../stores/history';
 import { layerStore } from '../stores/layers';
+import { animationStore } from '../stores/animation';
 import { TransformSelectionCommand } from '../commands/selection-commands';
+import { MoveTextCommand } from '../commands/text-commands';
 
 export class TransformTool extends BaseTool {
   name = 'transform';
@@ -13,7 +15,32 @@ export class TransformTool extends BaseTool {
   private startY = 0;
   private mode: 'move' | 'scale' | 'rotate' = 'move';
 
+  // Text layer drag state
+  private isDraggingText = false;
+  private textLayerId: string | null = null;
+  private originalTextPos = { x: 0, y: 0 };
+
   onDown(x: number, y: number) {
+    // Check if active layer is a text layer
+    const activeLayerId = layerStore.activeLayerId.value;
+    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
+
+    if (activeLayer?.type === 'text') {
+      // Start dragging text layer
+      const currentFrameId = animationStore.currentFrameId.value;
+      const textCelData = animationStore.getTextCelData(activeLayerId, currentFrameId);
+
+      if (textCelData) {
+        this.isDraggingText = true;
+        this.textLayerId = activeLayerId;
+        this.startX = x;
+        this.startY = y;
+        this.originalTextPos = { x: textCelData.x, y: textCelData.y };
+      }
+      return;
+    }
+
+    // Handle selection-based transforms
     const state = selectionStore.state.value;
     if (state.type === 'none') return;
 
@@ -34,6 +61,21 @@ export class TransformTool extends BaseTool {
   }
 
   onDrag(x: number, y: number) {
+    // Handle text layer dragging
+    if (this.isDraggingText && this.textLayerId) {
+      const currentFrameId = animationStore.currentFrameId.value;
+      const dx = x - this.startX;
+      const dy = y - this.startY;
+
+      // Update text position in real-time for visual feedback
+      animationStore.updateTextCelData(this.textLayerId, currentFrameId, {
+        x: Math.floor(this.originalTextPos.x + dx),
+        y: Math.floor(this.originalTextPos.y + dy),
+      });
+      return;
+    }
+
+    // Handle selection-based transforms
     if (!this.isDragging) return;
 
     const dx = x - this.startX;
@@ -52,7 +94,43 @@ export class TransformTool extends BaseTool {
     this.startY = y;
   }
 
-  onUp(_x: number, _y: number) {
+  onUp(x: number, y: number) {
+    // Handle text layer drag completion
+    if (this.isDraggingText && this.textLayerId) {
+      const currentFrameId = animationStore.currentFrameId.value;
+      const dx = x - this.startX;
+      const dy = y - this.startY;
+
+      const newPos = {
+        x: Math.floor(this.originalTextPos.x + dx),
+        y: Math.floor(this.originalTextPos.y + dy),
+      };
+
+      // Only create command if position actually changed
+      if (newPos.x !== this.originalTextPos.x || newPos.y !== this.originalTextPos.y) {
+        // First, revert to original position (command will re-apply)
+        animationStore.updateTextCelData(this.textLayerId, currentFrameId, {
+          x: this.originalTextPos.x,
+          y: this.originalTextPos.y,
+        });
+
+        // Execute move command for undo/redo support
+        historyStore.execute(
+          new MoveTextCommand(
+            this.textLayerId,
+            currentFrameId,
+            this.originalTextPos,
+            newPos
+          )
+        );
+      }
+
+      // Reset text drag state
+      this.isDraggingText = false;
+      this.textLayerId = null;
+      return;
+    }
+
     this.isDragging = false;
   }
 

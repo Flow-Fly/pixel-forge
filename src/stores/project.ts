@@ -27,30 +27,37 @@ class ProjectStore {
   }
 
   async saveProject(): Promise<ProjectFile> {
-    // Convert layers to binary format
+    // Convert layers to binary format (including text layer metadata)
     const layers = await Promise.all(
       layerStore.layers.value.map(async layer => ({
         id: layer.id,
         name: layer.name,
+        type: layer.type,
         visible: layer.visible,
         opacity: layer.opacity,
+        blendMode: layer.blendMode,
         data: layer.canvas
           ? await canvasToPngBytes(layer.canvas)
-          : new Uint8Array(0)
+          : new Uint8Array(0),
+        // Include text layer metadata if present
+        ...(layer.textData && { textData: layer.textData })
       }))
     );
 
-    // Convert frames/cels to binary format
+    // Convert frames/cels to binary format (including text cel data)
     const frames = await Promise.all(
       animationStore.frames.value.map(async frame => {
         const cels = await Promise.all(
           layerStore.layers.value.map(async layer => {
             const canvas = animationStore.getCelCanvas(frame.id, layer.id);
+            const textCelData = animationStore.getTextCelData(layer.id, frame.id);
             return {
               layerId: layer.id,
               data: canvas
                 ? await canvasToPngBytes(canvas)
-                : new Uint8Array(0)
+                : new Uint8Array(0),
+              // Include text cel data if present
+              ...(textCelData && { textCelData })
             };
           })
         );
@@ -94,13 +101,26 @@ class ProjectStore {
     }
 
     for (const l of file.layers) {
-      const layer = layerStore.addLayer(l.name, file.width, file.height);
+      // Check layer type (default to 'image' for backwards compatibility with pre-v2.1 files)
+      const layerType = l.type || 'image';
+
+      let layer;
+      if (layerType === 'text' && l.textData) {
+        // Create text layer with its metadata
+        layer = layerStore.addTextLayer(l.textData, l.name, file.width, file.height);
+      } else {
+        // Create regular image layer
+        layer = layerStore.addLayer(l.name, file.width, file.height);
+      }
+
       layer.id = l.id;
       layer.visible = l.visible;
       layer.opacity = l.opacity;
-      // Handle both Base64 (v1.x) and binary (v2.0+) formats
+      layer.blendMode = l.blendMode || 'normal';
+
+      // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
       const hasData = typeof l.data === 'string' ? l.data.length > 0 : l.data.length > 0;
-      if (hasData) {
+      if (hasData && layer.canvas) {
         await loadImageDataToCanvas(l.data, layer.canvas);
       }
     }
@@ -127,6 +147,11 @@ class ProjectStore {
         const hasData = typeof c.data === 'string' ? c.data.length > 0 : c.data.length > 0;
         if (canvas && hasData) {
           await loadImageDataToCanvas(c.data, canvas);
+        }
+
+        // Restore text cel data if present (v2.1+)
+        if (c.textCelData) {
+          animationStore.setTextCelData(c.layerId, newFrame.id, c.textCelData);
         }
       }
     }

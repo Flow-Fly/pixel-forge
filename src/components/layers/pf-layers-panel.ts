@@ -91,9 +91,22 @@ export class PFLayersPanel extends BaseComponent {
   }
 
   startRenaming(layer: any) {
+    // For text layers, double-click enters edit mode
+    if (layer.type === 'text') {
+      this.editTextLayer(layer.id);
+      return;
+    }
+
     const newName = prompt('Rename Layer', layer.name);
     if (newName && newName !== layer.name) {
       historyStore.execute(new UpdateLayerCommand(layer.id, { name: newName }));
     }
+  }
+
+  editTextLayer(layerId: string) {
+    // Dispatch event to trigger text editing
+    window.dispatchEvent(new CustomEvent('text-tool:edit-layer', {
+      detail: { layerId }
+    }));
   }
 }

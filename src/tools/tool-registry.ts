@@ -308,6 +308,32 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     ],
   },
 
+  text: {
+    name: "Text",
+    icon: "T",
+    label: "T",
+    shortcutKey: "T",
+    group: "utility",
+    options: [
+      {
+        type: "select",
+        key: "font",
+        label: "Font",
+        store: "text",
+        storeKey: "font",
+        options: [
+          { value: "tiny-3x5", label: "Tiny 3x5" },
+          { value: "small-5x7", label: "Small 5x7" },
+        ],
+      },
+    ],
+    alternatives: [],
+    shortcuts: [
+      { key: "escape", action: "Commit text" },
+      { key: "enter", action: "Commit text" },
+    ],
+  },
+
   hand: {
     name: "Hand",
     icon: "✋",

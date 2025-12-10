@@ -14,6 +14,7 @@ export type ToolType =
   | 'fill'
   | 'gradient'
   | 'transform'
+  | 'text'
   | 'hand'
   | 'zoom';
 

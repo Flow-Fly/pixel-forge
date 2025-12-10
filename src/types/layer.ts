@@ -1,9 +1,13 @@
+import type { TextLayerData } from './text';
+
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
+
+export type LayerType = 'image' | 'group' | 'text';
 
 export interface Layer {
   id: string;
   name: string;
-  type: 'image' | 'group';
+  type: LayerType;
   visible: boolean;
   locked: boolean;
   opacity: number; // 0-255
@@ -11,4 +15,6 @@ export interface Layer {
   parentId: string | null;
   // Runtime only
   canvas?: HTMLCanvasElement;
+  // Text layer specific (only present when type === 'text')
+  textData?: TextLayerData;
 }
