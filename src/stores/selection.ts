@@ -418,6 +418,7 @@ class SelectionStore {
       imageData,
       originalBounds: bounds,
       currentBounds: { ...bounds },
+      currentOffset: { x: 0, y: 0 },
       rotation: 0,
       previewData: null,
       shape,
@@ -461,6 +462,23 @@ class SelectionStore {
   }
 
   /**
+   * Move the selection while in transform mode.
+   * Called when user drags the selection (not a rotation handle).
+   */
+  moveTransform(dx: number, dy: number) {
+    const s = this.state.value;
+    if (s.type !== "transforming") return;
+
+    this.state.value = {
+      ...s,
+      currentOffset: {
+        x: s.currentOffset.x + dx,
+        y: s.currentOffset.y + dy,
+      },
+    };
+  }
+
+  /**
    * Get the original (unrotated) image data for committing.
    */
   getTransformImageData(): ImageData | null {
@@ -485,6 +503,7 @@ class SelectionStore {
     imageData: ImageData;
     originalBounds: Rect;
     currentBounds: Rect;
+    currentOffset: { x: number; y: number };
     rotation: number;
     shape: SelectionShape;
     mask?: Uint8Array;
@@ -495,6 +514,7 @@ class SelectionStore {
       imageData: s.imageData,
       originalBounds: s.originalBounds,
       currentBounds: s.currentBounds,
+      currentOffset: s.currentOffset,
       rotation: s.rotation,
       shape: s.shape,
       mask: s.mask,

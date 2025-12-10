@@ -1,14 +1,18 @@
-import { html, css, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { selectionStore } from '../../stores/selection';
-import { viewportStore } from '../../stores/viewport';
-import { angleFromCenter, snapAngle, normalizeAngle } from '../../utils/rotation-utils';
+import { html, css, nothing } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { selectionStore } from "../../stores/selection";
+import { viewportStore } from "../../stores/viewport";
+import {
+  angleFromCenter,
+  snapAngle,
+  normalizeAngle,
+} from "../../utils/rotation-utils";
 
 /**
  * Handle positions relative to bounding box
  */
-type HandlePosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+type HandlePosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 interface HandleInfo {
   position: HandlePosition;
@@ -20,7 +24,7 @@ interface HandleInfo {
  * Transform handles overlay for rotation.
  * Uses positioned DOM elements for handles so they only capture their own events.
  */
-@customElement('pf-transform-handles')
+@customElement("pf-transform-handles")
 export class PFTransformHandles extends BaseComponent {
   static styles = css`
     :host {
@@ -54,7 +58,7 @@ export class PFTransformHandles extends BaseComponent {
     }
 
     .handle::after {
-      content: '';
+      content: "";
       width: 4px;
       height: 4px;
       border-radius: 50%;
@@ -78,19 +82,23 @@ export class PFTransformHandles extends BaseComponent {
   connectedCallback() {
     super.connectedCallback();
     // Global mouse events for drag continuation
-    document.addEventListener('mousemove', this.handleDocumentMouseMove);
-    document.addEventListener('mouseup', this.handleDocumentMouseUp);
+    document.addEventListener("mousemove", this.handleDocumentMouseMove);
+    document.addEventListener("mouseup", this.handleDocumentMouseUp);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener('mousemove', this.handleDocumentMouseMove);
-    document.removeEventListener('mouseup', this.handleDocumentMouseUp);
+    document.removeEventListener("mousemove", this.handleDocumentMouseMove);
+    document.removeEventListener("mouseup", this.handleDocumentMouseUp);
   }
 
   private getHandles(): HandleInfo[] {
     const state = selectionStore.state.value;
-    if (state.type !== 'floating' && state.type !== 'transforming' && state.type !== 'selected') {
+    if (
+      state.type !== "floating" &&
+      state.type !== "transforming" &&
+      state.type !== "selected"
+    ) {
       return [];
     }
 
@@ -98,26 +106,43 @@ export class PFTransformHandles extends BaseComponent {
     const panX = viewportStore.panX.value;
     const panY = viewportStore.panY.value;
 
-    // For transforming state, use original bounds and apply rotation
-    if (state.type === 'transforming') {
+    // For transforming state, use original bounds + offset and apply rotation
+    if (state.type === "transforming") {
       const bounds = state.originalBounds;
+      const moveOffset = state.currentOffset;
       const rotation = state.rotation;
 
-      // Calculate center in screen coordinates
-      const centerX = (bounds.x + bounds.width / 2) * zoom + panX;
-      const centerY = (bounds.y + bounds.height / 2) * zoom + panY;
+      // Calculate center in screen coordinates (with offset applied)
+      const centerX = (bounds.x + moveOffset.x + bounds.width / 2) * zoom + panX;
+      const centerY = (bounds.y + moveOffset.y + bounds.height / 2) * zoom + panY;
 
       // Half dimensions
       const halfW = (bounds.width * zoom) / 2;
       const halfH = (bounds.height * zoom) / 2;
 
       // Corner positions relative to center (before rotation)
-      const offset = this.HANDLE_OFFSET;
+      const handleOffset = this.HANDLE_OFFSET;
       const corners = [
-        { pos: 'top-left' as HandlePosition, x: -halfW - offset, y: -halfH - offset },
-        { pos: 'top-right' as HandlePosition, x: halfW + offset, y: -halfH - offset },
-        { pos: 'bottom-left' as HandlePosition, x: -halfW - offset, y: halfH + offset },
-        { pos: 'bottom-right' as HandlePosition, x: halfW + offset, y: halfH + offset },
+        {
+          pos: "top-left" as HandlePosition,
+          x: -halfW - handleOffset,
+          y: -halfH - handleOffset,
+        },
+        {
+          pos: "top-right" as HandlePosition,
+          x: halfW + handleOffset,
+          y: -halfH - handleOffset,
+        },
+        {
+          pos: "bottom-left" as HandlePosition,
+          x: -halfW - handleOffset,
+          y: halfH + handleOffset,
+        },
+        {
+          pos: "bottom-right" as HandlePosition,
+          x: halfW + handleOffset,
+          y: halfH + handleOffset,
+        },
       ];
 
       // Apply rotation to each corner
@@ -125,7 +150,7 @@ export class PFTransformHandles extends BaseComponent {
       const cos = Math.cos(radians);
       const sin = Math.sin(radians);
 
-      return corners.map(corner => ({
+      return corners.map((corner) => ({
         position: corner.pos,
         screenX: centerX + corner.x * cos - corner.y * sin,
         screenY: centerY + corner.x * sin + corner.y * cos,
@@ -146,10 +171,26 @@ export class PFTransformHandles extends BaseComponent {
     const offset = this.HANDLE_OFFSET;
 
     return [
-      { position: 'top-left', screenX: screenLeft - offset, screenY: screenTop - offset },
-      { position: 'top-right', screenX: screenRight + offset, screenY: screenTop - offset },
-      { position: 'bottom-left', screenX: screenLeft - offset, screenY: screenBottom + offset },
-      { position: 'bottom-right', screenX: screenRight + offset, screenY: screenBottom + offset },
+      {
+        position: "top-left",
+        screenX: screenLeft - offset,
+        screenY: screenTop - offset,
+      },
+      {
+        position: "top-right",
+        screenX: screenRight + offset,
+        screenY: screenTop - offset,
+      },
+      {
+        position: "bottom-left",
+        screenX: screenLeft - offset,
+        screenY: screenBottom + offset,
+      },
+      {
+        position: "bottom-right",
+        screenX: screenRight + offset,
+        screenY: screenBottom + offset,
+      },
     ];
   }
 
@@ -159,12 +200,13 @@ export class PFTransformHandles extends BaseComponent {
     const panX = viewportStore.panX.value;
     const panY = viewportStore.panY.value;
 
-    // For transforming state, use original bounds (rotation is around original center)
-    if (state.type === 'transforming') {
+    // For transforming state, use original bounds + offset (rotation is around moved center)
+    if (state.type === "transforming") {
       const bounds = state.originalBounds;
+      const offset = state.currentOffset;
       return {
-        x: (bounds.x + bounds.width / 2) * zoom + panX,
-        y: (bounds.y + bounds.height / 2) * zoom + panY,
+        x: (bounds.x + offset.x + bounds.width / 2) * zoom + panX,
+        y: (bounds.y + offset.y + bounds.height / 2) * zoom + panY,
       };
     }
 
@@ -182,12 +224,14 @@ export class PFTransformHandles extends BaseComponent {
     const state = selectionStore.state.value;
 
     // If we're in selected or floating state, signal start of rotation
-    if (state.type === 'selected' || state.type === 'floating') {
-      this.dispatchEvent(new CustomEvent('rotation-start', {
-        bubbles: true,
-        composed: true,
-        detail: { handle },
-      }));
+    if (state.type === "selected" || state.type === "floating") {
+      this.dispatchEvent(
+        new CustomEvent("rotation-start", {
+          bubbles: true,
+          composed: true,
+          detail: { handle },
+        })
+      );
     }
 
     // Start drag tracking
@@ -241,10 +285,12 @@ export class PFTransformHandles extends BaseComponent {
   private handleDocumentMouseUp = () => {
     if (this.isDragging) {
       this.isDragging = false;
-      this.dispatchEvent(new CustomEvent('rotation-end', {
-        bubbles: true,
-        composed: true,
-      }));
+      this.dispatchEvent(
+        new CustomEvent("rotation-end", {
+          bubbles: true,
+          composed: true,
+        })
+      );
     }
   };
 
@@ -262,19 +308,22 @@ export class PFTransformHandles extends BaseComponent {
     }
 
     return html`
-      ${handles.map(handle => html`
-        <div
-          class="handle ${this.isDragging ? 'dragging' : ''}"
-          style="left: ${handle.screenX}px; top: ${handle.screenY}px;"
-          @mousedown=${(e: MouseEvent) => this.handleMouseDown(e, handle.position)}
-        ></div>
-      `)}
+      ${handles.map(
+        (handle) => html`
+          <div
+            class="handle ${this.isDragging ? "dragging" : ""}"
+            style="left: ${handle.screenX}px; top: ${handle.screenY}px;"
+            @mousedown=${(e: MouseEvent) =>
+              this.handleMouseDown(e, handle.position)}
+          ></div>
+        `
+      )}
     `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-transform-handles': PFTransformHandles;
+    "pf-transform-handles": PFTransformHandles;
   }
 }

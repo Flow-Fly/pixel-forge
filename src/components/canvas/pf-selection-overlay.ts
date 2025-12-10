@@ -141,8 +141,8 @@ export class PFSelectionOverlay extends BaseComponent {
       // Draw the preview pixels (rotated)
       this.drawTransformingPixels(ctx, state, zoom, panX, panY);
 
-      // Draw rotated marching ants around the original bounds
-      this.drawRotatedMarchingAnts(ctx, state.originalBounds, state.rotation, zoom, panX, panY);
+      // Draw rotated marching ants around the original bounds + offset
+      this.drawRotatedMarchingAnts(ctx, state.originalBounds, state.currentOffset, state.rotation, zoom, panX, panY);
     }
   }
 
@@ -156,10 +156,11 @@ export class PFSelectionOverlay extends BaseComponent {
     // Use previewData which is already rotated with CleanEdge
     const previewData = state.previewData ?? state.imageData;
     const originalBounds = state.originalBounds;
+    const offset = state.currentOffset;
 
-    // Calculate center of original bounds (rotation pivot point)
-    const centerX = (originalBounds.x + originalBounds.width / 2) * zoom + panX;
-    const centerY = (originalBounds.y + originalBounds.height / 2) * zoom + panY;
+    // Calculate center of original bounds + offset (rotation pivot point)
+    const centerX = (originalBounds.x + offset.x + originalBounds.width / 2) * zoom + panX;
+    const centerY = (originalBounds.y + offset.y + originalBounds.height / 2) * zoom + panY;
 
     // Preview dimensions in screen space
     const screenWidth = previewData.width * zoom;
@@ -303,14 +304,15 @@ export class PFSelectionOverlay extends BaseComponent {
   private drawRotatedMarchingAnts(
     ctx: CanvasRenderingContext2D,
     bounds: { x: number; y: number; width: number; height: number },
+    offset: { x: number; y: number },
     rotation: number,
     zoom: number,
     panX: number,
     panY: number
   ) {
-    // Calculate center in screen coordinates
-    const centerX = (bounds.x + bounds.width / 2) * zoom + panX;
-    const centerY = (bounds.y + bounds.height / 2) * zoom + panY;
+    // Calculate center in screen coordinates (with offset applied)
+    const centerX = (bounds.x + offset.x + bounds.width / 2) * zoom + panX;
+    const centerY = (bounds.y + offset.y + bounds.height / 2) * zoom + panY;
 
     // Screen dimensions
     const screenWidth = bounds.width * zoom;
