@@ -790,10 +790,10 @@ export class PFCanvasViewport extends BaseComponent {
     const transformState = selectionStore.getTransformState();
     if (!transformState) return;
 
-    const { imageData, originalBounds, currentBounds, rotation, shape, mask } = transformState;
+    const { imageData, originalBounds, currentBounds, currentOffset, rotation, shape, mask } = transformState;
 
-    // If rotation is 0, just cancel (no change needed)
-    if (rotation === 0) {
+    // If rotation is 0 and no movement, just cancel (no change needed)
+    if (rotation === 0 && currentOffset.x === 0 && currentOffset.y === 0) {
       selectionStore.cancelTransform();
       return;
     }
@@ -823,7 +823,8 @@ export class PFCanvasViewport extends BaseComponent {
       currentBounds,
       rotation,
       shape,
-      mask
+      mask,
+      currentOffset
     );
 
     historyStore.execute(command);

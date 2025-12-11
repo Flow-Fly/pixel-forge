@@ -56,7 +56,12 @@ export class MagicWandTool extends BaseTool {
       const canvasY = Math.floor(y);
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      selectionStore.moveFloat(dx, dy);
+      const state = selectionStore.state.value;
+      if (state.type === 'transforming') {
+        selectionStore.moveTransform(dx, dy);
+      } else {
+        selectionStore.moveFloat(dx, dy);
+      }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
     }

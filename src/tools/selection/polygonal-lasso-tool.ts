@@ -96,7 +96,12 @@ export class PolygonalLassoTool extends BaseTool {
     if (this.mode === 'dragging') {
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      selectionStore.moveFloat(dx, dy);
+      const state = selectionStore.state.value;
+      if (state.type === 'transforming') {
+        selectionStore.moveTransform(dx, dy);
+      } else {
+        selectionStore.moveFloat(dx, dy);
+      }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
     } else {
