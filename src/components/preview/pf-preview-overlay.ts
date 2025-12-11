@@ -12,6 +12,7 @@ type BackgroundType = "white" | "black" | "checker";
 const STORAGE_KEY_POSITION = "pf-preview-position";
 const STORAGE_KEY_COLLAPSED = "pf-preview-collapsed";
 const STORAGE_KEY_BG = "pf-preview-bg";
+const STORAGE_KEY_SIZE = "pf-preview-size";
 
 @customElement("pf-preview-overlay")
 export class PFPreviewOverlay extends BaseComponent {
@@ -24,6 +25,7 @@ export class PFPreviewOverlay extends BaseComponent {
     }
 
     .container {
+      position: relative;
       background: var(--pf-color-bg-panel);
       border: 1px solid var(--pf-color-border);
       border-radius: 4px;
@@ -195,6 +197,46 @@ export class PFPreviewOverlay extends BaseComponent {
       background: var(--pf-color-bg-hover);
       color: var(--pf-color-text-main);
     }
+
+    .resize-handle {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 12px;
+      height: 12px;
+      cursor: nwse-resize;
+      opacity: 0.5;
+      transition: opacity 0.15s ease;
+    }
+
+    .resize-handle:hover {
+      opacity: 1;
+    }
+
+    .resize-handle::before,
+    .resize-handle::after {
+      content: '';
+      position: absolute;
+      background: var(--pf-color-text-muted);
+    }
+
+    .resize-handle::before {
+      bottom: 3px;
+      right: 3px;
+      width: 6px;
+      height: 1px;
+      transform: rotate(-45deg);
+      transform-origin: right bottom;
+    }
+
+    .resize-handle::after {
+      bottom: 5px;
+      right: 5px;
+      width: 4px;
+      height: 1px;
+      transform: rotate(-45deg);
+      transform-origin: right bottom;
+    }
   `;
 
   @query("canvas") previewCanvas!: HTMLCanvasElement;
@@ -206,10 +248,19 @@ export class PFPreviewOverlay extends BaseComponent {
   @state() private isDragging = false;
   @state() private dragOffsetX = 0;
   @state() private dragOffsetY = 0;
+  @state() private previewSize = 128; // User-configurable preview size
+  @state() private isResizing = false;
+  private resizeStartX = 0;
+  private resizeStartY = 0;
+  private resizeStartSize = 0;
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number = 0;
-  private previewScale = 2; // Preview canvas scale factor
+
+  // Preview sizing constraints
+  private readonly MAX_PREVIEW_SIZE = 300; // Max user-resizable size
+  private readonly MIN_PREVIEW_SIZE = 64;  // Min user-resizable size
+  private readonly DEFAULT_PREVIEW_SIZE = 128;
 
   connectedCallback() {
     super.connectedCallback();
@@ -222,6 +273,8 @@ export class PFPreviewOverlay extends BaseComponent {
     cancelAnimationFrame(this.animationFrameId);
     window.removeEventListener("mousemove", this.handleMouseMove);
     window.removeEventListener("mouseup", this.handleMouseUp);
+    window.removeEventListener("mousemove", this.handleResizeMouseMove);
+    window.removeEventListener("mouseup", this.handleResizeMouseUp);
   }
 
   firstUpdated() {
@@ -254,6 +307,14 @@ export class PFPreviewOverlay extends BaseComponent {
     if (savedBg && ["white", "black", "checker"].includes(savedBg)) {
       this.bgType = savedBg;
     }
+
+    const savedSize = localStorage.getItem(STORAGE_KEY_SIZE);
+    if (savedSize) {
+      const size = parseInt(savedSize, 10);
+      if (size >= this.MIN_PREVIEW_SIZE && size <= this.MAX_PREVIEW_SIZE) {
+        this.previewSize = size;
+      }
+    }
   }
 
   private savePosition() {
@@ -269,6 +330,10 @@ export class PFPreviewOverlay extends BaseComponent {
 
   private saveBgType() {
     localStorage.setItem(STORAGE_KEY_BG, this.bgType);
+  }
+
+  private saveSize() {
+    localStorage.setItem(STORAGE_KEY_SIZE, String(this.previewSize));
   }
 
   private toggleCollapse() {
@@ -316,6 +381,41 @@ export class PFPreviewOverlay extends BaseComponent {
     window.removeEventListener("mouseup", this.handleMouseUp);
   };
 
+  private handleResizeMouseDown = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    this.isResizing = true;
+    this.resizeStartX = e.clientX;
+    this.resizeStartY = e.clientY;
+    this.resizeStartSize = this.previewSize;
+
+    window.addEventListener("mousemove", this.handleResizeMouseMove);
+    window.addEventListener("mouseup", this.handleResizeMouseUp);
+  };
+
+  private handleResizeMouseMove = (e: MouseEvent) => {
+    if (!this.isResizing) return;
+
+    // Use the larger of X or Y delta for uniform scaling
+    const deltaX = e.clientX - this.resizeStartX;
+    const deltaY = e.clientY - this.resizeStartY;
+    const delta = Math.max(deltaX, deltaY);
+
+    const newSize = Math.max(
+      this.MIN_PREVIEW_SIZE,
+      Math.min(this.MAX_PREVIEW_SIZE, this.resizeStartSize + delta)
+    );
+
+    this.previewSize = newSize;
+  };
+
+  private handleResizeMouseUp = () => {
+    this.isResizing = false;
+    this.saveSize();
+    window.removeEventListener("mousemove", this.handleResizeMouseMove);
+    window.removeEventListener("mouseup", this.handleResizeMouseUp);
+  };
+
   private handlePreviewClick(e: MouseEvent) {
     if (!this.previewCanvas) return;
 
@@ -324,8 +424,9 @@ export class PFPreviewOverlay extends BaseComponent {
     const clickY = e.clientY - rect.top;
 
     // Convert to canvas coordinates
-    const canvasX = clickX / this.previewScale;
-    const canvasY = clickY / this.previewScale;
+    const previewScale = this.getPreviewScale();
+    const canvasX = clickX / previewScale;
+    const canvasY = clickY / previewScale;
 
     // Center viewport on this point
     viewportStore.centerOn(canvasX, canvasY);
@@ -355,6 +456,18 @@ export class PFPreviewOverlay extends BaseComponent {
     renderFrameToCanvas(this.ctx, currentFrameId, layers, cels);
   }
 
+  /**
+   * Calculate the preview scale to fit the canvas within the user-defined previewSize.
+   */
+  private getPreviewScale(): number {
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const maxDim = Math.max(canvasW, canvasH);
+
+    // Scale to fit within user-defined preview size
+    return this.previewSize / maxDim;
+  }
+
   private getViewportIndicatorStyle() {
     const canvasW = projectStore.width.value;
     const canvasH = projectStore.height.value;
@@ -374,7 +487,7 @@ export class PFPreviewOverlay extends BaseComponent {
     const visibleBottom = Math.min(canvasH, (containerH - panY) / zoom);
 
     // Convert to preview coordinates
-    const scale = this.previewScale;
+    const scale = this.getPreviewScale();
     const left = visibleLeft * scale;
     const top = visibleTop * scale;
     const width = (visibleRight - visibleLeft) * scale;
@@ -402,8 +515,9 @@ export class PFPreviewOverlay extends BaseComponent {
     const isPlaying = animationStore.isPlaying.value;
     const canvasW = projectStore.width.value;
     const canvasH = projectStore.height.value;
-    const displayW = canvasW * this.previewScale;
-    const displayH = canvasH * this.previewScale;
+    const previewScale = this.getPreviewScale();
+    const displayW = canvasW * previewScale;
+    const displayH = canvasH * previewScale;
 
     const viewportStyle = this.getViewportIndicatorStyle();
 
@@ -468,6 +582,11 @@ export class PFPreviewOverlay extends BaseComponent {
             </button>
           </div>
         </div>
+        <div
+          class="resize-handle"
+          @mousedown=${this.handleResizeMouseDown}
+          title="Drag to resize"
+        ></div>
       </div>
     `;
   }

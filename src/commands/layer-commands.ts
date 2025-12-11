@@ -1,5 +1,6 @@
 import { type Command } from './index';
 import { layerStore } from '../stores/layers';
+import { projectStore } from '../stores/project';
 import { type Layer } from '../types/layer';
 
 export class AddLayerCommand implements Command {
@@ -8,7 +9,9 @@ export class AddLayerCommand implements Command {
   private layerId: string | null = null;
 
   execute() {
-    const layer = layerStore.addLayer();
+    const width = projectStore.width.value;
+    const height = projectStore.height.value;
+    const layer = layerStore.addLayer(undefined, width, height);
     this.layerId = layer.id;
   }
 

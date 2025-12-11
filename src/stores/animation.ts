@@ -2,6 +2,7 @@ import { signal } from '../core/signal';
 import { type Frame, type Cel, type OnionSkinSettings, type AnimationTag, type FrameTag } from '../types/animation';
 import type { TextCelData } from '../types/text';
 import { layerStore } from './layers';
+import { projectStore } from './project';
 
 export type PlaybackMode = 'all' | 'tag';
 
@@ -283,8 +284,8 @@ class AnimationStore {
       // Lazy creation of cels for new layers
       if (!cel) {
         const canvas = document.createElement('canvas');
-        canvas.width = 64; // TODO: Get from project settings
-        canvas.height = 64;
+        canvas.width = projectStore.width.value;
+        canvas.height = projectStore.height.value;
 
         // Apply optimized context settings
         const ctx = canvas.getContext('2d', {

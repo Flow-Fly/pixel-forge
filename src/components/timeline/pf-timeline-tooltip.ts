@@ -72,9 +72,11 @@ export class PFTimelineTooltip extends LitElement {
 
   @property({ type: Number }) canvasWidth = 64;
   @property({ type: Number }) canvasHeight = 64;
-  @property({ type: Number }) previewScale = 1.5;
   @property({ type: String }) primaryText = '';
   @property({ type: String }) secondaryText = '';
+
+  // Max display size for preview (constrains large canvases)
+  private readonly MAX_PREVIEW_SIZE = 128;
 
   @state() private isVisible = false;
   @state() private posX = 0;
@@ -186,6 +188,25 @@ export class PFTimelineTooltip extends LitElement {
   }
 
   /**
+   * Calculate the preview scale to fit within MAX_PREVIEW_SIZE.
+   */
+  private getPreviewScale(): number {
+    const maxDim = Math.max(this.canvasWidth, this.canvasHeight);
+
+    // For large canvases, scale down to fit
+    if (maxDim > this.MAX_PREVIEW_SIZE) {
+      return this.MAX_PREVIEW_SIZE / maxDim;
+    }
+
+    // For small canvases, scale up (1.5x for small, 1x for medium)
+    if (maxDim <= 64) {
+      return 1.5;
+    }
+
+    return 1;
+  }
+
+  /**
    * Clear the preview canvas.
    */
   clear() {
@@ -208,8 +229,9 @@ export class PFTimelineTooltip extends LitElement {
     if (!this.anchorElement) return;
 
     const rect = this.anchorElement.getBoundingClientRect();
-    const tooltipWidth = this.canvasWidth * this.previewScale + 16; // padding
-    const tooltipHeight = this.canvasHeight * this.previewScale + 50; // padding + text
+    const previewScale = this.getPreviewScale();
+    const tooltipWidth = this.canvasWidth * previewScale + 16; // padding
+    const tooltipHeight = this.canvasHeight * previewScale + 50; // padding + text
 
     // Position above the anchor by default
     let x = rect.left + rect.width / 2 - tooltipWidth / 2;
@@ -228,8 +250,9 @@ export class PFTimelineTooltip extends LitElement {
   }
 
   render() {
-    const displayWidth = this.canvasWidth * this.previewScale;
-    const displayHeight = this.canvasHeight * this.previewScale;
+    const previewScale = this.getPreviewScale();
+    const displayWidth = this.canvasWidth * previewScale;
+    const displayHeight = this.canvasHeight * previewScale;
 
     return html`
       <div
