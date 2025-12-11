@@ -18,6 +18,16 @@
   --pf-color-border: #333333;
   --pf-color-grid: #2a2a2a;
 
+  /* Interactive states */
+  --pf-color-primary: var(--pf-color-accent-cyan);
+  --pf-color-primary-transparent: rgba(0, 255, 255, 0.15);
+  --pf-color-bg-hover: #252525;
+  --pf-color-bg-input: #1a1a1a;
+
+  /* Border radius */
+  --pf-radius-sm: 4px;
+  --pf-radius-md: 6px;
+
   /* Typography */
   --pf-font-mono: 'JetBrains Mono', 'IBM Plex Mono', monospace;
   --pf-font-size-xs: 10px;

@@ -135,3 +135,60 @@ export class ReorderFrameCommand implements Command {
     animationStore.reorderFrame(this.toIndex, this.fromIndex);
   }
 }
+
+/**
+ * Command to link multiple cels together (share the same canvas).
+ * Undo creates independent copies for each cel.
+ */
+export class LinkCelsCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Link Cels';
+  private celKeys: string[];
+  private linkedCelId: string | null = null;
+
+  constructor(celKeys: string[]) {
+    this.celKeys = celKeys;
+  }
+
+  execute() {
+    this.linkedCelId = animationStore.linkCels(this.celKeys);
+  }
+
+  undo() {
+    if (this.linkedCelId) {
+      // Unlink creates independent copies for each cel
+      animationStore.unlinkCels(this.celKeys);
+    }
+  }
+}
+
+/**
+ * Command to unlink cels (give each its own canvas copy).
+ * Undo re-links them to share the first cel's canvas.
+ */
+export class UnlinkCelsCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Unlink Cels';
+  private celKeys: string[];
+  private previousLinkedCelId: string | null = null;
+
+  constructor(celKeys: string[]) {
+    this.celKeys = celKeys;
+    // Capture the linkedCelId before unlinking (assume all share the same one)
+    if (celKeys.length > 0) {
+      const firstCel = animationStore.cels.value.get(celKeys[0]);
+      this.previousLinkedCelId = firstCel?.linkedCelId ?? null;
+    }
+  }
+
+  execute() {
+    animationStore.unlinkCels(this.celKeys);
+  }
+
+  undo() {
+    if (this.previousLinkedCelId && this.celKeys.length >= 2) {
+      // Re-link the cels
+      animationStore.linkCels(this.celKeys);
+    }
+  }
+}

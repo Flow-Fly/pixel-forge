@@ -34,13 +34,21 @@ export interface OnionSkinSettings {
   tint: boolean;
 }
 
+/**
+ * Link type for cels:
+ * - 'soft': Auto-created when duplicating frames. Breaks on edit (copy-on-write).
+ * - 'hard': Explicitly created by user. Stays linked on edit (affects all).
+ */
+export type CelLinkType = 'soft' | 'hard';
+
 export interface Cel {
   id: string;
   layerId: string;
   frameId: string;
   canvas: HTMLCanvasElement;
-  linkedCelId?: string;  // Group identifier for linked cels (share same canvas)
-  opacity?: number;      // Cel-level opacity (0-100, default 100)
+  linkedCelId?: string;    // Group identifier for linked cels (share same canvas)
+  linkType?: CelLinkType;  // Type of link: 'soft' (auto-break) or 'hard' (user explicit)
+  opacity?: number;        // Cel-level opacity (0-100, default 100)
   // Text cel specific (only present for text layers)
   textCelData?: TextCelData;
 }

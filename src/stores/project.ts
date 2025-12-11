@@ -1,8 +1,9 @@
 import { signal } from '../core/signal';
 import { layerStore } from './layers';
-import { animationStore } from './animation';
+import { animationStore, EMPTY_CEL_LINK_ID } from './animation';
 import { historyStore } from './history';
 import { persistenceService } from '../services/persistence/indexed-db';
+import { onionSkinCache } from '../services/onion-skin-cache';
 import { canvasToPngBytes, loadImageDataToCanvas } from '../utils/canvas-binary';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 
@@ -55,18 +56,23 @@ class ProjectStore {
       }))
     );
 
-    // Convert frames/cels to binary format (including text cel data)
+    // Convert frames/cels to binary format (including text cel data and linked cel info)
     const frames = await Promise.all(
       animationStore.frames.value.map(async frame => {
         const cels = await Promise.all(
           layerStore.layers.value.map(async layer => {
-            const canvas = animationStore.getCelCanvas(frame.id, layer.id);
+            const celKey = animationStore.getCelKey(layer.id, frame.id);
+            const cel = animationStore.cels.value.get(celKey);
+            const canvas = cel?.canvas;
             const textCelData = animationStore.getTextCelData(layer.id, frame.id);
             return {
               layerId: layer.id,
               data: canvas
                 ? await canvasToPngBytes(canvas)
                 : new Uint8Array(0),
+              // Include linked cel ID and type if present (v2.2+)
+              ...(cel?.linkedCelId && { linkedCelId: cel.linkedCelId }),
+              ...(cel?.linkType && { linkType: cel.linkType }),
               // Include text cel data if present
               ...(textCelData && { textCelData })
             };
@@ -101,6 +107,9 @@ class ProjectStore {
   }
 
   async loadProject(file: ProjectFile) {
+    // Clear onion skin cache (old project's cels are no longer valid)
+    onionSkinCache.clear();
+
     // 1. Set dimensions and name
     this.setSize(file.width, file.height);
     this.name.value = file.name || 'Untitled';
@@ -144,6 +153,10 @@ class ProjectStore {
     // Now we have exactly 1 frame left - we'll replace it with loaded frames
     const placeholderFrameId = animationStore.frames.value[0]?.id;
 
+    // Track linked cel groups for post-processing (v2.2+)
+    // Maps linkedCelId -> { celKeys, linkType }
+    const linkedCelGroups = new Map<string, { celKeys: string[], linkType: 'soft' | 'hard' }>();
+
     // Add frames from file
     for (const f of file.frames) {
       animationStore.addFrame(false); // false = don't duplicate content
@@ -152,6 +165,30 @@ class ProjectStore {
 
       // Populate cels
       for (const c of f.cels) {
+        const celKey = animationStore.getCelKey(c.layerId, newFrame.id);
+        const cel = animationStore.cels.value.get(celKey);
+
+        // If cel uses shared transparent canvas and has data to load,
+        // give it its own canvas first (fix for Phase 3 regression)
+        if (cel && cel.linkedCelId === EMPTY_CEL_LINK_ID && hasImageData(c.data)) {
+          const newCanvas = document.createElement('canvas');
+          newCanvas.width = file.width;
+          newCanvas.height = file.height;
+          const ctx = newCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+          if (ctx) ctx.imageSmoothingEnabled = false;
+
+          // Update cel to use its own canvas and remove empty marker
+          const cels = new Map(animationStore.cels.value);
+          cels.set(celKey, {
+            ...cel,
+            canvas: newCanvas,
+            linkedCelId: undefined,
+            linkType: undefined
+          });
+          animationStore.cels.value = cels;
+        }
+
+        // Now load data into the cel's (non-shared) canvas
         const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
         // Handle both Base64 (v1.x) and binary (v2.0+) formats
         if (canvas && hasImageData(c.data)) {
@@ -161,6 +198,35 @@ class ProjectStore {
         // Restore text cel data if present (v2.1+)
         if (c.textCelData) {
           animationStore.setTextCelData(c.layerId, newFrame.id, c.textCelData);
+        }
+
+        // Track linked cels for later linking (v2.2+)
+        if (c.linkedCelId) {
+          const celKey = animationStore.getCelKey(c.layerId, newFrame.id);
+          if (!linkedCelGroups.has(c.linkedCelId)) {
+            linkedCelGroups.set(c.linkedCelId, {
+              celKeys: [],
+              linkType: c.linkType ?? 'soft' // Default to soft for backwards compat
+            });
+          }
+          linkedCelGroups.get(c.linkedCelId)!.celKeys.push(celKey);
+        }
+      }
+    }
+
+    // Restore linked cel relationships (v2.2+)
+    // Link cels that share the same linkedCelId, preserving linkType
+    for (const [linkedCelId, { celKeys, linkType }] of linkedCelGroups) {
+      if (celKeys.length >= 2) {
+        animationStore.linkCels(celKeys, linkType);
+      } else if (celKeys.length === 1) {
+        // Single cel with linkedCelId - just set the property (orphaned link)
+        const celKey = celKeys[0];
+        const cels = new Map(animationStore.cels.value);
+        const cel = cels.get(celKey);
+        if (cel) {
+          cels.set(celKey, { ...cel, linkedCelId, linkType });
+          animationStore.cels.value = cels;
         }
       }
     }
@@ -191,6 +257,9 @@ class ProjectStore {
    * Clears all existing content and resets to a fresh state.
    */
   async newProject(width: number, height: number) {
+    // Clear onion skin cache (old project's cels are no longer valid)
+    onionSkinCache.clear();
+
     // 1. Set new dimensions and reset name
     this.setSize(width, height);
     this.name.value = 'Untitled';
