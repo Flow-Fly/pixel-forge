@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { animationStore } from '../../stores/animation';
+import { dirtyRectStore } from '../../stores/dirty-rect';
 
 @customElement('pf-onion-skin-controls')
 export class PFOnionSkinControls extends BaseComponent {
@@ -73,6 +74,8 @@ export class PFOnionSkinControls extends BaseComponent {
       ...animationStore.onionSkin.value,
       enabled
     };
+    // Trigger canvas redraw to show/hide onion skins
+    dirtyRectStore.requestFullRedraw();
   }
 
   private updateSettings(updates: Partial<typeof animationStore.onionSkin.value>) {
@@ -80,6 +83,8 @@ export class PFOnionSkinControls extends BaseComponent {
       ...animationStore.onionSkin.value,
       ...updates
     };
+    // Trigger canvas redraw to update onion skin display
+    dirtyRectStore.requestFullRedraw();
   }
 
   render() {

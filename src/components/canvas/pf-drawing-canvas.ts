@@ -10,6 +10,7 @@ import { historyStore } from '../../stores/history';
 import { dirtyRectStore } from '../../stores/dirty-rect';
 import { viewportStore } from '../../stores/viewport';
 import { renderScheduler } from '../../services/render-scheduler';
+import { onionSkinCache } from '../../services/onion-skin-cache';
 import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
 import type { ModifierKeys } from '../../tools/base-tool';
 import { rectClamp, type Rect } from '../../types/geometry';
@@ -343,37 +344,49 @@ export class PFDrawingCanvas extends BaseComponent {
 
     const cels = animationStore.cels.value;
 
-    // Helper to draw a frame
+    // Helper to draw a frame with onion skin effect
     const drawFrame = (index: number, isPrev: boolean, distance: number) => {
       if (index < 0 || index >= frames.length) return;
-      
+
       const frame = frames[index];
       const key = animationStore.getCelKey(activeLayerId, frame.id);
       const cel = cels.get(key);
-      
+
       if (cel && cel.canvas) {
         const opacity = Math.max(0.1, 1 - (distance * opacityStep));
-        
+        const tintColor = isPrev ? '#ff0000' : '#0000ff';
+
         this.ctx.save();
         this.ctx.globalAlpha = opacity;
-        
+
         if (tint) {
-          // Create a temporary canvas for tinting
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = this.width;
-          tempCanvas.height = this.height;
-          const tempCtx = tempCanvas.getContext('2d')!;
-          
-          tempCtx.drawImage(cel.canvas, 0, 0);
-          tempCtx.globalCompositeOperation = 'source-in';
-          tempCtx.fillStyle = isPrev ? '#ff0000' : '#0000ff'; // Red for prev, Blue for next
-          tempCtx.fillRect(0, 0, this.width, this.height);
-          
-          this.ctx.drawImage(tempCanvas, 0, 0);
+          // Try to get cached tinted bitmap (fast path)
+          const cachedBitmap = onionSkinCache.getSync(cel.id, tintColor, opacity);
+
+          if (cachedBitmap) {
+            // Cache hit - draw the cached bitmap
+            this.ctx.drawImage(cachedBitmap, 0, 0);
+          } else {
+            // Cache miss - use sync fallback and populate cache for next time
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = this.width;
+            tempCanvas.height = this.height;
+            const tempCtx = tempCanvas.getContext('2d')!;
+
+            tempCtx.drawImage(cel.canvas, 0, 0);
+            tempCtx.globalCompositeOperation = 'source-in';
+            tempCtx.fillStyle = tintColor;
+            tempCtx.fillRect(0, 0, this.width, this.height);
+
+            this.ctx.drawImage(tempCanvas, 0, 0);
+
+            // Async populate cache for next render (fire and forget)
+            onionSkinCache.populate(cel.id, cel.canvas, tintColor, opacity);
+          }
         } else {
           this.ctx.drawImage(cel.canvas, 0, 0);
         }
-        
+
         this.ctx.restore();
       }
     };
@@ -470,7 +483,17 @@ export class PFDrawingCanvas extends BaseComponent {
     const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
 
     if (activeLayer && activeLayer.canvas && !activeLayer.locked && activeLayer.visible) {
-      const layerCtx = activeLayer.canvas.getContext('2d');
+      // Copy-on-write: unlink cel before editing if it's shared with others
+      const currentFrameId = animationStore.currentFrameId.value;
+      const wasUnlinked = animationStore.ensureUnlinkedForEdit(activeLayerId!, currentFrameId);
+
+      // If unlinked, the layer's canvas reference has changed - get fresh reference
+      let targetLayer = activeLayer;
+      if (wasUnlinked) {
+        targetLayer = layerStore.layers.value.find((l) => l.id === activeLayerId)!;
+      }
+
+      const layerCtx = targetLayer.canvas!.getContext('2d');
       if (layerCtx) {
         // Capture state before drawing
         this.previousImageData = layerCtx.getImageData(0, 0, this.width, this.height);
@@ -588,6 +611,14 @@ export class PFDrawingCanvas extends BaseComponent {
             this.getCommandNameForTool()
           );
           historyStore.execute(command);
+
+          // Invalidate onion skin cache for the modified cel
+          const currentFrameId = animationStore.currentFrameId.value;
+          const celKey = animationStore.getCelKey(activeLayerId, currentFrameId);
+          const cel = animationStore.cels.value.get(celKey);
+          if (cel) {
+            onionSkinCache.invalidateCel(cel.id);
+          }
         }
 
         this.previousImageData = null;

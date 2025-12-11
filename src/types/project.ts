@@ -3,7 +3,7 @@ import type { LayerType, BlendMode } from './layer';
 import type { TextLayerData, TextCelData } from './text';
 
 /** Current project file format version */
-export const PROJECT_VERSION = '2.1.0';
+export const PROJECT_VERSION = '2.2.0';
 
 export interface ProjectFile {
   version: string;
@@ -26,6 +26,8 @@ export interface ProjectFile {
     cels: {
       layerId: string;
       data: string | Uint8Array;   // Base64 (v1.x) or binary PNG (v2.0+)
+      linkedCelId?: string;        // v2.2+: linked cel group ID (cels with same ID share canvas)
+      linkType?: 'soft' | 'hard';  // v2.2+: 'soft' = auto-break on edit, 'hard' = user explicit
       textCelData?: TextCelData;   // v2.1+: text content and position
     }[];
   }[];

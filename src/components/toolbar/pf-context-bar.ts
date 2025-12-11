@@ -4,7 +4,9 @@ import { BaseComponent } from "../../core/base-component";
 import { toolStore } from "../../stores/tools";
 import { selectionStore } from "../../stores/selection";
 import { animationStore } from "../../stores/animation";
+import { historyStore } from "../../stores/history";
 import { getToolMeta } from "../../tools/tool-registry";
+import { LinkCelsCommand, UnlinkCelsCommand } from "../../commands/animation-commands";
 import type { ToolOption } from "../../types/tool-meta";
 import "./options/pf-option-slider";
 import "./options/pf-option-checkbox";
@@ -530,12 +532,16 @@ export class PFContextBar extends BaseComponent {
   private _linkSelectedCels = () => {
     const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
     if (selectedCelKeys.length >= 2) {
-      animationStore.linkCels(selectedCelKeys);
+      const command = new LinkCelsCommand(selectedCelKeys);
+      historyStore.execute(command);
     }
   };
 
   private _unlinkSelectedCels = () => {
     const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
-    animationStore.unlinkCels(selectedCelKeys);
+    if (selectedCelKeys.length > 0) {
+      const command = new UnlinkCelsCommand(selectedCelKeys);
+      historyStore.execute(command);
+    }
   };
 }

@@ -5,6 +5,9 @@ import { layerStore } from './layers';
 
 export type PlaybackMode = 'all' | 'tag';
 
+/** Special marker for empty cels that share the transparent canvas */
+export const EMPTY_CEL_LINK_ID = '__empty__';
+
 class AnimationStore {
   frames = signal<Frame[]>([]);
   cels = signal<Map<string, Cel>>(new Map());
@@ -34,6 +37,34 @@ class AnimationStore {
   // Playback internals
   private animationFrameId: number | null = null;
   private lastFrameTime: number = 0;
+
+  // Shared transparent canvas for empty cels (memory optimization)
+  private sharedTransparentCanvas: HTMLCanvasElement | null = null;
+
+  /**
+   * Get or create the shared transparent canvas.
+   * All empty cels share this canvas until they are edited.
+   */
+  private getSharedTransparentCanvas(width: number, height: number): HTMLCanvasElement {
+    if (
+      !this.sharedTransparentCanvas ||
+      this.sharedTransparentCanvas.width !== width ||
+      this.sharedTransparentCanvas.height !== height
+    ) {
+      this.sharedTransparentCanvas = document.createElement('canvas');
+      this.sharedTransparentCanvas.width = width;
+      this.sharedTransparentCanvas.height = height;
+      // Leave transparent - no drawing needed
+      const ctx = this.sharedTransparentCanvas.getContext('2d', {
+        alpha: true,
+        willReadFrequently: true
+      });
+      if (ctx) {
+        ctx.imageSmoothingEnabled = false;
+      }
+    }
+    return this.sharedTransparentCanvas;
+  }
 
   constructor() {
     this.initialize();
@@ -68,27 +99,24 @@ class AnimationStore {
     const layers = layerStore.layers.value;
     const newCels = new Map(this.cels.value);
 
+    // Get canvas dimensions (use first layer's canvas or default to 64x64)
+    const firstLayer = layers[0];
+    const width = firstLayer?.canvas?.width ?? 64;
+    const height = firstLayer?.canvas?.height ?? 64;
+
+    // Use shared transparent canvas for all empty cels (memory optimization)
+    const sharedCanvas = this.getSharedTransparentCanvas(width, height);
+
     layers.forEach(layer => {
       const key = this.getCelKey(layer.id, frameId);
       if (!newCels.has(key)) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64; // TODO: Get from project settings
-        canvas.height = 64;
-
-        // Apply optimized context settings for cel canvases
-        const ctx = canvas.getContext('2d', {
-          alpha: true,
-          willReadFrequently: true // Cels are read frequently for compositing
-        });
-        if (ctx) {
-          ctx.imageSmoothingEnabled = false;
-        }
-
         newCels.set(key, {
           id: crypto.randomUUID(),
           layerId: layer.id,
           frameId,
-          canvas
+          canvas: sharedCanvas,
+          linkedCelId: EMPTY_CEL_LINK_ID, // Mark as empty (shares transparent canvas)
+          linkType: 'soft' // Empty cels are soft-linked, break on edit
         });
       }
     });
@@ -113,19 +141,32 @@ class AnimationStore {
     // Use provided sourceFrameId, or fall back to current frame
     const frameIdToUse = sourceFrameId ?? this.currentFrameId.value;
     const sourceFrameIndex = frames.findIndex(f => f.id === frameIdToUse);
-    
+
+    // Insert position: after the current/source frame (Aseprite behavior)
+    const insertIndex = sourceFrameIndex === -1 ? frames.length : sourceFrameIndex + 1;
+
     const newFrame: Frame = {
       id: crypto.randomUUID(),
-      order: frames.length,
+      order: insertIndex,
       duration: 100
     };
-    
-    this.frames.value = [...frames, newFrame];
-    
-    // Initialize cels for the new frame
-    this.initializeCelsForFrame(newFrame.id);
-    
-    // If duplication is requested and we have a source frame, copy content
+
+    // Insert frame at the correct position
+    const newFrames = [
+      ...frames.slice(0, insertIndex),
+      newFrame,
+      ...frames.slice(insertIndex)
+    ];
+
+    // Update order for all frames after the insertion point
+    for (let i = insertIndex + 1; i < newFrames.length; i++) {
+      newFrames[i] = { ...newFrames[i], order: i };
+    }
+
+    this.frames.value = newFrames;
+
+    // If duplication is requested and we have a source frame, soft-link cels
+    // This is memory efficient - new cels share canvas with source until edited
     if (duplicate && sourceFrameIndex !== -1) {
       const layers = layerStore.layers.value;
       const cels = new Map(this.cels.value);
@@ -133,22 +174,43 @@ class AnimationStore {
       layers.forEach(layer => {
         const sourceKey = this.getCelKey(layer.id, frameIdToUse);
         const targetKey = this.getCelKey(layer.id, newFrame.id);
-        
+
         const sourceCel = cels.get(sourceKey);
-        const targetCel = cels.get(targetKey);
-        
-        if (sourceCel && targetCel) {
-          const ctx = targetCel.canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(sourceCel.canvas, 0, 0);
+
+        if (sourceCel) {
+          // Generate a linkedCelId - reuse source's if it exists, otherwise create new
+          const linkedCelId = sourceCel.linkedCelId ?? crypto.randomUUID();
+
+          // Update source cel to have linkedCelId if it didn't have one
+          // (preserving existing linkType if it was hard-linked)
+          if (!sourceCel.linkedCelId) {
+            cels.set(sourceKey, {
+              ...sourceCel,
+              linkedCelId,
+              linkType: 'soft'
+            });
           }
+
+          // Create new cel that shares canvas with source (soft link)
+          cels.set(targetKey, {
+            id: crypto.randomUUID(),
+            layerId: layer.id,
+            frameId: newFrame.id,
+            canvas: sourceCel.canvas, // Share the same canvas!
+            linkedCelId,
+            linkType: sourceCel.linkType ?? 'soft', // Inherit link type, default to soft
+            opacity: sourceCel.opacity,
+            textCelData: sourceCel.textCelData
+          });
         }
       });
-      
-      // Update cels map just in case (though we modified objects in place if we got them from map)
-      // Actually cels.get returns reference, so canvas draw is enough.
+
+      this.cels.value = cels;
+    } else {
+      // No duplication - create empty cels
+      this.initializeCelsForFrame(newFrame.id);
     }
-    
+
     this.goToFrame(newFrame.id);
   }
 
@@ -715,8 +777,10 @@ class AnimationStore {
   /**
    * Link multiple cels together. They will share the same canvas.
    * The first cel's canvas becomes the shared canvas.
+   * @param celKeys - Array of cel keys to link
+   * @param linkType - 'hard' (default, user explicit) or 'soft' (auto, breaks on edit)
    */
-  linkCels(celKeys: string[]): string | null {
+  linkCels(celKeys: string[], linkType: 'soft' | 'hard' = 'hard'): string | null {
     if (celKeys.length < 2) return null;
 
     const cels = new Map(this.cels.value);
@@ -735,7 +799,8 @@ class AnimationStore {
         cels.set(key, {
           ...cel,
           canvas: sharedCanvas,
-          linkedCelId
+          linkedCelId,
+          linkType
         });
       }
     }
@@ -769,7 +834,8 @@ class AnimationStore {
         cels.set(key, {
           ...cel,
           canvas: newCanvas,
-          linkedCelId: undefined
+          linkedCelId: undefined,
+          linkType: undefined
         });
       }
     }
@@ -788,6 +854,66 @@ class AnimationStore {
       }
     }
     return result;
+  }
+
+  /**
+   * Ensure a cel is unlinked before editing (copy-on-write).
+   * Only breaks SOFT links - hard links (user explicit) stay linked.
+   * Handles empty cels specially - they share a transparent canvas singleton.
+   * Returns true if unlink occurred, false if cel was already independent or hard-linked.
+   */
+  ensureUnlinkedForEdit(layerId: string, frameId: string): boolean {
+    const key = this.getCelKey(layerId, frameId);
+    const cel = this.cels.value.get(key);
+
+    // Not linked - nothing to do
+    if (!cel?.linkedCelId) return false;
+
+    // Hard links stay linked - user explicitly wants edits to affect all
+    if (cel.linkType === 'hard') return false;
+
+    // Empty cel special case: always give it a new canvas
+    // Empty cels share the transparent canvas singleton
+    if (cel.linkedCelId === EMPTY_CEL_LINK_ID) {
+      const cels = new Map(this.cels.value);
+
+      // Create a fresh canvas for this cel
+      const newCanvas = document.createElement('canvas');
+      newCanvas.width = cel.canvas.width;
+      newCanvas.height = cel.canvas.height;
+      const ctx = newCanvas.getContext('2d', {
+        alpha: true,
+        willReadFrequently: true
+      });
+      if (ctx) {
+        ctx.imageSmoothingEnabled = false;
+        // Start with transparent (don't copy from shared canvas)
+      }
+
+      cels.set(key, {
+        ...cel,
+        canvas: newCanvas,
+        linkedCelId: undefined,
+        linkType: undefined
+      });
+
+      this.cels.value = cels;
+
+      // Sync layer canvases so layer.canvas points to the new cel canvas
+      this.syncLayerCanvases();
+      return true;
+    }
+
+    // Check if there are other cels in the same link group
+    const group = this.getCelLinkGroup(cel.linkedCelId);
+    if (group.length <= 1) return false; // Only one in group, no need to unlink
+
+    // Clone canvas for this cel only (copy-on-write for soft links)
+    this.unlinkCels([key]);
+
+    // Sync layer canvases so layer.canvas points to the new cel canvas
+    this.syncLayerCanvases();
+    return true;
   }
 
   /**

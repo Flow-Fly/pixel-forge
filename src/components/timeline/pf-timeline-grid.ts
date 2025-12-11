@@ -2,7 +2,7 @@ import { html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseComponent } from "../../core/base-component";
-import { animationStore } from "../../stores/animation";
+import { animationStore, EMPTY_CEL_LINK_ID } from "../../stores/animation";
 import { layerStore } from "../../stores/layers";
 import type { FrameTag } from "../../types/animation";
 
@@ -29,6 +29,7 @@ export class PFTimelineGrid extends BaseComponent {
       justify-content: center;
       cursor: pointer;
       box-sizing: border-box;
+      position: relative;
     }
 
     .cel:hover {
@@ -55,30 +56,22 @@ export class PFTimelineGrid extends BaseComponent {
       height: 6px;
       border-radius: 50%;
       background-color: var(--pf-color-text-muted);
+      position: relative;
+      z-index: 1;
     }
 
     .cel.has-content .cel-content {
       background-color: var(--pf-color-text-main);
     }
 
-    /* Tag column tinting */
-    .cel.tag-tinted {
-      position: relative;
-    }
-
-    .cel.tag-tinted::before {
-      content: "";
+    /* Tag column tinting - use real element to avoid ::before conflict with link lines */
+    .tag-tint {
       position: absolute;
       inset: 0;
       pointer-events: none;
       opacity: 0.12;
       background-color: var(--tag-tint-color);
       z-index: 0;
-    }
-
-    .cel.tag-tinted .cel-content {
-      position: relative;
-      z-index: 1;
     }
 
     /* Collapsed tag cell styling */
@@ -96,11 +89,7 @@ export class PFTimelineGrid extends BaseComponent {
       opacity: 0.6;
     }
 
-    /* Link badge */
-    .cel.linked {
-      position: relative;
-    }
-
+    /* Link badge (only for hard links) */
     .link-badge {
       position: absolute;
       bottom: 2px;
@@ -109,6 +98,33 @@ export class PFTimelineGrid extends BaseComponent {
       height: 6px;
       border-radius: 50%;
       z-index: 2;
+    }
+
+    /* Soft link spanning lines */
+    /* Line connecting to next cel (right side) */
+    .cel.link-continues-right::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      right: 0;
+      height: 2px;
+      background-color: var(--link-line-color, var(--pf-color-text-muted));
+      transform: translateY(-50%);
+      z-index: 1;
+    }
+
+    /* Line connecting from previous cel (left side) */
+    .cel.link-continues-left::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 50%;
+      height: 2px;
+      background-color: var(--link-line-color, var(--pf-color-text-muted));
+      transform: translateY(-50%);
+      z-index: 1;
     }
   `;
 
@@ -249,12 +265,46 @@ export class PFTimelineGrid extends BaseComponent {
               const isActive =
                 layer.id === activeLayerId && frame.id === currentFrameId;
               const isSelected = selectedCels.has(key);
-              const isLinked = cel?.linkedCelId != null;
+              // Exclude empty cels from linking visualization (they're just a memory optimization)
+              const isLinked =
+                cel?.linkedCelId != null &&
+                cel.linkedCelId !== EMPTY_CEL_LINK_ID;
+              const isHardLinked = isLinked && cel?.linkType === "hard";
               const linkColor = isLinked
                 ? animationStore.getLinkColor(cel!.linkedCelId!)
                 : null;
-              // TODO: Check if cel has content (non-empty canvas)
-              const hasContent = !!cel;
+
+              // Check link continuity with neighboring frames
+              let linkContinuesLeft = false;
+              let linkContinuesRight = false;
+              if (isLinked && cel?.linkedCelId) {
+                // Check previous frame
+                if (frameIndex > 0) {
+                  const prevFrame = frames[frameIndex - 1];
+                  const prevKey = animationStore.getCelKey(
+                    layer.id,
+                    prevFrame.id
+                  );
+                  const prevCel = cels.get(prevKey);
+                  linkContinuesLeft =
+                    prevCel?.linkedCelId === cel.linkedCelId;
+                }
+                // Check next frame
+                if (frameIndex < frames.length - 1) {
+                  const nextFrame = frames[frameIndex + 1];
+                  const nextKey = animationStore.getCelKey(
+                    layer.id,
+                    nextFrame.id
+                  );
+                  const nextCel = cels.get(nextKey);
+                  linkContinuesRight =
+                    nextCel?.linkedCelId === cel.linkedCelId;
+                }
+              }
+
+              // Empty cels (sharing transparent canvas) don't have content
+              const hasContent =
+                !!cel && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
               const tagColor = this.getTagColorForFrame(frameIndex, tags);
               const hasTint = tagColor !== null;
 
@@ -263,19 +313,35 @@ export class PFTimelineGrid extends BaseComponent {
                 active: isActive,
                 selected: isSelected,
                 "has-content": hasContent,
-                "tag-tinted": hasTint,
                 linked: isLinked,
+                "hard-linked": isHardLinked,
+                "link-continues-left": linkContinuesLeft,
+                "link-continues-right": linkContinuesRight,
               };
+
+              // Build style string with link line color
+              // Soft links: colorless (same as cel-content dot)
+              // Hard links: colored (distinct per link group)
+              const effectiveLinkColor = isHardLinked
+                ? linkColor
+                : "var(--pf-color-text-muted)";
+              const styleStr = [
+                hasTint ? `--tag-tint-color: ${tagColor}` : "",
+                isLinked ? `--link-line-color: ${effectiveLinkColor}` : "",
+              ]
+                .filter(Boolean)
+                .join("; ");
 
               return html`
                 <div
                   class=${classMap(celClasses)}
-                  style="${hasTint ? `--tag-tint-color: ${tagColor}` : ""}"
+                  style="${styleStr}"
                   @click=${(e: MouseEvent) =>
                     this.selectCel(layer.id, frame.id, e)}
                 >
+                  ${hasTint ? html`<div class="tag-tint"></div>` : ""}
                   <div class="cel-content"></div>
-                  ${isLinked
+                  ${isHardLinked
                     ? html`<div
                         class="link-badge"
                         style="background-color: ${linkColor}"
