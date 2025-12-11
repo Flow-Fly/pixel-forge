@@ -42,7 +42,12 @@ export class MarqueeRectTool extends BaseTool {
     } else if (this.mode === 'dragging') {
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      selectionStore.moveFloat(dx, dy);
+      const state = selectionStore.state.value;
+      if (state.type === 'transforming') {
+        selectionStore.moveTransform(dx, dy);
+      } else {
+        selectionStore.moveFloat(dx, dy);
+      }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
     }
@@ -68,10 +73,11 @@ export class MarqueeRectTool extends BaseTool {
   private startDragging(x: number, y: number) {
     const state = selectionStore.state.value;
 
-    // If selected (not floating), cut to float first
+    // If selected (not floating or transforming), cut to float first
     if (state.type === 'selected') {
       this.cutToFloat();
     }
+    // For floating and transforming states, just start dragging
 
     this.mode = 'dragging';
     this.lastDragX = x;

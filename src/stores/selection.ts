@@ -574,14 +574,32 @@ class SelectionStore {
     }
 
     if (s.type === "transforming") {
-      // For transforming, check against the current (rotated) bounds
-      // Use simple rectangle check since rotated shapes become complex
-      const { currentBounds } = s;
+      // Check against the actual rotated bounds, not the expanded axis-aligned bounding box
+      const { originalBounds, currentOffset, rotation } = s;
+
+      // Calculate center of selection (including movement offset)
+      const cx = originalBounds.x + currentOffset.x + originalBounds.width / 2;
+      const cy = originalBounds.y + currentOffset.y + originalBounds.height / 2;
+
+      // Translate point relative to center
+      const px = x - cx;
+      const py = y - cy;
+
+      // Rotate point backwards by -rotation to get position in original coordinate space
+      const angle = (-rotation * Math.PI) / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const rotatedX = px * cos - py * sin;
+      const rotatedY = px * sin + py * cos;
+
+      // Check if rotated point is within original bounds (centered at 0,0)
+      const halfW = originalBounds.width / 2;
+      const halfH = originalBounds.height / 2;
       return (
-        x >= currentBounds.x &&
-        x < currentBounds.x + currentBounds.width &&
-        y >= currentBounds.y &&
-        y < currentBounds.y + currentBounds.height
+        rotatedX >= -halfW &&
+        rotatedX < halfW &&
+        rotatedY >= -halfH &&
+        rotatedY < halfH
       );
     }
 
