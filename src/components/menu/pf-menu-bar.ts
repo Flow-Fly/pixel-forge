@@ -5,7 +5,16 @@ import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
 import { gridStore } from '../../stores/grid';
+import { selectionStore } from '../../stores/selection';
+import { clipboardStore } from '../../stores/clipboard';
+import { viewportStore } from '../../stores/viewport';
 import { FlipLayerCommand, RotateLayerCommand } from '../../commands/layer-commands';
+import {
+  CopyCommand,
+  PasteCommand,
+  CommitFloatCommand,
+  CutToFloatCommand,
+} from '../../commands/selection-commands';
 import { FileService } from '../../services/file-service';
 import { openAseFile, exportAseFile } from '../../services/aseprite-service';
 import { type ProjectFile } from '../../types/project';
@@ -225,6 +234,104 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent('toggle-shortcuts-overlay'));
   }
 
+  private getActiveCanvas(): HTMLCanvasElement | null {
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    return layer?.canvas ?? null;
+  }
+
+  cutSelection() {
+    const state = selectionStore.state.value;
+    const canvas = this.getActiveCanvas();
+    if (!canvas) return;
+
+    if (state.type === 'selected') {
+      const activeLayerId = layerStore.activeLayerId.value;
+      if (!activeLayerId) return;
+
+      const mask =
+        state.shape === 'freeform'
+          ? (state as { mask: Uint8Array }).mask
+          : undefined;
+
+      // First copy to clipboard
+      const copyCommand = new CopyCommand(canvas, state.bounds, state.shape, mask);
+      historyStore.execute(copyCommand);
+
+      // Then cut to floating (removes from canvas)
+      const cutCommand = new CutToFloatCommand(
+        canvas,
+        activeLayerId,
+        state.bounds,
+        state.shape,
+        mask
+      );
+      historyStore.execute(cutCommand);
+    }
+  }
+
+  copySelection() {
+    const state = selectionStore.state.value;
+    const canvas = this.getActiveCanvas();
+    if (!canvas) return;
+
+    if (state.type === 'selected') {
+      const mask =
+        state.shape === 'freeform'
+          ? (state as { mask: Uint8Array }).mask
+          : undefined;
+
+      const command = new CopyCommand(canvas, state.bounds, state.shape, mask);
+      historyStore.execute(command);
+    } else if (state.type === 'floating') {
+      // Copy floating selection directly
+      clipboardStore.copy(
+        state.imageData,
+        state.originalBounds,
+        state.shape,
+        state.mask
+      );
+    }
+  }
+
+  pasteFromClipboard() {
+    const clipboardData = clipboardStore.getData();
+    if (!clipboardData) return;
+
+    const currentState = selectionStore.state.value;
+    const canvas = this.getActiveCanvas();
+
+    // If there's a floating selection, commit it first
+    if (currentState.type === 'floating' && canvas) {
+      const activeLayerId = layerStore.activeLayerId.value;
+      if (activeLayerId) {
+        const commitCommand = new CommitFloatCommand(
+          canvas,
+          activeLayerId,
+          currentState.imageData,
+          currentState.originalBounds,
+          currentState.currentOffset,
+          currentState.shape,
+          currentState.mask
+        );
+        historyStore.execute(commitCommand);
+      }
+    }
+
+    // Get cursor position in canvas coordinates (if cursor is over canvas)
+    const cursorPosition = viewportStore.getCursorCanvasPosition();
+
+    // Create paste command (centered on cursor if available, otherwise canvas center)
+    const command = new PasteCommand(
+      clipboardData,
+      projectStore.width.value,
+      projectStore.height.value,
+      selectionStore.state.value,
+      cursorPosition
+    );
+    historyStore.execute(command);
+  }
+
   private startEditingName() {
     this.isEditingName = true;
     // Focus the input after render
@@ -269,9 +376,9 @@ export class PFMenuBar extends BaseComponent {
         <div id="menu-edit" popover>
           <div class="menu-item" @click=${() => historyStore.undo()}>Undo <span class="shortcut">Ctrl+Z</span></div>
           <div class="menu-item" @click=${() => historyStore.redo()}>Redo <span class="shortcut">Ctrl+Y</span></div>
-          <div class="menu-item">Cut <span class="shortcut">Ctrl+X</span></div>
-          <div class="menu-item">Copy <span class="shortcut">Ctrl+C</span></div>
-          <div class="menu-item">Paste <span class="shortcut">Ctrl+V</span></div>
+          <div class="menu-item" @click=${() => this.cutSelection()}>Cut <span class="shortcut">Ctrl+X</span></div>
+          <div class="menu-item" @click=${() => this.copySelection()}>Copy <span class="shortcut">Ctrl+C</span></div>
+          <div class="menu-item" @click=${() => this.pasteFromClipboard()}>Paste <span class="shortcut">Ctrl+V</span></div>
         </div>
 
         <button id="btn-view" class="menu-btn" popovertarget="menu-view">View</button>

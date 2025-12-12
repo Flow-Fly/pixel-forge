@@ -9,7 +9,10 @@ import {
   DeleteSelectionCommand,
   CommitFloatCommand,
   CutToFloatCommand,
+  CopyCommand,
+  PasteCommand,
 } from "../../commands/selection-commands";
+import { clipboardStore } from "../../stores/clipboard";
 import { colorStore } from "../../stores/colors";
 import { animationStore } from "../../stores/animation";
 import { viewportStore } from "../../stores/viewport";
@@ -503,6 +506,121 @@ export function registerShortcuts() {
     },
     "Toggle Pixel Perfect Mode"
   );
+
+  // ============================================
+  // CLIPBOARD SHORTCUTS
+  // ============================================
+
+  // Helper function to get active canvas
+  const getActiveCanvas = (): HTMLCanvasElement | null => {
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    return layer?.canvas ?? null;
+  };
+
+  // Ctrl+C / Cmd+C = Copy selection to clipboard
+  const copySelection = () => {
+    const state = selectionStore.state.value;
+    const canvas = getActiveCanvas();
+    if (!canvas) return;
+
+    if (state.type === "selected") {
+      const mask =
+        state.shape === "freeform"
+          ? (state as { mask: Uint8Array }).mask
+          : undefined;
+
+      const command = new CopyCommand(canvas, state.bounds, state.shape, mask);
+      historyStore.execute(command);
+    } else if (state.type === "floating") {
+      // Copy floating selection (already extracted pixels)
+      clipboardStore.copy(
+        state.imageData,
+        state.originalBounds,
+        state.shape,
+        state.mask
+      );
+    }
+  };
+
+  keyboardService.register("c", ["ctrl"], copySelection, "Copy");
+  keyboardService.register("c", ["meta"], copySelection, "Copy");
+
+  // Ctrl+V / Cmd+V = Paste from clipboard
+  const pasteFromClipboard = () => {
+    const clipboardData = clipboardStore.getData();
+    if (!clipboardData) return;
+
+    const currentState = selectionStore.state.value;
+    const canvas = getActiveCanvas();
+
+    // If there's a floating selection, commit it first
+    if (currentState.type === "floating" && canvas) {
+      const activeLayerId = layerStore.activeLayerId.value;
+      if (activeLayerId) {
+        const commitCommand = new CommitFloatCommand(
+          canvas,
+          activeLayerId,
+          currentState.imageData,
+          currentState.originalBounds,
+          currentState.currentOffset,
+          currentState.shape,
+          currentState.mask
+        );
+        historyStore.execute(commitCommand);
+      }
+    }
+
+    // Get cursor position in canvas coordinates (if cursor is over canvas)
+    const cursorPosition = viewportStore.getCursorCanvasPosition();
+
+    // Create paste command (centered on cursor if available, otherwise canvas center)
+    const command = new PasteCommand(
+      clipboardData,
+      projectStore.width.value,
+      projectStore.height.value,
+      selectionStore.state.value, // Capture state after potential commit
+      cursorPosition
+    );
+    historyStore.execute(command);
+  };
+
+  keyboardService.register("v", ["ctrl"], pasteFromClipboard, "Paste");
+  keyboardService.register("v", ["meta"], pasteFromClipboard, "Paste");
+
+  // Ctrl+X / Cmd+X = Cut selection (copy + cut to floating)
+  const cutSelection = () => {
+    const state = selectionStore.state.value;
+    const canvas = getActiveCanvas();
+    if (!canvas) return;
+
+    if (state.type === "selected") {
+      const activeLayerId = layerStore.activeLayerId.value;
+      if (!activeLayerId) return;
+
+      const mask =
+        state.shape === "freeform"
+          ? (state as { mask: Uint8Array }).mask
+          : undefined;
+
+      // First copy to clipboard
+      const copyCommand = new CopyCommand(canvas, state.bounds, state.shape, mask);
+      historyStore.execute(copyCommand);
+
+      // Then cut to floating (removes from canvas)
+      const cutCommand = new CutToFloatCommand(
+        canvas,
+        activeLayerId,
+        state.bounds,
+        state.shape,
+        mask
+      );
+      historyStore.execute(cutCommand);
+    }
+  };
+
+  keyboardService.register("x", ["ctrl"], cutSelection, "Cut");
+  keyboardService.register("x", ["meta"], cutSelection, "Cut");
 
   // ============================================
   // FILE SHORTCUTS
