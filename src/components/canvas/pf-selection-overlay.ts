@@ -1,10 +1,11 @@
 import { html, css } from 'lit';
-import { customElement, query } from 'lit/decorators.js';
+import { customElement, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { selectionStore } from '../../stores/selection';
 import { viewportStore } from '../../stores/viewport';
 import { traceMaskOutline, connectSegments, type Point } from '../../utils/mask-utils';
 import { type SelectionState } from '../../types/selection';
+import '../../components/common/pf-tooltip';
 
 /**
  * Transparent canvas overlay that renders:
@@ -35,6 +36,15 @@ export class PFSelectionOverlay extends BaseComponent {
   private animationFrameId = 0;
   private dashOffset = 0;
   private lastTimestamp = 0;
+
+  // Tooltip state for dimension display
+  @state() private widthTooltipX = 0;
+  @state() private widthTooltipY = 0;
+  @state() private heightTooltipX = 0;
+  @state() private heightTooltipY = 0;
+  @state() private selectionWidth = 0;
+  @state() private selectionHeight = 0;
+  @state() private showDimensionTooltips = false;
 
   // Cache for freeform outline paths
   private cachedOutlinePaths: Point[][] | null = null;
@@ -115,6 +125,7 @@ export class PFSelectionOverlay extends BaseComponent {
     if (state.type === 'none') {
       this.cachedOutlinePaths = null;
       this.cachedStateId = null;
+      this.hideDimensionTooltips();
       return;
     }
 
@@ -126,23 +137,34 @@ export class PFSelectionOverlay extends BaseComponent {
       // Draw preview path if available (lasso tools), otherwise fall back to bounding box
       if (state.previewPath && state.previewPath.length >= 2) {
         this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
+        this.hideDimensionTooltips(); // No tooltips for freeform/lasso
       } else {
         this.drawRectMarchingAnts(ctx, state.currentBounds, zoom, panX, panY);
+        // Show dimension tooltips for rectangular selection during drag
+        this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
       }
     } else if (state.type === 'selected') {
       this.drawSelectedState(ctx, state, zoom, panX, panY);
+      // Show dimension tooltips only for rectangle shape
+      if (state.shape === 'rectangle') {
+        this.updateDimensionTooltips(state.bounds, zoom, panX, panY);
+      } else {
+        this.hideDimensionTooltips();
+      }
     } else if (state.type === 'floating') {
       // Draw floating pixels
       this.drawFloatingPixels(ctx, state, zoom, panX, panY);
 
       // Draw marching ants around floating selection
       this.drawFloatingState(ctx, state, zoom, panX, panY);
+      this.hideDimensionTooltips(); // No tooltips when floating
     } else if (state.type === 'transforming') {
       // Draw the preview pixels (rotated)
       this.drawTransformingPixels(ctx, state, zoom, panX, panY);
 
       // Draw rotated marching ants around the original bounds + offset
       this.drawRotatedMarchingAnts(ctx, state.originalBounds, state.currentOffset, state.rotation, zoom, panX, panY);
+      this.hideDimensionTooltips(); // No tooltips when transforming
     }
   }
 
@@ -222,6 +244,40 @@ export class PFSelectionOverlay extends BaseComponent {
     } else {
       this.drawRectMarchingAnts(ctx, floatBounds, zoom, panX, panY);
     }
+  }
+
+  /**
+   * Update tooltip positions for dimension display on rectangular selections.
+   */
+  private updateDimensionTooltips(
+    bounds: { x: number; y: number; width: number; height: number },
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    const screenX = bounds.x * zoom + panX;
+    const screenY = bounds.y * zoom + panY;
+    const screenWidth = bounds.width * zoom;
+    const screenHeight = bounds.height * zoom;
+
+    // Width tooltip: centered on top edge, offset above
+    this.widthTooltipX = screenX + screenWidth / 2;
+    this.widthTooltipY = screenY - 8;
+
+    // Height tooltip: centered on left edge, offset to the left
+    this.heightTooltipX = screenX - 8;
+    this.heightTooltipY = screenY + screenHeight / 2;
+
+    this.selectionWidth = bounds.width;
+    this.selectionHeight = bounds.height;
+    this.showDimensionTooltips = true;
+  }
+
+  /**
+   * Hide dimension tooltips when no rectangle selection is active.
+   */
+  private hideDimensionTooltips() {
+    this.showDimensionTooltips = false;
   }
 
   private drawRectMarchingAnts(
@@ -507,6 +563,20 @@ export class PFSelectionOverlay extends BaseComponent {
     void viewportStore.panX.value;
     void viewportStore.panY.value;
 
-    return html`<canvas></canvas>`;
+    return html`
+      <canvas></canvas>
+      <pf-tooltip
+        .x=${this.widthTooltipX}
+        .y=${this.widthTooltipY}
+        .text=${`${this.selectionWidth}px`}
+        ?visible=${this.showDimensionTooltips}
+      ></pf-tooltip>
+      <pf-tooltip
+        .x=${this.heightTooltipX}
+        .y=${this.heightTooltipY}
+        .text=${`${this.selectionHeight}px`}
+        ?visible=${this.showDimensionTooltips}
+      ></pf-tooltip>
+    `;
   }
 }

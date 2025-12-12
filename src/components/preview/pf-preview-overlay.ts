@@ -78,7 +78,6 @@ export class PFPreviewOverlay extends BaseComponent {
       flex-direction: column;
       overflow: hidden;
       transition: max-height 0.15s ease, opacity 0.15s ease;
-      max-height: 300px;
     }
 
     .content.collapsed {
@@ -534,7 +533,10 @@ export class PFPreviewOverlay extends BaseComponent {
           <span class="header-title">Preview</span>
         </div>
 
-        <div class="content ${this.collapsed ? "collapsed" : ""}">
+        <div
+          class="content ${this.collapsed ? "collapsed" : ""}"
+          style="${!this.collapsed ? `max-height: ${this.previewSize + 100}px` : ""}"
+        >
           <div
             class="preview-area bg-${this.bgType}"
             @click=${this.handlePreviewClick}
