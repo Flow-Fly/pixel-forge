@@ -2,10 +2,12 @@ import { html, css } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { animationStore } from '../../stores/animation';
+import { layerStore } from '../../stores/layers';
 import { historyStore } from '../../stores/history';
 import { projectStore } from '../../stores/project';
 import { SetFrameDurationCommand, ReorderFrameCommand, AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
 import { compositeFrame } from '../../utils/canvas-utils';
+import { renderFrameToCanvas } from '../../utils/preview-renderer';
 import './pf-timeline-tooltip';
 import './pf-tag-preview';
 import '../ui/pf-context-menu';
@@ -202,6 +204,47 @@ export class PFTimelineHeader extends BaseComponent {
     .tag-bar.collapsed .tag-drag-handle {
       display: none;
     }
+
+    /* Resize frame previews */
+    .resize-preview-container {
+      position: absolute;
+      top: -80px;
+      z-index: 100;
+      display: flex;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .resize-preview-frame {
+      background: var(--pf-color-bg-panel, #1e1e1e);
+      border: 1px solid var(--pf-color-border, #3e3e3e);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .resize-preview-frame canvas {
+      display: block;
+      image-rendering: pixelated;
+      background-image:
+        linear-gradient(45deg, #404040 25%, transparent 25%),
+        linear-gradient(-45deg, #404040 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #404040 75%),
+        linear-gradient(-45deg, transparent 75%, #404040 75%);
+      background-size: 8px 8px;
+      background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+      background-color: #606060;
+    }
+
+    .resize-preview-label {
+      font-size: 9px;
+      color: var(--pf-color-text-muted, #888);
+      white-space: nowrap;
+    }
   `;
 
   @state() private durationUnit: 'ms' | 'fps' = 'ms';
@@ -223,6 +266,8 @@ export class PFTimelineHeader extends BaseComponent {
   @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
   @query('pf-context-menu') private contextMenu!: PFContextMenu;
   @query('pf-tag-preview') private tagPreview!: PFTagPreview;
+  @query('.resize-preview-start canvas') private resizePreviewStartCanvas!: HTMLCanvasElement;
+  @query('.resize-preview-end canvas') private resizePreviewEndCanvas!: HTMLCanvasElement;
 
   connectedCallback() {
     super.connectedCallback();
@@ -239,6 +284,46 @@ export class PFTimelineHeader extends BaseComponent {
     super.updated(changedProperties);
     // Update collapsed class when tagsExpanded changes
     this.updateTagsCollapsedClass();
+
+    // Render resize frame previews when resize state changes
+    if (changedProperties.has('resizePreviewIndex') && this.resizingTagId) {
+      this.renderResizeFramePreviews();
+    }
+  }
+
+  private renderResizeFramePreviews() {
+    if (!this.resizingTagId || this.resizePreviewIndex === null) return;
+
+    const tag = animationStore.tags.value.find(t => t.id === this.resizingTagId);
+    if (!tag) return;
+
+    const frames = animationStore.frames.value;
+    const layers = layerStore.layers.value;
+    const cels = animationStore.cels.value;
+
+    // Calculate preview range
+    const previewStart = this.resizingEdge === 'left'
+      ? Math.min(this.resizePreviewIndex, tag.endFrameIndex)
+      : tag.startFrameIndex;
+    const previewEnd = this.resizingEdge === 'right'
+      ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
+      : tag.endFrameIndex;
+
+    // Render start frame preview
+    if (this.resizePreviewStartCanvas && frames[previewStart]) {
+      const ctx = this.resizePreviewStartCanvas.getContext('2d');
+      if (ctx) {
+        renderFrameToCanvas(ctx, frames[previewStart].id, layers, cels);
+      }
+    }
+
+    // Render end frame preview
+    if (this.resizePreviewEndCanvas && frames[previewEnd]) {
+      const ctx = this.resizePreviewEndCanvas.getContext('2d');
+      if (ctx) {
+        renderFrameToCanvas(ctx, frames[previewEnd].id, layers, cels);
+      }
+    }
   }
 
   private updateTagsCollapsedClass() {
@@ -377,6 +462,18 @@ export class PFTimelineHeader extends BaseComponent {
     const clampedIndex = Math.max(0, Math.min(maxFrameIndex, frameIndex));
 
     this.resizePreviewIndex = clampedIndex;
+
+    // Update store with preview range for visual feedback in grid
+    const tag = animationStore.tags.value.find(t => t.id === this.resizingTagId);
+    if (tag) {
+      const previewStart = this.resizingEdge === 'left'
+        ? Math.min(clampedIndex, tag.endFrameIndex)
+        : tag.startFrameIndex;
+      const previewEnd = this.resizingEdge === 'right'
+        ? Math.max(clampedIndex, tag.startFrameIndex)
+        : tag.endFrameIndex;
+      animationStore.setTagResizePreview(this.resizingTagId, previewStart, previewEnd);
+    }
   };
 
   private handleTagResizeEnd = () => {
@@ -400,6 +497,7 @@ export class PFTimelineHeader extends BaseComponent {
     }
 
     // Clean up
+    animationStore.setTagResizePreview(null);
     this.resizingTagId = null;
     this.resizingEdge = null;
     this.resizePreviewIndex = null;
@@ -835,12 +933,56 @@ export class PFTimelineHeader extends BaseComponent {
     const tags = animationStore.tags.value;
     const activeTagId = animationStore.activeTagId.value;
     const frameWidth = 32; // Must match .frame-cell width
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const previewScale = 2;
+
+    // Calculate resize preview position and labels
+    let resizePreviewLeft = 0;
+    let previewStartLabel = '';
+    let previewEndLabel = '';
+    if (this.resizingTagId && this.resizePreviewIndex !== null) {
+      const tag = tags.find(t => t.id === this.resizingTagId);
+      if (tag) {
+        const previewStart = this.resizingEdge === 'left'
+          ? Math.min(this.resizePreviewIndex, tag.endFrameIndex)
+          : tag.startFrameIndex;
+        const previewEnd = this.resizingEdge === 'right'
+          ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
+          : tag.endFrameIndex;
+        resizePreviewLeft = previewStart * frameWidth;
+        previewStartLabel = `Frame ${previewStart + 1}`;
+        previewEndLabel = `Frame ${previewEnd + 1}`;
+      }
+    }
 
     return html`
       <!-- Tag container -->
       <div class="tag-bars-container">
         ${this.renderTags(tags, activeTagId, frameWidth)}
       </div>
+
+      <!-- Resize frame previews (shown during tag resize) -->
+      ${this.resizingTagId && this.resizePreviewIndex !== null ? html`
+        <div class="resize-preview-container" style="left: ${resizePreviewLeft}px;">
+          <div class="resize-preview-frame resize-preview-start">
+            <canvas
+              width="${canvasW}"
+              height="${canvasH}"
+              style="width: ${canvasW * previewScale}px; height: ${canvasH * previewScale}px;"
+            ></canvas>
+            <span class="resize-preview-label">${previewStartLabel}</span>
+          </div>
+          <div class="resize-preview-frame resize-preview-end">
+            <canvas
+              width="${canvasW}"
+              height="${canvasH}"
+              style="width: ${canvasW * previewScale}px; height: ${canvasH * previewScale}px;"
+            ></canvas>
+            <span class="resize-preview-label">${previewEndLabel}</span>
+          </div>
+        </div>
+      ` : ''}
 
       <!-- Frame cells -->
       ${frames.map((frame, index) => {

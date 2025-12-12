@@ -1,15 +1,18 @@
-import { html, css } from 'lit';
-import { customElement, property, state, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { animationStore } from '../../stores/animation';
-import { layerStore } from '../../stores/layers';
-import { projectStore } from '../../stores/project';
-import { renderFrameToCanvas, getFrameIdsForTag } from '../../utils/preview-renderer';
+import { html, css } from "lit";
+import { customElement, property, state, query } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { animationStore } from "../../stores/animation";
+import { layerStore } from "../../stores/layers";
+import { projectStore } from "../../stores/project";
+import {
+  renderFrameToCanvas,
+  getFrameIdsForTag,
+} from "../../utils/preview-renderer";
 
 const PREVIEW_SCALE = 2;
 const HOVER_DELAY = 300;
 
-@customElement('pf-tag-preview')
+@customElement("pf-tag-preview")
 export class PFTagPreview extends BaseComponent {
   static styles = css`
     :host {
@@ -44,8 +47,7 @@ export class PFTagPreview extends BaseComponent {
     .preview-canvas {
       display: block;
       image-rendering: pixelated;
-      background-image:
-        linear-gradient(45deg, #404040 25%, transparent 25%),
+      background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
         linear-gradient(-45deg, #404040 25%, transparent 25%),
         linear-gradient(45deg, transparent 75%, #404040 75%),
         linear-gradient(-45deg, transparent 75%, #404040 75%);
@@ -55,14 +57,14 @@ export class PFTagPreview extends BaseComponent {
     }
   `;
 
-  @property({ type: String, reflect: true }) tagId: string = '';
+  @property({ type: String, reflect: true }) tagId: string = "";
   @property({ type: Boolean, reflect: true }) visible: boolean = false;
   @property({ type: Number }) posX: number = 0;
   @property({ type: Number }) posY: number = 0;
 
-  @query('.preview-canvas') previewCanvas!: HTMLCanvasElement;
+  @query(".preview-canvas") previewCanvas!: HTMLCanvasElement;
 
-  @state() private tagName: string = '';
+  @state() private tagName: string = "";
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number | null = null;
@@ -78,27 +80,37 @@ export class PFTagPreview extends BaseComponent {
   }
 
   updated(changedProps: Map<string, unknown>) {
-    if (changedProps.has('visible')) {
+    if (changedProps.has("visible")) {
       if (this.visible) {
-        this.startAnimation();
+        // Defer initialization to next frame to ensure DOM is fully updated
+        requestAnimationFrame(() => {
+          this.initCanvasContext();
+          this.startAnimation();
+        });
       } else {
         this.stopAnimation();
       }
     }
 
-    if (changedProps.has('tagId') && this.tagId) {
+    if (changedProps.has("tagId") && this.tagId) {
       this.loadTagInfo();
     }
   }
 
-  firstUpdated() {
-    if (this.previewCanvas) {
-      this.ctx = this.previewCanvas.getContext('2d');
+  private initCanvasContext() {
+    // Query directly from shadow root to avoid stale @query references
+    if (!this.ctx) {
+      const canvas = this.shadowRoot?.querySelector(
+        ".preview-canvas"
+      ) as HTMLCanvasElement | null;
+      if (canvas) {
+        this.ctx = canvas.getContext("2d");
+      }
     }
   }
 
   private loadTagInfo() {
-    const tag = animationStore.tags.value.find(t => t.id === this.tagId);
+    const tag = animationStore.tags.value.find((t) => t.id === this.tagId);
     if (tag) {
       this.tagName = tag.name;
       this.frameIds = getFrameIdsForTag(this.tagId);
@@ -118,6 +130,8 @@ export class PFTagPreview extends BaseComponent {
       this.posX = x;
       this.posY = y;
       this.loadTagInfo();
+      // Reset canvas context so it gets re-initialized when visible
+      this.ctx = null;
       this.visible = true;
     }, HOVER_DELAY);
   }
@@ -152,14 +166,15 @@ export class PFTagPreview extends BaseComponent {
       // Get frame duration from current frame or use default
       const frames = animationStore.frames.value;
       const currentFrameId = this.frameIds[this.currentFrameIndex];
-      const currentFrame = frames.find(f => f.id === currentFrameId);
+      const currentFrame = frames.find((f) => f.id === currentFrameId);
       const frameDuration = currentFrame?.duration ?? 100;
 
       const elapsed = timestamp - this.lastFrameTime;
 
       if (elapsed >= frameDuration) {
         // Advance to next frame
-        this.currentFrameIndex = (this.currentFrameIndex + 1) % this.frameIds.length;
+        this.currentFrameIndex =
+          (this.currentFrameIndex + 1) % this.frameIds.length;
         this.lastFrameTime = timestamp;
       }
 
@@ -197,7 +212,9 @@ export class PFTagPreview extends BaseComponent {
     return html`
       <div
         class="preview-container"
-        style="transform: translate(${this.posX}px, ${this.posY - displayH - 40}px)"
+        style="transform: translate(${this.posX}px, ${this.posY -
+        displayH -
+        40}px)"
       >
         <canvas
           class="preview-canvas"
@@ -205,7 +222,9 @@ export class PFTagPreview extends BaseComponent {
           height="${canvasH}"
           style="width: ${displayW}px; height: ${displayH}px;"
         ></canvas>
-        <span class="preview-label">${this.tagName} (${frameCount} frames)</span>
+        <span class="preview-label"
+          >${this.tagName} (${frameCount} frames)</span
+        >
       </div>
     `;
   }
@@ -213,6 +232,6 @@ export class PFTagPreview extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-tag-preview': PFTagPreview;
+    "pf-tag-preview": PFTagPreview;
   }
 }
