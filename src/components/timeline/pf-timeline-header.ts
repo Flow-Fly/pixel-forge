@@ -1,25 +1,43 @@
-import { html, css, render } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { animationStore } from '../../stores/animation';
-import { layerStore } from '../../stores/layers';
-import { historyStore } from '../../stores/history';
-import { projectStore } from '../../stores/project';
-import { SetFrameDurationCommand, ReorderFrameCommand, AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
-import { compositeFrame } from '../../utils/canvas-utils';
-import { renderFrameToCanvas } from '../../utils/preview-renderer';
-import './pf-timeline-tooltip';
-import './pf-tag-preview';
-import '../ui/pf-context-menu';
-import type { PFTimelineTooltip } from './pf-timeline-tooltip';
-import type { PFTagPreview } from './pf-tag-preview';
-import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
-import type { FrameTag } from '../../types/animation';
+import { html, css, render } from "lit";
+import { customElement, state, query } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { animationStore } from "../../stores/animation";
+import { layerStore } from "../../stores/layers";
+import { historyStore } from "../../stores/history";
+import { projectStore } from "../../stores/project";
+import {
+  SetFrameDurationCommand,
+  ReorderFrameCommand,
+  AddFrameCommand,
+  DeleteFrameCommand,
+} from "../../commands/animation-commands";
+import { compositeFrame } from "../../utils/canvas-utils";
+import { renderFrameToCanvas } from "../../utils/preview-renderer";
+import "./pf-timeline-tooltip";
+import "./pf-tag-preview";
+import "../ui/pf-context-menu";
+import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
+import type { PFTagPreview } from "./pf-tag-preview";
+import type { PFContextMenu, ContextMenuItem } from "../ui/pf-context-menu";
+import type { FrameTag } from "../../types/animation";
 
-const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
-const TAG_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e91e63', '#00bcd4', '#ff5722', '#607d8b', '#795548', '#8bc34a'];
+const DURATION_UNIT_KEY = "pf-timeline-duration-unit";
+const TAG_COLORS = [
+  "#e74c3c",
+  "#3498db",
+  "#2ecc71",
+  "#f39c12",
+  "#9b59b6",
+  "#1abc9c",
+  "#e91e63",
+  "#00bcd4",
+  "#ff5722",
+  "#607d8b",
+  "#795548",
+  "#8bc34a",
+];
 
-@customElement('pf-timeline-header')
+@customElement("pf-timeline-header")
 export class PFTimelineHeader extends BaseComponent {
   static styles = css`
     :host {
@@ -70,7 +88,7 @@ export class PFTimelineHeader extends BaseComponent {
     }
 
     .frame-cell.tag-tinted::before {
-      content: '';
+      content: "";
       position: absolute;
       inset: 0;
       pointer-events: none;
@@ -123,7 +141,8 @@ export class PFTimelineHeader extends BaseComponent {
     }
 
     .tag-bar.active-loop {
-      box-shadow: 0 0 0 2px var(--pf-color-accent), 0 0 8px var(--pf-color-accent);
+      box-shadow: 0 0 0 2px var(--pf-color-accent),
+        0 0 8px var(--pf-color-accent);
     }
 
     .tag-bar.resizing {
@@ -229,8 +248,7 @@ export class PFTimelineHeader extends BaseComponent {
     .resize-preview-frame canvas {
       display: block;
       image-rendering: pixelated;
-      background-image:
-        linear-gradient(45deg, #404040 25%, transparent 25%),
+      background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
         linear-gradient(-45deg, #404040 25%, transparent 25%),
         linear-gradient(45deg, transparent 75%, #404040 75%),
         linear-gradient(-45deg, transparent 75%, #404040 75%);
@@ -246,15 +264,15 @@ export class PFTimelineHeader extends BaseComponent {
     }
   `;
 
-  @state() private durationUnit: 'ms' | 'fps' = 'ms';
+  @state() private durationUnit: "ms" | "fps" = "ms";
   @state() private draggedFrameIndex: number | null = null;
   @state() private dragOverFrameIndex: number | null = null;
-  @state() private pendingTagName: string = '';
-  @state() private pendingTagColor: string = '';
+  @state() private pendingTagName: string = "";
+  @state() private pendingTagColor: string = "";
   @state() private pendingTagFrameIndex: number = -1;
   // Tag resize state
   @state() private resizingTagId: string | null = null;
-  @state() private resizingEdge: 'left' | 'right' | null = null;
+  @state() private resizingEdge: "left" | "right" | null = null;
   @state() private resizePreviewIndex: number | null = null;
   @state() private resizePreviewX: number = 0;
   @state() private resizePreviewY: number = 0;
@@ -267,23 +285,27 @@ export class PFTimelineHeader extends BaseComponent {
   // Portal container for resize preview (to escape parent transform)
   private resizePreviewPortal: HTMLDivElement | null = null;
 
-  @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
-  @query('pf-context-menu') private contextMenu!: PFContextMenu;
-  @query('pf-tag-preview') private tagPreview!: PFTagPreview;
+  @query("pf-timeline-tooltip") private tooltip!: PFTimelineTooltip;
+  @query("pf-context-menu") private contextMenu!: PFContextMenu;
+  @query("pf-tag-preview") private tagPreview!: PFTagPreview;
+  @query(".resize-preview-start canvas")
+  private resizePreviewStartCanvas!: HTMLCanvasElement;
+  @query(".resize-preview-end canvas")
+  private resizePreviewEndCanvas!: HTMLCanvasElement;
 
   connectedCallback() {
     super.connectedCallback();
     // Load saved preference
     const saved = localStorage.getItem(DURATION_UNIT_KEY);
-    if (saved === 'fps' || saved === 'ms') {
+    if (saved === "fps" || saved === "ms") {
       this.durationUnit = saved;
     }
     // Set initial collapsed class
     this.updateTagsCollapsedClass();
 
     // Create portal container for resize preview on document.body
-    this.resizePreviewPortal = document.createElement('div');
-    this.resizePreviewPortal.id = 'resize-preview-portal';
+    this.resizePreviewPortal = document.createElement("div");
+    this.resizePreviewPortal.id = "resize-preview-portal";
     this.resizePreviewPortal.style.cssText = `
       position: fixed;
       z-index: 10000;
@@ -299,7 +321,7 @@ export class PFTimelineHeader extends BaseComponent {
     this.updateTagsCollapsedClass();
 
     // Render resize frame previews when resize state changes
-    if (changedProperties.has('resizePreviewIndex') && this.resizingTagId) {
+    if (changedProperties.has("resizePreviewIndex") && this.resizingTagId) {
       this.renderResizeFramePreviews();
     }
   }
@@ -309,11 +331,13 @@ export class PFTimelineHeader extends BaseComponent {
 
     if (!this.resizingTagId || this.resizePreviewIndex === null) {
       // Hide portal when not resizing
-      this.resizePreviewPortal.style.display = 'none';
+      this.resizePreviewPortal.style.display = "none";
       return;
     }
 
-    const tag = animationStore.tags.value.find(t => t.id === this.resizingTagId);
+    const tag = animationStore.tags.value.find(
+      (t) => t.id === this.resizingTagId
+    );
     if (!tag) return;
 
     const frames = animationStore.frames.value;
@@ -325,12 +349,14 @@ export class PFTimelineHeader extends BaseComponent {
     const frameWidth = 32;
 
     // Calculate preview range
-    const previewStart = this.resizingEdge === 'left'
-      ? Math.min(this.resizePreviewIndex, tag.endFrameIndex)
-      : tag.startFrameIndex;
-    const previewEnd = this.resizingEdge === 'right'
-      ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
-      : tag.endFrameIndex;
+    const previewStart =
+      this.resizingEdge === "left"
+        ? Math.min(this.resizePreviewIndex, tag.endFrameIndex)
+        : tag.startFrameIndex;
+    const previewEnd =
+      this.resizingEdge === "right"
+        ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
+        : tag.endFrameIndex;
 
     const previewStartLabel = `Frame ${previewStart + 1}`;
     const previewEndLabel = `Frame ${previewEnd + 1}`;
@@ -341,9 +367,11 @@ export class PFTimelineHeader extends BaseComponent {
     const previewHeight = canvasH * previewScale + 24; // canvas + label + padding
 
     // Position start preview above start frame column (centered)
-    const startX = rect.left + (previewStart * frameWidth) + (frameWidth / 2) - (previewWidth / 2);
+    const startX =
+      rect.left + previewStart * frameWidth + frameWidth / 2 - previewWidth / 2;
     // Position end preview above end frame column (centered)
-    const endX = rect.left + (previewEnd * frameWidth) + (frameWidth / 2) - (previewWidth / 2);
+    const endX =
+      rect.left + previewEnd * frameWidth + frameWidth / 2 - previewWidth / 2;
     // Y position above the header
     let previewY = rect.top - previewHeight - 8;
     if (previewY < 8) {
@@ -383,49 +411,63 @@ export class PFTimelineHeader extends BaseComponent {
 
     // Render two separate preview frames, each positioned above its column
     const template = html`
-      <div class="resize-preview-start" style="${previewFrameStyle} left: ${startX}px;">
+      <div
+        class="resize-preview-start"
+        style="${previewFrameStyle} left: ${startX}px;"
+      >
         <canvas
           class="resize-preview-start-canvas"
           width="${canvasW}"
           height="${canvasH}"
           style="${canvasStyle}"
         ></canvas>
-        <span style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;">
+        <span
+          style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;"
+        >
           ${previewStartLabel}
         </span>
       </div>
-      <div class="resize-preview-end" style="${previewFrameStyle} left: ${endX}px;">
+      <div
+        class="resize-preview-end"
+        style="${previewFrameStyle} left: ${endX}px;"
+      >
         <canvas
           class="resize-preview-end-canvas"
           width="${canvasW}"
           height="${canvasH}"
           style="${canvasStyle}"
         ></canvas>
-        <span style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;">
+        <span
+          style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;"
+        >
           ${previewEndLabel}
         </span>
       </div>
     `;
 
     render(template, this.resizePreviewPortal);
-    this.resizePreviewPortal.style.display = 'block';
+    this.resizePreviewPortal.style.display = "block";
 
     // Render frame content to canvases after DOM update
     requestAnimationFrame(() => {
       if (!this.resizePreviewPortal) return;
 
-      const startCanvas = this.resizePreviewPortal.querySelector('.resize-preview-start-canvas') as HTMLCanvasElement;
-      const endCanvas = this.resizePreviewPortal.querySelector('.resize-preview-end-canvas') as HTMLCanvasElement;
+      const startCanvas = this.resizePreviewPortal.querySelector(
+        ".resize-preview-start-canvas"
+      ) as HTMLCanvasElement;
+      const endCanvas = this.resizePreviewPortal.querySelector(
+        ".resize-preview-end-canvas"
+      ) as HTMLCanvasElement;
 
       if (startCanvas && frames[previewStart]) {
-        const ctx = startCanvas.getContext('2d');
+        const ctx = startCanvas.getContext("2d");
         if (ctx) {
           renderFrameToCanvas(ctx, frames[previewStart].id, layers, cels);
         }
       }
 
       if (endCanvas && frames[previewEnd]) {
-        const ctx = endCanvas.getContext('2d');
+        const ctx = endCanvas.getContext("2d");
         if (ctx) {
           renderFrameToCanvas(ctx, frames[previewEnd].id, layers, cels);
         }
@@ -435,14 +477,14 @@ export class PFTimelineHeader extends BaseComponent {
 
   private updateTagsCollapsedClass() {
     const tagsExpanded = animationStore.tagsExpanded.value;
-    this.classList.toggle('tags-collapsed', !tagsExpanded);
+    this.classList.toggle("tags-collapsed", !tagsExpanded);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     // Clean up any resize listeners
-    window.removeEventListener('mousemove', this.handleTagResizeMove);
-    window.removeEventListener('mouseup', this.handleTagResizeEnd);
+    window.removeEventListener("mousemove", this.handleTagResizeMove);
+    window.removeEventListener("mouseup", this.handleTagResizeEnd);
 
     // Remove resize preview portal from body
     if (this.resizePreviewPortal && this.resizePreviewPortal.parentNode) {
@@ -451,17 +493,22 @@ export class PFTimelineHeader extends BaseComponent {
     }
   }
 
-  private handleFrameMouseEnter(e: MouseEvent, frameId: string, frameIndex: number) {
+  private handleFrameMouseEnter(
+    e: MouseEvent,
+    frameId: string,
+    frameIndex: number
+  ) {
     const target = e.currentTarget as HTMLElement;
-    const frame = animationStore.frames.value.find(f => f.id === frameId);
+    const frame = animationStore.frames.value.find((f) => f.id === frameId);
     if (!frame || !this.tooltip) return;
 
     // Update tooltip text
-    const durationText = this.durationUnit === 'fps'
-      ? `${Math.round(1000 / frame.duration)}fps`
-      : `${frame.duration}ms`;
+    const durationText =
+      this.durationUnit === "fps"
+        ? `${Math.round(1000 / frame.duration)}fps`
+        : `${frame.duration}ms`;
     const tags = animationStore.getTagsForFrame(frameIndex);
-    const tagText = tags.length > 0 ? tags.map(t => t.name).join(', ') : '';
+    const tagText = tags.length > 0 ? tags.map((t) => t.name).join(", ") : "";
 
     this.tooltip.primaryText = `Frame ${frameIndex + 1} · ${durationText}`;
     this.tooltip.secondaryText = tagText;
@@ -488,8 +535,8 @@ export class PFTimelineHeader extends BaseComponent {
   private handleFrameDragStart(index: number, e: DragEvent) {
     this.draggedFrameIndex = index;
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(index));
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(index));
     }
     // Hide tooltip during drag
     if (this.tooltip) {
@@ -515,21 +562,30 @@ export class PFTimelineHeader extends BaseComponent {
 
   private handleFrameDrop(targetIndex: number, e: DragEvent) {
     e.preventDefault();
-    if (this.draggedFrameIndex === null || this.draggedFrameIndex === targetIndex) return;
+    if (
+      this.draggedFrameIndex === null ||
+      this.draggedFrameIndex === targetIndex
+    )
+      return;
 
     // Use command for undo support
-    historyStore.execute(new ReorderFrameCommand(this.draggedFrameIndex, targetIndex));
+    historyStore.execute(
+      new ReorderFrameCommand(this.draggedFrameIndex, targetIndex)
+    );
 
     this.draggedFrameIndex = null;
     this.dragOverFrameIndex = null;
   }
 
   private getDragOverClass(index: number): string {
-    if (this.dragOverFrameIndex === null || this.draggedFrameIndex === null) return '';
-    if (this.dragOverFrameIndex !== index) return '';
+    if (this.dragOverFrameIndex === null || this.draggedFrameIndex === null)
+      return "";
+    if (this.dragOverFrameIndex !== index) return "";
 
     // Show indicator on left or right side depending on drag direction
-    return this.draggedFrameIndex < index ? 'drag-over-right' : 'drag-over-left';
+    return this.draggedFrameIndex < index
+      ? "drag-over-right"
+      : "drag-over-left";
   }
 
   private handleTagClick(tagId: string, e: MouseEvent) {
@@ -541,15 +597,19 @@ export class PFTimelineHeader extends BaseComponent {
 
     if (currentActiveTag === tagId) {
       // Click on active tag clears the loop
-      animationStore.setPlaybackMode('all');
+      animationStore.setPlaybackMode("all");
     } else {
       // Click on tag sets it as the loop target
-      animationStore.setPlaybackMode('tag', tagId);
+      animationStore.setPlaybackMode("tag", tagId);
     }
   }
 
   // Tag resize handlers
-  private handleTagResizeStart(tagId: string, edge: 'left' | 'right', e: MouseEvent) {
+  private handleTagResizeStart(
+    tagId: string,
+    edge: "left" | "right",
+    e: MouseEvent
+  ) {
     e.preventDefault();
     e.stopPropagation();
 
@@ -557,8 +617,8 @@ export class PFTimelineHeader extends BaseComponent {
     this.resizingEdge = edge;
 
     // Add listeners for mousemove and mouseup
-    window.addEventListener('mousemove', this.handleTagResizeMove);
-    window.addEventListener('mouseup', this.handleTagResizeEnd);
+    window.addEventListener("mousemove", this.handleTagResizeMove);
+    window.addEventListener("mouseup", this.handleTagResizeEnd);
   }
 
   private handleTagResizeMove = (e: MouseEvent) => {
@@ -577,15 +637,23 @@ export class PFTimelineHeader extends BaseComponent {
     this.resizePreviewIndex = clampedIndex;
 
     // Update store with preview range for visual feedback in grid
-    const tag = animationStore.tags.value.find(t => t.id === this.resizingTagId);
+    const tag = animationStore.tags.value.find(
+      (t) => t.id === this.resizingTagId
+    );
     if (tag) {
-      const previewStart = this.resizingEdge === 'left'
-        ? Math.min(clampedIndex, tag.endFrameIndex)
-        : tag.startFrameIndex;
-      const previewEnd = this.resizingEdge === 'right'
-        ? Math.max(clampedIndex, tag.startFrameIndex)
-        : tag.endFrameIndex;
-      animationStore.setTagResizePreview(this.resizingTagId, previewStart, previewEnd);
+      const previewStart =
+        this.resizingEdge === "left"
+          ? Math.min(clampedIndex, tag.endFrameIndex)
+          : tag.startFrameIndex;
+      const previewEnd =
+        this.resizingEdge === "right"
+          ? Math.max(clampedIndex, tag.startFrameIndex)
+          : tag.endFrameIndex;
+      animationStore.setTagResizePreview(
+        this.resizingTagId,
+        previewStart,
+        previewEnd
+      );
 
       // Update screen position for fixed positioning
       this.updateResizePreviewPosition(rect, previewStart);
@@ -600,7 +668,7 @@ export class PFTimelineHeader extends BaseComponent {
     const previewHeight = 150; // approximate preview height
 
     // Position at the start frame
-    this.resizePreviewX = rect.left + (frameIndex * frameWidth);
+    this.resizePreviewX = rect.left + frameIndex * frameWidth;
 
     // Position above the header
     this.resizePreviewY = rect.top - previewHeight - 8;
@@ -612,20 +680,30 @@ export class PFTimelineHeader extends BaseComponent {
   }
 
   private handleTagResizeEnd = () => {
-    if (this.resizingTagId && this.resizingEdge && this.resizePreviewIndex !== null) {
-      const tag = animationStore.tags.value.find(t => t.id === this.resizingTagId);
+    if (
+      this.resizingTagId &&
+      this.resizingEdge &&
+      this.resizePreviewIndex !== null
+    ) {
+      const tag = animationStore.tags.value.find(
+        (t) => t.id === this.resizingTagId
+      );
       if (tag) {
-        if (this.resizingEdge === 'left') {
+        if (this.resizingEdge === "left") {
           // Don't allow left edge to go past right edge
           const newStart = Math.min(this.resizePreviewIndex, tag.endFrameIndex);
           if (newStart !== tag.startFrameIndex) {
-            animationStore.updateFrameTag(this.resizingTagId, { startFrameIndex: newStart });
+            animationStore.updateFrameTag(this.resizingTagId, {
+              startFrameIndex: newStart,
+            });
           }
         } else {
           // Don't allow right edge to go past left edge
           const newEnd = Math.max(this.resizePreviewIndex, tag.startFrameIndex);
           if (newEnd !== tag.endFrameIndex) {
-            animationStore.updateFrameTag(this.resizingTagId, { endFrameIndex: newEnd });
+            animationStore.updateFrameTag(this.resizingTagId, {
+              endFrameIndex: newEnd,
+            });
           }
         }
       }
@@ -636,19 +714,19 @@ export class PFTimelineHeader extends BaseComponent {
     this.resizingTagId = null;
     this.resizingEdge = null;
     this.resizePreviewIndex = null;
-    window.removeEventListener('mousemove', this.handleTagResizeMove);
-    window.removeEventListener('mouseup', this.handleTagResizeEnd);
+    window.removeEventListener("mousemove", this.handleTagResizeMove);
+    window.removeEventListener("mouseup", this.handleTagResizeEnd);
 
     // Hide resize preview portal
     if (this.resizePreviewPortal) {
-      this.resizePreviewPortal.style.display = 'none';
+      this.resizePreviewPortal.style.display = "none";
     }
   };
 
   private handleTagContextMenu(tagId: string, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    const tag = animationStore.tags.value.find(t => t.id === tagId);
+    const tag = animationStore.tags.value.find((t) => t.id === tagId);
     if (!tag) return;
 
     const isActiveLoop = animationStore.activeTagId.value === tagId;
@@ -658,31 +736,31 @@ export class PFTimelineHeader extends BaseComponent {
 
     const items: ContextMenuItem[] = [
       {
-        type: 'input',
-        label: 'Tag Name',
+        type: "input",
+        label: "Tag Name",
         inputValue: tag.name,
-        placeholder: 'Enter tag name',
+        placeholder: "Enter tag name",
         onInputSubmit: (name: string) => {
           if (name.trim()) {
             animationStore.updateFrameTag(tagId, { name: name.trim() });
           }
-        }
+        },
       },
       {
-        type: 'color-picker',
-        label: 'Tag Color',
+        type: "color-picker",
+        label: "Tag Color",
         colors: TAG_COLORS,
         selectedColor: tag.color,
         onColorSelect: (color: string) => {
           animationStore.updateFrameTag(tagId, { color });
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       // Range inputs (1-indexed for display)
       {
-        type: 'input',
-        inputType: 'number',
-        label: 'Start Frame',
+        type: "input",
+        inputType: "number",
+        label: "Start Frame",
         inputValue: String(tag.startFrameIndex + 1),
         inputMin: 1,
         inputMax: totalFrames,
@@ -691,12 +769,12 @@ export class PFTimelineHeader extends BaseComponent {
           if (newStart >= 0 && newStart <= tag.endFrameIndex) {
             animationStore.updateFrameTag(tagId, { startFrameIndex: newStart });
           }
-        }
+        },
       },
       {
-        type: 'input',
-        inputType: 'number',
-        label: 'End Frame',
+        type: "input",
+        inputType: "number",
+        label: "End Frame",
         inputValue: String(tag.endFrameIndex + 1),
         inputMin: 1,
         inputMax: totalFrames,
@@ -705,33 +783,33 @@ export class PFTimelineHeader extends BaseComponent {
           if (newEnd >= tag.startFrameIndex && newEnd < totalFrames) {
             animationStore.updateFrameTag(tagId, { endFrameIndex: newEnd });
           }
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       {
-        type: 'item',
-        label: isActiveLoop ? '⏹ Stop Loop' : '🔁 Loop This Tag',
+        type: "item",
+        label: isActiveLoop ? "⏹ Stop Loop" : "🔁 Loop This Tag",
         action: () => {
           if (isActiveLoop) {
-            animationStore.setPlaybackMode('all');
+            animationStore.setPlaybackMode("all");
           } else {
-            animationStore.setPlaybackMode('tag', tagId);
+            animationStore.setPlaybackMode("tag", tagId);
           }
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       {
-        type: 'item',
-        label: '🗑 Delete Tag',
-        action: () => animationStore.removeFrameTag(tagId)
-      }
+        type: "item",
+        label: "🗑 Delete Tag",
+        action: () => animationStore.removeFrameTag(tagId),
+      },
     ];
 
     this.contextMenu.show(anchor, items);
   }
 
   /** Set duration unit - called externally from playback controls */
-  setDurationUnit(unit: 'ms' | 'fps') {
+  setDurationUnit(unit: "ms" | "fps") {
     this.durationUnit = unit;
     localStorage.setItem(DURATION_UNIT_KEY, unit);
   }
@@ -743,7 +821,7 @@ export class PFTimelineHeader extends BaseComponent {
   handleContextMenu(e: MouseEvent, frameId: string) {
     e.preventDefault();
     const frames = animationStore.frames.value;
-    const frameIndex = frames.findIndex(f => f.id === frameId);
+    const frameIndex = frames.findIndex((f) => f.id === frameId);
     if (frameIndex === -1) return;
 
     const frame = frames[frameIndex];
@@ -759,45 +837,52 @@ export class PFTimelineHeader extends BaseComponent {
     const items: ContextMenuItem[] = [
       // Duration slider
       {
-        type: 'slider',
-        label: this.durationUnit === 'fps' ? 'Frame Rate (FPS)' : 'Duration',
-        min: this.durationUnit === 'fps' ? 1 : 10,
-        max: this.durationUnit === 'fps' ? 60 : 2000,
-        step: this.durationUnit === 'fps' ? 1 : 10,
-        value: this.durationUnit === 'fps' ? Math.round(1000 / frame.duration) : frame.duration,
+        type: "slider",
+        label: this.durationUnit === "fps" ? "Frame Rate (FPS)" : "Duration",
+        min: this.durationUnit === "fps" ? 1 : 10,
+        max: this.durationUnit === "fps" ? 60 : 2000,
+        step: this.durationUnit === "fps" ? 1 : 10,
+        value:
+          this.durationUnit === "fps"
+            ? Math.round(1000 / frame.duration)
+            : frame.duration,
         // Live preview - directly update frame duration without history
         onSliderChange: (value: number) => {
-          const durationMs = this.durationUnit === 'fps' ? Math.round(1000 / value) : value;
+          const durationMs =
+            this.durationUnit === "fps" ? Math.round(1000 / value) : value;
           animationStore.setFrameDuration(frameId, durationMs);
         },
         // Commit on release - add to history for undo support
         onSliderCommit: (value: number) => {
-          const durationMs = this.durationUnit === 'fps' ? Math.round(1000 / value) : value;
+          const durationMs =
+            this.durationUnit === "fps" ? Math.round(1000 / value) : value;
           // Only add to history if value actually changed
           if (durationMs !== originalDuration) {
-            historyStore.execute(new SetFrameDurationCommand(frameId, durationMs, originalDuration));
+            historyStore.execute(
+              new SetFrameDurationCommand(frameId, durationMs, originalDuration)
+            );
           }
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       // Frame operations
       {
-        type: 'item',
-        label: '📋 Duplicate Frame',
+        type: "item",
+        label: "📋 Duplicate Frame",
         action: () => {
           // Pass the frameId directly to avoid signal timing issues
           historyStore.execute(new AddFrameCommand(true, frameId));
-        }
+        },
       },
       {
-        type: 'item',
-        label: '🗑 Delete Frame',
+        type: "item",
+        label: "🗑 Delete Frame",
         disabled: frames.length <= 1,
         action: () => {
           historyStore.execute(new DeleteFrameCommand(frameId));
-        }
+        },
       },
-      { type: 'divider' }
+      { type: "divider" },
     ];
 
     // Tag options
@@ -805,38 +890,42 @@ export class PFTimelineHeader extends BaseComponent {
       const tag = existingTags[0];
       items.push(
         {
-          type: 'item',
+          type: "item",
           label: `✏️ Edit Tag "${tag.name}"`,
           keepOpen: true,
           action: () => {
             // Show tag edit menu (reuse same anchor)
             setTimeout(() => this.showTagEditMenu(tag.id), 50);
-          }
+          },
         },
         {
-          type: 'item',
-          label: '🏷️ Remove from Tag',
+          type: "item",
+          label: "🏷️ Remove from Tag",
           action: () => {
             // If tag spans only this frame, delete it. Otherwise shrink it.
             if (tag.startFrameIndex === tag.endFrameIndex) {
               animationStore.removeFrameTag(tag.id);
             } else if (frameIndex === tag.startFrameIndex) {
-              animationStore.updateFrameTag(tag.id, { startFrameIndex: tag.startFrameIndex + 1 });
+              animationStore.updateFrameTag(tag.id, {
+                startFrameIndex: tag.startFrameIndex + 1,
+              });
             } else if (frameIndex === tag.endFrameIndex) {
-              animationStore.updateFrameTag(tag.id, { endFrameIndex: tag.endFrameIndex - 1 });
+              animationStore.updateFrameTag(tag.id, {
+                endFrameIndex: tag.endFrameIndex - 1,
+              });
             }
-          }
+          },
         }
       );
     } else {
       items.push({
-        type: 'item',
-        label: '🏷️ Add Tag',
+        type: "item",
+        label: "🏷️ Add Tag",
         keepOpen: true,
         action: () => {
           // Show add tag submenu (reuse same anchor)
           setTimeout(() => this.showAddTagMenu(frameIndex), 50);
-        }
+        },
       });
     }
 
@@ -844,36 +933,36 @@ export class PFTimelineHeader extends BaseComponent {
   }
 
   private showTagEditMenu(tagId: string) {
-    const tag = animationStore.tags.value.find(t => t.id === tagId);
+    const tag = animationStore.tags.value.find((t) => t.id === tagId);
     if (!tag || !this.menuAnchorElement) return;
 
     const items: ContextMenuItem[] = [
       {
-        type: 'input',
-        label: 'Tag Name',
+        type: "input",
+        label: "Tag Name",
         inputValue: tag.name,
-        placeholder: 'Enter tag name',
+        placeholder: "Enter tag name",
         onInputSubmit: (name: string) => {
           if (name.trim()) {
             animationStore.updateFrameTag(tagId, { name: name.trim() });
           }
-        }
+        },
       },
       {
-        type: 'color-picker',
-        label: 'Tag Color',
+        type: "color-picker",
+        label: "Tag Color",
         colors: TAG_COLORS,
         selectedColor: tag.color,
         onColorSelect: (color: string) => {
           animationStore.updateFrameTag(tagId, { color });
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       {
-        type: 'item',
-        label: '🗑 Delete Tag',
-        action: () => animationStore.removeFrameTag(tagId)
-      }
+        type: "item",
+        label: "🗑 Delete Tag",
+        action: () => animationStore.removeFrameTag(tagId),
+      },
     ];
 
     this.contextMenu.show(this.menuAnchorElement, items);
@@ -883,42 +972,47 @@ export class PFTimelineHeader extends BaseComponent {
     if (!this.menuAnchorElement) return;
 
     // Initialize pending state with defaults
-    this.pendingTagName = 'New Tag';
+    this.pendingTagName = "New Tag";
     this.pendingTagColor = TAG_COLORS[0];
     this.pendingTagFrameIndex = frameIndex;
 
     const items: ContextMenuItem[] = [
       {
-        type: 'input',
-        label: 'Tag Name',
-        inputValue: 'New Tag',
-        placeholder: 'Enter tag name',
+        type: "input",
+        label: "Tag Name",
+        inputValue: "New Tag",
+        placeholder: "Enter tag name",
         onInputChange: (name: string) => {
           this.pendingTagName = name;
-        }
+        },
       },
       {
-        type: 'color-picker',
-        label: 'Tag Color',
+        type: "color-picker",
+        label: "Tag Color",
         colors: TAG_COLORS,
         selectedColor: TAG_COLORS[0],
         onColorSelect: (color: string) => {
           this.pendingTagColor = color;
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       {
-        type: 'item',
-        label: '✓ Create Tag',
+        type: "item",
+        label: "✓ Create Tag",
         action: () => {
-          const name = this.pendingTagName.trim() || 'New Tag';
-          animationStore.addFrameTag(name, this.pendingTagColor, this.pendingTagFrameIndex, this.pendingTagFrameIndex);
+          const name = this.pendingTagName.trim() || "New Tag";
+          animationStore.addFrameTag(
+            name,
+            this.pendingTagColor,
+            this.pendingTagFrameIndex,
+            this.pendingTagFrameIndex
+          );
           // Reset pending state
-          this.pendingTagName = '';
-          this.pendingTagColor = '';
+          this.pendingTagName = "";
+          this.pendingTagColor = "";
           this.pendingTagFrameIndex = -1;
-        }
-      }
+        },
+      },
     ];
 
     this.contextMenu.show(this.menuAnchorElement, items);
@@ -942,7 +1036,11 @@ export class PFTimelineHeader extends BaseComponent {
 
     // Show preview with delay
     if (this.tagPreview) {
-      this.tagPreview.showWithDelay(tag.id, rect.left + rect.width / 2, rect.top);
+      this.tagPreview.showWithDelay(
+        tag.id,
+        rect.left + rect.width / 2,
+        rect.top
+      );
     }
     this.hoverPreviewTagId = tag.id;
   }
@@ -958,7 +1056,7 @@ export class PFTimelineHeader extends BaseComponent {
     e.stopPropagation();
     const target = e.target as HTMLElement;
     // Don't process if clicking on chevron (that has its own handler)
-    if (target.classList.contains('tag-chevron')) return;
+    if (target.classList.contains("tag-chevron")) return;
 
     // For collapsed tags, expand them
     if (tag.collapsed) {
@@ -973,11 +1071,19 @@ export class PFTimelineHeader extends BaseComponent {
    * Calculate positions for tags, accounting for collapsed tags.
    * Returns a map of tagId -> { left, width, effectiveStartIndex }
    */
-  private calculateTagPositions(tags: FrameTag[], frameWidth: number): Map<string, { left: number; width: number; visualStartIndex: number }> {
-    const positions = new Map<string, { left: number; width: number; visualStartIndex: number }>();
+  private calculateTagPositions(
+    tags: FrameTag[],
+    frameWidth: number
+  ): Map<string, { left: number; width: number; visualStartIndex: number }> {
+    const positions = new Map<
+      string,
+      { left: number; width: number; visualStartIndex: number }
+    >();
 
     // Sort tags by start index
-    const sortedTags = [...tags].sort((a, b) => a.startFrameIndex - b.startFrameIndex);
+    const sortedTags = [...tags].sort(
+      (a, b) => a.startFrameIndex - b.startFrameIndex
+    );
 
     let visualOffset = 0;
 
@@ -985,25 +1091,38 @@ export class PFTimelineHeader extends BaseComponent {
       if (tag.collapsed) {
         // Collapsed tag takes 1 column
         const left = (tag.startFrameIndex + visualOffset) * frameWidth;
-        positions.set(tag.id, { left, width: frameWidth, visualStartIndex: tag.startFrameIndex + visualOffset });
+        positions.set(tag.id, {
+          left,
+          width: frameWidth,
+          visualStartIndex: tag.startFrameIndex + visualOffset,
+        });
         // Next tags shift left by the collapsed frames (minus 1 for the collapsed column)
-        visualOffset -= (tag.endFrameIndex - tag.startFrameIndex);
+        visualOffset -= tag.endFrameIndex - tag.startFrameIndex;
       } else {
         // Expanded tag spans its full range
         const left = (tag.startFrameIndex + visualOffset) * frameWidth;
-        const width = (tag.endFrameIndex - tag.startFrameIndex + 1) * frameWidth;
-        positions.set(tag.id, { left, width, visualStartIndex: tag.startFrameIndex + visualOffset });
+        const width =
+          (tag.endFrameIndex - tag.startFrameIndex + 1) * frameWidth;
+        positions.set(tag.id, {
+          left,
+          width,
+          visualStartIndex: tag.startFrameIndex + visualOffset,
+        });
       }
     }
 
     return positions;
   }
 
-  private renderTags(tags: FrameTag[], activeTagId: string | null, frameWidth: number) {
+  private renderTags(
+    tags: FrameTag[],
+    activeTagId: string | null,
+    frameWidth: number
+  ) {
     // Calculate visual positions accounting for collapsed tags
     const positions = this.calculateTagPositions(tags, frameWidth);
 
-    return tags.map(tag => {
+    return tags.map((tag) => {
       const isActiveLoop = tag.id === activeTagId;
       const isResizing = this.resizingTagId === tag.id;
       const frameCount = tag.endFrameIndex - tag.startFrameIndex + 1;
@@ -1018,32 +1137,41 @@ export class PFTimelineHeader extends BaseComponent {
 
       return html`
         <div
-          class="tag-bar ${isActiveLoop ? 'active-loop' : ''} ${isResizing ? 'resizing' : ''} ${tag.collapsed ? 'collapsed' : ''}"
+          class="tag-bar ${isActiveLoop ? "active-loop" : ""} ${isResizing
+            ? "resizing"
+            : ""} ${tag.collapsed ? "collapsed" : ""}"
           style="left: ${left}px; width: ${width}px; background-color: ${tag.color};"
           @click=${(e: MouseEvent) => this.handleTagBarClick(tag, e)}
-          @contextmenu=${(e: MouseEvent) => this.handleTagContextMenu(tag.id, e)}
+          @contextmenu=${(e: MouseEvent) =>
+            this.handleTagContextMenu(tag.id, e)}
           @mouseenter=${(e: MouseEvent) => this.handleTagMouseEnter(tag, e)}
           @mouseleave=${this.handleTagMouseLeave}
-          title="${tag.name}${isActiveLoop ? ' (looping)' : ''}${tag.collapsed ? ' - Click to expand' : ''}"
+          title="${tag.name}${isActiveLoop ? " (looping)" : ""}${tag.collapsed
+            ? " - Click to expand"
+            : ""}"
         >
           <span
             class="tag-chevron"
             @click=${(e: MouseEvent) => this.handleTagChevronClick(tag.id, e)}
-            title="${tag.collapsed ? 'Expand' : 'Collapse'}"
+            title="${tag.collapsed ? "Expand" : "Collapse"}"
           >
             ▼
           </span>
           <span class="tag-label">${label}</span>
-          ${!tag.collapsed ? html`
-            <div
-              class="tag-drag-handle left"
-              @mousedown=${(e: MouseEvent) => this.handleTagResizeStart(tag.id, 'left', e)}
-            ></div>
-            <div
-              class="tag-drag-handle right"
-              @mousedown=${(e: MouseEvent) => this.handleTagResizeStart(tag.id, 'right', e)}
-            ></div>
-          ` : ''}
+          ${!tag.collapsed
+            ? html`
+                <div
+                  class="tag-drag-handle left"
+                  @mousedown=${(e: MouseEvent) =>
+                    this.handleTagResizeStart(tag.id, "left", e)}
+                ></div>
+                <div
+                  class="tag-drag-handle right"
+                  @mousedown=${(e: MouseEvent) =>
+                    this.handleTagResizeStart(tag.id, "right", e)}
+                ></div>
+              `
+            : ""}
         </div>
       `;
     });
@@ -1054,7 +1182,11 @@ export class PFTimelineHeader extends BaseComponent {
    */
   private isFrameHidden(frameIndex: number, tags: FrameTag[]): boolean {
     for (const tag of tags) {
-      if (tag.collapsed && frameIndex > tag.startFrameIndex && frameIndex <= tag.endFrameIndex) {
+      if (
+        tag.collapsed &&
+        frameIndex > tag.startFrameIndex &&
+        frameIndex <= tag.endFrameIndex
+      ) {
         return true;
       }
     }
@@ -1065,9 +1197,15 @@ export class PFTimelineHeader extends BaseComponent {
    * Get the tag color for a frame index (for column tinting).
    * Returns null if frame is not in any tag.
    */
-  private getTagColorForFrame(frameIndex: number, tags: FrameTag[]): string | null {
+  private getTagColorForFrame(
+    frameIndex: number,
+    tags: FrameTag[]
+  ): string | null {
     for (const tag of tags) {
-      if (frameIndex >= tag.startFrameIndex && frameIndex <= tag.endFrameIndex) {
+      if (
+        frameIndex >= tag.startFrameIndex &&
+        frameIndex <= tag.endFrameIndex
+      ) {
         return tag.color;
       }
     }
@@ -1080,6 +1218,30 @@ export class PFTimelineHeader extends BaseComponent {
     const tags = animationStore.tags.value;
     const activeTagId = animationStore.activeTagId.value;
     const frameWidth = 32; // Must match .frame-cell width
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const previewScale = 2;
+
+    // Calculate resize preview position and labels
+    let resizePreviewLeft = 0;
+    let previewStartLabel = "";
+    let previewEndLabel = "";
+    if (this.resizingTagId && this.resizePreviewIndex !== null) {
+      const tag = tags.find((t) => t.id === this.resizingTagId);
+      if (tag) {
+        const previewStart =
+          this.resizingEdge === "left"
+            ? Math.min(this.resizePreviewIndex, tag.endFrameIndex)
+            : tag.startFrameIndex;
+        const previewEnd =
+          this.resizingEdge === "right"
+            ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
+            : tag.endFrameIndex;
+        resizePreviewLeft = previewStart * frameWidth;
+        previewStartLabel = `Frame ${previewStart + 1}`;
+        previewEndLabel = `Frame ${previewEnd + 1}`;
+      }
+    }
 
     return html`
       <!-- Tag container -->
@@ -1093,7 +1255,7 @@ export class PFTimelineHeader extends BaseComponent {
       ${frames.map((frame, index) => {
         // Skip frames that are hidden (inside collapsed tags)
         if (this.isFrameHidden(index, tags)) {
-          return '';
+          return "";
         }
 
         const isDragging = this.draggedFrameIndex === index;
@@ -1103,11 +1265,17 @@ export class PFTimelineHeader extends BaseComponent {
 
         return html`
           <div
-            class="frame-cell ${frame.id === currentFrameId ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${dragOverClass} ${hasTint ? 'tag-tinted' : ''}"
-            style="${hasTint ? `--tag-tint-color: ${tagColor}` : ''}"
+            class="frame-cell ${frame.id === currentFrameId
+              ? "active"
+              : ""} ${isDragging ? "dragging" : ""} ${dragOverClass} ${hasTint
+              ? "tag-tinted"
+              : ""}"
+            style="${hasTint ? `--tag-tint-color: ${tagColor}` : ""}"
             @click=${() => this.selectFrame(frame.id)}
-            @contextmenu=${(e: MouseEvent) => this.handleContextMenu(e, frame.id)}
-            @mouseenter=${(e: MouseEvent) => this.handleFrameMouseEnter(e, frame.id, index)}
+            @contextmenu=${(e: MouseEvent) =>
+              this.handleContextMenu(e, frame.id)}
+            @mouseenter=${(e: MouseEvent) =>
+              this.handleFrameMouseEnter(e, frame.id, index)}
             @mouseleave=${this.handleFrameMouseLeave}
             draggable="true"
             @dragstart=${(e: DragEvent) => this.handleFrameDragStart(index, e)}
