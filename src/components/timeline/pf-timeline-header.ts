@@ -1,4 +1,4 @@
-import { html, css } from 'lit';
+import { html, css, render } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { animationStore } from '../../stores/animation';
@@ -207,9 +207,8 @@ export class PFTimelineHeader extends BaseComponent {
 
     /* Resize frame previews */
     .resize-preview-container {
-      position: absolute;
-      top: -80px;
-      z-index: 100;
+      position: fixed;
+      z-index: 1000;
       display: flex;
       gap: 8px;
       pointer-events: none;
@@ -257,17 +256,20 @@ export class PFTimelineHeader extends BaseComponent {
   @state() private resizingTagId: string | null = null;
   @state() private resizingEdge: 'left' | 'right' | null = null;
   @state() private resizePreviewIndex: number | null = null;
+  @state() private resizePreviewX: number = 0;
+  @state() private resizePreviewY: number = 0;
   // Hover preview state
   @state() private hoverPreviewTagId: string | null = null;
 
   // Store anchor element for submenus
   private menuAnchorElement: HTMLElement | null = null;
 
+  // Portal container for resize preview (to escape parent transform)
+  private resizePreviewPortal: HTMLDivElement | null = null;
+
   @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
   @query('pf-context-menu') private contextMenu!: PFContextMenu;
   @query('pf-tag-preview') private tagPreview!: PFTagPreview;
-  @query('.resize-preview-start canvas') private resizePreviewStartCanvas!: HTMLCanvasElement;
-  @query('.resize-preview-end canvas') private resizePreviewEndCanvas!: HTMLCanvasElement;
 
   connectedCallback() {
     super.connectedCallback();
@@ -278,6 +280,17 @@ export class PFTimelineHeader extends BaseComponent {
     }
     // Set initial collapsed class
     this.updateTagsCollapsedClass();
+
+    // Create portal container for resize preview on document.body
+    this.resizePreviewPortal = document.createElement('div');
+    this.resizePreviewPortal.id = 'resize-preview-portal';
+    this.resizePreviewPortal.style.cssText = `
+      position: fixed;
+      z-index: 10000;
+      pointer-events: none;
+      display: none;
+    `;
+    document.body.appendChild(this.resizePreviewPortal);
   }
 
   protected updated(changedProperties: Map<string, unknown>): void {
@@ -292,7 +305,13 @@ export class PFTimelineHeader extends BaseComponent {
   }
 
   private renderResizeFramePreviews() {
-    if (!this.resizingTagId || this.resizePreviewIndex === null) return;
+    if (!this.resizePreviewPortal) return;
+
+    if (!this.resizingTagId || this.resizePreviewIndex === null) {
+      // Hide portal when not resizing
+      this.resizePreviewPortal.style.display = 'none';
+      return;
+    }
 
     const tag = animationStore.tags.value.find(t => t.id === this.resizingTagId);
     if (!tag) return;
@@ -300,6 +319,10 @@ export class PFTimelineHeader extends BaseComponent {
     const frames = animationStore.frames.value;
     const layers = layerStore.layers.value;
     const cels = animationStore.cels.value;
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const previewScale = 2;
+    const frameWidth = 32;
 
     // Calculate preview range
     const previewStart = this.resizingEdge === 'left'
@@ -309,21 +332,105 @@ export class PFTimelineHeader extends BaseComponent {
       ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
       : tag.endFrameIndex;
 
-    // Render start frame preview
-    if (this.resizePreviewStartCanvas && frames[previewStart]) {
-      const ctx = this.resizePreviewStartCanvas.getContext('2d');
-      if (ctx) {
-        renderFrameToCanvas(ctx, frames[previewStart].id, layers, cels);
-      }
+    const previewStartLabel = `Frame ${previewStart + 1}`;
+    const previewEndLabel = `Frame ${previewEnd + 1}`;
+
+    // Calculate screen positions for each preview (centered above its frame column)
+    const rect = this.getBoundingClientRect();
+    const previewWidth = canvasW * previewScale + 10; // canvas + padding
+    const previewHeight = canvasH * previewScale + 24; // canvas + label + padding
+
+    // Position start preview above start frame column (centered)
+    const startX = rect.left + (previewStart * frameWidth) + (frameWidth / 2) - (previewWidth / 2);
+    // Position end preview above end frame column (centered)
+    const endX = rect.left + (previewEnd * frameWidth) + (frameWidth / 2) - (previewWidth / 2);
+    // Y position above the header
+    let previewY = rect.top - previewHeight - 8;
+    if (previewY < 8) {
+      previewY = rect.bottom + 8;
     }
 
-    // Render end frame preview
-    if (this.resizePreviewEndCanvas && frames[previewEnd]) {
-      const ctx = this.resizePreviewEndCanvas.getContext('2d');
-      if (ctx) {
-        renderFrameToCanvas(ctx, frames[previewEnd].id, layers, cels);
+    // Common preview frame styles
+    const previewFrameStyle = `
+      position: fixed;
+      top: ${previewY}px;
+      z-index: 10000;
+      pointer-events: none;
+      background: var(--pf-color-bg-panel, #1e1e1e);
+      border: 1px solid var(--pf-color-border, #3e3e3e);
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    `;
+
+    const canvasStyle = `
+      display: block;
+      image-rendering: pixelated;
+      width: ${canvasW * previewScale}px;
+      height: ${canvasH * previewScale}px;
+      background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
+        linear-gradient(-45deg, #404040 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #404040 75%),
+        linear-gradient(-45deg, transparent 75%, #404040 75%);
+      background-size: 8px 8px;
+      background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+      background-color: #606060;
+    `;
+
+    // Render two separate preview frames, each positioned above its column
+    const template = html`
+      <div class="resize-preview-start" style="${previewFrameStyle} left: ${startX}px;">
+        <canvas
+          class="resize-preview-start-canvas"
+          width="${canvasW}"
+          height="${canvasH}"
+          style="${canvasStyle}"
+        ></canvas>
+        <span style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;">
+          ${previewStartLabel}
+        </span>
+      </div>
+      <div class="resize-preview-end" style="${previewFrameStyle} left: ${endX}px;">
+        <canvas
+          class="resize-preview-end-canvas"
+          width="${canvasW}"
+          height="${canvasH}"
+          style="${canvasStyle}"
+        ></canvas>
+        <span style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;">
+          ${previewEndLabel}
+        </span>
+      </div>
+    `;
+
+    render(template, this.resizePreviewPortal);
+    this.resizePreviewPortal.style.display = 'block';
+
+    // Render frame content to canvases after DOM update
+    requestAnimationFrame(() => {
+      if (!this.resizePreviewPortal) return;
+
+      const startCanvas = this.resizePreviewPortal.querySelector('.resize-preview-start-canvas') as HTMLCanvasElement;
+      const endCanvas = this.resizePreviewPortal.querySelector('.resize-preview-end-canvas') as HTMLCanvasElement;
+
+      if (startCanvas && frames[previewStart]) {
+        const ctx = startCanvas.getContext('2d');
+        if (ctx) {
+          renderFrameToCanvas(ctx, frames[previewStart].id, layers, cels);
+        }
       }
-    }
+
+      if (endCanvas && frames[previewEnd]) {
+        const ctx = endCanvas.getContext('2d');
+        if (ctx) {
+          renderFrameToCanvas(ctx, frames[previewEnd].id, layers, cels);
+        }
+      }
+    });
   }
 
   private updateTagsCollapsedClass() {
@@ -336,6 +443,12 @@ export class PFTimelineHeader extends BaseComponent {
     // Clean up any resize listeners
     window.removeEventListener('mousemove', this.handleTagResizeMove);
     window.removeEventListener('mouseup', this.handleTagResizeEnd);
+
+    // Remove resize preview portal from body
+    if (this.resizePreviewPortal && this.resizePreviewPortal.parentNode) {
+      this.resizePreviewPortal.parentNode.removeChild(this.resizePreviewPortal);
+      this.resizePreviewPortal = null;
+    }
   }
 
   private handleFrameMouseEnter(e: MouseEvent, frameId: string, frameIndex: number) {
@@ -473,8 +586,30 @@ export class PFTimelineHeader extends BaseComponent {
         ? Math.max(clampedIndex, tag.startFrameIndex)
         : tag.endFrameIndex;
       animationStore.setTagResizePreview(this.resizingTagId, previewStart, previewEnd);
+
+      // Update screen position for fixed positioning
+      this.updateResizePreviewPosition(rect, previewStart);
     }
   };
+
+  /**
+   * Calculate screen position for the resize preview container.
+   */
+  private updateResizePreviewPosition(rect: DOMRect, frameIndex: number) {
+    const frameWidth = 32;
+    const previewHeight = 150; // approximate preview height
+
+    // Position at the start frame
+    this.resizePreviewX = rect.left + (frameIndex * frameWidth);
+
+    // Position above the header
+    this.resizePreviewY = rect.top - previewHeight - 8;
+
+    // If would go off top, position below instead
+    if (this.resizePreviewY < 8) {
+      this.resizePreviewY = rect.bottom + 8;
+    }
+  }
 
   private handleTagResizeEnd = () => {
     if (this.resizingTagId && this.resizingEdge && this.resizePreviewIndex !== null) {
@@ -503,6 +638,11 @@ export class PFTimelineHeader extends BaseComponent {
     this.resizePreviewIndex = null;
     window.removeEventListener('mousemove', this.handleTagResizeMove);
     window.removeEventListener('mouseup', this.handleTagResizeEnd);
+
+    // Hide resize preview portal
+    if (this.resizePreviewPortal) {
+      this.resizePreviewPortal.style.display = 'none';
+    }
   };
 
   private handleTagContextMenu(tagId: string, e: MouseEvent) {
@@ -793,7 +933,8 @@ export class PFTimelineHeader extends BaseComponent {
     animationStore.toggleTagCollapsed(tagId);
   }
 
-  private handleCollapsedTagMouseEnter(tag: FrameTag, e: MouseEvent) {
+  private handleTagMouseEnter(tag: FrameTag, e: MouseEvent) {
+    // Only show preview for collapsed tags
     if (!tag.collapsed) return;
 
     const target = e.currentTarget as HTMLElement;
@@ -806,19 +947,25 @@ export class PFTimelineHeader extends BaseComponent {
     this.hoverPreviewTagId = tag.id;
   }
 
-  private handleCollapsedTagMouseLeave() {
+  private handleTagMouseLeave() {
     if (this.tagPreview) {
       this.tagPreview.hide();
     }
     this.hoverPreviewTagId = null;
   }
 
-  private handleCollapsedTagClick(tag: FrameTag, e: MouseEvent) {
+  private handleTagBarClick(tag: FrameTag, e: MouseEvent) {
     e.stopPropagation();
-    // If clicking on the tag bar (not chevron), expand it
     const target = e.target as HTMLElement;
-    if (!target.classList.contains('tag-chevron')) {
+    // Don't process if clicking on chevron (that has its own handler)
+    if (target.classList.contains('tag-chevron')) return;
+
+    // For collapsed tags, expand them
+    if (tag.collapsed) {
       animationStore.toggleTagCollapsed(tag.id);
+    } else {
+      // For expanded tags, use the existing click behavior (set playback mode)
+      this.handleTagClick(tag.id, e);
     }
   }
 
@@ -873,10 +1020,10 @@ export class PFTimelineHeader extends BaseComponent {
         <div
           class="tag-bar ${isActiveLoop ? 'active-loop' : ''} ${isResizing ? 'resizing' : ''} ${tag.collapsed ? 'collapsed' : ''}"
           style="left: ${left}px; width: ${width}px; background-color: ${tag.color};"
-          @click=${(e: MouseEvent) => tag.collapsed ? this.handleCollapsedTagClick(tag, e) : this.handleTagClick(tag.id, e)}
+          @click=${(e: MouseEvent) => this.handleTagBarClick(tag, e)}
           @contextmenu=${(e: MouseEvent) => this.handleTagContextMenu(tag.id, e)}
-          @mouseenter=${(e: MouseEvent) => this.handleCollapsedTagMouseEnter(tag, e)}
-          @mouseleave=${this.handleCollapsedTagMouseLeave}
+          @mouseenter=${(e: MouseEvent) => this.handleTagMouseEnter(tag, e)}
+          @mouseleave=${this.handleTagMouseLeave}
           title="${tag.name}${isActiveLoop ? ' (looping)' : ''}${tag.collapsed ? ' - Click to expand' : ''}"
         >
           <span
@@ -933,28 +1080,6 @@ export class PFTimelineHeader extends BaseComponent {
     const tags = animationStore.tags.value;
     const activeTagId = animationStore.activeTagId.value;
     const frameWidth = 32; // Must match .frame-cell width
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
-    const previewScale = 2;
-
-    // Calculate resize preview position and labels
-    let resizePreviewLeft = 0;
-    let previewStartLabel = '';
-    let previewEndLabel = '';
-    if (this.resizingTagId && this.resizePreviewIndex !== null) {
-      const tag = tags.find(t => t.id === this.resizingTagId);
-      if (tag) {
-        const previewStart = this.resizingEdge === 'left'
-          ? Math.min(this.resizePreviewIndex, tag.endFrameIndex)
-          : tag.startFrameIndex;
-        const previewEnd = this.resizingEdge === 'right'
-          ? Math.max(this.resizePreviewIndex, tag.startFrameIndex)
-          : tag.endFrameIndex;
-        resizePreviewLeft = previewStart * frameWidth;
-        previewStartLabel = `Frame ${previewStart + 1}`;
-        previewEndLabel = `Frame ${previewEnd + 1}`;
-      }
-    }
 
     return html`
       <!-- Tag container -->
@@ -962,27 +1087,7 @@ export class PFTimelineHeader extends BaseComponent {
         ${this.renderTags(tags, activeTagId, frameWidth)}
       </div>
 
-      <!-- Resize frame previews (shown during tag resize) -->
-      ${this.resizingTagId && this.resizePreviewIndex !== null ? html`
-        <div class="resize-preview-container" style="left: ${resizePreviewLeft}px;">
-          <div class="resize-preview-frame resize-preview-start">
-            <canvas
-              width="${canvasW}"
-              height="${canvasH}"
-              style="width: ${canvasW * previewScale}px; height: ${canvasH * previewScale}px;"
-            ></canvas>
-            <span class="resize-preview-label">${previewStartLabel}</span>
-          </div>
-          <div class="resize-preview-frame resize-preview-end">
-            <canvas
-              width="${canvasW}"
-              height="${canvasH}"
-              style="width: ${canvasW * previewScale}px; height: ${canvasH * previewScale}px;"
-            ></canvas>
-            <span class="resize-preview-label">${previewEndLabel}</span>
-          </div>
-        </div>
-      ` : ''}
+      <!-- Resize frame previews are now rendered to a portal on document.body -->
 
       <!-- Frame cells -->
       ${frames.map((frame, index) => {

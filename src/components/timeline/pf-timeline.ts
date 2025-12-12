@@ -76,7 +76,15 @@ export class PFTimeline extends BaseComponent {
 
     .header-frames {
       flex: 1;
-      overflow: hidden;
+      overflow-x: scroll;
+      overflow-y: hidden;
+      /* Hide scrollbar but keep scrollability */
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* IE/Edge */
+    }
+
+    .header-frames::-webkit-scrollbar {
+      display: none; /* Chrome/Safari/Opera */
     }
 
     /* Scroll container for synchronized scrolling */
@@ -251,11 +259,10 @@ export class PFTimeline extends BaseComponent {
 
   private handleScroll = () => {
     // Sync horizontal scroll to timeline header
+    // Using scrollLeft on the scrollable .header-frames container (not transform)
+    // This avoids creating a new containing block that breaks fixed positioning
     if (this.scrollContainer && this.headerFrames) {
-      const header = this.headerFrames.querySelector('pf-timeline-header');
-      if (header) {
-        (header as HTMLElement).scrollLeft = this.scrollContainer.scrollLeft;
-      }
+      this.headerFrames.scrollLeft = this.scrollContainer.scrollLeft;
     }
   };
 
