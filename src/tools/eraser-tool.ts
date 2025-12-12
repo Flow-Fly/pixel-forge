@@ -2,6 +2,8 @@ import { BaseTool, type Point, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-settings';
+import { guidesStore } from '../stores/guides';
+import { projectStore } from '../stores/project';
 import {
   bresenhamLine,
   constrainTo45Degrees,
@@ -246,10 +248,29 @@ export class EraserTool extends BaseTool {
     const size = toolSizes.eraser.value;
     const halfSize = Math.floor(size / 2);
 
+    // Erase original point
+    this.eraseSinglePoint(x, y, size, halfSize, brush.opacity);
+
+    // Mirror erasing: erase at mirrored positions if guides are active
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+
+    for (const pos of mirrorPositions) {
+      this.eraseSinglePoint(pos.x, pos.y, size, halfSize, brush.opacity);
+    }
+  }
+
+  /**
+   * Erase a single point at the given position (helper for erasePoint)
+   */
+  private eraseSinglePoint(x: number, y: number, size: number, halfSize: number, opacity: number) {
+    if (!this.context) return;
+
     if (eraserSettings.mode.value === 'background') {
       // Fill with secondary (background) color
       this.context.fillStyle = colorStore.secondaryColor.value;
-      this.context.globalAlpha = brush.opacity;
+      this.context.globalAlpha = opacity;
       this.context.fillRect(x - halfSize, y - halfSize, size, size);
       this.context.globalAlpha = 1;
     } else {
@@ -280,6 +301,25 @@ export class EraserTool extends BaseTool {
    * Restore a single pixel to its pre-stroke state (for pixel-perfect L-shape removal)
    */
   private restorePoint(x: number, y: number) {
+    if (!this.context) return;
+
+    // Restore the original point
+    this.restoreSinglePixel(x, y);
+
+    // Also restore mirrored positions
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+
+    for (const pos of mirrorPositions) {
+      this.restoreSinglePixel(pos.x, pos.y);
+    }
+  }
+
+  /**
+   * Restore a single pixel at the given position (helper for restorePoint)
+   */
+  private restoreSinglePixel(x: number, y: number) {
     if (!this.context) return;
 
     // If this point was erased earlier in the current stroke (path crosses itself),

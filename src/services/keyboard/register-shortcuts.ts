@@ -15,6 +15,7 @@ import { animationStore } from "../../stores/animation";
 import { viewportStore } from "../../stores/viewport";
 import { panelStore } from "../../stores/panels";
 import { shapeStore } from "../../stores/shape";
+import { guidesStore } from "../../stores/guides";
 import { AddFrameCommand } from "../../commands/animation-commands";
 import { toolRegistry } from "../../tools/tool-registry";
 
@@ -125,6 +126,14 @@ export function registerShortcuts() {
     [],
     () => panelStore.togglePanel("timeline"),
     "Toggle timeline"
+  );
+
+  // Shift+G = Toggle guide visibility
+  keyboardService.register(
+    "g",
+    ["shift"],
+    () => guidesStore.toggleVisibility(),
+    "Toggle guides"
   );
 
   // ============================================
