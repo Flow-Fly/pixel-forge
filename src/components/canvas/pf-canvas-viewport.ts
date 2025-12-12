@@ -106,12 +106,6 @@ export class PFCanvasViewport extends BaseComponent {
   @state() private lastMouseX = 0;
   @state() private lastMouseY = 0;
 
-  // Zoom easing for trackpad - accumulate delta before changing level
-  private zoomAccumulatedDelta = 0;
-  private zoomDecayTimeout?: number;
-  private readonly ZOOM_THRESHOLD = 10; // Pixels of scroll before zoom changes
-  private readonly ZOOM_DECAY_MS = 150; // Reset accumulator after this idle time
-
   // Track actual modifier key presses to distinguish from macOS pinch gestures
   // macOS injects ctrlKey=true for pinch-to-zoom, but we want pinch=zoom, Ctrl+scroll=brush
   private isCtrlActuallyPressed = false;
@@ -126,6 +120,8 @@ export class PFCanvasViewport extends BaseComponent {
     window.addEventListener("keyup", this.handleKeyUp);
     window.addEventListener("blur", this.handleWindowBlur);
     window.addEventListener("commit-transform", this.handleCommitTransform);
+    window.addEventListener("mousedown", this.handleGlobalMouseDown);
+    window.addEventListener("wheel", this.handleGlobalWheel, { passive: false });
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions();
@@ -175,6 +171,8 @@ export class PFCanvasViewport extends BaseComponent {
     window.removeEventListener("keyup", this.handleKeyUp);
     window.removeEventListener("blur", this.handleWindowBlur);
     window.removeEventListener("commit-transform", this.handleCommitTransform);
+    window.removeEventListener("mousedown", this.handleGlobalMouseDown);
+    window.removeEventListener("wheel", this.handleGlobalWheel);
 
     // Clean up ResizeObserver
     if (this.resizeObserver) {
@@ -185,11 +183,6 @@ export class PFCanvasViewport extends BaseComponent {
     // Clean up any active drag listeners
     window.removeEventListener("mousemove", this.handleGlobalMouseMove);
     window.removeEventListener("mouseup", this.handleGlobalMouseUp);
-
-    // Clean up zoom decay timeout
-    if (this.zoomDecayTimeout) {
-      clearTimeout(this.zoomDecayTimeout);
-    }
   }
 
   // Reset modifier tracking when window loses focus (prevents stuck state)
@@ -516,6 +509,41 @@ export class PFCanvasViewport extends BaseComponent {
     }
   };
 
+  /**
+   * Global mousedown handler to allow starting pan from outside the canvas.
+   * Enables spacebar+click and middle-click pan from anywhere (except UI elements).
+   */
+  private handleGlobalMouseDown = (e: MouseEvent) => {
+    // Skip if already dragging
+    if (this.isDragging) return;
+
+    // Check if clicking on UI elements (toolbar, sidebar, timeline, etc.)
+    if (this.isClickOnUI(e)) return;
+
+    // Middle-click pan from anywhere
+    if (e.button === 1) {
+      this.startDragging(e);
+      return;
+    }
+
+    // Spacebar + left-click pan from anywhere
+    if (viewportStore.isSpacebarDown.value && e.button === 0) {
+      this.startDragging(e);
+      return;
+    }
+  };
+
+  /**
+   * Check if the click target is a UI element that should not trigger pan.
+   */
+  private isClickOnUI(e: MouseEvent): boolean {
+    const target = e.target as HTMLElement;
+    // Check if click is on toolbar, sidebar, timeline, dialogs, context bar, menu bar, or panels
+    return target.closest(
+      'pf-toolbar, pf-sidebar, pf-timeline, pf-layers-panel, [role="dialog"], .context-bar, pf-menu-bar, pf-context-bar, pf-palette-panel, pf-brush-panel'
+    ) !== null;
+  }
+
   private handleMouseDown(e: MouseEvent) {
     // Alt or Cmd/Meta + Click = Quick Eyedropper
     // Left click: pick to foreground, Right click: pick to background
@@ -686,48 +714,30 @@ export class PFCanvasViewport extends BaseComponent {
       return;
     }
 
-    // Pinch gesture = zoom
+    // Pinch gesture = zoom at cursor position
     if (isPinchGesture) {
-      // Accumulate scroll delta for smoother trackpad zoom
-      this.zoomAccumulatedDelta += e.deltaY;
-
-      // Reset decay timeout - accumulator clears after idle period
-      if (this.zoomDecayTimeout) {
-        clearTimeout(this.zoomDecayTimeout);
-      }
-      this.zoomDecayTimeout = window.setTimeout(() => {
-        this.zoomAccumulatedDelta = 0;
-      }, this.ZOOM_DECAY_MS);
-
-      // Only change zoom level when threshold is exceeded
-      if (Math.abs(this.zoomAccumulatedDelta) < this.ZOOM_THRESHOLD) {
-        return;
-      }
-
-      // Zoom at cursor position
       const rect = this.getBoundingClientRect();
       const screenX = e.clientX - rect.left;
       const screenY = e.clientY - rect.top;
 
-      if (this.zoomAccumulatedDelta < 0) {
+      if (e.deltaY < 0) {
         viewportStore.zoomInAt(screenX, screenY);
-      } else {
+      } else if (e.deltaY > 0) {
         viewportStore.zoomOutAt(screenX, screenY);
       }
 
-      // Reset accumulator after zoom change
-      this.zoomAccumulatedDelta = 0;
       this.requestUpdate();
       return;
     }
 
     // Distinguish mouse wheel from trackpad two-finger scroll:
-    // - deltaMode === 1 (LINE) = mouse wheel → zoom
-    // - deltaMode === 0 (PIXEL) with horizontal component = trackpad pan → pan
-    // - deltaMode === 0 (PIXEL) Y-only with large delta = likely mouse wheel → zoom
+    // - deltaMode === 1 (LINE) = definitely mouse wheel → zoom
+    // - deltaMode === 0 (PIXEL) with horizontal component = trackpad → pan
+    // - deltaMode === 0 (PIXEL) Y-only = likely mouse wheel → zoom
+    // On macOS, both use deltaMode === 0, but trackpad usually has deltaX due to finger imprecision
     const isMouseWheel =
       e.deltaMode === 1 || // LINE mode is definitely mouse wheel
-      (e.deltaMode === 0 && e.deltaX === 0 && Math.abs(e.deltaY) >= 50); // Large discrete Y-only in pixel mode
+      (e.deltaMode === 0 && e.deltaX === 0); // Y-only scroll = likely mouse wheel
 
     if (isMouseWheel) {
       // Mouse wheel = zoom at cursor position
@@ -747,6 +757,33 @@ export class PFCanvasViewport extends BaseComponent {
 
     this.requestUpdate();
   }
+
+  /**
+   * Global wheel handler to allow trackpad panning from outside the canvas.
+   * Only handles trackpad gestures (deltaMode === 0), not mouse wheel.
+   */
+  private handleGlobalWheel = (e: WheelEvent) => {
+    // Skip if event originated from within this component (already handled by local handler)
+    if (this.contains(e.target as Node)) return;
+
+    // Skip if on UI elements
+    if (this.isClickOnUI(e)) return;
+
+    // Skip pinch gestures (ctrlKey is injected by macOS for pinch)
+    if (e.ctrlKey) return;
+
+    // Only handle trackpad (has horizontal component), not mouse wheel
+    // Mouse wheels have deltaMode === 1 OR Y-only scroll (deltaX === 0)
+    const isMouseWheel =
+      e.deltaMode === 1 ||
+      (e.deltaMode === 0 && e.deltaX === 0);
+    if (isMouseWheel) return;
+
+    // Trackpad two-finger scroll = pan
+    e.preventDefault();
+    viewportStore.panBy(-e.deltaX, -e.deltaY);
+    this.requestUpdate();
+  };
 
   // ============================================
   // Rotation handlers
