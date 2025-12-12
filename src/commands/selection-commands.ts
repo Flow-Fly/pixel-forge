@@ -1,6 +1,7 @@
 import { type Command } from '../stores/history';
 import { selectionStore } from '../stores/selection';
-import { type SelectionShape } from '../types/selection';
+import { clipboardStore, type ClipboardData } from '../stores/clipboard';
+import { type SelectionShape, type SelectionState } from '../types/selection';
 import { type Rect } from '../types/geometry';
 
 /**
@@ -693,5 +694,178 @@ export class TransformSelectionCommand implements Command {
     }
 
     ctx.putImageData(destData, this.actualDestX, this.actualDestY);
+  }
+}
+
+/**
+ * Command for copying selected pixels to clipboard.
+ * Execute: copies pixels to clipboard (does NOT clear original)
+ * Undo: restores previous clipboard contents
+ */
+export class CopyCommand implements Command {
+  id: string;
+  name = 'Copy Selection';
+  timestamp: number;
+
+  private canvas: HTMLCanvasElement;
+  private bounds: Rect;
+  private shape: SelectionShape;
+  private mask?: Uint8Array;
+
+  // Store previous clipboard for undo
+  private previousClipboard: ClipboardData | null = null;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    bounds: Rect,
+    shape: SelectionShape,
+    mask?: Uint8Array
+  ) {
+    this.id = crypto.randomUUID();
+    this.timestamp = Date.now();
+    this.canvas = canvas;
+    this.bounds = { ...bounds };
+    this.shape = shape;
+    this.mask = mask;
+  }
+
+  execute() {
+    // Save current clipboard for undo
+    this.previousClipboard = clipboardStore.getData();
+
+    const ctx = this.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(
+      this.bounds.x,
+      this.bounds.y,
+      this.bounds.width,
+      this.bounds.height
+    );
+
+    // For ellipse/freeform, mask out pixels outside selection
+    if (this.shape === 'ellipse') {
+      this.applyEllipseMask(imageData);
+    } else if (this.shape === 'freeform' && this.mask) {
+      this.applyFreeformMask(imageData);
+    }
+
+    // Store in clipboard
+    clipboardStore.copy(imageData, this.bounds, this.shape, this.mask);
+  }
+
+  undo() {
+    // Restore previous clipboard state
+    if (this.previousClipboard) {
+      clipboardStore.copy(
+        this.previousClipboard.imageData,
+        this.previousClipboard.bounds,
+        this.previousClipboard.shape,
+        this.previousClipboard.mask
+      );
+    } else {
+      clipboardStore.clear();
+    }
+  }
+
+  private applyEllipseMask(imageData: ImageData) {
+    const { width, height } = this.bounds;
+    const data = imageData.data;
+    const rx = width / 2;
+    const ry = height / 2;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const dx = (px + 0.5 - width / 2) / rx;
+        const dy = (py + 0.5 - height / 2) / ry;
+        if (dx * dx + dy * dy > 1) {
+          const idx = (py * width + px) * 4;
+          data[idx + 3] = 0; // Make transparent
+        }
+      }
+    }
+  }
+
+  private applyFreeformMask(imageData: ImageData) {
+    const { width, height } = this.bounds;
+    const data = imageData.data;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const maskIdx = py * width + px;
+        if (this.mask![maskIdx] !== 255) {
+          const idx = maskIdx * 4;
+          data[idx + 3] = 0; // Make transparent
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Command for pasting clipboard contents as a floating selection.
+ * Execute: creates floating selection from clipboard centered on cursor or canvas
+ * Undo: removes the floating selection, restores previous state
+ */
+export class PasteCommand implements Command {
+  id: string;
+  name = 'Paste';
+  timestamp: number;
+
+  private clipboardData: ClipboardData;
+  private canvasWidth: number;
+  private canvasHeight: number;
+  private pastePosition: { x: number; y: number } | null;
+
+  // Store previous selection state for undo
+  private previousState: SelectionState;
+
+  constructor(
+    clipboardData: ClipboardData,
+    canvasWidth: number,
+    canvasHeight: number,
+    previousState: SelectionState,
+    pastePosition: { x: number; y: number } | null = null
+  ) {
+    this.id = crypto.randomUUID();
+    this.timestamp = Date.now();
+    this.clipboardData = clipboardData;
+    this.canvasWidth = canvasWidth;
+    this.canvasHeight = canvasHeight;
+    this.previousState = previousState;
+    this.pastePosition = pastePosition;
+  }
+
+  execute() {
+    let pasteX: number;
+    let pasteY: number;
+
+    if (this.pastePosition) {
+      // Center on cursor position
+      pasteX = Math.floor(this.pastePosition.x - this.clipboardData.bounds.width / 2);
+      pasteY = Math.floor(this.pastePosition.y - this.clipboardData.bounds.height / 2);
+    } else {
+      // Fall back to canvas center
+      pasteX = Math.floor((this.canvasWidth - this.clipboardData.bounds.width) / 2);
+      pasteY = Math.floor((this.canvasHeight - this.clipboardData.bounds.height) / 2);
+    }
+
+    const bounds: Rect = {
+      x: pasteX,
+      y: pasteY,
+      width: this.clipboardData.bounds.width,
+      height: this.clipboardData.bounds.height,
+    };
+
+    // Create floating selection with pasted content
+    selectionStore.setFloating(
+      this.clipboardData.imageData,
+      bounds,
+      this.clipboardData.shape,
+      this.clipboardData.mask
+    );
+  }
+
+  undo() {
+    // Restore previous selection state
+    selectionStore.state.value = this.previousState;
   }
 }

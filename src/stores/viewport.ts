@@ -207,6 +207,21 @@ class ViewportStore {
   }
 
   /**
+   * Get current cursor position in canvas coordinates.
+   * Returns null if cursor is not over the viewport.
+   */
+  getCursorCanvasPosition(): { x: number; y: number } | null {
+    const screenX = this.cursorScreenX.value;
+    const screenY = this.cursorScreenY.value;
+
+    if (screenX === null || screenY === null) {
+      return null;
+    }
+
+    return this.screenToCanvas(screenX, screenY);
+  }
+
+  /**
    * Get valid pan boundaries.
    * Returns the min/max pan values that keep at least MIN_VISIBLE_PIXELS of canvas visible.
    */

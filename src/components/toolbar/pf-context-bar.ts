@@ -6,7 +6,10 @@ import { selectionStore } from "../../stores/selection";
 import { animationStore } from "../../stores/animation";
 import { historyStore } from "../../stores/history";
 import { getToolMeta } from "../../tools/tool-registry";
-import { LinkCelsCommand, UnlinkCelsCommand } from "../../commands/animation-commands";
+import {
+  LinkCelsCommand,
+  UnlinkCelsCommand,
+} from "../../commands/animation-commands";
 import type { ToolOption } from "../../types/tool-meta";
 import "./options/pf-option-slider";
 import "./options/pf-option-checkbox";
@@ -240,14 +243,14 @@ export class PFContextBar extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener('mousemove', this._handleCelScrubMove);
-    window.removeEventListener('mouseup', this._handleCelScrubEnd);
+    window.removeEventListener("mousemove", this._handleCelScrubMove);
+    window.removeEventListener("mouseup", this._handleCelScrubEnd);
   }
 
   render() {
     // Check if we're in transforming state - show transform controls instead
     const selectionState = selectionStore.state.value;
-    if (selectionState.type === 'transforming') {
+    if (selectionState.type === "transforming") {
       return this._renderTransformControls();
     }
 
@@ -271,16 +274,18 @@ export class PFContextBar extends BaseComponent {
       <div class="separator"></div>
 
       <div class="options-section">${this._renderOptions(meta.options)}</div>
-
+      <!--
       ${meta.alternatives.length > 0
         ? html`
             <div class="separator"></div>
             <div class="alternatives-section">
-              <pf-alternative-tools .alternatives=${meta.alternatives}></pf-alternative-tools>
+              <pf-alternative-tools
+                .alternatives=${meta.alternatives}
+              ></pf-alternative-tools>
             </div>
           `
         : ""}
-
+-->
       ${hasSelectedCels ? this._renderCelControls(selectedCelKeys) : ""}
 
       <div class="separator"></div>
@@ -316,7 +321,9 @@ export class PFContextBar extends BaseComponent {
             @input=${this._handleAngleInput}
             @keydown=${this._handleAngleKeydown}
           />
-          <span style="color: var(--pf-color-text-muted); font-size: 11px;">°</span>
+          <span style="color: var(--pf-color-text-muted); font-size: 11px;"
+            >°</span
+          >
         </div>
 
         <div class="separator"></div>
@@ -327,7 +334,7 @@ export class PFContextBar extends BaseComponent {
           ?disabled=${this.isCommitting}
           title="Apply rotation (Enter)"
         >
-          ${this.isCommitting ? 'Applying...' : 'Apply'}
+          ${this.isCommitting ? "Applying..." : "Apply"}
         </button>
         <button
           class="action-btn"
@@ -356,10 +363,10 @@ export class PFContextBar extends BaseComponent {
   }
 
   private _handleAngleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       this._commitTransform();
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       e.preventDefault();
       this._cancelTransform();
     }
@@ -370,10 +377,12 @@ export class PFContextBar extends BaseComponent {
 
     // Dispatch event for viewport to handle the commit
     // The viewport has access to the canvas and can perform the rotation
-    this.dispatchEvent(new CustomEvent('commit-transform', {
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent("commit-transform", {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private _cancelTransform() {
@@ -395,7 +404,10 @@ export class PFContextBar extends BaseComponent {
 
     return options.map((option, index) => {
       const showSeparator = index < options.length - 1;
-      return html` ${this._renderOption(option)} ${showSeparator ? html`<div class="separator"></div>` : ""} `;
+      return html`
+        ${this._renderOption(option)}
+        ${showSeparator ? html`<div class="separator"></div>` : ""}
+      `;
     });
   }
 
@@ -469,13 +481,16 @@ export class PFContextBar extends BaseComponent {
 
     return html`
       <div class="cel-section">
-        <span class="cel-label">${celKeys.length} cel${celKeys.length > 1 ? 's' : ''}</span>
+        <span class="cel-label"
+          >${celKeys.length} cel${celKeys.length > 1 ? "s" : ""}</span
+        >
 
         <div class="cel-opacity">
           <span class="cel-label">Opacity:</span>
           <span
-            class="opacity-scrubber ${this.isCelScrubbing ? 'scrubbing' : ''}"
-            @mousedown=${(e: MouseEvent) => this._handleCelScrubStart(e, avgOpacity)}
+            class="opacity-scrubber ${this.isCelScrubbing ? "scrubbing" : ""}"
+            @mousedown=${(e: MouseEvent) =>
+              this._handleCelScrubStart(e, avgOpacity)}
             title="Drag to adjust opacity"
           >
             ${avgOpacity}%
@@ -508,8 +523,8 @@ export class PFContextBar extends BaseComponent {
     this.celScrubStartX = e.clientX;
     this.celScrubStartOpacity = currentOpacity;
 
-    window.addEventListener('mousemove', this._handleCelScrubMove);
-    window.addEventListener('mouseup', this._handleCelScrubEnd);
+    window.addEventListener("mousemove", this._handleCelScrubMove);
+    window.addEventListener("mouseup", this._handleCelScrubEnd);
   };
 
   private _handleCelScrubMove = (e: MouseEvent) => {
@@ -517,7 +532,10 @@ export class PFContextBar extends BaseComponent {
 
     const deltaX = e.clientX - this.celScrubStartX;
     const deltaPercent = Math.round(deltaX / 2);
-    const newOpacity = Math.max(0, Math.min(100, this.celScrubStartOpacity + deltaPercent));
+    const newOpacity = Math.max(
+      0,
+      Math.min(100, this.celScrubStartOpacity + deltaPercent)
+    );
 
     const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
     animationStore.setCelOpacity(selectedCelKeys, newOpacity);
@@ -525,8 +543,8 @@ export class PFContextBar extends BaseComponent {
 
   private _handleCelScrubEnd = () => {
     this.isCelScrubbing = false;
-    window.removeEventListener('mousemove', this._handleCelScrubMove);
-    window.removeEventListener('mouseup', this._handleCelScrubEnd);
+    window.removeEventListener("mousemove", this._handleCelScrubMove);
+    window.removeEventListener("mouseup", this._handleCelScrubEnd);
   };
 
   private _linkSelectedCels = () => {
