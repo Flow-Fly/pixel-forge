@@ -260,7 +260,6 @@ export class PFPreviewOverlay extends BaseComponent {
   // Preview sizing constraints
   private readonly MAX_PREVIEW_SIZE = 300; // Max user-resizable size
   private readonly MIN_PREVIEW_SIZE = 64;  // Min user-resizable size
-  private readonly DEFAULT_PREVIEW_SIZE = 128;
 
   connectedCallback() {
     super.connectedCallback();
