@@ -35,6 +35,9 @@ class AnimationStore {
   selectedCelKeys = signal<Set<string>>(new Set());
   selectionAnchor = signal<{ layerId: string; frameId: string } | null>(null);
 
+  // Tag resize preview state (for visual feedback while dragging)
+  tagResizePreview = signal<{ tagId: string; previewStart: number; previewEnd: number } | null>(null);
+
   // Playback internals
   private animationFrameId: number | null = null;
   private lastFrameTime: number = 0;
@@ -700,6 +703,18 @@ class AnimationStore {
    */
   setSelectionAnchor(layerId: string, frameId: string) {
     this.selectionAnchor.value = { layerId, frameId };
+  }
+
+  /**
+   * Set or clear the tag resize preview state.
+   * Used for visual feedback while dragging tag edges.
+   */
+  setTagResizePreview(tagId: string | null, previewStart?: number, previewEnd?: number) {
+    if (tagId === null) {
+      this.tagResizePreview.value = null;
+    } else {
+      this.tagResizePreview.value = { tagId, previewStart: previewStart!, previewEnd: previewEnd! };
+    }
   }
 
   /**

@@ -23,6 +23,7 @@ export class PFTimelineGrid extends BaseComponent {
     .cel {
       width: 32px;
       height: 100%;
+      flex-shrink: 0;
       border-right: 1px solid var(--pf-color-border);
       display: flex;
       align-items: center;
@@ -72,6 +73,18 @@ export class PFTimelineGrid extends BaseComponent {
       opacity: 0.12;
       background-color: var(--tag-tint-color);
       z-index: 0;
+    }
+
+    /* Tag resize preview tint - shows during drag */
+    .resize-preview-tint {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.25;
+      background-color: var(--resize-preview-color);
+      z-index: 3;
+      border: 2px dashed rgba(255, 255, 255, 0.4);
+      box-sizing: border-box;
     }
 
     /* Collapsed tag cell styling */
@@ -175,6 +188,24 @@ export class PFTimelineGrid extends BaseComponent {
       }
     }
     return null;
+  }
+
+  /**
+   * Check if a frame is within the tag resize preview range.
+   * Returns the preview info if in range, null otherwise.
+   */
+  private getResizePreviewForFrame(
+    frameIndex: number,
+    tags: FrameTag[]
+  ): { inPreview: boolean; color: string | null } {
+    const preview = animationStore.tagResizePreview.value;
+    if (!preview) return { inPreview: false, color: null };
+
+    if (frameIndex >= preview.previewStart && frameIndex <= preview.previewEnd) {
+      const tag = tags.find(t => t.id === preview.tagId);
+      return { inPreview: true, color: tag?.color ?? null };
+    }
+    return { inPreview: false, color: null };
   }
 
   /**
@@ -308,6 +339,10 @@ export class PFTimelineGrid extends BaseComponent {
               const tagColor = this.getTagColorForFrame(frameIndex, tags);
               const hasTint = tagColor !== null;
 
+              // Check for resize preview
+              const resizePreview = this.getResizePreviewForFrame(frameIndex, tags);
+              const hasResizePreview = resizePreview.inPreview;
+
               const celClasses = {
                 cel: true,
                 active: isActive,
@@ -328,6 +363,7 @@ export class PFTimelineGrid extends BaseComponent {
               const styleStr = [
                 hasTint ? `--tag-tint-color: ${tagColor}` : "",
                 isLinked ? `--link-line-color: ${effectiveLinkColor}` : "",
+                hasResizePreview ? `--resize-preview-color: ${resizePreview.color}` : "",
               ]
                 .filter(Boolean)
                 .join("; ");
@@ -340,6 +376,7 @@ export class PFTimelineGrid extends BaseComponent {
                     this.selectCel(layer.id, frame.id, e)}
                 >
                   ${hasTint ? html`<div class="tag-tint"></div>` : ""}
+                  ${hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ""}
                   <div class="cel-content"></div>
                   ${isHardLinked
                     ? html`<div
