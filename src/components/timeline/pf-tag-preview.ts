@@ -1,5 +1,5 @@
-import { html, css } from "lit";
-import { customElement, property, state, query } from "lit/decorators.js";
+import { html, css, render } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { animationStore } from "../../stores/animation";
 import { layerStore } from "../../stores/layers";
@@ -12,48 +12,16 @@ import {
 const PREVIEW_SCALE = 2;
 const HOVER_DELAY = 300;
 
+/**
+ * Tag preview component that uses a portal pattern to escape
+ * any parent transforms that would break fixed positioning.
+ */
 @customElement("pf-tag-preview")
 export class PFTagPreview extends BaseComponent {
+  // No styles needed - we render to a portal outside shadow DOM
   static styles = css`
     :host {
-      position: fixed;
-      z-index: 1000;
-      pointer-events: none;
       display: none;
-    }
-
-    :host([visible]) {
-      display: block;
-    }
-
-    .preview-container {
-      background: var(--pf-color-bg-panel, #1e1e1e);
-      border: 1px solid var(--pf-color-border, #3e3e3e);
-      border-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .preview-label {
-      font-size: 10px;
-      color: var(--pf-color-text-muted, #888);
-      white-space: nowrap;
-    }
-
-    .preview-canvas {
-      display: block;
-      image-rendering: pixelated;
-      background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
-        linear-gradient(-45deg, #404040 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #404040 75%),
-        linear-gradient(-45deg, transparent 75%, #404040 75%);
-      background-size: 8px 8px;
-      background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
-      background-color: #606060;
     }
   `;
 
@@ -62,9 +30,9 @@ export class PFTagPreview extends BaseComponent {
   @property({ type: Number }) posX: number = 0;
   @property({ type: Number }) posY: number = 0;
 
-  @query(".preview-canvas") previewCanvas!: HTMLCanvasElement;
-
   @state() private tagName: string = "";
+  @state() private computedX: number = 0;
+  @state() private computedY: number = 0;
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number | null = null;
@@ -73,34 +41,73 @@ export class PFTagPreview extends BaseComponent {
   private lastFrameTime: number = 0;
   private hoverTimeout: number | null = null;
 
+  // Portal container on document.body
+  private portalContainer: HTMLDivElement | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    // Create portal container on document.body
+    this.portalContainer = document.createElement("div");
+    this.portalContainer.id = `tag-preview-portal-${this.tagId || 'default'}`;
+    this.portalContainer.style.cssText = `
+      position: fixed;
+      z-index: 10000;
+      pointer-events: none;
+      display: none;
+    `;
+    document.body.appendChild(this.portalContainer);
+  }
+
   disconnectedCallback() {
     super.disconnectedCallback();
     this.stopAnimation();
     this.clearHoverTimeout();
+    // Remove portal from body
+    if (this.portalContainer && this.portalContainer.parentNode) {
+      this.portalContainer.parentNode.removeChild(this.portalContainer);
+      this.portalContainer = null;
+    }
   }
 
   updated(changedProps: Map<string, unknown>) {
     if (changedProps.has("visible")) {
       if (this.visible) {
-        // Defer initialization to next frame to ensure DOM is fully updated
+        // Calculate position before showing
+        this.updatePosition();
+        // Show portal
+        if (this.portalContainer) {
+          this.portalContainer.style.display = "block";
+        }
+        // Render to portal and start animation
+        this.renderToPortal();
         requestAnimationFrame(() => {
           this.initCanvasContext();
           this.startAnimation();
         });
       } else {
         this.stopAnimation();
+        // Hide portal
+        if (this.portalContainer) {
+          this.portalContainer.style.display = "none";
+        }
       }
     }
 
     if (changedProps.has("tagId") && this.tagId) {
       this.loadTagInfo();
     }
+
+    // Recalculate position when posX or posY change
+    if ((changedProps.has("posX") || changedProps.has("posY")) && this.visible) {
+      this.updatePosition();
+      this.renderToPortal();
+    }
   }
 
   private initCanvasContext() {
-    // Query directly from shadow root to avoid stale @query references
-    if (!this.ctx) {
-      const canvas = this.shadowRoot?.querySelector(
+    // Query from portal container
+    if (!this.ctx && this.portalContainer) {
+      const canvas = this.portalContainer.querySelector(
         ".preview-canvas"
       ) as HTMLCanvasElement | null;
       if (canvas) {
@@ -119,8 +126,105 @@ export class PFTagPreview extends BaseComponent {
   }
 
   /**
+   * Calculate position with viewport bounds checking.
+   * Positions above the anchor by default, falls back to below if off-screen.
+   */
+  private updatePosition() {
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const displayH = canvasH * PREVIEW_SCALE;
+    const displayW = canvasW * PREVIEW_SCALE;
+    const padding = 16; // 8px padding on each side
+    const labelHeight = 24; // label + gap
+    const tooltipHeight = displayH + padding + labelHeight;
+    const tooltipWidth = displayW + padding;
+
+    // Center horizontally on posX
+    let x = this.posX - tooltipWidth / 2;
+    // Position above the anchor with 8px gap
+    let y = this.posY - tooltipHeight - 8;
+
+    // If would go off top, position below the anchor instead
+    if (y < 8) {
+      y = this.posY + 24; // 24px below anchor (approximate tag height + gap)
+    }
+
+    // Keep within horizontal bounds
+    x = Math.max(8, Math.min(x, window.innerWidth - tooltipWidth - 8));
+
+    this.computedX = x;
+    this.computedY = y;
+  }
+
+  /**
+   * Render the preview content to the portal container.
+   */
+  private renderToPortal() {
+    if (!this.portalContainer) return;
+
+    const canvasW = projectStore.width.value;
+    const canvasH = projectStore.height.value;
+    const displayW = canvasW * PREVIEW_SCALE;
+    const displayH = canvasH * PREVIEW_SCALE;
+    const frameCount = this.frameIds.length;
+
+    const template = html`
+      <div
+        class="preview-container"
+        style="
+          position: fixed;
+          left: ${this.computedX}px;
+          top: ${this.computedY}px;
+          z-index: 10000;
+          pointer-events: none;
+          background: var(--pf-color-bg-panel, #1e1e1e);
+          border: 1px solid var(--pf-color-border, #3e3e3e);
+          border-radius: 4px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+          padding: 8px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+        "
+      >
+        <canvas
+          class="preview-canvas"
+          width="${canvasW}"
+          height="${canvasH}"
+          style="
+            display: block;
+            image-rendering: pixelated;
+            width: ${displayW}px;
+            height: ${displayH}px;
+            background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
+              linear-gradient(-45deg, #404040 25%, transparent 25%),
+              linear-gradient(45deg, transparent 75%, #404040 75%),
+              linear-gradient(-45deg, transparent 75%, #404040 75%);
+            background-size: 8px 8px;
+            background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+            background-color: #606060;
+          "
+        ></canvas>
+        <span
+          style="
+            font-size: 10px;
+            color: var(--pf-color-text-muted, #888);
+            white-space: nowrap;
+          "
+          >${this.tagName} (${frameCount} frames)</span
+        >
+      </div>
+    `;
+
+    // Reset context since we're re-rendering
+    this.ctx = null;
+    render(template, this.portalContainer);
+  }
+
+  /**
    * Show the preview after a delay.
-   * Call this when hovering over a collapsed tag.
+   * Call this when hovering over a tag.
    */
   showWithDelay(tagId: string, x: number, y: number) {
     this.clearHoverTimeout();
@@ -202,31 +306,9 @@ export class PFTagPreview extends BaseComponent {
     renderFrameToCanvas(this.ctx, frameId, layers, cels);
   }
 
+  // No content rendered in shadow DOM - everything goes to portal
   render() {
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
-    const displayW = canvasW * PREVIEW_SCALE;
-    const displayH = canvasH * PREVIEW_SCALE;
-    const frameCount = this.frameIds.length;
-
-    return html`
-      <div
-        class="preview-container"
-        style="transform: translate(${this.posX}px, ${this.posY -
-        displayH -
-        40}px)"
-      >
-        <canvas
-          class="preview-canvas"
-          width="${canvasW}"
-          height="${canvasH}"
-          style="width: ${displayW}px; height: ${displayH}px;"
-        ></canvas>
-        <span class="preview-label"
-          >${this.tagName} (${frameCount} frames)</span
-        >
-      </div>
-    `;
+    return html``;
   }
 }
 
