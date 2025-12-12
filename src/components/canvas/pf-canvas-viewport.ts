@@ -16,6 +16,8 @@ import "./pf-marching-ants-overlay";
 import "./pf-brush-cursor-overlay";
 import "./pf-transform-handles";
 import "./pf-text-input";
+import "./pf-ruler";
+import "./pf-guides-overlay";
 
 @customElement("pf-canvas-viewport")
 export class PFCanvasViewport extends BaseComponent {
@@ -73,6 +75,26 @@ export class PFCanvasViewport extends BaseComponent {
       width: 100%;
       height: 100%;
       pointer-events: none;
+    }
+
+    /* Ruler positioning */
+    pf-ruler[orientation="horizontal"] {
+      left: 24px; /* Account for vertical ruler width */
+    }
+
+    pf-ruler[orientation="vertical"] {
+      top: 24px; /* Account for horizontal ruler height */
+    }
+
+    /* Corner piece where rulers meet */
+    .ruler-corner {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 24px;
+      height: 24px;
+      background: var(--color-bg-secondary, #252525);
+      z-index: 101;
     }
   `;
 
@@ -241,6 +263,10 @@ export class PFCanvasViewport extends BaseComponent {
         @rotation-end=${this.handleRotationEnd}
       ></pf-transform-handles>
       <pf-text-input></pf-text-input>
+      <pf-guides-overlay></pf-guides-overlay>
+      <div class="ruler-corner"></div>
+      <pf-ruler orientation="horizontal"></pf-ruler>
+      <pf-ruler orientation="vertical"></pf-ruler>
     `;
   }
 
@@ -455,6 +481,8 @@ export class PFCanvasViewport extends BaseComponent {
       gridStore.toggleTileGrid();
       return;
     }
+
+    // Note: Shift+G for guide visibility is handled by keyboardService
 
     // Handle transform state Enter/Escape
     const selectionState = selectionStore.state.value;

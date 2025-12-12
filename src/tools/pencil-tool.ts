@@ -2,6 +2,8 @@ import { BaseTool, type Point, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { toolSizes } from '../stores/tool-settings';
+import { guidesStore } from '../stores/guides';
+import { projectStore } from '../stores/project';
 import {
   bresenhamLine,
   constrainWithStickyAngles,
@@ -323,7 +325,25 @@ export class PencilTool extends BaseTool {
   private restoreStamp(x: number, y: number) {
     if (!this.context || !this.strokeStartSnapshot) return;
 
-    const brush = brushStore.activeBrush.value;
+    // Restore the original stamp
+    this.restoreSingleStamp(x, y);
+
+    // Also restore mirrored stamps
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+
+    for (const pos of mirrorPositions) {
+      this.restoreSingleStamp(pos.x, pos.y);
+    }
+  }
+
+  /**
+   * Restore a single stamp area at the given position (helper for restoreStamp)
+   */
+  private restoreSingleStamp(x: number, y: number) {
+    if (!this.context || !this.strokeStartSnapshot) return;
+
     const size = toolSizes.pencil.value;
     // x/y is the center of the stamp
     const halfSize = Math.floor(size / 2);
@@ -403,12 +423,22 @@ export class PencilTool extends BaseTool {
     const halfSize = Math.floor(size / 2);
     this.context.fillRect(x - halfSize, y - halfSize, size, size);
 
-    this.context.globalAlpha = 1;
-
     // Mark dirty region for partial redraw (convert center to top-left)
     const dirtyX = x - halfSize;
     const dirtyY = y - halfSize;
     this.markDirty(dirtyX, dirtyY, size);
+
+    // Mirror drawing: draw at mirrored positions if guides are active
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+
+    for (const pos of mirrorPositions) {
+      this.context.fillRect(pos.x - halfSize, pos.y - halfSize, size, size);
+      this.markDirty(pos.x - halfSize, pos.y - halfSize, size);
+    }
+
+    this.context.globalAlpha = 1;
   }
 
   /**
@@ -428,6 +458,25 @@ export class PencilTool extends BaseTool {
    * Restore a single pixel to its pre-stroke state (for pixel-perfect L-shape removal)
    */
   private restorePoint(x: number, y: number) {
+    if (!this.context) return;
+
+    // Restore the original point
+    this.restoreSinglePixel(x, y);
+
+    // Also restore mirrored positions
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+
+    for (const pos of mirrorPositions) {
+      this.restoreSinglePixel(pos.x, pos.y);
+    }
+  }
+
+  /**
+   * Restore a single pixel at the given position (helper for restorePoint)
+   */
+  private restoreSinglePixel(x: number, y: number) {
     if (!this.context) return;
 
     // If this point was drawn earlier in the current stroke (path crosses itself),

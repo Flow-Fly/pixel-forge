@@ -3,7 +3,7 @@
   --pf-color-bg-dark: #0a0a0a;
   --pf-color-bg-panel: #141414;
   --pf-color-bg-surface: #1e1e1e;
-  
+
   --pf-color-text-main: #e0e0e0;
   --pf-color-text-muted: #808080;
   --pf-color-text-secondary: #a0a0a0;
@@ -29,7 +29,7 @@
   --pf-radius-md: 6px;
 
   /* Typography */
-  --pf-font-mono: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+  --pf-font-mono: "JetBrains Mono", "IBM Plex Mono", monospace;
   --pf-font-size-xs: 10px;
   --pf-font-size-sm: 12px;
   --pf-font-size-md: 14px;
@@ -40,11 +40,11 @@
   --pf-spacing-2: 8px;
   --pf-spacing-3: 12px;
   --pf-spacing-4: 16px;
-  
+
   /* Effects */
   --pf-shadow-glow-cyan: 0 0 8px rgba(0, 255, 255, 0.3);
   --pf-shadow-glow-magenta: 0 0 8px rgba(255, 0, 255, 0.3);
-  
+
   /* Z-Index */
   --pf-z-canvas: 10;
   --pf-z-ui: 100;
