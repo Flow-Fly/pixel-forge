@@ -8,6 +8,7 @@ import pako from 'pako';
 // Chunk types
 const CHUNK_LAYER = 0x2004;
 const CHUNK_CEL = 0x2005;
+const CHUNK_TAGS = 0x2018;
 const CHUNK_PALETTE = 0x2019;
 
 // Cel types
@@ -63,11 +64,21 @@ export interface AsePaletteEntry {
   a: number;
 }
 
+export interface AseTag {
+  fromFrame: number;
+  toFrame: number;
+  loopDirection: number; // 0=forward, 1=reverse, 2=ping-pong, 3=ping-pong-reverse
+  repeatCount: number;
+  color: { r: number; g: number; b: number };
+  name: string;
+}
+
 export interface AseFile {
   header: AseHeader;
   layers: AseLayer[];
   frames: AseFrame[];
   palette: AsePaletteEntry[];
+  tags: AseTag[];
 }
 
 class AseReader {
@@ -144,14 +155,15 @@ export function parseAseFile(buffer: ArrayBuffer): AseFile {
   const layers: AseLayer[] = [];
   const frames: AseFrame[] = [];
   const palette: AsePaletteEntry[] = [];
+  const tags: AseTag[] = [];
 
   // Read frames
   for (let i = 0; i < header.frames; i++) {
-    const frame = readFrame(reader, header, layers, palette, i === 0);
+    const frame = readFrame(reader, header, layers, palette, tags, i === 0);
     frames.push(frame);
   }
 
-  return { header, layers, frames, palette };
+  return { header, layers, frames, palette, tags };
 }
 
 function readHeader(reader: AseReader): AseHeader {
@@ -192,6 +204,7 @@ function readFrame(
   header: AseHeader,
   layers: AseLayer[],
   palette: AsePaletteEntry[],
+  tags: AseTag[],
   isFirstFrame: boolean
 ): AseFrame {
   const frameStart = reader.position();
@@ -227,6 +240,11 @@ function readFrame(
         break;
       case CHUNK_CEL:
         cels.push(readCelChunk(reader, header, chunkSize - 6));
+        break;
+      case CHUNK_TAGS:
+        if (isFirstFrame) {
+          readTagsChunk(reader, tags);
+        }
         break;
       case CHUNK_PALETTE:
         if (isFirstFrame) {
@@ -315,6 +333,33 @@ function readPaletteChunk(reader: AseReader, palette: AsePaletteEntry[]) {
     }
 
     palette[i] = { r, g, b, a };
+  }
+}
+
+function readTagsChunk(reader: AseReader, tags: AseTag[]) {
+  const numTags = reader.readWord();
+  reader.skip(8); // Reserved
+
+  for (let i = 0; i < numTags; i++) {
+    const fromFrame = reader.readWord();
+    const toFrame = reader.readWord();
+    const loopDirection = reader.readByte();
+    const repeatCount = reader.readWord();
+    reader.skip(6); // Reserved (was 10 bytes total, but repeatCount is 2 bytes)
+    const r = reader.readByte();
+    const g = reader.readByte();
+    const b = reader.readByte();
+    reader.skip(1); // Extra byte (padding)
+    const name = reader.readString();
+
+    tags.push({
+      fromFrame,
+      toFrame,
+      loopDirection,
+      repeatCount,
+      color: { r, g, b },
+      name,
+    });
   }
 }
 

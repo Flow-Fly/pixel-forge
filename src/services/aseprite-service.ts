@@ -4,6 +4,13 @@ import { projectStore } from '../stores/project';
 import { layerStore } from '../stores/layers';
 import { animationStore } from '../stores/animation';
 
+// Track linked cels to establish links after all frames are created
+interface LinkedCelRecord {
+  sourceFrameIndex: number;
+  targetFrameIndex: number;
+  layerId: string;
+}
+
 /**
  * Import an Aseprite file into the current project.
  * This replaces the current project content.
@@ -46,13 +53,22 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
   // Track the old frame we need to delete later
   const oldFrameId = animationStore.frames.value[0]?.id;
 
+  // Track linked cels to establish links after all frames exist
+  const linkedCelRecords: LinkedCelRecord[] = [];
+
+  // Track created frames by index for later reference
+  const createdFrameIds: string[] = [];
+
   // Create frames and populate cels
-  aseFile.frames.forEach((aseFrame) => {
+  aseFile.frames.forEach((aseFrame, frameIndex) => {
     // Add frame (don't duplicate)
     animationStore.addFrame(false);
     const frames = animationStore.frames.value;
     const frame = frames[frames.length - 1];
     frame.duration = aseFrame.duration;
+
+    // Store frame ID for linking later
+    createdFrameIds.push(frame.id);
 
     // Process cels
     aseFrame.cels.forEach((cel) => {
@@ -61,17 +77,15 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
 
       // Handle linked cels
       if (cel.celType === 1 && cel.linkedFrame !== undefined) {
-        // Linked cel - copy from referenced frame
-        const linkedFrameData = aseFile.frames[cel.linkedFrame];
-        const linkedCel = linkedFrameData?.cels.find((c) => c.layerIndex === cel.layerIndex);
-        if (linkedCel) {
-          const imageData = celToImageData(linkedCel, aseFile.header, aseFile.palette);
-          if (imageData) {
-            drawCelToCanvas(frame.id, layerId, cel.x, cel.y, imageData);
-          }
-        }
+        // Record for linking after all frames exist
+        linkedCelRecords.push({
+          sourceFrameIndex: cel.linkedFrame,
+          targetFrameIndex: frameIndex,
+          layerId,
+        });
+        // Don't draw anything - we'll link to the source cel's canvas
       } else {
-        // Regular or compressed cel
+        // Regular or compressed cel - draw to canvas
         const imageData = celToImageData(cel, aseFile.header, aseFile.palette);
         if (imageData) {
           drawCelToCanvas(frame.id, layerId, cel.x, cel.y, imageData);
@@ -85,6 +99,40 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
     animationStore.deleteFrame(oldFrameId);
   }
 
+  // Establish hard links for linked cels
+  // Group by source frame + layer to link all cels that share the same source
+  const linkGroups = new Map<string, string[]>(); // "sourceFrameIndex:layerId" -> [celKeys]
+
+  for (const record of linkedCelRecords) {
+    const sourceFrameId = createdFrameIds[record.sourceFrameIndex];
+    const targetFrameId = createdFrameIds[record.targetFrameIndex];
+    if (!sourceFrameId || !targetFrameId) continue;
+
+    const groupKey = `${record.sourceFrameIndex}:${record.layerId}`;
+    const sourceCelKey = animationStore.getCelKey(record.layerId, sourceFrameId);
+    const targetCelKey = animationStore.getCelKey(record.layerId, targetFrameId);
+
+    if (!linkGroups.has(groupKey)) {
+      // Start with source cel
+      linkGroups.set(groupKey, [sourceCelKey]);
+    }
+    linkGroups.get(groupKey)!.push(targetCelKey);
+  }
+
+  // Apply hard links
+  for (const celKeys of linkGroups.values()) {
+    if (celKeys.length >= 2) {
+      animationStore.linkCels(celKeys, 'hard');
+    }
+  }
+
+  // Import tags
+  for (const aseTag of aseFile.tags) {
+    // Convert RGB to hex color
+    const color = `#${aseTag.color.r.toString(16).padStart(2, '0')}${aseTag.color.g.toString(16).padStart(2, '0')}${aseTag.color.b.toString(16).padStart(2, '0')}`;
+    animationStore.addFrameTag(aseTag.name, color, aseTag.fromFrame, aseTag.toFrame);
+  }
+
   // Go to first frame
   const frames = animationStore.frames.value;
   if (frames.length > 0) {
@@ -94,6 +142,7 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
 
 /**
  * Draw ImageData to a cel canvas at the specified position.
+ * Ensures the cel has its own canvas (breaks soft links to shared empty canvas).
  */
 function drawCelToCanvas(
   frameId: string,
@@ -102,6 +151,9 @@ function drawCelToCanvas(
   y: number,
   imageData: ImageData
 ): void {
+  // Break any soft link to shared empty canvas - this cel needs its own canvas
+  animationStore.ensureUnlinkedForEdit(layerId, frameId);
+
   const celCanvas = animationStore.getCelCanvas(frameId, layerId);
   if (!celCanvas) return;
 
