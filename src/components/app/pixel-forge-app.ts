@@ -9,7 +9,6 @@ import "../canvas/pf-canvas-viewport";
 import "../color/pf-color-selector";
 import "../color/pf-color-sliders";
 import "../color/pf-palette-panel";
-import "../color/pf-palette-generator";
 import "../toolbar/pf-context-bar";
 import "../timeline/pf-timeline";
 import "../ui/pf-shortcuts-overlay";
@@ -284,10 +283,6 @@ export class PixelForgeApp extends BaseComponent {
 
         <pf-collapsible-panel panelId="palette" title="Palette">
           <pf-palette-panel></pf-palette-panel>
-        </pf-collapsible-panel>
-
-        <pf-collapsible-panel panelId="palette-generator" title="Palette Generator">
-          <pf-palette-generator></pf-palette-generator>
         </pf-collapsible-panel>
 
         <pf-collapsible-panel panelId="history" title="History">

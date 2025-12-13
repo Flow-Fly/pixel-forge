@@ -1,5 +1,5 @@
 import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { colorStore } from '../../stores/colors';
 
@@ -87,7 +87,18 @@ export class PFColorSelectorCompact extends BaseComponent {
     .reset-btn:hover {
       color: var(--pf-color-text-main, #e0e0e0);
     }
+
+    .hidden-picker {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
   `;
+
+  @query('#fg-picker') private fgPicker!: HTMLInputElement;
+  @query('#bg-picker') private bgPicker!: HTMLInputElement;
 
   render() {
     return html`
@@ -95,14 +106,14 @@ export class PFColorSelectorCompact extends BaseComponent {
         <div
           class="color-box bg"
           style="background-color: ${colorStore.secondaryColor.value}"
-          @click=${() => this.selectColor('bg')}
-          title="Background Color (Right-click to pick)"
+          @click=${() => this.openPicker('bg')}
+          title="Background Color - Click to change"
         ></div>
         <div
           class="color-box fg"
           style="background-color: ${colorStore.primaryColor.value}"
-          @click=${() => this.selectColor('fg')}
-          title="Foreground Color (Click to pick)"
+          @click=${() => this.openPicker('fg')}
+          title="Foreground Color - Click to change"
         ></div>
       </div>
       <button class="swap-btn" @click=${this.swapColors} title="Swap Colors (X)">
@@ -111,12 +122,42 @@ export class PFColorSelectorCompact extends BaseComponent {
       <button class="reset-btn" @click=${this.resetColors} title="Reset to Default">
         D
       </button>
+
+      <!-- Hidden color pickers -->
+      <input
+        type="color"
+        id="fg-picker"
+        class="hidden-picker"
+        .value=${colorStore.primaryColor.value}
+        @input=${this.handleFgChange}
+      />
+      <input
+        type="color"
+        id="bg-picker"
+        class="hidden-picker"
+        .value=${colorStore.secondaryColor.value}
+        @input=${this.handleBgChange}
+      />
     `;
   }
 
-  private selectColor(type: 'fg' | 'bg') {
-    // TODO: Open color picker dialog
-    console.log('Select color:', type);
+  private openPicker(type: 'fg' | 'bg') {
+    if (type === 'fg') {
+      this.fgPicker.click();
+    } else {
+      this.bgPicker.click();
+    }
+  }
+
+  private handleFgChange(e: Event) {
+    const color = (e.target as HTMLInputElement).value;
+    colorStore.setPrimaryColor(color);
+    colorStore.updateLightnessVariations(color);
+  }
+
+  private handleBgChange(e: Event) {
+    const color = (e.target as HTMLInputElement).value;
+    colorStore.setSecondaryColor(color);
   }
 
   private swapColors() {
