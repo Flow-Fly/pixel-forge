@@ -2,9 +2,6 @@ import { signal } from '../core/signal';
 import { layerStore } from './layers';
 import { animationStore } from './animation';
 
-// Harmony types for palette generation
-export type Harmony = 'analogous' | 'triadic' | 'complementary' | 'split' | 'tetradic';
-
 // DB32 Palette - Default colors
 const DB32_COLORS = [
   '#000000', '#222034', '#45283c', '#663931', '#8f563b', '#df7126', '#d9a066', '#eec39a',
@@ -16,14 +13,12 @@ const DB32_COLORS = [
 class PaletteStore {
   colors = signal<string[]>([...DB32_COLORS]);
 
-  // Palette generator state
-  generatedColors = signal<string[]>([]);
-  selectedHarmony = signal<Harmony>('analogous');
+  // Extracted colors staging area
+  extractedColors = signal<string[]>([]);
   isExtracting = signal<boolean>(false);
 
   constructor() {
     this.loadFromStorage();
-    this.loadHarmonyFromStorage();
   }
 
   addColor(color: string) {
@@ -42,100 +37,29 @@ class PaletteStore {
     }
   }
 
+  /**
+   * Move a color from one position to another (for drag-and-drop reordering)
+   */
+  moveColor(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || fromIndex >= this.colors.value.length) return;
+    if (toIndex < 0 || toIndex >= this.colors.value.length) return;
+
+    const colors = [...this.colors.value];
+    const [movedColor] = colors.splice(fromIndex, 1);
+    colors.splice(toIndex, 0, movedColor);
+    this.colors.value = colors;
+    this.saveToStorage();
+  }
+
   resetToDefault() {
     this.colors.value = [...DB32_COLORS];
     this.saveToStorage();
   }
 
   // ==========================================
-  // Palette Generator Methods
+  // Color Extraction Methods
   // ==========================================
-
-  /**
-   * Set harmony type and regenerate palette
-   */
-  setHarmony(harmony: Harmony) {
-    this.selectedHarmony.value = harmony;
-    this.saveHarmonyToStorage();
-  }
-
-  /**
-   * Generate harmonious palette from a base color
-   */
-  generateHarmony(baseColor: string): void {
-    const rgb = this.hexToRgb(baseColor);
-    if (!rgb) {
-      this.generatedColors.value = [baseColor, baseColor, baseColor, baseColor, baseColor];
-      return;
-    }
-
-    const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
-    const hues = this.generateHarmonyHues(hsl.h * 360, this.selectedHarmony.value);
-
-    // Generate 5 colors with the harmony hues, keeping original saturation/lightness
-    const colors = hues.slice(0, 5).map(hue => {
-      const newRgb = this.hslToRgb(hue / 360, hsl.s, hsl.l);
-      return this.rgbToHex(newRgb.r, newRgb.g, newRgb.b);
-    });
-
-    // Pad to 5 if needed (for harmonies that produce fewer colors)
-    while (colors.length < 5) {
-      colors.push(colors[colors.length - 1] || baseColor);
-    }
-
-    this.generatedColors.value = colors;
-  }
-
-  /**
-   * Generate hues based on harmony type
-   */
-  private generateHarmonyHues(baseHue: number, type: Harmony): number[] {
-    const hues: number[] = [baseHue];
-
-    switch (type) {
-      case 'complementary':
-        // Base + opposite + 3 variations between
-        hues.push((baseHue + 180) % 360);
-        hues.push((baseHue + 60) % 360);
-        hues.push((baseHue + 120) % 360);
-        hues.push((baseHue + 240) % 360);
-        break;
-
-      case 'analogous':
-        // Spread evenly within ±60° range
-        hues.push((baseHue - 30 + 360) % 360);
-        hues.push((baseHue - 15 + 360) % 360);
-        hues.push((baseHue + 15) % 360);
-        hues.push((baseHue + 30) % 360);
-        break;
-
-      case 'triadic':
-        // Base + 120° + 240° + 2 variations
-        hues.push((baseHue + 120) % 360);
-        hues.push((baseHue + 240) % 360);
-        hues.push((baseHue + 60) % 360);
-        hues.push((baseHue + 180) % 360);
-        break;
-
-      case 'split':
-        // Base + 150° + 210° + 2 variations
-        hues.push((baseHue + 150) % 360);
-        hues.push((baseHue + 210) % 360);
-        hues.push((baseHue + 30) % 360);
-        hues.push((baseHue + 330) % 360);
-        break;
-
-      case 'tetradic':
-        // Base + 90° + 180° + 270°
-        hues.push((baseHue + 90) % 360);
-        hues.push((baseHue + 180) % 360);
-        hues.push((baseHue + 270) % 360);
-        hues.push((baseHue + 45) % 360);
-        break;
-    }
-
-    return hues;
-  }
 
   /**
    * Extract distinct colors from the current drawing (all visible layers)
@@ -177,21 +101,65 @@ class PaletteStore {
       }
 
       if (colorCounts.size === 0) {
-        this.generatedColors.value = [];
+        this.extractedColors.value = [];
         return;
       }
 
       // Cluster similar colors
       const clusters = this.clusterColors(colorCounts);
 
-      // Sort by total pixel count and pick top 5
+      // Sort by total pixel count and return all distinct colors (no limit)
       clusters.sort((a, b) => b.count - a.count);
-      const topColors = clusters.slice(0, 5).map(c => c.representative);
+      const extractedColors = clusters.map(c => c.representative);
 
-      this.generatedColors.value = topColors;
+      this.extractedColors.value = extractedColors;
     } finally {
       this.isExtracting.value = false;
     }
+  }
+
+  /**
+   * Add a single extracted color to the main palette
+   */
+  addExtractedColor(color: string) {
+    if (!this.colors.value.includes(color)) {
+      this.colors.value = [...this.colors.value, color];
+      this.saveToStorage();
+    }
+    // Remove from extracted colors
+    this.extractedColors.value = this.extractedColors.value.filter(c => c !== color);
+  }
+
+  /**
+   * Add all extracted colors to the main palette
+   */
+  addAllExtracted() {
+    const newColors = this.extractedColors.value.filter(
+      c => !this.colors.value.includes(c)
+    );
+    if (newColors.length > 0) {
+      this.colors.value = [...this.colors.value, ...newColors];
+      this.saveToStorage();
+    }
+    this.extractedColors.value = [];
+  }
+
+  /**
+   * Replace the entire palette with extracted colors
+   */
+  replaceWithExtracted() {
+    if (this.extractedColors.value.length > 0) {
+      this.colors.value = [...this.extractedColors.value];
+      this.extractedColors.value = [];
+      this.saveToStorage();
+    }
+  }
+
+  /**
+   * Clear extracted colors
+   */
+  clearExtracted() {
+    this.extractedColors.value = [];
   }
 
   /**
@@ -256,17 +224,6 @@ class PaletteStore {
 
     // Weighted distance (hue matters most for color perception)
     return Math.sqrt(hueDiff * hueDiff * 2 + satDiff * satDiff + lightDiff * lightDiff);
-  }
-
-  private loadHarmonyFromStorage() {
-    const saved = localStorage.getItem('pf-palette-harmony');
-    if (saved && ['analogous', 'triadic', 'complementary', 'split', 'tetradic'].includes(saved)) {
-      this.selectedHarmony.value = saved as Harmony;
-    }
-  }
-
-  private saveHarmonyToStorage() {
-    localStorage.setItem('pf-palette-harmony', this.selectedHarmony.value);
   }
 
   // ==========================================
