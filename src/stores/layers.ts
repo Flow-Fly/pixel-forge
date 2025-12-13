@@ -46,6 +46,51 @@ class LayerStore {
   }
 
   /**
+   * Duplicate an existing layer, copying its canvas content and properties.
+   */
+  duplicateLayer(sourceLayerId: string): Layer | null {
+    const sourceLayer = this.layers.value.find(l => l.id === sourceLayerId);
+    if (!sourceLayer || !sourceLayer.canvas) return null;
+
+    // Create new canvas and copy content
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceLayer.canvas.width;
+    canvas.height = sourceLayer.canvas.height;
+
+    const ctx = canvas.getContext('2d', {
+      alpha: true,
+      willReadFrequently: true
+    });
+
+    if (ctx) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(sourceLayer.canvas, 0, 0);
+    }
+
+    const newLayer: Layer = {
+      id: uuidv4(),
+      name: `${sourceLayer.name} Copy`,
+      type: sourceLayer.type,
+      visible: sourceLayer.visible,
+      locked: false, // Don't copy locked state
+      opacity: sourceLayer.opacity,
+      blendMode: sourceLayer.blendMode,
+      parentId: sourceLayer.parentId,
+      canvas,
+      // Copy text data if it's a text layer
+      textData: sourceLayer.textData ? { ...sourceLayer.textData } : undefined,
+    };
+
+    // Insert after the source layer
+    const sourceIndex = this.layers.value.findIndex(l => l.id === sourceLayerId);
+    const newLayers = [...this.layers.value];
+    newLayers.splice(sourceIndex + 1, 0, newLayer);
+    this.layers.value = newLayers;
+    this.activeLayerId.value = newLayer.id;
+    return newLayer;
+  }
+
+  /**
    * Add a new text layer.
    * Text layers render text using pixel fonts instead of storing pixel data directly.
    */

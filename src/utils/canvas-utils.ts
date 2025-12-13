@@ -29,7 +29,10 @@ export function compositeFrame(
     const canvasToUse = cel?.canvas ?? layer.canvas;
 
     if (canvasToUse) {
-      targetCtx.globalAlpha = layer.opacity / 255;
+      // Combine layer opacity (0-255) and cel opacity (0-100)
+      const layerOpacity = layer.opacity / 255;
+      const celOpacity = (cel?.opacity ?? 100) / 100;
+      targetCtx.globalAlpha = layerOpacity * celOpacity;
       targetCtx.globalCompositeOperation =
         layer.blendMode === 'normal' ? 'source-over' : (layer.blendMode as GlobalCompositeOperation);
       targetCtx.drawImage(canvasToUse, 0, 0);

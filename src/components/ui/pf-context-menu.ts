@@ -15,6 +15,7 @@ export interface ContextMenuItem {
   max?: number;
   value?: number;
   step?: number;
+  unit?: string; // e.g. '%', 'ms', 'px' - defaults to 'ms' for backwards compatibility
   onSliderChange?: (value: number) => void; // Called during drag (for live preview)
   onSliderCommit?: (value: number) => void; // Called on release (for final commit)
   // For input type
@@ -601,7 +602,8 @@ export class PFContextMenu extends BaseComponent {
       case 'slider': {
         // Use displayed value if we have one, otherwise item.value
         const displayValue = this.sliderDisplayValues.get(index) ?? item.value ?? 100;
-        const suffix = item.label?.includes('FPS') ? '' : 'ms';
+        // Use explicit unit if provided, otherwise default based on label
+        const suffix = item.unit !== undefined ? item.unit : (item.label?.includes('FPS') ? '' : 'ms');
         return html`
           <div class="slider-item" @mousedown="${(e: Event) => e.stopPropagation()}">
             <div class="slider-label">
@@ -613,7 +615,7 @@ export class PFContextMenu extends BaseComponent {
               class="slider-input"
               min="${item.min ?? 10}"
               max="${item.max ?? 1000}"
-              step="${item.step ?? 10}"
+              step="${item.step ?? 1}"
               .value="${String(displayValue)}"
               @mousedown="${(e: Event) => this.handleSliderMouseDown(e)}"
               @input="${(e: Event) => this.handleSliderInput(item, index, e)}"
