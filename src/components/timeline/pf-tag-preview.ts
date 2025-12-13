@@ -48,7 +48,7 @@ export class PFTagPreview extends BaseComponent {
     super.connectedCallback();
     // Create portal container on document.body
     this.portalContainer = document.createElement("div");
-    this.portalContainer.id = `tag-preview-portal-${this.tagId || 'default'}`;
+    this.portalContainer.id = `tag-preview-portal-${this.tagId || "default"}`;
     this.portalContainer.style.cssText = `
       position: fixed;
       z-index: 10000;
@@ -98,7 +98,10 @@ export class PFTagPreview extends BaseComponent {
     }
 
     // Recalculate position when posX or posY change
-    if ((changedProps.has("posX") || changedProps.has("posY")) && this.visible) {
+    if (
+      (changedProps.has("posX") || changedProps.has("posY")) &&
+      this.visible
+    ) {
       this.updatePosition();
       this.renderToPortal();
     }
