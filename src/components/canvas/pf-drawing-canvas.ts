@@ -272,10 +272,19 @@ export class PFDrawingCanvas extends BaseComponent {
     const layers = layerStore.layers.value;
     const currentFrameId = animationStore.currentFrameId.value;
 
+    const cels = animationStore.cels.value;
+
     for (const layer of layers) {
       if (!layer.visible) continue;
 
-      this.ctx.globalAlpha = layer.opacity / 255;
+      // Get cel for current frame to apply cel-level opacity
+      const celKey = animationStore.getCelKey(layer.id, currentFrameId);
+      const cel = cels.get(celKey);
+
+      // Combine layer opacity (0-255) and cel opacity (0-100)
+      const layerOpacity = layer.opacity / 255;
+      const celOpacity = (cel?.opacity ?? 100) / 100;
+      this.ctx.globalAlpha = layerOpacity * celOpacity;
       this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
 
       if (layer.type === 'text') {

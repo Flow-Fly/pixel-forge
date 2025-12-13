@@ -1,7 +1,9 @@
 import { type Command } from './index';
 import { layerStore } from '../stores/layers';
+import { animationStore } from '../stores/animation';
 import { projectStore } from '../stores/project';
 import { type Layer } from '../types/layer';
+import { type Cel } from '../types/animation';
 
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
@@ -18,6 +20,97 @@ export class AddLayerCommand implements Command {
   undo() {
     if (this.layerId) {
       layerStore.removeLayer(this.layerId);
+    }
+  }
+}
+
+export class DuplicateLayerCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Duplicate Layer';
+  private sourceLayerId: string;
+  private newLayerId: string | null = null;
+  private duplicatedCelKeys: string[] = [];
+
+  constructor(sourceLayerId: string) {
+    this.sourceLayerId = sourceLayerId;
+  }
+
+  execute() {
+    const newLayer = layerStore.duplicateLayer(this.sourceLayerId);
+    this.newLayerId = newLayer?.id ?? null;
+
+    if (this.newLayerId) {
+      // Duplicate all cels for this layer
+      this.duplicateCels(this.sourceLayerId, this.newLayerId);
+    }
+  }
+
+  private duplicateCels(sourceLayerId: string, newLayerId: string) {
+    const frames = animationStore.frames.value;
+    const cels = animationStore.cels.value;
+    const newCels = new Map(cels);
+
+    // Track which linkedCelIds map to new linkedCelIds (to preserve link groups)
+    const linkIdMap = new Map<string, string>();
+
+    for (const frame of frames) {
+      const sourceKey = animationStore.getCelKey(sourceLayerId, frame.id);
+      const sourceCel = cels.get(sourceKey);
+
+      if (sourceCel) {
+        const newKey = animationStore.getCelKey(newLayerId, frame.id);
+
+        // Create new canvas and copy content
+        const newCanvas = document.createElement('canvas');
+        newCanvas.width = sourceCel.canvas.width;
+        newCanvas.height = sourceCel.canvas.height;
+        const ctx = newCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+        if (ctx) {
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(sourceCel.canvas, 0, 0);
+        }
+
+        // Map old linkedCelId to new one (preserve link groups within the duplicated layer)
+        let newLinkedCelId: string | undefined;
+        if (sourceCel.linkedCelId) {
+          if (!linkIdMap.has(sourceCel.linkedCelId)) {
+            linkIdMap.set(sourceCel.linkedCelId, crypto.randomUUID());
+          }
+          newLinkedCelId = linkIdMap.get(sourceCel.linkedCelId);
+        }
+
+        const newCel: Cel = {
+          id: crypto.randomUUID(),
+          layerId: newLayerId,
+          frameId: frame.id,
+          canvas: newCanvas,
+          linkedCelId: newLinkedCelId,
+          linkType: sourceCel.linkType,
+          opacity: sourceCel.opacity,
+          textCelData: sourceCel.textCelData ? { ...sourceCel.textCelData } : undefined,
+        };
+
+        newCels.set(newKey, newCel);
+        this.duplicatedCelKeys.push(newKey);
+      }
+    }
+
+    animationStore.cels.value = newCels;
+  }
+
+  undo() {
+    if (this.newLayerId) {
+      // Remove duplicated cels
+      const cels = animationStore.cels.value;
+      const newCels = new Map(cels);
+      for (const key of this.duplicatedCelKeys) {
+        newCels.delete(key);
+      }
+      animationStore.cels.value = newCels;
+      this.duplicatedCelKeys = [];
+
+      // Remove the layer
+      layerStore.removeLayer(this.newLayerId);
     }
   }
 }

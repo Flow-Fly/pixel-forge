@@ -1,10 +1,14 @@
 import { html, css } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, query } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseComponent } from "../../core/base-component";
 import { animationStore, EMPTY_CEL_LINK_ID } from "../../stores/animation";
 import { layerStore } from "../../stores/layers";
+import { historyStore } from "../../stores/history";
+import { SetCelOpacityCommand } from "../../commands/cel-opacity-command";
 import type { FrameTag } from "../../types/animation";
+import "../ui/pf-context-menu";
+import type { PFContextMenu, ContextMenuItem } from "../ui/pf-context-menu";
 
 @customElement("pf-timeline-grid")
 export class PFTimelineGrid extends BaseComponent {
@@ -141,6 +145,11 @@ export class PFTimelineGrid extends BaseComponent {
     }
   `;
 
+  @query("pf-context-menu") private contextMenu!: PFContextMenu;
+
+  // Track original opacity for undo/redo
+  private contextMenuOriginalOpacity: number = 100;
+
   selectCel(layerId: string, frameId: string, e: MouseEvent) {
     const anchor = animationStore.selectionAnchor.value;
 
@@ -169,6 +178,45 @@ export class PFTimelineGrid extends BaseComponent {
 
   private handleCollapsedTagClick(tag: FrameTag) {
     animationStore.toggleTagCollapsed(tag.id);
+  }
+
+  private handleCelContextMenu(e: MouseEvent, celKey: string) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const cels = animationStore.cels.value;
+    const cel = cels.get(celKey);
+    const currentOpacity = cel?.opacity ?? 100;
+
+    // Store for undo/redo
+    this.contextMenuOriginalOpacity = currentOpacity;
+
+    const items: ContextMenuItem[] = [
+      {
+        type: "slider",
+        label: "Opacity",
+        min: 0,
+        max: 100,
+        value: currentOpacity,
+        unit: "%",
+        onSliderChange: (value: number) => {
+          // Live preview
+          animationStore.setCelOpacity([celKey], value);
+        },
+        onSliderCommit: (value: number) => {
+          // Add to history for undo/redo
+          if (value !== this.contextMenuOriginalOpacity) {
+            // Restore original, then execute command to record in history
+            animationStore.setCelOpacity([celKey], this.contextMenuOriginalOpacity);
+            const beforeOpacities = new Map<string, number>();
+            beforeOpacities.set(celKey, this.contextMenuOriginalOpacity);
+            historyStore.execute(new SetCelOpacityCommand([celKey], beforeOpacities, value));
+          }
+        }
+      }
+    ];
+
+    this.contextMenu.show(e.clientX, e.clientY, items);
   }
 
   /**
@@ -374,6 +422,8 @@ export class PFTimelineGrid extends BaseComponent {
                   style="${styleStr}"
                   @click=${(e: MouseEvent) =>
                     this.selectCel(layer.id, frame.id, e)}
+                  @contextmenu=${(e: MouseEvent) =>
+                    this.handleCelContextMenu(e, key)}
                 >
                   ${hasTint ? html`<div class="tag-tint"></div>` : ""}
                   ${hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ""}
@@ -390,6 +440,7 @@ export class PFTimelineGrid extends BaseComponent {
           </div>
         `
       )}
+      <pf-context-menu></pf-context-menu>
     `;
   }
 }

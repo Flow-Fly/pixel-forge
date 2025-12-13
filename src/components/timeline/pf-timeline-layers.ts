@@ -5,10 +5,12 @@ import { layerStore } from '../../stores/layers';
 import { animationStore } from '../../stores/animation';
 import { projectStore } from '../../stores/project';
 import { historyStore } from '../../stores/history';
-import { AddLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../commands/layer-commands';
+import { AddLayerCommand, DuplicateLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../commands/layer-commands';
 import { compositeLayer } from '../../utils/canvas-utils';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
+import '../ui/pf-context-menu';
+import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 
 @customElement('pf-timeline-layers')
 export class PFTimelineLayers extends BaseComponent {
@@ -159,6 +161,10 @@ export class PFTimelineLayers extends BaseComponent {
   @state() private dragOverLayerId: string | null = null;
 
   @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
+  @query('pf-context-menu') private contextMenu!: PFContextMenu;
+
+  // Track original opacity for undo/redo
+  private contextMenuOriginalOpacity: number = 255;
 
   private handleLayerMouseEnter(e: MouseEvent, layerId: string, layerName: string) {
     const target = e.currentTarget as HTMLElement;
@@ -257,6 +263,61 @@ export class PFTimelineLayers extends BaseComponent {
     }
   }
 
+  private handleLayerContextMenu(e: MouseEvent, layerId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const layer = layerStore.layers.value.find(l => l.id === layerId);
+    if (!layer) return;
+
+    // Store for undo/redo
+    this.contextMenuOriginalOpacity = layer.opacity;
+
+    const currentOpacity = Math.round((layer.opacity / 255) * 100);
+
+    const items: ContextMenuItem[] = [
+      {
+        type: 'slider',
+        label: 'Opacity',
+        min: 0,
+        max: 100,
+        value: currentOpacity,
+        unit: '%',
+        onSliderChange: (value: number) => {
+          // Live preview
+          layerStore.updateLayer(layerId, { opacity: Math.round((value / 100) * 255) });
+        },
+        onSliderCommit: (value: number) => {
+          // Add to history for undo/redo
+          const newOpacity = Math.round((value / 100) * 255);
+          if (newOpacity !== this.contextMenuOriginalOpacity) {
+            // First restore original, then execute command to record in history
+            layerStore.updateLayer(layerId, { opacity: this.contextMenuOriginalOpacity });
+            historyStore.execute(new UpdateLayerCommand(layerId, { opacity: newOpacity }));
+          }
+        }
+      },
+      { type: 'divider' },
+      {
+        type: 'item',
+        label: '📋 Duplicate Layer',
+        action: () => {
+          historyStore.execute(new DuplicateLayerCommand(layerId));
+        }
+      },
+      {
+        type: 'item',
+        label: '🗑️ Delete Layer',
+        disabled: layerStore.layers.value.length <= 1,
+        action: () => {
+          historyStore.execute(new RemoveLayerCommand(layerId));
+        }
+      }
+    ];
+
+    this.contextMenu.show(e.clientX, e.clientY, items);
+  }
+
   // Drag and drop handlers
   private handleDragStart(id: string, e: DragEvent) {
     this.draggedLayerId = id;
@@ -325,6 +386,7 @@ export class PFTimelineLayers extends BaseComponent {
           <div
             class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${this.draggedLayerId === layer.id ? 'dragging' : ''} ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
             @click=${() => this.selectLayer(layer.id)}
+            @contextmenu=${(e: MouseEvent) => this.handleLayerContextMenu(e, layer.id)}
             @mouseenter=${(e: MouseEvent) => this.handleLayerMouseEnter(e, layer.id, layer.name)}
             @mouseleave=${this.handleLayerMouseLeave}
             draggable="true"
@@ -371,6 +433,7 @@ export class PFTimelineLayers extends BaseComponent {
         `)}
       </div>
       <pf-timeline-tooltip></pf-timeline-tooltip>
+      <pf-context-menu></pf-context-menu>
     `;
   }
 }
