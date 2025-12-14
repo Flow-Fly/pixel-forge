@@ -468,18 +468,22 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
+    // Check if current tool is a selection tool (needs Alt for subtract mode)
+    const currentTool = toolStore.activeTool.value;
+    const isSelectionTool = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'].includes(currentTool);
+
     // Skip drawing when:
     // - Middle mouse button (panning)
-    // - Alt/Cmd+click (quick eyedropper, handled by viewport)
-    // - Ctrl+click (lightness shift, handled by viewport)
     // - Spacebar pan mode
-    if (
-      e.button === 1 ||
-      e.altKey ||
-      e.metaKey ||
-      e.ctrlKey ||
-      viewportStore.isSpacebarDown.value
-    ) {
+    if (e.button === 1 || viewportStore.isSpacebarDown.value) {
+      return;
+    }
+
+    // For non-selection tools:
+    // - Alt/Cmd+click = quick eyedropper (handled by viewport)
+    // - Ctrl+click = lightness shift (handled by viewport)
+    // For selection tools: allow Alt through for subtract mode, Ctrl for shrink-to-content
+    if (!isSelectionTool && (e.altKey || e.metaKey || e.ctrlKey)) {
       return;
     }
 

@@ -94,16 +94,18 @@ export class LassoTool extends BaseTool {
     }
   }
 
-  onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
+  onUp(_x: number, _y: number, modifiers?: ModifierKeys) {
     if (this.mode === 'selecting') {
-      this.finalizeSelection();
+      // Shrink to content only if Ctrl is held
+      const shrinkToContent = modifiers?.ctrl ?? false;
+      this.finalizeSelection(shrinkToContent);
     }
     // If dragging, stay floating (wait for commit on next click outside)
 
     this.mode = 'idle';
   }
 
-  private finalizeSelection() {
+  private finalizeSelection(shrinkToContent: boolean = false) {
     // Need at least 3 points for a polygon
     if (this.points.length < 3) {
       selectionStore.clear();
@@ -148,12 +150,12 @@ export class LassoTool extends BaseTool {
     if (mode !== 'replace' && currentState.type === 'selected') {
       const combined = this.combineMasks(currentState, bounds, mask, mode);
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
         selectionStore.clear();
       }
     } else {
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas);
+      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
     }
 
     selectionStore.resetMode();
