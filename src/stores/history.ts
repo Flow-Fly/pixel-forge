@@ -18,6 +18,12 @@ export interface Command {
   undo(): void | Promise<void>;
 }
 
+interface HistoryContext {
+  undoStack: Command[];
+  redoStack: Command[];
+  memoryUsage: number;
+}
+
 class HistoryStore {
   undoStack = signal<Command[]>([]);
   redoStack = signal<Command[]>([]);
@@ -31,6 +37,9 @@ class HistoryStore {
 
   // Track total memory usage
   private memoryUsage = 0;
+
+  // Context stack for isolated editing modes (e.g., brush editing)
+  private contextStack: HistoryContext[] = [];
 
   // Auto-save state
   private isDirty = false;
@@ -227,6 +236,50 @@ class HistoryStore {
     this.undoStack.value = [];
     this.redoStack.value = [];
     this.updateComputed();
+  }
+
+  /**
+   * Push current history context onto the stack and start fresh.
+   * Used for isolated editing modes like brush editing.
+   */
+  pushContext() {
+    // Save current state
+    this.contextStack.push({
+      undoStack: [...this.undoStack.value],
+      redoStack: [...this.redoStack.value],
+      memoryUsage: this.memoryUsage,
+    });
+
+    // Start fresh
+    this.undoStack.value = [];
+    this.redoStack.value = [];
+    this.memoryUsage = 0;
+    this.updateComputed();
+  }
+
+  /**
+   * Pop and restore the previous history context.
+   * Discards the current context (any isolated edits are lost).
+   */
+  popContext() {
+    const context = this.contextStack.pop();
+    if (!context) {
+      console.warn('No history context to restore');
+      return;
+    }
+
+    // Restore previous state
+    this.undoStack.value = context.undoStack;
+    this.redoStack.value = context.redoStack;
+    this.memoryUsage = context.memoryUsage;
+    this.updateComputed();
+  }
+
+  /**
+   * Check if currently in a nested context.
+   */
+  isInContext(): boolean {
+    return this.contextStack.length > 0;
   }
 }
 

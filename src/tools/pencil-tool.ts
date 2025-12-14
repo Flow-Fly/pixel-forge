@@ -450,8 +450,23 @@ export class PencilTool extends BaseTool {
     if (!this.context) return;
 
     const brush = brushStore.activeBrush.value;
-    const size = toolSizes.pencil.value;
     const canvasWidth = this.context.canvas.width;
+    const canvasHeight = projectStore.height.value;
+
+    // Use custom brush stamping for custom brushes with image data
+    if (brush.type === "custom" && brush.imageData) {
+      this.stampCustomBrush(x, y, brush.imageData);
+
+      // Mirror drawing for custom brushes
+      const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+      for (const pos of mirrorPositions) {
+        this.stampCustomBrush(pos.x, pos.y, brush.imageData);
+      }
+      return;
+    }
+
+    // Standard builtin brush drawing
+    const size = toolSizes.pencil.value;
 
     this.context.globalAlpha = brush.opacity;
     this.context.fillStyle = colorStore.primaryColor.value;
@@ -482,7 +497,6 @@ export class PencilTool extends BaseTool {
     this.markDirty(dirtyX, dirtyY, size);
 
     // Mirror drawing: draw at mirrored positions if guides are active
-    const canvasHeight = projectStore.height.value;
     const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
 
     for (const pos of mirrorPositions) {
@@ -506,6 +520,68 @@ export class PencilTool extends BaseTool {
     }
 
     this.context.globalAlpha = 1;
+  }
+
+  /**
+   * Stamp a custom brush at the given position.
+   * Uses the brush's alpha channel as a mask and applies the current foreground color.
+   */
+  private stampCustomBrush(
+    x: number,
+    y: number,
+    imageData: { width: number; height: number; data: number[] }
+  ) {
+    if (!this.context) return;
+
+    const { width, height, data } = imageData;
+    const halfW = Math.floor(width / 2);
+    const halfH = Math.floor(height / 2);
+
+    const brush = brushStore.activeBrush.value;
+    const fgColor = colorStore.primaryColor.value;
+
+    const canvasWidth = this.context.canvas.width;
+    const canvasHeight = this.context.canvas.height;
+
+    // Draw each pixel of the brush
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const i = (py * width + px) * 4;
+        const alpha = data[i + 3];
+
+        if (alpha === 0) continue; // Skip transparent pixels
+
+        const destX = x - halfW + px;
+        const destY = y - halfH + py;
+
+        // Bounds check
+        if (destX < 0 || destY < 0 || destX >= canvasWidth || destY >= canvasHeight) continue;
+
+        // Apply foreground color with brush alpha
+        const finalAlpha = (alpha / 255) * brush.opacity;
+        this.context.globalAlpha = finalAlpha;
+        this.context.fillStyle = fgColor;
+        this.context.fillRect(destX, destY, 1, 1);
+
+        // Update index buffer
+        if (this.currentIndexBuffer && this.currentPaletteIndex > 0 && finalAlpha > 0.5) {
+          setIndexBufferPixel(
+            this.currentIndexBuffer,
+            canvasWidth,
+            destX,
+            destY,
+            this.currentPaletteIndex
+          );
+        }
+      }
+    }
+
+    this.context.globalAlpha = 1;
+
+    // Mark dirty region
+    const dirtyX = x - halfW;
+    const dirtyY = y - halfH;
+    this.markDirty(dirtyX, dirtyY, Math.max(width, height));
   }
 
   /**

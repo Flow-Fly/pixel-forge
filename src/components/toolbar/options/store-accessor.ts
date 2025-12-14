@@ -25,6 +25,11 @@ export type StoreType = ToolOption["store"];
 export function getOptionValue(store: StoreType, storeKey: string): unknown {
   switch (store) {
     case "brush":
+      if (storeKey === "spacing") {
+        // Convert BrushSpacing to string for select component
+        const spacing = brushStore.activeBrush.value.spacing;
+        return spacing === "match" ? "match" : String(spacing);
+      }
       return brushStore.activeBrush.value[storeKey as keyof typeof brushStore.activeBrush.value];
 
     case "magicWand":
@@ -72,7 +77,13 @@ export function getOptionValue(store: StoreType, storeKey: string): unknown {
 export function setOptionValue(store: StoreType, storeKey: string, value: unknown): void {
   switch (store) {
     case "brush":
-      brushStore.updateActiveBrushSettings({ [storeKey]: value });
+      if (storeKey === "spacing") {
+        // Convert string to BrushSpacing
+        const spacing = value === "match" ? "match" : parseInt(value as string, 10);
+        brushStore.updateActiveBrushSettings({ spacing });
+      } else {
+        brushStore.updateActiveBrushSettings({ [storeKey]: value });
+      }
       break;
 
     case "magicWand":

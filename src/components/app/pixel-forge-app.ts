@@ -89,7 +89,7 @@ export class PixelForgeApp extends BaseComponent {
     }
 
     .timeline-resize-handle::before {
-      content: '';
+      content: "";
       position: absolute;
       left: 50%;
       top: 50%;
@@ -154,16 +154,22 @@ export class PixelForgeApp extends BaseComponent {
   connectedCallback() {
     super.connectedCallback();
     // Load saved timeline height
-    const savedHeight = localStorage.getItem('pf-timeline-height');
+    const savedHeight = localStorage.getItem("pf-timeline-height");
     if (savedHeight) {
-      this.timelineHeight = Math.max(100, Math.min(500, parseInt(savedHeight, 10)));
+      this.timelineHeight = Math.max(
+        100,
+        Math.min(500, parseInt(savedHeight, 10))
+      );
     }
 
     // Load saved project from IndexedDB
     this.loadSavedProject();
 
     // Listen for keyboard shortcut to open new project dialog
-    window.addEventListener('show-new-project-dialog', this.handleShowNewProjectDialog);
+    window.addEventListener(
+      "show-new-project-dialog",
+      this.handleShowNewProjectDialog
+    );
   }
 
   private handleShowNewProjectDialog = () => {
@@ -178,15 +184,18 @@ export class PixelForgeApp extends BaseComponent {
         historyStore.clear();
       }
     } catch (error) {
-      console.warn('Failed to load saved project, starting fresh:', error);
+      console.warn("Failed to load saved project, starting fresh:", error);
     }
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener('mousemove', this.handleTimelineResizeMove);
-    document.removeEventListener('mouseup', this.handleTimelineResizeEnd);
-    window.removeEventListener('show-new-project-dialog', this.handleShowNewProjectDialog);
+    document.removeEventListener("mousemove", this.handleTimelineResizeMove);
+    document.removeEventListener("mouseup", this.handleTimelineResizeEnd);
+    window.removeEventListener(
+      "show-new-project-dialog",
+      this.handleShowNewProjectDialog
+    );
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -199,10 +208,10 @@ export class PixelForgeApp extends BaseComponent {
     this.resizeStartY = e.clientY;
     this.resizeStartHeight = this.timelineHeight;
 
-    document.addEventListener('mousemove', this.handleTimelineResizeMove);
-    document.addEventListener('mouseup', this.handleTimelineResizeEnd);
-    document.body.style.cursor = 'ns-resize';
-    document.body.style.userSelect = 'none';
+    document.addEventListener("mousemove", this.handleTimelineResizeMove);
+    document.addEventListener("mouseup", this.handleTimelineResizeEnd);
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
   };
 
   private handleTimelineResizeMove = (e: MouseEvent) => {
@@ -210,19 +219,22 @@ export class PixelForgeApp extends BaseComponent {
 
     // Dragging up increases height (inverse delta)
     const deltaY = this.resizeStartY - e.clientY;
-    const newHeight = Math.max(100, Math.min(500, this.resizeStartHeight + deltaY));
+    const newHeight = Math.max(
+      100,
+      Math.min(500, this.resizeStartHeight + deltaY)
+    );
     this.timelineHeight = newHeight;
   };
 
   private handleTimelineResizeEnd = () => {
     this.isResizingTimeline = false;
-    document.removeEventListener('mousemove', this.handleTimelineResizeMove);
-    document.removeEventListener('mouseup', this.handleTimelineResizeEnd);
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
+    document.removeEventListener("mousemove", this.handleTimelineResizeMove);
+    document.removeEventListener("mouseup", this.handleTimelineResizeEnd);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
 
     // Save to localStorage
-    localStorage.setItem('pf-timeline-height', String(this.timelineHeight));
+    localStorage.setItem("pf-timeline-height", String(this.timelineHeight));
   };
 
   render() {
@@ -254,10 +266,15 @@ export class PixelForgeApp extends BaseComponent {
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
         <pf-shortcuts-toggle></pf-shortcuts-toggle>
         <div
-          class="timeline-resize-handle ${this.isResizingTimeline ? 'resizing' : ''}"
+          class="timeline-resize-handle ${this.isResizingTimeline
+            ? "resizing"
+            : ""}"
           @mousedown=${this.handleTimelineResizeStart}
         ></div>
-        <div class="timeline-container" style="height: ${this.timelineHeight}px;">
+        <div
+          class="timeline-container"
+          style="height: ${this.timelineHeight}px;"
+        >
           <pf-timeline></pf-timeline>
         </div>
       </main>
@@ -273,11 +290,7 @@ export class PixelForgeApp extends BaseComponent {
         </pf-collapsible-panel>
         -->
 
-        <pf-collapsible-panel
-          panelId="brush"
-          title="Brushes"
-          .visibleForTools=${["pencil", "eraser"] as ToolType[]}
-        >
+        <pf-collapsible-panel panelId="brush" title="Brushes" }>
           <pf-brush-panel></pf-brush-panel>
         </pf-collapsible-panel>
 

@@ -37,6 +37,20 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
         store: "brush",
         storeKey: "pixelPerfect",
       },
+      {
+        type: "select",
+        key: "spacing",
+        label: "Spacing",
+        store: "brush",
+        storeKey: "spacing",
+        options: [
+          { value: "1", label: "1px" },
+          { value: "match", label: "Match Size" },
+          { value: "2", label: "2px" },
+          { value: "4", label: "4px" },
+          { value: "8", label: "8px" },
+        ],
+      },
     ],
     alternatives: ["eraser", "eyedropper"],
     shortcuts: [
