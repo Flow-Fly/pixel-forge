@@ -18,9 +18,45 @@ export type ToolType =
   | 'hand'
   | 'zoom';
 
+export interface CanvasTransform {
+  screenX: number;      // Top-left position on screen
+  screenY: number;
+  zoom: number;         // Canvas zoom level
+  width: number;        // Canvas width in pixels
+  height: number;       // Canvas height in pixels
+}
+
 class ToolStore {
   activeTool = signal<ToolType>('pencil');
   previousTool = signal<ToolType | null>(null);
+
+  // Override canvas for brush editing mode
+  // When set, tools draw to this canvas instead of active layer
+  overrideCanvas = signal<HTMLCanvasElement | null>(null);
+  overrideCanvasTransform = signal<CanvasTransform | null>(null);
+
+  /**
+   * Set override canvas for brush editing mode
+   */
+  setOverrideCanvas(canvas: HTMLCanvasElement | null, transform: CanvasTransform | null) {
+    this.overrideCanvas.value = canvas;
+    this.overrideCanvasTransform.value = transform;
+  }
+
+  /**
+   * Clear override canvas, returning to normal mode
+   */
+  clearOverrideCanvas() {
+    this.overrideCanvas.value = null;
+    this.overrideCanvasTransform.value = null;
+  }
+
+  /**
+   * Check if in brush editing mode
+   */
+  isOverrideActive(): boolean {
+    return this.overrideCanvas.value !== null;
+  }
 
   setActiveTool(tool: ToolType) {
     this.activeTool.value = tool;

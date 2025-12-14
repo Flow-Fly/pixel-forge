@@ -8,6 +8,7 @@ import { toolSizes } from '../../stores/tool-settings';
 import { viewportStore } from '../../stores/viewport';
 import { PencilTool } from '../../tools/pencil-tool';
 import { EraserTool } from '../../tools/eraser-tool';
+import type { BrushImageData } from '../../types/brush';
 
 @customElement('pf-brush-cursor-overlay')
 export class PFBrushCursorOverlay extends BaseComponent {
@@ -216,21 +217,28 @@ export class PFBrushCursorOverlay extends BaseComponent {
 
     // Draw brush cursor if we have cursor position
     if (this.cursorPos) {
-      // Get brush settings
-      // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore
-      const size = tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
+      const brush = brushStore.activeBrush.value;
 
-      // Calculate screen position - always center brush on cursor
-      const halfSize = Math.floor(size / 2);
-      const screenX = (this.cursorPos.x - halfSize) * zoom + panX;
-      const screenY = (this.cursorPos.y - halfSize) * zoom + panY;
-      const screenSize = size * zoom;
+      // Check if using a custom brush with image data (only for pencil tool)
+      if (tool === 'pencil' && brush.type === 'custom' && brush.imageData) {
+        this.drawCustomBrush(ctx, this.cursorPos.x, this.cursorPos.y, brush.imageData, zoom, panX, panY, color);
+      } else {
+        // Standard square brush preview
+        // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore
+        const size = tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
 
-      // Minimum visible size for outline
-      const minOutlineSize = Math.max(screenSize, 3);
+        // Calculate screen position - always center brush on cursor
+        const halfSize = Math.floor(size / 2);
+        const screenX = (this.cursorPos.x - halfSize) * zoom + panX;
+        const screenY = (this.cursorPos.y - halfSize) * zoom + panY;
+        const screenSize = size * zoom;
 
-      // Draw the brush preview (always square)
-      this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
+        // Minimum visible size for outline
+        const minOutlineSize = Math.max(screenSize, 3);
+
+        // Draw the brush preview (always square)
+        this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
+      }
     }
   }
 
@@ -295,6 +303,65 @@ export class PFBrushCursorOverlay extends BaseComponent {
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.5;
     ctx.fillRect(x, y, size, size);
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Draw a custom brush preview showing the actual brush shape
+   */
+  private drawCustomBrush(
+    ctx: CanvasRenderingContext2D,
+    cursorX: number,
+    cursorY: number,
+    imageData: BrushImageData,
+    zoom: number,
+    panX: number,
+    panY: number,
+    color: string
+  ) {
+    const { width, height, data } = imageData;
+    const halfW = Math.floor(width / 2);
+    const halfH = Math.floor(height / 2);
+
+    // Calculate bounding box in screen coordinates
+    const screenX = (cursorX - halfW) * zoom + panX;
+    const screenY = (cursorY - halfH) * zoom + panY;
+    const screenWidth = width * zoom;
+    const screenHeight = height * zoom;
+
+    // Draw outline around the brush bounds
+    // Outer black stroke
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX - 1, screenY - 1, screenWidth + 2, screenHeight + 2);
+
+    // Inner white stroke
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(screenX - 0.5, screenY - 0.5, screenWidth + 1, screenHeight + 1);
+
+    // Draw each visible pixel of the brush
+    ctx.fillStyle = color;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const i = (py * width + px) * 4;
+        const alpha = data[i + 3];
+
+        // Skip fully transparent pixels
+        if (alpha === 0) continue;
+
+        // Calculate screen position for this pixel
+        const pixelScreenX = (cursorX - halfW + px) * zoom + panX;
+        const pixelScreenY = (cursorY - halfH + py) * zoom + panY;
+        const pixelSize = zoom;
+
+        // Draw with the brush's alpha (semi-transparent for preview)
+        ctx.globalAlpha = (alpha / 255) * 0.5;
+        ctx.fillRect(pixelScreenX, pixelScreenY, pixelSize, pixelSize);
+      }
+    }
+
     ctx.globalAlpha = 1;
   }
 

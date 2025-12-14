@@ -18,6 +18,7 @@ import { shapeStore } from "../../stores/shape";
 import { guidesStore } from "../../stores/guides";
 import { AddFrameCommand } from "../../commands/animation-commands";
 import { toolRegistry } from "../../tools/tool-registry";
+import { canCaptureBrush, captureBrushAndAdd } from "../brush-capture";
 
 export function registerShortcuts() {
   // ============================================
@@ -514,4 +515,19 @@ export function registerShortcuts() {
   };
   keyboardService.register("n", ["ctrl"], openNewProjectDialog, "New project");
   keyboardService.register("n", ["meta"], openNewProjectDialog, "New project");
+
+  // ============================================
+  // BRUSH SHORTCUTS
+  // ============================================
+
+  // Ctrl+B / Cmd+B = Capture brush from selection
+  const captureBrush = async () => {
+    if (!canCaptureBrush()) {
+      console.log("No selection to capture as brush");
+      return;
+    }
+    await captureBrushAndAdd();
+  };
+  keyboardService.register("b", ["ctrl"], captureBrush, "Capture brush from selection");
+  keyboardService.register("b", ["meta"], captureBrush, "Capture brush from selection");
 }

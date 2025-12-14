@@ -2,7 +2,12 @@ import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { brushStore } from "../../stores/brush";
-import type { Brush, BrushSpacing } from "../../types/brush";
+import type { Brush, BrushImageData } from "../../types/brush";
+import {
+  canCaptureBrush,
+  captureBrushAndAdd,
+} from "../../services/brush-capture";
+import "./pf-brush-editor-overlay";
 
 @customElement("pf-brush-panel")
 export class PFBrushPanel extends BaseComponent {
@@ -15,6 +20,9 @@ export class PFBrushPanel extends BaseComponent {
     }
 
     .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       font-size: 12px;
       color: var(--pf-color-text-muted);
       margin-bottom: 8px;
@@ -22,208 +30,300 @@ export class PFBrushPanel extends BaseComponent {
       padding-bottom: 4px;
     }
 
-    .brush-list {
+    .header-hint {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+
+    .brush-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
       gap: 4px;
-      margin-bottom: 16px;
+      overflow-y: auto;
+      flex: 1;
     }
 
     .brush-item {
-      width: 40px;
-      height: 40px;
+      width: 48px;
+      height: 48px;
       border: 1px solid var(--pf-color-border);
       border-radius: 4px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      background-color: var(--pf-color-bg-panel);
+      background-color: var(--pf-color-bg-hover);
+      position: relative;
     }
 
     .brush-item:hover {
-      background-color: var(--pf-color-bg-hover);
+      background-color: gray;
     }
 
     .brush-item.active {
       border-color: var(--pf-color-primary);
-      background-color: var(--pf-color-bg-active);
+      // background-color: var(--pf-color-bg-active);
     }
 
-    .brush-preview {
-      background-color: white;
+    .brush-item.custom::after {
+      content: "";
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      width: 6px;
+      height: 6px;
+      background: var(--pf-color-primary);
+      border-radius: 50%;
     }
 
-    .controls {
+    .brush-preview-canvas {
+      max-width: 40px;
+      max-height: 40px;
+      image-rendering: pixelated;
+    }
+
+    .actions {
       display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .control-group {
-      display: flex;
-      flex-direction: column;
       gap: 4px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--pf-color-border);
     }
 
-    label {
+    .action-btn {
+      flex: 1;
+      padding: 4px 8px;
       font-size: 11px;
+      background: var(--pf-color-bg-tertiary);
+      border: 1px solid var(--pf-color-border);
+      border-radius: 4px;
+      color: var(--pf-color-text-primary);
+      cursor: pointer;
+    }
+
+    .action-btn:hover:not(:disabled) {
+      background: var(--pf-color-bg-hover);
+    }
+
+    .action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 16px 8px;
       color: var(--pf-color-text-muted);
-    }
-
-    input[type="range"] {
-      width: 100%;
-    }
-
-    select {
-      width: 100%;
-      padding: 4px;
-      background: var(--pf-color-bg-input, #2a2a2a);
-      color: var(--pf-color-text, #fff);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      font-size: 11px;
-    }
-
-    .custom-spacing {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      margin-top: 4px;
-    }
-
-    .custom-spacing input {
-      width: 50px;
-      padding: 2px 4px;
-      background: var(--pf-color-bg-input, #2a2a2a);
-      color: var(--pf-color-text, #fff);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
       font-size: 11px;
     }
   `;
 
-  @state() private showCustomSpacing = false;
+  @state() private editingBrush: Brush | null = null;
 
   render() {
-    const brushes = brushStore.brushes.value;
+    const allBrushes = brushStore.allBrushes;
     const activeBrush = brushStore.activeBrush.value;
-    const spacingValue = this.getSpacingSelectValue(activeBrush.spacing);
+    const hasSelection = canCaptureBrush();
 
     return html`
-      <div class="header">Brushes</div>
+      <div class="header">
+        <span>Brushes</span>
+        <span class="header-hint">Ctrl+B to capture</span>
+      </div>
 
-      <div class="brush-list">
-        ${brushes.map(
+      <div class="brush-grid">
+        ${allBrushes.map(
           (brush) => html`
             <div
-              class="brush-item ${brush.id === activeBrush.id ? "active" : ""}"
-              @click=${() => brushStore.setActiveBrush(brush)}
+              class="brush-item ${brush.id === activeBrush.id
+                ? "active"
+                : ""} ${brush.type === "custom" ? "custom" : ""}"
+              @click=${() => this.selectBrush(brush)}
+              @dblclick=${() => this.editBrush(brush)}
               title="${brush.name}"
             >
-              <div
-                class="brush-preview"
-                style="
-                width: ${Math.min(24, brush.size * 2)}px; 
-                height: ${Math.min(24, brush.size * 2)}px;
-                border-radius: 0;
-                background-color: whitesmoke;
-              "
-              ></div>
+              ${this.renderBrushPreview(brush)}
             </div>
           `
         )}
       </div>
 
-      <div class="controls">
-        <div class="control-group">
-          <label>Size: ${activeBrush.size}px</label>
-          <input
-            type="range"
-            min="1"
-            max="50"
-            .value=${activeBrush.size}
-            @input=${(e: Event) => this.updateSize(e)}
-          />
-        </div>
+      ${allBrushes.length === this.builtinCount
+        ? html`<div class="empty-state">
+            Select an area and press Ctrl+B to create a custom brush
+          </div>`
+        : ""}
 
-        <div class="control-group">
-          <label>Opacity: ${Math.round(activeBrush.opacity * 100)}%</label>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            .value=${activeBrush.opacity * 100}
-            @input=${(e: Event) => this.updateOpacity(e)}
-          />
-        </div>
-
-        <div class="control-group">
-          <label>Spacing</label>
-          <select @change=${(e: Event) => this.updateSpacing(e)}>
-            <option value="1" ?selected=${spacingValue === "1"}>1px (Standard)</option>
-            <option value="match" ?selected=${spacingValue === "match"}>Match Brush Size</option>
-            <option value="custom" ?selected=${spacingValue === "custom"}>Custom...</option>
-          </select>
-          ${this.showCustomSpacing || spacingValue === "custom"
-            ? html`
-                <div class="custom-spacing">
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    .value=${typeof activeBrush.spacing === "number" ? activeBrush.spacing : activeBrush.size}
-                    @input=${(e: Event) => this.updateCustomSpacing(e)}
-                  />
-                  <span>px</span>
-                </div>
-              `
-            : null}
-        </div>
+      <div class="actions">
+        <button
+          class="action-btn"
+          @click=${this.addBrush}
+          ?disabled=${!hasSelection}
+          title=${hasSelection
+            ? "Create brush from selection"
+            : "Make a selection first (Ctrl+B)"}
+        >
+          + Add
+        </button>
+        <button
+          class="action-btn"
+          @click=${this.editCurrentBrush}
+          ?disabled=${activeBrush.type !== "custom"}
+          title="Edit selected brush"
+        >
+          Edit
+        </button>
+        <button
+          class="action-btn"
+          @click=${this.deleteCurrentBrush}
+          ?disabled=${activeBrush.type !== "custom"}
+          title="Delete selected brush"
+        >
+          Delete
+        </button>
       </div>
+
+      ${this.editingBrush
+        ? html`
+            <pf-brush-editor-overlay
+              .brush=${this.editingBrush}
+              @close=${() => (this.editingBrush = null)}
+            ></pf-brush-editor-overlay>
+          `
+        : ""}
     `;
   }
 
-  private getSpacingSelectValue(spacing: BrushSpacing): string {
-    if (spacing === "match") return "match";
-    if (spacing === 1) return "1";
-    return "custom";
+  private get builtinCount(): number {
+    return brushStore.builtinBrushes.length;
   }
 
-  updateSize(e: Event) {
-    const input = e.target as HTMLInputElement;
-    brushStore.updateActiveBrushSettings({ size: parseInt(input.value) });
-    brushStore.syncBigPixelModeWithBrushSize();
+  private renderBrushPreview(brush: Brush) {
+    if (brush.type === "builtin" || !brush.imageData) {
+      // Render builtin brush as canvas showing actual pixel pattern
+      return html`
+        <canvas
+          class="brush-preview-canvas builtin-brush"
+          data-brush-id="${brush.id}"
+          data-brush-size="${brush.size}"
+          data-brush-shape="${brush.shape}"
+        ></canvas>
+      `;
+    }
+
+    // Render custom brush as canvas
+    return html`
+      <canvas
+        class="brush-preview-canvas"
+        width=${brush.imageData.width}
+        height=${brush.imageData.height}
+      ></canvas>
+    `;
   }
 
-  updateOpacity(e: Event) {
-    const input = e.target as HTMLInputElement;
-    brushStore.updateActiveBrushSettings({
-      opacity: parseInt(input.value) / 100,
+  updated() {
+    // Draw builtin brush previews
+    const builtinCanvases = this.shadowRoot?.querySelectorAll(".builtin-brush");
+    builtinCanvases?.forEach((canvas) => {
+      const canvasEl = canvas as HTMLCanvasElement;
+      const size = parseInt(canvasEl.dataset.brushSize || "1", 10);
+      const shape = canvasEl.dataset.brushShape || "square";
+      this.drawBuiltinBrushPreview(canvasEl, size, shape);
+    });
+
+    // Draw custom brush previews
+    const customCanvases = this.shadowRoot?.querySelectorAll(
+      ".brush-preview-canvas:not(.builtin-brush)"
+    );
+    customCanvases?.forEach((canvas) => {
+      const brushName = (canvas as HTMLElement)
+        .closest(".brush-item")
+        ?.getAttribute("title");
+      const brush = brushStore.allBrushes.find((b) => b.name === brushName);
+      if (brush?.imageData) {
+        this.drawBrushPreview(canvas as HTMLCanvasElement, brush.imageData);
+      }
     });
   }
 
-  updateSpacing(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    const value = select.value;
+  private drawBrushPreview(
+    canvas: HTMLCanvasElement,
+    imageData: BrushImageData
+  ) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    if (value === "1") {
-      brushStore.updateActiveBrushSettings({ spacing: 1 });
-      this.showCustomSpacing = false;
-    } else if (value === "match") {
-      brushStore.updateActiveBrushSettings({ spacing: "match" });
-      this.showCustomSpacing = false;
+    // Convert stored data to ImageData
+    const data = new ImageData(
+      new Uint8ClampedArray(imageData.data),
+      imageData.width,
+      imageData.height
+    );
+    ctx.putImageData(data, 0, 0);
+  }
+
+  private drawBuiltinBrushPreview(
+    canvas: HTMLCanvasElement,
+    size: number,
+    shape: string
+  ) {
+    // Use a fixed pixel size (4px per brush pixel) to show relative size differences
+    const pixelSize = 4;
+    const displaySize = size * pixelSize;
+
+    // Set canvas dimensions
+    canvas.width = displaySize;
+    canvas.height = displaySize;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, displaySize, displaySize);
+
+    // Draw the brush pattern (using light color for visibility on dark bg)
+    const computedStyle = getComputedStyle(this);
+    const textColor = computedStyle.getPropertyValue("--pf-color-text-primary").trim() || "#e0e0e0";
+    ctx.fillStyle = textColor;
+
+    if (shape === "circle") {
+      // Draw circle pattern
+      const centerX = displaySize / 2;
+      const centerY = displaySize / 2;
+      const radius = displaySize / 2;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.fill();
     } else {
-      this.showCustomSpacing = true;
-      // Default custom to brush size
-      const brush = brushStore.activeBrush.value;
-      brushStore.updateActiveBrushSettings({ spacing: brush.size });
+      // Draw square pattern
+      ctx.fillRect(0, 0, displaySize, displaySize);
     }
   }
 
-  updateCustomSpacing(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const value = Math.max(1, Math.min(50, parseInt(input.value) || 1));
-    brushStore.updateActiveBrushSettings({ spacing: value });
+  private selectBrush(brush: Brush) {
+    brushStore.setActiveBrush(brush);
+  }
+
+  private editBrush(brush: Brush) {
+    if (brush.type !== "custom") return;
+    this.editingBrush = brush;
+  }
+
+  private async addBrush() {
+    await captureBrushAndAdd();
+  }
+
+  private editCurrentBrush() {
+    const brush = brushStore.activeBrush.value;
+    if (brush.type === "custom") {
+      this.editBrush(brush);
+    }
+  }
+
+  private async deleteCurrentBrush() {
+    const brush = brushStore.activeBrush.value;
+    if (brush.type !== "custom") return;
+
+    await brushStore.deleteCustomBrush(brush.id);
   }
 }
