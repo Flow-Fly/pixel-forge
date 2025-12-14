@@ -43,12 +43,28 @@ export class PFToolbar extends BaseComponent {
   // Track which tool is displayed for each group
   @state() private groupDisplayTools: Map<string, ToolType> = new Map();
 
+  // Track last seen active tool to detect changes
+  private lastSeenActiveTool: ToolType | null = null;
+
   connectedCallback() {
     super.connectedCallback();
     // Initialize display tools from groups
     toolGroups.forEach(group => {
       this.groupDisplayTools.set(group.id, getActiveToolForGroup(group));
     });
+  }
+
+  willUpdate() {
+    // Sync groupDisplayTools when active tool changes (e.g., via keyboard shortcut)
+    const activeTool = toolStore.activeTool.value;
+    if (activeTool !== this.lastSeenActiveTool) {
+      this.lastSeenActiveTool = activeTool;
+      const group = getToolGroup(activeTool);
+      if (group && this.groupDisplayTools.get(group.id) !== activeTool) {
+        setLastSelectedTool(group.id, activeTool);
+        this.groupDisplayTools.set(group.id, activeTool);
+      }
+    }
   }
 
   private selectTool(tool: ToolType) {
@@ -65,12 +81,6 @@ export class PFToolbar extends BaseComponent {
   private handleGroupToolChanged(e: CustomEvent<{ tool: ToolType; groupId: string }>) {
     const { tool, groupId } = e.detail;
     this.groupDisplayTools = new Map(this.groupDisplayTools.set(groupId, tool));
-  }
-
-  private isGroupActive(groupId: string): boolean {
-    const activeTool = toolStore.activeTool.value;
-    const group = toolGroups.find(g => g.id === groupId);
-    return group ? group.tools.includes(activeTool) : false;
   }
 
   render() {
@@ -116,8 +126,14 @@ export class PFToolbar extends BaseComponent {
     const group = toolGroups.find(g => g.id === groupId);
     if (!group) return '';
 
-    const displayTool = this.groupDisplayTools.get(groupId) || group.defaultTool;
-    const isActive = this.isGroupActive(groupId);
+    const activeTool = toolStore.activeTool.value;
+    const isActive = group.tools.includes(activeTool);
+
+    // If active tool is in this group, show it; otherwise use stored preference or default
+    const displayTool = isActive
+      ? activeTool
+      : (this.groupDisplayTools.get(groupId) || group.defaultTool);
+
     // Get shortcut from the displayed tool via registry
     const shortcut = getToolShortcutKey(displayTool);
 

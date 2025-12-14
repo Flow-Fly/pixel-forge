@@ -14,12 +14,21 @@ import type { ToolType } from "../stores/tools";
 export const toolRegistry: Record<ToolType, ToolMeta> = {
   pencil: {
     name: "Pencil",
-    icon: "✏️",
+    icon: "/icons/tools/pen.webp",
     label: "P",
     shortcutKey: "B",
     group: "drawing",
     options: [
-      { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "toolSizes", storeKey: "pencil" },
+      {
+        type: "slider",
+        key: "size",
+        label: "Size",
+        min: 1,
+        max: 50,
+        unit: "px",
+        store: "toolSizes",
+        storeKey: "pencil",
+      },
       {
         type: "slider",
         key: "opacity",
@@ -61,12 +70,21 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   eraser: {
     name: "Eraser",
-    icon: "🧹",
+    icon: "/icons/tools/eraser.webp",
     label: "E",
     shortcutKey: "E",
     group: "drawing",
     options: [
-      { type: "slider", key: "size", label: "Size", min: 1, max: 50, unit: "px", store: "toolSizes", storeKey: "eraser" },
+      {
+        type: "slider",
+        key: "size",
+        label: "Size",
+        min: 1,
+        max: 50,
+        unit: "px",
+        store: "toolSizes",
+        storeKey: "eraser",
+      },
     ],
     alternatives: ["pencil", "eyedropper"],
     shortcuts: [
@@ -78,7 +96,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   eyedropper: {
     name: "Eyedropper",
-    icon: "💧",
+    icon: "/icons/tools/eyedropper.webp",
     label: "I",
     shortcutKey: "I",
     group: "drawing",
@@ -89,7 +107,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   fill: {
     name: "Fill",
-    icon: "🪣",
+    icon: "/icons/tools/bucket.png",
     label: "F",
     shortcutKey: "G",
     group: "fill",
@@ -108,7 +126,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   gradient: {
     name: "Gradient",
-    icon: "▤",
+    icon: "/icons/tools/gradient.png",
     label: "G",
     shortcutKey: "shift+G",
     group: "fill",
@@ -131,7 +149,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   line: {
     name: "Line",
-    icon: "╱",
+    icon: "/icons/tools/line.png",
     label: "L",
     shortcutKey: "L",
     group: "shape",
@@ -156,7 +174,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   rectangle: {
     name: "Rectangle",
-    icon: "▢",
+    icon: "/icons/tools/rectangle.png",
     label: "R",
     shortcutKey: "U",
     group: "shape",
@@ -189,7 +207,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   ellipse: {
     name: "Ellipse",
-    icon: "◯",
+    icon: "/icons/tools/ellipse.png",
     label: "O",
     shortcutKey: "shift+U",
     group: "shape",
@@ -222,7 +240,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "marquee-rect": {
     name: "Marquee",
-    icon: "⬚",
+    icon: "/icons/tools/rect-marquee.webp",
     label: "M",
     shortcutKey: "M",
     group: "selection",
@@ -239,7 +257,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   lasso: {
     name: "Lasso",
-    icon: "◯",
+    icon: "/icons/tools/lasso.webp",
     label: "Q",
     shortcutKey: "Q",
     group: "selection",
@@ -254,7 +272,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "polygonal-lasso": {
     name: "Polygonal Lasso",
-    icon: "⬡",
+    icon: "/icons/tools/polygonal-lasso.png",
     label: "PL",
     shortcutKey: "shift+Q",
     group: "selection",
@@ -270,7 +288,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "magic-wand": {
     name: "Magic Wand",
-    icon: "✨",
+    icon: "/icons/tools/Magic-wand.png",
     label: "W",
     shortcutKey: "W",
     group: "selection",
@@ -324,7 +342,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   text: {
     name: "Text",
-    icon: "T",
+    icon: "/icons/tools/text.png",
     label: "T",
     shortcutKey: "T",
     group: "utility",
@@ -350,7 +368,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   hand: {
     name: "Hand",
-    icon: "✋",
+    icon: "/icons/tools/hand.png",
     label: "H",
     shortcutKey: "H",
     group: "navigation",

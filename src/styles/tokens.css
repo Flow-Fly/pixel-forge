@@ -1,28 +1,41 @@
 :root {
-  /* Neo-Retro Palette */
+  /* Forge Palette - Backgrounds */
   --pf-color-bg-dark: #0a0a0a;
   --pf-color-bg-panel: #141414;
   --pf-color-bg-surface: #1e1e1e;
+  --pf-color-bg-tertiary: #282828;
+  --pf-color-bg-charcoal: #2a2a2a;
 
+  /* Text */
   --pf-color-text-main: #e0e0e0;
   --pf-color-text-muted: #808080;
   --pf-color-text-secondary: #a0a0a0;
 
-  --pf-color-bg-tertiary: #282828;
+  /* Forge Palette - Heat Colors (ember/forge theme) */
+  --pf-color-ember-rest: #f59e0b;       /* Amber - resting/dormant state */
+  --pf-color-ember-hover: #fbbf24;      /* Bright amber - heating up */
+  --pf-color-ember-active: #ea580c;     /* Deep orange - working temperature */
+  --pf-color-ember-hot: #f97316;        /* Coral-orange - highlights, sparks */
+  --pf-color-ember-white: #fef3c7;      /* Pale yellow - white-hot intensity */
 
-  --pf-color-accent-cyan: #00ffff;
-  --pf-color-accent-magenta: #ff00ff;
-  --pf-color-accent-yellow: #ffff00;
-  --pf-color-accent: var(--pf-color-accent-cyan);
+  /* Primary accent (mapped to ember) */
+  --pf-color-accent: var(--pf-color-ember-rest);
+  --pf-color-accent-hover: var(--pf-color-ember-hover);
+  --pf-color-accent-active: var(--pf-color-ember-active);
 
+  /* Borders & Grid */
   --pf-color-border: #333333;
+  --pf-color-border-warm: rgba(245, 158, 11, 0.3);
   --pf-color-grid: #2a2a2a;
 
   /* Interactive states */
-  --pf-color-primary: var(--pf-color-accent-cyan);
-  --pf-color-primary-transparent: rgba(0, 255, 255, 0.15);
+  --pf-color-primary: var(--pf-color-ember-rest);
+  --pf-color-primary-hover: var(--pf-color-ember-hover);
+  --pf-color-primary-active: var(--pf-color-ember-active);
+  --pf-color-primary-transparent: rgba(245, 158, 11, 0.15);
   --pf-color-bg-hover: #252525;
   --pf-color-bg-input: #1a1a1a;
+  --pf-color-bg-selected: rgba(234, 88, 12, 0.2);
 
   /* Border radius */
   --pf-radius-sm: 4px;
@@ -41,9 +54,12 @@
   --pf-spacing-3: 12px;
   --pf-spacing-4: 16px;
 
-  /* Effects */
-  --pf-shadow-glow-cyan: 0 0 8px rgba(0, 255, 255, 0.3);
-  --pf-shadow-glow-magenta: 0 0 8px rgba(255, 0, 255, 0.3);
+  /* Effects - Forge Glow */
+  --pf-shadow-glow: 0 0 8px rgba(245, 158, 11, 0.3);
+  --pf-shadow-glow-hover: 0 0 12px rgba(251, 191, 36, 0.4);
+  --pf-shadow-glow-active: 0 0 10px rgba(234, 88, 12, 0.5);
+  --pf-shadow-glow-hot: 0 0 16px rgba(249, 115, 22, 0.6);
+  --pf-shadow-glow-white: 0 0 20px rgba(254, 243, 199, 0.8);
 
   /* Z-Index */
   --pf-z-canvas: 10;
