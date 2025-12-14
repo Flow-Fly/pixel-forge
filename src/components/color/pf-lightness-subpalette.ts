@@ -80,7 +80,8 @@ export class PFLightnessSubpalette extends LitElement {
   }
 
   private selectVariation(color: string) {
-    colorStore.setPrimaryColor(color);
+    // Use setPrimaryColorFromShade to mark this as an ephemeral color
+    colorStore.setPrimaryColorFromShade(color);
     this.close();
   }
 

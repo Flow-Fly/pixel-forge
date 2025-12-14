@@ -11,6 +11,7 @@ export interface ProjectFile {
   width: number;
   height: number;
   palette?: string[]; // v3.0+: indexed color palette (hex strings)
+  ephemeralPalette?: string[]; // v3.1+: ephemeral/untracked colors (generated shades)
   layers: {
     id: string;
     name: string;

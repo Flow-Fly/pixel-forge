@@ -267,6 +267,75 @@ export class PFPalettePanel extends BaseComponent {
       text-align: center;
       padding: 8px;
     }
+
+    /* Untracked colors section */
+    .untracked-section {
+      margin-top: 12px;
+      border-top: 1px solid var(--pf-color-border, #333);
+      padding-top: 8px;
+    }
+
+    .untracked-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .untracked-title {
+      font-size: 11px;
+      color: var(--pf-color-text-muted, #808080);
+    }
+
+    .untracked-count {
+      color: var(--pf-color-accent-cyan, #00e5ff);
+    }
+
+    .untracked-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 2px;
+      padding: 4px;
+      background: var(--pf-color-bg-surface, #1e1e1e);
+      border-radius: 3px;
+      margin-bottom: 6px;
+    }
+
+    .untracked-swatch {
+      aspect-ratio: 1;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: transform 0.1s ease;
+      border: 1px dashed var(--pf-color-border, #444);
+    }
+
+    .untracked-swatch:hover {
+      transform: scale(1.15);
+      z-index: 1;
+      border-color: var(--pf-color-accent, #4a9eff);
+    }
+
+    .untracked-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .untracked-actions .action-btn {
+      flex: 1;
+      padding: 4px 8px;
+      background: var(--pf-color-bg-surface, #1e1e1e);
+      border: 1px solid var(--pf-color-border, #333);
+      border-radius: 3px;
+      color: var(--pf-color-text-muted, #808080);
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .untracked-actions .action-btn:hover {
+      background: var(--pf-color-bg-panel, #141414);
+      color: var(--pf-color-text-main, #e0e0e0);
+    }
   `;
 
   @state() private hexInput = '';
@@ -410,8 +479,41 @@ export class PFPalettePanel extends BaseComponent {
     paletteStore.replaceWithExtracted();
   }
 
+  // ==========================================
+  // Untracked Colors Methods
+  // ==========================================
+
+  private selectUntrackedColor(color: string) {
+    // Select as foreground, marking it as ephemeral
+    colorStore.setPrimaryColorFromShade(color);
+    colorStore.updateLightnessVariations(color);
+  }
+
+  private handleUntrackedRightClick(e: MouseEvent, color: string) {
+    e.preventDefault();
+    // Promote to main palette
+    paletteStore.promoteEphemeralColor(color);
+  }
+
+  private handleUntrackedDragStart(color: string, e: DragEvent) {
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('application/x-palette-color', color);
+      e.dataTransfer.setData('application/x-ephemeral-color', 'true');
+    }
+  }
+
+  private promoteAllUntracked() {
+    paletteStore.promoteAllEphemeralColors();
+  }
+
+  private clearUntracked() {
+    paletteStore.clearEphemeralColors();
+  }
+
   render() {
-    const colors = paletteStore.colors.value;
+    const colors = paletteStore.mainColors.value;
+    const ephemeralColors = paletteStore.ephemeralColors.value;
     const extractedColors = paletteStore.extractedColors.value;
     const isExtracting = paletteStore.isExtracting.value;
 
@@ -472,6 +574,33 @@ export class PFPalettePanel extends BaseComponent {
           ></div>
         `)}
       </div>
+
+      ${ephemeralColors.length > 0 ? html`
+        <div class="untracked-section">
+          <div class="untracked-header">
+            <span class="untracked-title">
+              Untracked <span class="untracked-count">(${ephemeralColors.length})</span>
+            </span>
+          </div>
+          <div class="untracked-grid">
+            ${ephemeralColors.map(color => html`
+              <div
+                class="untracked-swatch"
+                style="background-color: ${color}"
+                title="${color} - Click to select, right-click to add to palette"
+                draggable="true"
+                @click=${() => this.selectUntrackedColor(color)}
+                @contextmenu=${(e: MouseEvent) => this.handleUntrackedRightClick(e, color)}
+                @dragstart=${(e: DragEvent) => this.handleUntrackedDragStart(color, e)}
+              ></div>
+            `)}
+          </div>
+          <div class="untracked-actions">
+            <button class="action-btn" @click=${this.promoteAllUntracked}>Add All</button>
+            <button class="action-btn" @click=${this.clearUntracked}>Clear</button>
+          </div>
+        </div>
+      ` : ''}
 
       <div class="extraction-section">
         <div
