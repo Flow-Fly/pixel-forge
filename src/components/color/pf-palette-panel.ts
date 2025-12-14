@@ -7,6 +7,7 @@ import { historyStore } from '../../stores/history';
 import { PaletteChangeCommand } from '../../commands/palette-command';
 import '../ui/pf-popover';
 import './pf-color-picker-popup';
+import './pf-palette-selector';
 
 @customElement('pf-palette-panel')
 export class PFPalettePanel extends BaseComponent {
@@ -21,6 +22,10 @@ export class PFPalettePanel extends BaseComponent {
       align-items: center;
       margin-bottom: 8px;
       gap: 6px;
+    }
+
+    .toolbar pf-palette-selector {
+      flex: 1;
     }
 
     .add-btn {
@@ -384,10 +389,6 @@ export class PFPalettePanel extends BaseComponent {
     this.showColorPicker = false;
   }
 
-  private resetPalette() {
-    paletteStore.resetToDefault();
-  }
-
   // ==========================================
   // Add Color Popover Methods
   // ==========================================
@@ -519,18 +520,12 @@ export class PFPalettePanel extends BaseComponent {
 
     return html`
       <div class="toolbar">
+        <pf-palette-selector></pf-palette-selector>
         <button
           class="add-btn"
           @click=${(e: Event) => this.toggleAddPopover(e)}
           title="Add color"
         >+</button>
-        <button
-          class="toolbar-btn"
-          @click=${this.resetPalette}
-          title="Reset to default DB32 palette"
-        >
-          Reset
-        </button>
       </div>
 
       <pf-popover
