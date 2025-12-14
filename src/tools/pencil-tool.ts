@@ -524,7 +524,9 @@ export class PencilTool extends BaseTool {
 
   /**
    * Stamp a custom brush at the given position.
-   * Uses the brush's alpha channel as a mask and applies the current foreground color.
+   * Uses the brush's alpha channel as a mask.
+   * If useOriginalColors is true, uses the brush's stored RGB values.
+   * Otherwise, applies the current foreground color.
    */
   private stampCustomBrush(
     x: number,
@@ -539,6 +541,7 @@ export class PencilTool extends BaseTool {
 
     const brush = brushStore.activeBrush.value;
     const fgColor = colorStore.primaryColor.value;
+    const useOriginalColors = brush.useOriginalColors ?? false;
 
     const canvasWidth = this.context.canvas.width;
     const canvasHeight = this.context.canvas.height;
@@ -557,14 +560,25 @@ export class PencilTool extends BaseTool {
         // Bounds check
         if (destX < 0 || destY < 0 || destX >= canvasWidth || destY >= canvasHeight) continue;
 
-        // Apply foreground color with brush alpha
+        // Apply color based on mode
         const finalAlpha = (alpha / 255) * brush.opacity;
         this.context.globalAlpha = finalAlpha;
-        this.context.fillStyle = fgColor;
+
+        if (useOriginalColors) {
+          // Use the brush's stored RGB values
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          this.context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        } else {
+          // Use foreground color
+          this.context.fillStyle = fgColor;
+        }
+
         this.context.fillRect(destX, destY, 1, 1);
 
-        // Update index buffer
-        if (this.currentIndexBuffer && this.currentPaletteIndex > 0 && finalAlpha > 0.5) {
+        // Update index buffer (only for foreground color mode with valid palette index)
+        if (this.currentIndexBuffer && this.currentPaletteIndex > 0 && finalAlpha > 0.5 && !useOriginalColors) {
           setIndexBufferPixel(
             this.currentIndexBuffer,
             canvasWidth,
