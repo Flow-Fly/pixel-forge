@@ -24,6 +24,9 @@ export interface Brush {
   // For custom brushes - store as compact RGBA array
   imageData?: BrushImageData;
 
+  // Color mode for custom brushes: true = use brush's stored colors, false = use foreground color (default)
+  useOriginalColors?: boolean;
+
   // Metadata for custom brushes
   createdAt?: number;
   modifiedAt?: number;
@@ -35,6 +38,7 @@ export interface StoredCustomBrush {
   name: string;
   imageData: BrushImageData;
   spacing: BrushSpacing;
+  useOriginalColors?: boolean;
   createdAt: number;
   modifiedAt: number;
 }

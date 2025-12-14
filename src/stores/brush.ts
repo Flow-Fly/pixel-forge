@@ -93,6 +93,7 @@ class BrushStore {
       pixelPerfect: false,
       spacing: stored.spacing,
       imageData: stored.imageData,
+      useOriginalColors: stored.useOriginalColors ?? false,
       createdAt: stored.createdAt,
       modifiedAt: stored.modifiedAt,
     };
@@ -109,6 +110,7 @@ class BrushStore {
       name: brush.name,
       imageData: brush.imageData,
       spacing: brush.spacing,
+      useOriginalColors: brush.useOriginalColors,
       createdAt: brush.createdAt ?? Date.now(),
       modifiedAt: brush.modifiedAt ?? Date.now(),
     };
@@ -197,6 +199,18 @@ class BrushStore {
       return brush.size;
     }
     return brush.spacing;
+  }
+
+  /**
+   * Toggle whether the active custom brush uses its original colors or foreground color.
+   * Only works for custom brushes; does nothing for builtin brushes.
+   */
+  async toggleUseOriginalColors(): Promise<void> {
+    const brush = this.activeBrush.value;
+    if (brush.type !== "custom") return;
+
+    const newValue = !brush.useOriginalColors;
+    await this.updateCustomBrush(brush.id, { useOriginalColors: newValue });
   }
 
   /**

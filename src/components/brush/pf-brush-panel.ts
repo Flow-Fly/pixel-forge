@@ -8,6 +8,7 @@ import {
   captureBrushAndAdd,
 } from "../../services/brush-capture";
 import "./pf-brush-editor-overlay";
+import "./pf-brush-create-overlay";
 
 @customElement("pf-brush-panel")
 export class PFBrushPanel extends BaseComponent {
@@ -116,9 +117,32 @@ export class PFBrushPanel extends BaseComponent {
       color: var(--pf-color-text-muted);
       font-size: 11px;
     }
+
+    .brush-options {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--pf-color-border);
+      font-size: 11px;
+      color: var(--pf-color-text-primary);
+    }
+
+    .brush-options label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    .brush-options input[type="checkbox"] {
+      cursor: pointer;
+    }
   `;
 
   @state() private editingBrush: Brush | null = null;
+  @state() private showCreateOverlay: boolean = false;
 
   render() {
     const allBrushes = brushStore.allBrushes;
@@ -158,10 +182,7 @@ export class PFBrushPanel extends BaseComponent {
         <button
           class="action-btn"
           @click=${this.addBrush}
-          ?disabled=${!hasSelection}
-          title=${hasSelection
-            ? "Create brush from selection"
-            : "Make a selection first (Ctrl+B)"}
+          title="Create new brush or capture from selection (Ctrl+B)"
         >
           + Add
         </button>
@@ -183,12 +204,34 @@ export class PFBrushPanel extends BaseComponent {
         </button>
       </div>
 
+      ${activeBrush.type === "custom"
+        ? html`
+            <div class="brush-options">
+              <label>
+                <input
+                  type="checkbox"
+                  .checked=${activeBrush.useOriginalColors ?? false}
+                  @change=${this.toggleUseOriginalColors}
+                />
+                Use brush colors
+              </label>
+            </div>
+          `
+        : ""}
+
       ${this.editingBrush
         ? html`
             <pf-brush-editor-overlay
               .brush=${this.editingBrush}
               @close=${() => (this.editingBrush = null)}
             ></pf-brush-editor-overlay>
+          `
+        : ""}
+      ${this.showCreateOverlay
+        ? html`
+            <pf-brush-create-overlay
+              @close=${() => (this.showCreateOverlay = false)}
+            ></pf-brush-create-overlay>
           `
         : ""}
     `;
@@ -310,7 +353,11 @@ export class PFBrushPanel extends BaseComponent {
   }
 
   private async addBrush() {
-    await captureBrushAndAdd();
+    if (canCaptureBrush()) {
+      await captureBrushAndAdd();
+    } else {
+      this.showCreateOverlay = true;
+    }
   }
 
   private editCurrentBrush() {
@@ -325,5 +372,9 @@ export class PFBrushPanel extends BaseComponent {
     if (brush.type !== "custom") return;
 
     await brushStore.deleteCustomBrush(brush.id);
+  }
+
+  private async toggleUseOriginalColors() {
+    await brushStore.toggleUseOriginalColors();
   }
 }
