@@ -36,8 +36,13 @@ export class FillTool extends BaseTool {
     if (layerId) {
       indexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
       // Get or add fill color to palette
+      // Use ephemeral color system for shade-generated colors
       const fillHex = colorStore.primaryColor.value;
-      fillPaletteIndex = paletteStore.getOrAddColor(fillHex);
+      if (colorStore.isEphemeralColor.value) {
+        fillPaletteIndex = paletteStore.getOrAddEphemeralColor(fillHex);
+      } else {
+        fillPaletteIndex = paletteStore.getOrAddColor(fillHex);
+      }
     }
 
     // Get target color

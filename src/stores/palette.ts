@@ -14,7 +14,16 @@ const DB32_COLORS = [
 const MAX_PALETTE_SIZE = 256;
 
 class PaletteStore {
-  colors = signal<string[]>([...DB32_COLORS]);
+  /** Main palette colors (user-managed, visible in palette panel) */
+  mainColors = signal<string[]>([...DB32_COLORS]);
+
+  /** Ephemeral colors (auto-generated shades, not in main palette) */
+  ephemeralColors = signal<string[]>([]);
+
+  /** @deprecated Use mainColors instead - kept for compatibility during migration */
+  get colors() {
+    return this.mainColors;
+  }
 
   // Extracted colors staging area
   extractedColors = signal<string[]>([]);
@@ -24,8 +33,11 @@ class PaletteStore {
   // Indexed Color Management
   // ==========================================
 
-  /** Fast lookup: normalized hex color -> palette index */
+  /** Fast lookup: normalized hex color -> palette index (for main palette) */
   private colorToIndex = new Map<string, number>();
+
+  /** Fast lookup: normalized hex color -> ephemeral index offset */
+  private ephemeralColorToIndex = new Map<string, number>();
 
   constructor() {
     this.loadFromStorage();
@@ -33,14 +45,23 @@ class PaletteStore {
   }
 
   /**
-   * Rebuild the color-to-index lookup map.
+   * Rebuild the color-to-index lookup maps.
    * Call this after any palette modification.
    */
   rebuildColorMap() {
     this.colorToIndex.clear();
+    this.ephemeralColorToIndex.clear();
+
     // Index 0 is reserved for transparent, so palette colors start at index 1
-    this.colors.value.forEach((color, i) => {
+    // Main palette: indices 1 to mainColors.length
+    this.mainColors.value.forEach((color, i) => {
       this.colorToIndex.set(this.normalizeHex(color), i + 1);
+    });
+
+    // Ephemeral colors: indices mainColors.length + 1 to mainColors.length + ephemeralColors.length
+    const ephemeralOffset = this.mainColors.value.length;
+    this.ephemeralColors.value.forEach((color, i) => {
+      this.ephemeralColorToIndex.set(this.normalizeHex(color), ephemeralOffset + i + 1);
     });
   }
 
@@ -57,9 +78,29 @@ class PaletteStore {
 
   /**
    * Get the palette index for a color. Returns 0 (transparent) if not found.
+   * Checks both main palette and ephemeral colors.
    */
   getColorIndex(color: string): number {
-    return this.colorToIndex.get(this.normalizeHex(color)) ?? 0;
+    const normalized = this.normalizeHex(color);
+    // Check main palette first
+    const mainIndex = this.colorToIndex.get(normalized);
+    if (mainIndex !== undefined) return mainIndex;
+    // Check ephemeral colors
+    return this.ephemeralColorToIndex.get(normalized) ?? 0;
+  }
+
+  /**
+   * Check if a color is in the main palette (not ephemeral).
+   */
+  isMainPaletteColor(color: string): boolean {
+    return this.colorToIndex.has(this.normalizeHex(color));
+  }
+
+  /**
+   * Check if a color is ephemeral (not in main palette).
+   */
+  isEphemeralColor(color: string): boolean {
+    return this.ephemeralColorToIndex.has(this.normalizeHex(color));
   }
 
   /**
@@ -92,6 +133,94 @@ class PaletteStore {
 
     // Return the new index (insertionIndex in array + 1 for 1-based indexing)
     return insertionIndex + 1;
+  }
+
+  /**
+   * Get the palette index for a color, adding it to EPHEMERAL if not present anywhere.
+   * Use this when drawing with generated shades to avoid polluting the main palette.
+   * Returns the index (1-based, 0 = transparent).
+   */
+  getOrAddEphemeralColor(color: string): number {
+    const normalized = this.normalizeHex(color);
+
+    // Check main palette first - if it's there, use that index
+    const mainIndex = this.colorToIndex.get(normalized);
+    if (mainIndex !== undefined) {
+      return mainIndex;
+    }
+
+    // Check ephemeral palette
+    const ephemeralIndex = this.ephemeralColorToIndex.get(normalized);
+    if (ephemeralIndex !== undefined) {
+      return ephemeralIndex;
+    }
+
+    // Check combined palette limit
+    const totalColors = this.mainColors.value.length + this.ephemeralColors.value.length;
+    if (totalColors >= MAX_PALETTE_SIZE) {
+      // Find closest existing color instead
+      return this.findClosestColorIndex(normalized);
+    }
+
+    // Add to ephemeral palette (append at end)
+    const newEphemeral = [...this.ephemeralColors.value, normalized];
+    this.ephemeralColors.value = newEphemeral;
+    this.rebuildColorMap();
+    // Note: ephemeral colors are not saved to localStorage
+
+    // Return the new ephemeral index
+    return this.mainColors.value.length + newEphemeral.length;
+  }
+
+  /**
+   * Promote an ephemeral color to the main palette.
+   * @param color Hex color to promote
+   * @returns New main palette index, or existing index if already in main
+   */
+  promoteEphemeralColor(color: string): number {
+    const normalized = this.normalizeHex(color);
+
+    // Already in main palette?
+    const mainIndex = this.colorToIndex.get(normalized);
+    if (mainIndex !== undefined) {
+      return mainIndex;
+    }
+
+    // Remove from ephemeral if present
+    const ephemeralIdx = this.ephemeralColors.value.indexOf(normalized);
+    if (ephemeralIdx !== -1) {
+      const newEphemeral = [...this.ephemeralColors.value];
+      newEphemeral.splice(ephemeralIdx, 1);
+      this.ephemeralColors.value = newEphemeral;
+    }
+
+    // Add to main palette using hue-based insertion
+    const insertionIndex = this.findInsertionIndex(normalized);
+    const newColors = [...this.mainColors.value];
+    newColors.splice(insertionIndex, 0, normalized);
+    this.mainColors.value = newColors;
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    return insertionIndex + 1;
+  }
+
+  /**
+   * Promote all ephemeral colors to the main palette.
+   */
+  promoteAllEphemeralColors() {
+    for (const color of this.ephemeralColors.value) {
+      this.promoteEphemeralColor(color);
+    }
+    // ephemeralColors is already cleared by promoteEphemeralColor
+  }
+
+  /**
+   * Clear all ephemeral colors without promoting them.
+   */
+  clearEphemeralColors() {
+    this.ephemeralColors.value = [];
+    this.rebuildColorMap();
   }
 
   /**
@@ -231,14 +360,27 @@ class PaletteStore {
 
   /**
    * Get the hex color for a palette index.
+   * Checks both main palette and ephemeral colors.
    * @param index 1-based palette index (0 = transparent)
    * @returns Hex color string, or null for transparent/invalid
    */
   getColorByIndex(index: number): string | null {
     if (index === 0) return null; // Transparent
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return null;
-    return this.colors.value[arrayIndex];
+
+    const mainLength = this.mainColors.value.length;
+
+    // Check main palette first (indices 1 to mainLength)
+    if (index >= 1 && index <= mainLength) {
+      return this.mainColors.value[index - 1];
+    }
+
+    // Check ephemeral colors (indices mainLength+1 to mainLength+ephemeralLength)
+    const ephemeralIndex = index - mainLength - 1;
+    if (ephemeralIndex >= 0 && ephemeralIndex < this.ephemeralColors.value.length) {
+      return this.ephemeralColors.value[ephemeralIndex];
+    }
+
+    return null;
   }
 
   addColor(color: string) {
@@ -477,11 +619,13 @@ class PaletteStore {
   }
 
   // ==========================================
-  // Lightness Variations
+  // Lightness Variations (Smart Shade Generation)
   // ==========================================
 
   /**
-   * Generate lightness variations for a given color.
+   * Generate lightness variations for a given color with pixel-art-style hue shifting.
+   * Shadows shift toward blue/purple, highlights shift toward yellow/orange.
+   * Peak shift occurs at mid-tones (25% and 75%), tapering at extremes.
    * Returns 7 variations from dark to light.
    */
   getLightnessVariations(hexColor: string): string[] {
@@ -491,11 +635,49 @@ class PaletteStore {
     const hsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
     const variations: string[] = [];
 
-    // Generate 7 variations: 15%, 25%, 35%, 50%, 65%, 75%, 85% lightness
-    const lightnessLevels = [15, 25, 35, 50, 65, 75, 85];
+    // Shade generation parameters: [lightness%, hueShift°, saturationShift%]
+    // Positive hue shift = toward blue (shadows), negative = toward yellow (highlights)
+    const shadeParams: [number, number, number][] = [
+      [15, 8, -15],   // Dark shadow - moderate shift, significant desat
+      [25, 12, -10],  // Peak shadow shift
+      [35, 6, -5],    // Light shadow
+      [50, 0, 0],     // Base color - no shift
+      [65, -6, -5],   // Light highlight
+      [75, -12, -10], // Peak highlight shift
+      [85, -8, -15],  // Bright highlight - moderate shift, significant desat
+    ];
 
-    for (const l of lightnessLevels) {
-      const newRgb = this.hslToRgb(hsl.h, hsl.s, l / 100);
+    // Check if color is grayscale (skip hue shifting)
+    const isGrayscale = hsl.s < 0.05;
+
+    // Check if hue is already in shadow/highlight direction (reduce shift)
+    // Hue is 0-1, so blue is ~0.55-0.72 (200-260°) and yellow/orange is ~0.08-0.17 (30-60°)
+    const hueInDegrees = hsl.h * 360;
+    const isAlreadyBlue = hueInDegrees >= 200 && hueInDegrees <= 260;
+    const isAlreadyYellow = hueInDegrees >= 30 && hueInDegrees <= 60;
+
+    for (const [lightness, hueShift, satShift] of shadeParams) {
+      let newHue = hsl.h;
+      let newSat = hsl.s;
+
+      if (!isGrayscale) {
+        // Apply hue shift (convert degrees to 0-1 range)
+        let adjustedHueShift = hueShift / 360;
+
+        // Reduce shift if color is already in that direction
+        if (hueShift > 0 && isAlreadyBlue) {
+          adjustedHueShift *= 0.5; // Reduce shadow shift for blue colors
+        } else if (hueShift < 0 && isAlreadyYellow) {
+          adjustedHueShift *= 0.5; // Reduce highlight shift for yellow colors
+        }
+
+        newHue = (hsl.h + adjustedHueShift + 1) % 1; // Keep in 0-1 range
+
+        // Apply saturation shift (relative to current saturation)
+        newSat = Math.max(0, Math.min(1, hsl.s * (1 + satShift / 100)));
+      }
+
+      const newRgb = this.hslToRgb(newHue, newSat, lightness / 100);
       variations.push(this.rgbToHex(newRgb.r, newRgb.g, newRgb.b));
     }
 

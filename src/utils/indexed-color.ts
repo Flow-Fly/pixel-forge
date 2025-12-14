@@ -31,19 +31,49 @@ export function rgbToHex(r: number, g: number, b: number): string {
 }
 
 /**
- * Get RGBA values for a palette index.
+ * Get RGBA values for a palette index using the palette store.
+ * Handles both main palette and ephemeral colors automatically.
  * @param index 1-based palette index (0 = transparent)
- * @param palette Array of hex colors
  * @returns [r, g, b, a] tuple
  */
-export function indexToRgba(index: number, palette: string[]): [number, number, number, number] {
+export function indexToRgbaFromStore(index: number): [number, number, number, number] {
   if (index === 0) {
     return [0, 0, 0, 0]; // Transparent
   }
 
+  const hex = paletteStore.getColorByIndex(index);
+  if (!hex) {
+    return [0, 0, 0, 0]; // Invalid index = transparent
+  }
+
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return [0, 0, 0, 0];
+  }
+
+  return [rgb.r, rgb.g, rgb.b, 255];
+}
+
+/**
+ * Get RGBA values for a palette index.
+ * @param index 1-based palette index (0 = transparent)
+ * @param palette Array of hex colors (optional - uses store if not provided)
+ * @returns [r, g, b, a] tuple
+ */
+export function indexToRgba(index: number, palette?: string[]): [number, number, number, number] {
+  if (index === 0) {
+    return [0, 0, 0, 0]; // Transparent
+  }
+
+  // If no palette provided, use the store (handles ephemeral colors)
+  if (!palette) {
+    return indexToRgbaFromStore(index);
+  }
+
   const arrayIndex = index - 1;
   if (arrayIndex < 0 || arrayIndex >= palette.length) {
-    return [0, 0, 0, 0]; // Invalid index = transparent
+    // Might be an ephemeral color - check store
+    return indexToRgbaFromStore(index);
   }
 
   const rgb = hexToRgb(palette[arrayIndex]);

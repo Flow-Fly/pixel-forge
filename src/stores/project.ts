@@ -101,12 +101,18 @@ class ProjectStore {
       f => f.id === animationStore.currentFrameId.value
     );
 
+    // Only include ephemeral palette if there are ephemeral colors
+    const ephemeralPalette = paletteStore.ephemeralColors.value.length > 0
+      ? paletteStore.ephemeralColors.value
+      : undefined;
+
     return {
       version: PROJECT_VERSION,
       name: this.name.value,
       width: this.width.value,
       height: this.height.value,
-      palette: paletteStore.colors.value, // v3.0+: Save the palette
+      palette: paletteStore.mainColors.value, // v3.0+: Save the main palette
+      ephemeralPalette, // v3.1+: Save ephemeral colors if any
       layers,
       frames,
       animation: {
@@ -130,6 +136,16 @@ class ProjectStore {
     // (legacy files will have index buffers built from canvas content during cel loading)
     if (file.palette && Array.isArray(file.palette) && file.palette.length > 0) {
       paletteStore.setPalette(file.palette);
+    }
+
+    // 2b. Restore Ephemeral Palette (v3.1+)
+    // If file has ephemeral colors, restore them
+    if (file.ephemeralPalette && Array.isArray(file.ephemeralPalette) && file.ephemeralPalette.length > 0) {
+      paletteStore.ephemeralColors.value = file.ephemeralPalette;
+      paletteStore.rebuildColorMap();
+    } else {
+      // Clear any existing ephemeral colors when loading a project without them
+      paletteStore.clearEphemeralColors();
     }
 
     // 3. Restore Layers
@@ -336,6 +352,9 @@ class ProjectStore {
 
     // 8. Clear tags
     animationStore.tags.value = [];
+
+    // 8b. Clear ephemeral colors
+    paletteStore.clearEphemeralColors();
 
     // 9. Reset animation settings
     animationStore.fps.value = 12;
