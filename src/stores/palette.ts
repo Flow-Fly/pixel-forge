@@ -1,14 +1,13 @@
 import { signal } from '../core/signal';
 import { layerStore } from './layers';
 import { animationStore } from './animation';
+import { PRESET_PALETTES, PALETTE_BY_ID, type PresetPalette } from '../data/preset-palettes';
 
-// DB32 Palette - Default colors
-const DB32_COLORS = [
-  '#000000', '#222034', '#45283c', '#663931', '#8f563b', '#df7126', '#d9a066', '#eec39a',
-  '#fbf236', '#99e550', '#6abe30', '#37946e', '#4b692f', '#524b24', '#323c39', '#3f3f74',
-  '#306082', '#5b6ee1', '#639bff', '#5fcde4', '#cbdbfc', '#ffffff', '#9badb7', '#847e87',
-  '#696a6a', '#595652', '#76428a', '#ac3232', '#d95763', '#d77bba', '#8f974a', '#8a6f30'
-];
+// Re-export for convenience
+export { PRESET_PALETTES, type PresetPalette };
+
+// DB32 Palette - Default colors (kept for backward compatibility)
+const DB32_COLORS = PALETTE_BY_ID.get('db32')!.colors;
 
 /** Maximum number of colors in indexed mode (standard limit) */
 const MAX_PALETTE_SIZE = 256;
@@ -19,6 +18,9 @@ class PaletteStore {
 
   /** Ephemeral colors (auto-generated shades, not in main palette) */
   ephemeralColors = signal<string[]>([]);
+
+  /** Current preset palette ID, or 'custom' if modified */
+  currentPaletteId = signal<string>('db32');
 
   /** @deprecated Use mainColors instead - kept for compatibility during migration */
   get colors() {
@@ -297,6 +299,7 @@ class PaletteStore {
     const colors = [...this.colors.value];
     colors[arrayIndex] = normalized;
     this.colors.value = colors;
+    this.currentPaletteId.value = 'custom';
     this.rebuildColorMap();
     this.saveToStorage();
 
@@ -386,6 +389,7 @@ class PaletteStore {
   addColor(color: string) {
     if (!this.colors.value.includes(color)) {
       this.colors.value = [...this.colors.value, color];
+      this.currentPaletteId.value = 'custom';
       this.rebuildColorMap();
       this.saveToStorage();
     }
@@ -396,6 +400,7 @@ class PaletteStore {
       const newColors = [...this.colors.value];
       newColors.splice(index, 1);
       this.colors.value = newColors;
+      this.currentPaletteId.value = 'custom';
       this.rebuildColorMap();
       this.saveToStorage();
 
@@ -418,6 +423,7 @@ class PaletteStore {
     const [movedColor] = colors.splice(fromIndex, 1);
     colors.splice(toIndex, 0, movedColor);
     this.colors.value = colors;
+    this.currentPaletteId.value = 'custom';
     this.rebuildColorMap();
     this.saveToStorage();
 
@@ -428,12 +434,43 @@ class PaletteStore {
   }
 
   resetToDefault() {
-    this.colors.value = [...DB32_COLORS];
+    this.loadPreset('db32');
+  }
+
+  /**
+   * Load a preset palette by ID.
+   * @param id Preset palette ID (e.g., 'db32', 'pico8', 'gameboy')
+   */
+  loadPreset(id: string) {
+    const preset = PALETTE_BY_ID.get(id);
+    if (!preset) {
+      console.warn(`Unknown palette preset: ${id}`);
+      return;
+    }
+
+    this.mainColors.value = [...preset.colors];
+    this.ephemeralColors.value = [];
+    this.currentPaletteId.value = id;
     this.rebuildColorMap();
     this.saveToStorage();
 
     // Dispatch event to rebuild all canvases
-    window.dispatchEvent(new CustomEvent('palette-reset'));
+    window.dispatchEvent(new CustomEvent('palette-replaced'));
+  }
+
+  /**
+   * Create an empty palette (just transparent).
+   * User can then build their own palette from scratch.
+   */
+  createEmpty() {
+    this.mainColors.value = [];
+    this.ephemeralColors.value = [];
+    this.currentPaletteId.value = 'custom';
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    // Dispatch event to rebuild all canvases
+    window.dispatchEvent(new CustomEvent('palette-replaced'));
   }
 
   /**
@@ -442,6 +479,7 @@ class PaletteStore {
    */
   setPalette(colors: string[]) {
     this.colors.value = colors.map(c => this.normalizeHex(c));
+    this.currentPaletteId.value = 'custom';
     this.rebuildColorMap();
     this.saveToStorage();
 
