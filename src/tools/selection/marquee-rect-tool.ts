@@ -53,12 +53,14 @@ export class MarqueeRectTool extends BaseTool {
     }
   }
 
-  onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
+  onUp(_x: number, _y: number, modifiers?: ModifierKeys) {
     if (this.mode === 'selecting') {
       // Get active layer canvas for content-aware trimming
       const activeLayerId = layerStore.activeLayerId.value;
       const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-      selectionStore.finalizeSelection(layer?.canvas);
+      // Shrink to content only if Ctrl is held
+      const shrinkToContent = modifiers?.ctrl ?? false;
+      selectionStore.finalizeSelection(layer?.canvas, shrinkToContent);
     }
     // If dragging, stay floating (wait for commit)
 

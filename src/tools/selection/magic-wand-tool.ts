@@ -47,7 +47,9 @@ export class MagicWandTool extends BaseTool {
       selectionStore.setMode('replace');
     }
 
-    this.selectRegion(x, y);
+    // Shrink to content only if Ctrl is held
+    const shrinkToContent = modifiers?.ctrl ?? false;
+    this.selectRegion(x, y, shrinkToContent);
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
@@ -138,7 +140,7 @@ export class MagicWandTool extends BaseTool {
     return true;
   }
 
-  private selectRegion(x: number, y: number) {
+  private selectRegion(x: number, y: number, shrinkToContent: boolean = false) {
     const activeLayerId = layerStore.activeLayerId.value;
     const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
 
@@ -189,18 +191,18 @@ export class MagicWandTool extends BaseTool {
 
     if (mode === 'replace' || currentState.type === 'none') {
       // Simple replace
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas);
+      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
     } else if (mode === 'add' && currentState.type === 'selected') {
       // Add to existing selection
       const combined = this.combineMasks(currentState, bounds, mask, 'add');
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       }
     } else if (mode === 'subtract' && currentState.type === 'selected') {
       // Subtract from existing selection
       const combined = this.combineMasks(currentState, bounds, mask, 'subtract');
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
         selectionStore.clear();
       }

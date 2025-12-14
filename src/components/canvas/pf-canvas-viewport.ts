@@ -545,17 +545,21 @@ export class PFCanvasViewport extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
-    // Alt or Cmd/Meta + Click = Quick Eyedropper
+    // Check if current tool is a selection tool (needs Alt for subtract mode, Ctrl for shrink-to-content)
+    const currentTool = toolStore.activeTool.value;
+    const isSelectionTool = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'].includes(currentTool);
+
+    // Alt or Cmd/Meta + Click = Quick Eyedropper (but not for selection tools - they use Alt for subtract)
     // Left click: pick to foreground, Right click: pick to background
-    if (e.altKey || e.metaKey) {
+    if ((e.altKey || e.metaKey) && !isSelectionTool) {
       e.preventDefault();
       e.stopPropagation();
       this.triggerQuickEyedropper(e);
       return;
     }
 
-    // Ctrl+Click for lightness shifting (Ctrl only, not Meta)
-    if (e.ctrlKey) {
+    // Ctrl+Click for lightness shifting (Ctrl only, not Meta) - but not for selection tools
+    if (e.ctrlKey && !isSelectionTool) {
       if (e.button === 0) {
         // Left click: shift darker
         e.preventDefault();

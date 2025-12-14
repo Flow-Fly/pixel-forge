@@ -17,6 +17,11 @@ class SelectionStore {
   // Track the layer we're operating on
   private activeLayerId: string | null = null;
 
+  // Rotation performance optimization: rAF throttling
+  private pendingRotation: number | null = null;
+  private rotationRafId: number | null = null;
+  private isRotationDragging = false;
+
   // Convenience getters
   get isActive(): boolean {
     return this.state.value.type !== "none";
@@ -99,9 +104,10 @@ class SelectionStore {
 
   /**
    * Finalize the current selection.
-   * If a canvas is provided, the bounds will be trimmed to exclude transparent pixels.
+   * @param canvas - Optional canvas for content-aware trimming
+   * @param shrinkToContent - If true and canvas provided, trim bounds to exclude transparent pixels
    */
-  finalizeSelection(canvas?: HTMLCanvasElement) {
+  finalizeSelection(canvas?: HTMLCanvasElement, shrinkToContent: boolean = false) {
     const s = this.state.value;
     if (s.type !== "selecting") return;
 
@@ -119,8 +125,8 @@ class SelectionStore {
 
     let finalBounds = s.currentBounds;
 
-    // If canvas provided, trim bounds to content
-    if (canvas) {
+    // If shrinkToContent is true and canvas provided, trim bounds to content
+    if (shrinkToContent && canvas) {
       const trimmed = this.trimBoundsToContent(
         canvas,
         s.currentBounds,
@@ -213,12 +219,16 @@ class SelectionStore {
   /**
    * Finalize a freeform selection with a mask.
    * Called by lasso and magic wand tools.
-   * If a canvas is provided, the bounds will be trimmed to exclude transparent pixels.
+   * @param bounds - The bounds of the selection
+   * @param mask - The selection mask
+   * @param canvas - Optional canvas for content-aware trimming
+   * @param shrinkToContent - If true and canvas provided, trim bounds to exclude transparent pixels
    */
   finalizeFreeformSelection(
     bounds: Rect,
     mask: Uint8Array,
-    canvas?: HTMLCanvasElement
+    canvas?: HTMLCanvasElement,
+    shrinkToContent: boolean = false
   ) {
     // Validate mask size matches bounds
     if (mask.length !== bounds.width * bounds.height) {
@@ -230,8 +240,8 @@ class SelectionStore {
     let finalBounds = bounds;
     let finalMask = mask;
 
-    // If canvas provided, trim bounds to content
-    if (canvas) {
+    // If shrinkToContent is true and canvas provided, trim bounds to content
+    if (shrinkToContent && canvas) {
       const trimmed = this.trimFreeformToContent(canvas, bounds, mask);
       if (!trimmed) {
         // All transparent or empty - no selection
@@ -248,6 +258,36 @@ class SelectionStore {
       bounds: finalBounds,
       mask: finalMask,
     };
+  }
+
+  /**
+   * Shrink the current selection to fit its content.
+   * Called by context bar button.
+   */
+  shrinkToContent(canvas: HTMLCanvasElement) {
+    const s = this.state.value;
+    if (s.type !== "selected") return;
+
+    if (s.shape === "freeform") {
+      const trimmed = this.trimFreeformToContent(canvas, s.bounds, s.mask);
+      if (trimmed) {
+        this.state.value = {
+          type: "selected",
+          shape: "freeform",
+          bounds: trimmed.bounds,
+          mask: trimmed.mask,
+        };
+      }
+    } else {
+      const trimmed = this.trimBoundsToContent(canvas, s.bounds, s.shape);
+      if (trimmed) {
+        this.state.value = {
+          type: "selected",
+          shape: s.shape,
+          bounds: trimmed,
+        };
+      }
+    }
   }
 
   /**
@@ -427,22 +467,86 @@ class SelectionStore {
   }
 
   /**
+   * Start rotation drag - enables draft quality and rAF throttling.
+   * Called when user starts dragging a rotation handle.
+   */
+  startRotationDrag() {
+    this.isRotationDragging = true;
+  }
+
+  /**
+   * End rotation drag - regenerates preview at full quality.
+   * Called when user releases the rotation handle.
+   */
+  endRotationDrag() {
+    this.isRotationDragging = false;
+
+    // Cancel any pending rAF
+    if (this.rotationRafId !== null) {
+      cancelAnimationFrame(this.rotationRafId);
+      this.rotationRafId = null;
+    }
+
+    // If there's a pending rotation, apply it at full quality
+    if (this.pendingRotation !== null) {
+      this._applyRotation(this.pendingRotation, "final");
+      this.pendingRotation = null;
+    } else {
+      // Regenerate current rotation at full quality
+      const s = this.state.value;
+      if (s.type === "transforming" && s.rotation !== 0) {
+        this._applyRotation(s.rotation, "final");
+      }
+    }
+  }
+
+  /**
    * Update rotation angle and regenerate preview.
    * Called during drag or when context bar slider changes.
+   * Uses rAF throttling during drag to prevent frame drops.
    * Uses CleanEdge algorithm for high-quality pixel art rotation.
    */
   updateRotation(angleDegrees: number) {
     const s = this.state.value;
     if (s.type !== "transforming") return;
 
+    // If dragging, use rAF throttling to batch updates
+    if (this.isRotationDragging) {
+      this.pendingRotation = angleDegrees;
+
+      if (this.rotationRafId === null) {
+        this.rotationRafId = requestAnimationFrame(() => {
+          this.rotationRafId = null;
+          if (this.pendingRotation !== null) {
+            this._applyRotation(this.pendingRotation, "draft");
+            this.pendingRotation = null;
+          }
+        });
+      }
+    } else {
+      // Not dragging (e.g., slider or direct input) - apply immediately at full quality
+      this._applyRotation(angleDegrees, "final");
+    }
+  }
+
+  /**
+   * Internal method to apply rotation at specified quality.
+   */
+  private _applyRotation(
+    angleDegrees: number,
+    quality: "draft" | "final"
+  ) {
+    const s = this.state.value;
+    if (s.type !== "transforming") return;
+
     const normalizedAngle = normalizeAngle(angleDegrees);
 
-    // Generate preview using CleanEdge (high quality)
+    // Generate preview using CleanEdge
     let previewData: ImageData | null = null;
     let newBounds = s.originalBounds;
 
     if (normalizedAngle !== 0) {
-      previewData = rotateCleanEdge(s.imageData, normalizedAngle);
+      previewData = rotateCleanEdge(s.imageData, normalizedAngle, { quality });
       newBounds = calculateRotatedBounds(s.originalBounds, normalizedAngle);
       // Ensure bounds dimensions match preview
       newBounds.width = previewData.width;

@@ -247,6 +247,9 @@ export class PFTransformHandles extends BaseComponent {
     this.dragStartAngle = angleFromCenter(center.x, center.y, mouseX, mouseY);
     this.initialRotation = selectionStore.rotation;
 
+    // Enable draft quality and rAF throttling for live preview performance
+    selectionStore.startRotationDrag();
+
     e.preventDefault();
     e.stopPropagation();
   };
@@ -285,6 +288,10 @@ export class PFTransformHandles extends BaseComponent {
   private handleDocumentMouseUp = () => {
     if (this.isDragging) {
       this.isDragging = false;
+
+      // Regenerate preview at full quality now that drag is complete
+      selectionStore.endRotationDrag();
+
       this.dispatchEvent(
         new CustomEvent("rotation-end", {
           bubbles: true,

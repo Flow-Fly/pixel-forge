@@ -78,7 +78,9 @@ export class PolygonalLassoTool extends BaseTool {
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist < 5) {
-          this.closePolygon();
+          // Shrink to content only if Ctrl is held
+          const shrinkToContent = modifiers?.ctrl ?? false;
+          this.closePolygon(shrinkToContent);
           return;
         }
       }
@@ -170,7 +172,7 @@ export class PolygonalLassoTool extends BaseTool {
     selectionStore.resetMode();
   }
 
-  private closePolygon() {
+  private closePolygon(shrinkToContent: boolean = false) {
     if (this.vertices.length < 3) {
       this.cancel();
       return;
@@ -203,12 +205,12 @@ export class PolygonalLassoTool extends BaseTool {
     if (mode !== 'replace' && currentState.type === 'selected') {
       const combined = this.combineMasks(currentState, bounds, mask, mode);
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas);
+        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
         selectionStore.clear();
       }
     } else {
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas);
+      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
     }
 
     selectionStore.resetMode();

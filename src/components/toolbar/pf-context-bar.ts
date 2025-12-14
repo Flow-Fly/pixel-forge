@@ -3,6 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { toolStore } from "../../stores/tools";
 import { selectionStore } from "../../stores/selection";
+import { layerStore } from "../../stores/layers";
 import { animationStore } from "../../stores/animation";
 import { historyStore } from "../../stores/history";
 import { getToolMeta } from "../../tools/tool-registry";
@@ -256,6 +257,11 @@ export class PFContextBar extends BaseComponent {
       return this._renderTransformControls();
     }
 
+    // Check if we have an active selection - show selection controls
+    if (selectionState.type === "selected") {
+      return this._renderSelectionControls(selectionState);
+    }
+
     const tool = toolStore.activeTool.value;
     const meta = getToolMeta(tool);
 
@@ -390,6 +396,48 @@ export class PFContextBar extends BaseComponent {
   private _cancelTransform() {
     if (this.isCommitting) return;
     selectionStore.cancelTransform();
+  }
+
+  private _renderSelectionControls(selectionState: { bounds: { width: number; height: number } }) {
+    const bounds = selectionState.bounds;
+
+    return html`
+      <span class="tool-name">Selection</span>
+      <div class="separator"></div>
+
+      <div class="selection-section" style="display: flex; align-items: center; gap: var(--pf-spacing-2);">
+        <span style="color: var(--pf-color-text-muted); font-size: 11px;">
+          ${bounds.width} × ${bounds.height} px
+        </span>
+        <div class="separator"></div>
+        <button
+          class="action-btn"
+          @click=${this._shrinkToContent}
+          title="Shrink selection to fit content (Ctrl+release during draw)"
+        >
+          Shrink to Content
+        </button>
+        <button
+          class="action-btn"
+          @click=${this._clearSelection}
+          title="Deselect (Escape)"
+        >
+          Deselect
+        </button>
+      </div>
+    `;
+  }
+
+  private _shrinkToContent() {
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (layer?.canvas) {
+      selectionStore.shrinkToContent(layer.canvas);
+    }
+  }
+
+  private _clearSelection() {
+    selectionStore.clear();
   }
 
   _formatToolName(tool: string): string {
