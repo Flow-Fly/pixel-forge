@@ -3,8 +3,10 @@ import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { colorStore } from '../../stores/colors';
 import { paletteStore } from '../../stores/palette';
-import './pf-lightness-subpalette';
+import { historyStore } from '../../stores/history';
+import { PaletteChangeCommand } from '../../commands/palette-command';
 import '../ui/pf-popover';
+import './pf-color-picker-popup';
 
 @customElement('pf-palette-panel')
 export class PFPalettePanel extends BaseComponent {
@@ -146,39 +148,15 @@ export class PFPalettePanel extends BaseComponent {
 
     .swatch {
       aspect-ratio: 1;
-      cursor: grab;
+      cursor: pointer;
       position: relative;
-      transition: transform 0.1s ease, opacity 0.1s ease;
+      transition: transform 0.1s ease;
     }
 
     .swatch:hover {
       transform: scale(1.1);
       z-index: 1;
       box-shadow: 0 0 4px rgba(0,0,0,0.5);
-    }
-
-    .swatch.dragging {
-      opacity: 0.4;
-      cursor: grabbing;
-    }
-
-    .swatch.insert-before::before,
-    .swatch.insert-after::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 3px;
-      background: var(--pf-color-accent, #4a9eff);
-      z-index: 10;
-    }
-
-    .swatch.insert-before::before {
-      left: -2px;
-    }
-
-    .swatch.insert-after::after {
-      right: -2px;
     }
 
 
@@ -291,17 +269,17 @@ export class PFPalettePanel extends BaseComponent {
     }
   `;
 
-  @state() private lightnessTarget: { color: string; x: number; y: number } | null = null;
   @state() private hexInput = '';
   @state() private hexInvalid = false;
   @state() private showAddPopover = false;
   @state() private extractionExpanded = false;
   @state() private addBtnRect: DOMRect | null = null;
 
-  // Drag and drop state
-  @state() private draggedIndex: number | null = null;
-  @state() private dragOverIndex: number | null = null;
-  @state() private insertPosition: 'before' | 'after' | null = null;
+  // Color picker popup state
+  @state() private showColorPicker = false;
+  @state() private editingColor = '';
+  @state() private editingIndex = 0;
+  @state() private anchorElement: HTMLElement | null = null;
 
   @query('.add-btn') private addButton!: HTMLButtonElement;
 
@@ -310,17 +288,31 @@ export class PFPalettePanel extends BaseComponent {
     colorStore.updateLightnessVariations(color);
   }
 
-  private handleSwatchRightClick(e: MouseEvent, color: string) {
+  private handleSwatchRightClick(e: MouseEvent, color: string, index: number) {
     e.preventDefault();
-    this.lightnessTarget = {
-      color,
-      x: e.clientX,
-      y: e.clientY
-    };
+    this.editingColor = color;
+    this.editingIndex = index;
+    this.anchorElement = e.currentTarget as HTMLElement;
+    this.showColorPicker = true;
   }
 
-  private closeLightnessSubpalette() {
-    this.lightnessTarget = null;
+  private handleColorPickerApply(e: CustomEvent) {
+    const { color, paletteIndex } = e.detail;
+    // paletteIndex is 0-based array index
+    const oneBasedIndex = paletteIndex + 1;
+    const previousColor = paletteStore.getColorByIndex(oneBasedIndex);
+
+    if (previousColor && previousColor !== color) {
+      // Create and execute command for undo/redo support
+      const command = new PaletteChangeCommand(oneBasedIndex, previousColor, color);
+      historyStore.execute(command);
+    }
+
+    this.showColorPicker = false;
+  }
+
+  private handleColorPickerCancel() {
+    this.showColorPicker = false;
   }
 
   private resetPalette() {
@@ -386,83 +378,6 @@ export class PFPalettePanel extends BaseComponent {
     paletteStore.addColor(color);
   }
 
-  // ==========================================
-  // Drag and Drop Methods
-  // ==========================================
-
-  private handleDragStart(index: number, e: DragEvent) {
-    this.draggedIndex = index;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(index));
-    }
-  }
-
-  private handleDragEnd() {
-    this.draggedIndex = null;
-    this.dragOverIndex = null;
-    this.insertPosition = null;
-  }
-
-  private handleDragOver(index: number, e: DragEvent) {
-    e.preventDefault();
-    if (this.draggedIndex !== null && this.draggedIndex !== index) {
-      this.dragOverIndex = index;
-
-      // Determine if we're on the left or right half of the swatch
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const midpoint = rect.left + rect.width / 2;
-      this.insertPosition = e.clientX < midpoint ? 'before' : 'after';
-    }
-  }
-
-  private handleDragLeave() {
-    this.dragOverIndex = null;
-    this.insertPosition = null;
-  }
-
-  private handleDrop(targetIndex: number, e: DragEvent) {
-    e.preventDefault();
-
-    // Check if this is an extracted color being dropped
-    const extractedColor = e.dataTransfer?.getData('application/x-palette-color');
-    if (extractedColor) {
-      paletteStore.addExtractedColor(extractedColor);
-      return;
-    }
-
-    // Otherwise handle palette reordering
-    if (this.draggedIndex === null || this.draggedIndex === targetIndex) return;
-
-    // Calculate the actual insert index based on position
-    let insertIndex = targetIndex;
-    if (this.insertPosition === 'after') {
-      insertIndex = targetIndex + 1;
-    }
-
-    // Adjust if dragging from before the target
-    if (this.draggedIndex < insertIndex) {
-      insertIndex--;
-    }
-
-    paletteStore.moveColor(this.draggedIndex, insertIndex);
-    this.draggedIndex = null;
-    this.dragOverIndex = null;
-    this.insertPosition = null;
-  }
-
-  // Handle drops on the grid itself (for extracted colors)
-  private handleGridDrop(e: DragEvent) {
-    e.preventDefault();
-    const extractedColor = e.dataTransfer?.getData('application/x-palette-color');
-    if (extractedColor) {
-      paletteStore.addExtractedColor(extractedColor);
-    }
-  }
-
-  private handleGridDragOver(e: DragEvent) {
-    e.preventDefault();
-  }
 
   // ==========================================
   // Extraction Methods
@@ -546,31 +461,16 @@ export class PFPalettePanel extends BaseComponent {
         </div>
       </pf-popover>
 
-      <div
-        class="palette-grid"
-        @dragover=${this.handleGridDragOver}
-        @drop=${this.handleGridDrop}
-      >
-        ${colors.map((color, index) => {
-          const isDragging = this.draggedIndex === index;
-          const isDropTarget = this.dragOverIndex === index;
-          const insertClass = isDropTarget && this.insertPosition ? `insert-${this.insertPosition}` : '';
-          return html`
-            <div
-              class="swatch ${isDragging ? 'dragging' : ''} ${insertClass}"
-              style="background-color: ${color}"
-              title="${color} - Right-click for variations"
-              draggable="true"
-              @dragstart=${(e: DragEvent) => this.handleDragStart(index, e)}
-              @dragend=${this.handleDragEnd}
-              @dragover=${(e: DragEvent) => this.handleDragOver(index, e)}
-              @dragleave=${this.handleDragLeave}
-              @drop=${(e: DragEvent) => this.handleDrop(index, e)}
-              @click=${() => this.selectColor(color)}
-              @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color)}
-            ></div>
-          `;
-        })}
+      <div class="palette-grid">
+        ${colors.map((color, index) => html`
+          <div
+            class="swatch"
+            style="background-color: ${color}"
+            title="${color}"
+            @click=${() => this.selectColor(color)}
+            @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color, index)}
+          ></div>
+        `)}
       </div>
 
       <div class="extraction-section">
@@ -613,14 +513,14 @@ export class PFPalettePanel extends BaseComponent {
         ` : ''}
       </div>
 
-      ${this.lightnessTarget ? html`
-        <pf-lightness-subpalette
-          .color=${this.lightnessTarget.color}
-          .x=${this.lightnessTarget.x}
-          .y=${this.lightnessTarget.y}
-          @close=${this.closeLightnessSubpalette}
-        ></pf-lightness-subpalette>
-      ` : ''}
+      <pf-color-picker-popup
+        ?open=${this.showColorPicker}
+        .color=${this.editingColor}
+        .paletteIndex=${this.editingIndex}
+        .anchorElement=${this.anchorElement}
+        @apply=${this.handleColorPickerApply}
+        @cancel=${this.handleColorPickerCancel}
+      ></pf-color-picker-popup>
     `;
   }
 }

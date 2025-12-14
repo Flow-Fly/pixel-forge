@@ -2,9 +2,11 @@ import { signal } from '../core/signal';
 import { layerStore } from './layers';
 import { animationStore, EMPTY_CEL_LINK_ID } from './animation';
 import { historyStore } from './history';
+import { paletteStore } from './palette';
 import { persistenceService } from '../services/persistence/indexed-db';
 import { onionSkinCache } from '../services/onion-skin-cache';
 import { canvasToPngBytes, loadImageDataToCanvas } from '../utils/canvas-binary';
+import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 
 /**
@@ -56,7 +58,7 @@ class ProjectStore {
       }))
     );
 
-    // Convert frames/cels to binary format (including text cel data and linked cel info)
+    // Convert frames/cels to binary format (including text cel data, linked cel info, and index buffer)
     const frames = await Promise.all(
       animationStore.frames.value.map(async frame => {
         const cels = await Promise.all(
@@ -65,6 +67,12 @@ class ProjectStore {
             const cel = animationStore.cels.value.get(celKey);
             const canvas = cel?.canvas;
             const textCelData = animationStore.getTextCelData(layer.id, frame.id);
+
+            // Serialize index buffer to array if present
+            const indexData = cel?.indexBuffer
+              ? Array.from(cel.indexBuffer)
+              : undefined;
+
             return {
               layerId: layer.id,
               data: canvas
@@ -74,7 +82,9 @@ class ProjectStore {
               ...(cel?.linkedCelId && { linkedCelId: cel.linkedCelId }),
               ...(cel?.linkType && { linkType: cel.linkType }),
               // Include text cel data if present
-              ...(textCelData && { textCelData })
+              ...(textCelData && { textCelData }),
+              // Include index buffer data if present (v3.0+)
+              ...(indexData && { indexData })
             };
           })
         );
@@ -96,6 +106,7 @@ class ProjectStore {
       name: this.name.value,
       width: this.width.value,
       height: this.height.value,
+      palette: paletteStore.colors.value, // v3.0+: Save the palette
       layers,
       frames,
       animation: {
@@ -114,7 +125,14 @@ class ProjectStore {
     this.setSize(file.width, file.height);
     this.name.value = file.name || 'Untitled';
 
-    // 2. Restore Layers
+    // 2. Restore Palette (v3.0+)
+    // If file has palette, use it; otherwise keep current palette
+    // (legacy files will have index buffers built from canvas content during cel loading)
+    if (file.palette && Array.isArray(file.palette) && file.palette.length > 0) {
+      paletteStore.setPalette(file.palette);
+    }
+
+    // 3. Restore Layers
     // Clear all layers (layerStore.removeLayer doesn't have a "last layer" guard)
     while (layerStore.layers.value.length > 0) {
       layerStore.removeLayer(layerStore.layers.value[0].id);
@@ -144,7 +162,7 @@ class ProjectStore {
       }
     }
 
-    // 3. Restore Frames
+    // 4. Restore Frames
     // Delete all frames except the last one (deleteFrame guards against deleting last)
     while (animationStore.frames.value.length > 1) {
       animationStore.deleteFrame(animationStore.frames.value[0].id);
@@ -195,6 +213,32 @@ class ProjectStore {
           await loadImageDataToCanvas(c.data, canvas);
         }
 
+        // Restore index buffer data (v3.0+)
+        // If cel has indexData, restore it directly
+        // If legacy file (no indexData), build index buffer from canvas content
+        const currentCel = animationStore.cels.value.get(celKey);
+        if (currentCel && hasImageData(c.data)) {
+          const cels = new Map(animationStore.cels.value);
+
+          if (c.indexData && Array.isArray(c.indexData)) {
+            // v3.0+ file: restore index buffer from saved data
+            cels.set(celKey, {
+              ...currentCel,
+              indexBuffer: new Uint8Array(c.indexData)
+            });
+          } else if (canvas && !file.palette) {
+            // Legacy file migration: build index buffer from canvas content
+            // This also adds any new colors to the palette
+            const indexBuffer = buildIndexBufferFromCanvas(canvas, true);
+            cels.set(celKey, {
+              ...currentCel,
+              indexBuffer
+            });
+          }
+
+          animationStore.cels.value = cels;
+        }
+
         // Restore text cel data if present (v2.1+)
         if (c.textCelData) {
           animationStore.setTextCelData(c.layerId, newFrame.id, c.textCelData);
@@ -236,7 +280,7 @@ class ProjectStore {
       animationStore.deleteFrame(placeholderFrameId);
     }
 
-    // 4. Animation Settings
+    // 5. Animation Settings
     animationStore.fps.value = file.animation.fps;
 
     const targetFrame = animationStore.frames.value[file.animation.currentFrameIndex];
@@ -244,7 +288,7 @@ class ProjectStore {
       animationStore.goToFrame(targetFrame.id);
     }
 
-    // 5. Restore Tags (v2.0+)
+    // 6. Restore Tags (v2.0+)
     if (file.tags && Array.isArray(file.tags)) {
       animationStore.tags.value = file.tags;
     } else {

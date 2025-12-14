@@ -4,11 +4,15 @@ import { brushStore } from '../stores/brush';
 import { toolSizes } from '../stores/tool-settings';
 import { guidesStore } from '../stores/guides';
 import { projectStore } from '../stores/project';
+import { paletteStore } from '../stores/palette';
+import { animationStore } from '../stores/animation';
+import { layerStore } from '../stores/layers';
 import {
   bresenhamLine,
   constrainWithStickyAngles,
   isLShape,
 } from '../services/drawing/algorithms';
+import { setIndexBufferPixel } from '../utils/indexed-color';
 
 // Distance threshold as percentage of spacing (0.3 = within 30% of spacing distance)
 const DISTANCE_THRESHOLD = 0.3;
@@ -81,6 +85,10 @@ export class PencilTool extends BaseTool {
   // Snapshot of canvas before current stroke (for pixel-perfect restore)
   private strokeStartSnapshot: ImageData | null = null;
 
+  // Cached index buffer and palette index for current stroke
+  private currentIndexBuffer: Uint8Array | null = null;
+  private currentPaletteIndex: number = 0;
+
   constructor(context: CanvasRenderingContext2D) {
     super();
     this.setContext(context);
@@ -96,6 +104,17 @@ export class PencilTool extends BaseTool {
     // Capture canvas state before stroke for pixel-perfect restore
     const canvas = this.context.canvas;
     this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Initialize indexed color support for this stroke
+    const layerId = layerStore.activeLayerId.value;
+    const frameId = animationStore.currentFrameId.value;
+    if (layerId) {
+      // Ensure cel has an index buffer (creates if needed, migrates from canvas if has content)
+      this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+      // Get or add color to palette, get the palette index
+      const color = colorStore.primaryColor.value;
+      this.currentPaletteIndex = paletteStore.getOrAddColor(color);
+    }
 
     // Shift+Click: draw line from last stroke end to current position
     // Ctrl+Shift+Click: angle-snapped line (45 degree increments)
@@ -178,6 +197,8 @@ export class PencilTool extends BaseTool {
     this.drawnPoints = [];
     this.stampPositions = [];
     this.strokeStartSnapshot = null; // Free memory
+    this.currentIndexBuffer = null;
+    this.currentPaletteIndex = 0;
   }
 
   onMove(x: number, y: number, modifiers?: ModifierKeys) {
@@ -368,10 +389,20 @@ export class PencilTool extends BaseTool {
 
         if (a === 0) {
           this.context.clearRect(pixelX, pixelY, 1, 1);
+          // Also clear index buffer
+          if (this.currentIndexBuffer) {
+            setIndexBufferPixel(this.currentIndexBuffer, canvas.width, pixelX, pixelY, 0);
+          }
         } else {
           this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
           this.context.globalAlpha = 1;
           this.context.fillRect(pixelX, pixelY, 1, 1);
+          // Restore index buffer
+          if (this.currentIndexBuffer) {
+            const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+            const originalIndex = paletteStore.getColorIndex(hex);
+            setIndexBufferPixel(this.currentIndexBuffer, canvas.width, pixelX, pixelY, originalIndex);
+          }
         }
       }
     }
@@ -415,6 +446,7 @@ export class PencilTool extends BaseTool {
 
     const brush = brushStore.activeBrush.value;
     const size = toolSizes.pencil.value;
+    const canvasWidth = this.context.canvas.width;
 
     this.context.globalAlpha = brush.opacity;
     this.context.fillStyle = colorStore.primaryColor.value;
@@ -423,19 +455,49 @@ export class PencilTool extends BaseTool {
     const halfSize = Math.floor(size / 2);
     this.context.fillRect(x - halfSize, y - halfSize, size, size);
 
+    // Update index buffer for indexed color mode
+    if (this.currentIndexBuffer && this.currentPaletteIndex > 0) {
+      // Write to all pixels in the brush stamp
+      for (let py = 0; py < size; py++) {
+        for (let px = 0; px < size; px++) {
+          setIndexBufferPixel(
+            this.currentIndexBuffer,
+            canvasWidth,
+            x - halfSize + px,
+            y - halfSize + py,
+            this.currentPaletteIndex
+          );
+        }
+      }
+    }
+
     // Mark dirty region for partial redraw (convert center to top-left)
     const dirtyX = x - halfSize;
     const dirtyY = y - halfSize;
     this.markDirty(dirtyX, dirtyY, size);
 
     // Mirror drawing: draw at mirrored positions if guides are active
-    const canvasWidth = projectStore.width.value;
     const canvasHeight = projectStore.height.value;
     const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
 
     for (const pos of mirrorPositions) {
       this.context.fillRect(pos.x - halfSize, pos.y - halfSize, size, size);
       this.markDirty(pos.x - halfSize, pos.y - halfSize, size);
+
+      // Update index buffer for mirrored positions too
+      if (this.currentIndexBuffer && this.currentPaletteIndex > 0) {
+        for (let py = 0; py < size; py++) {
+          for (let px = 0; px < size; px++) {
+            setIndexBufferPixel(
+              this.currentIndexBuffer,
+              canvasWidth,
+              pos.x - halfSize + px,
+              pos.y - halfSize + py,
+              this.currentPaletteIndex
+            );
+          }
+        }
+      }
     }
 
     this.context.globalAlpha = 1;
@@ -488,6 +550,10 @@ export class PencilTool extends BaseTool {
     // If no snapshot, fall back to clearing
     if (!this.strokeStartSnapshot) {
       this.context.clearRect(x, y, 1, 1);
+      // Also clear index buffer
+      if (this.currentIndexBuffer) {
+        setIndexBufferPixel(this.currentIndexBuffer, this.context.canvas.width, x, y, 0);
+      }
       return;
     }
 
@@ -505,11 +571,21 @@ export class PencilTool extends BaseTool {
     if (a === 0) {
       // Original was transparent, clear it
       this.context.clearRect(x, y, 1, 1);
+      // Also clear index buffer
+      if (this.currentIndexBuffer) {
+        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, 0);
+      }
     } else {
       // Restore original color
       this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
       this.context.globalAlpha = 1;
       this.context.fillRect(x, y, 1, 1);
+      // Restore index buffer - get the original color's palette index
+      if (this.currentIndexBuffer) {
+        const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+        const originalIndex = paletteStore.getColorIndex(hex);
+        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, originalIndex);
+      }
     }
   }
 

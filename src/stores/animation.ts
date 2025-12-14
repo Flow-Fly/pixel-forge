@@ -3,6 +3,13 @@ import { type Frame, type Cel, type OnionSkinSettings, type AnimationTag, type F
 import type { TextCelData } from '../types/text';
 import { layerStore } from './layers';
 import { projectStore } from './project';
+import { paletteStore } from './palette';
+import {
+  createIndexBuffer,
+  cloneIndexBuffer,
+  rebuildCanvasFromIndices,
+  buildIndexBufferFromCanvas
+} from '../utils/indexed-color';
 
 export type PlaybackMode = 'all' | 'tag';
 
@@ -74,6 +81,40 @@ class AnimationStore {
     this.initialize();
     this.setupSync();
     this.loadUIState();
+    this.setupPaletteListeners();
+  }
+
+  /**
+   * Set up listeners for palette change events.
+   * When palette colors change, we need to rebuild canvases from index buffers.
+   */
+  private setupPaletteListeners() {
+    // When a single color is updated, rebuild all canvases
+    window.addEventListener('palette-color-changed', () => {
+      this.rebuildAllCelCanvases();
+    });
+
+    // When palette is replaced (loading project, resetting), rebuild all canvases
+    window.addEventListener('palette-replaced', () => {
+      this.rebuildAllCelCanvases();
+    });
+
+    // When palette is reset to default, rebuild all canvases
+    window.addEventListener('palette-reset', () => {
+      this.rebuildAllCelCanvases();
+    });
+
+    // When colors are reordered, we need to update index buffers
+    window.addEventListener('palette-colors-reordered', (event: Event) => {
+      const { fromIndex, toIndex } = (event as CustomEvent).detail;
+      this.handlePaletteReorder(fromIndex, toIndex);
+    });
+
+    // When a color is removed, remap affected pixels
+    window.addEventListener('palette-color-removed', (event: Event) => {
+      const { removedIndex } = (event as CustomEvent).detail;
+      this.handlePaletteColorRemoved(removedIndex);
+    });
   }
 
   private loadUIState() {
@@ -328,7 +369,180 @@ class AnimationStore {
     }
   }
 
-  
+  // ===== Index Buffer Management =====
+
+  /**
+   * Get the index buffer for a cel. Returns undefined if cel doesn't exist.
+   */
+  getCelIndexBuffer(layerId: string, frameId: string): Uint8Array | undefined {
+    const key = this.getCelKey(layerId, frameId);
+    return this.cels.value.get(key)?.indexBuffer;
+  }
+
+  /**
+   * Ensure a cel has an index buffer. Creates one if missing.
+   * If the cel has canvas content but no index buffer, builds buffer from canvas.
+   */
+  ensureCelIndexBuffer(layerId: string, frameId: string): Uint8Array {
+    const key = this.getCelKey(layerId, frameId);
+    const cel = this.cels.value.get(key);
+
+    if (!cel) {
+      // Create the cel first, then return its buffer
+      this.syncLayerCanvases();
+      const newCel = this.cels.value.get(key);
+      if (!newCel) {
+        // Shouldn't happen, but create a buffer anyway
+        const width = projectStore.width.value;
+        const height = projectStore.height.value;
+        return createIndexBuffer(width, height);
+      }
+      return this.ensureCelIndexBuffer(layerId, frameId);
+    }
+
+    // If cel already has an index buffer, return it
+    if (cel.indexBuffer) {
+      return cel.indexBuffer;
+    }
+
+    // Create index buffer - either empty or built from existing canvas content
+    const width = cel.canvas.width;
+    const height = cel.canvas.height;
+
+    let indexBuffer: Uint8Array;
+
+    // Check if canvas has any content (for migration from non-indexed projects)
+    const ctx = cel.canvas.getContext('2d', { willReadFrequently: true });
+    if (ctx) {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0); // Any non-transparent pixels
+
+      if (hasContent) {
+        // Build index buffer from existing canvas content
+        indexBuffer = buildIndexBufferFromCanvas(cel.canvas, true);
+      } else {
+        // Empty cel - create empty index buffer
+        indexBuffer = createIndexBuffer(width, height);
+      }
+    } else {
+      indexBuffer = createIndexBuffer(width, height);
+    }
+
+    // Update cel with the new index buffer
+    const cels = new Map(this.cels.value);
+    cels.set(key, { ...cel, indexBuffer });
+    this.cels.value = cels;
+
+    return indexBuffer;
+  }
+
+  /**
+   * Update a cel's index buffer. Also updates the canvas to reflect the change.
+   */
+  updateCelIndexBuffer(layerId: string, frameId: string, indexBuffer: Uint8Array): void {
+    const key = this.getCelKey(layerId, frameId);
+    const cel = this.cels.value.get(key);
+    if (!cel) return;
+
+    const cels = new Map(this.cels.value);
+    cels.set(key, { ...cel, indexBuffer });
+    this.cels.value = cels;
+
+    // Rebuild canvas from index buffer
+    const palette = paletteStore.colors.value;
+    rebuildCanvasFromIndices(cel.canvas, indexBuffer, palette);
+  }
+
+  /**
+   * Rebuild all cel canvases from their index buffers.
+   * Called when palette colors change.
+   */
+  rebuildAllCelCanvases(): void {
+    const palette = paletteStore.colors.value;
+
+    for (const [_key, cel] of this.cels.value) {
+      // Skip cels without index buffers (empty/linked cels sharing transparent canvas)
+      if (!cel.indexBuffer) continue;
+
+      // Skip text cels (they don't use indexed colors)
+      if (cel.textCelData) continue;
+
+      // Rebuild canvas from index buffer
+      rebuildCanvasFromIndices(cel.canvas, cel.indexBuffer, palette);
+    }
+
+    // Force UI update by triggering canvas refresh
+    // The canvas component will re-render on signal change
+  }
+
+  /**
+   * Handle palette color reorder - update index buffers to use new indices.
+   */
+  private handlePaletteReorder(fromIndex: number, toIndex: number): void {
+    // When colors are reordered, index buffers need to be remapped
+    // fromIndex and toIndex are 1-based palette indices
+
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        // Remap based on move direction
+        if (fromIndex < toIndex) {
+          // Moving forward: indices between from+1 and to shift down by 1
+          if (oldIndex === fromIndex) {
+            buffer[i] = toIndex;
+          } else if (oldIndex > fromIndex && oldIndex <= toIndex) {
+            buffer[i] = oldIndex - 1;
+          }
+        } else {
+          // Moving backward: indices between to and from-1 shift up by 1
+          if (oldIndex === fromIndex) {
+            buffer[i] = toIndex;
+          } else if (oldIndex >= toIndex && oldIndex < fromIndex) {
+            buffer[i] = oldIndex + 1;
+          }
+        }
+      }
+    }
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette color removal - remap affected pixels to closest color.
+   */
+  private handlePaletteColorRemoved(removedIndex: number): void {
+    // Find the closest color to remap to
+    // Since the color is already removed, we use index 1 as fallback
+    // In practice, this should rarely happen (UI should warn before removal)
+
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        if (oldIndex === removedIndex) {
+          // Remap to first color (could be smarter with closest color logic)
+          buffer[i] = 1;
+        } else if (oldIndex > removedIndex) {
+          // Indices after removed one shift down
+          buffer[i] = oldIndex - 1;
+        }
+      }
+    }
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
   addTag(frameId: string, name: string, color: string) {
     const frames = this.frames.value;
     const frameIndex = frames.findIndex(f => f.id === frameId);
@@ -807,14 +1021,16 @@ class AnimationStore {
     if (!firstCel) return null;
 
     const sharedCanvas = firstCel.canvas;
+    const sharedIndexBuffer = firstCel.indexBuffer;
 
-    // Update all cels to share the same canvas and linkedCelId
+    // Update all cels to share the same canvas, index buffer, and linkedCelId
     for (const key of celKeys) {
       const cel = cels.get(key);
       if (cel) {
         cels.set(key, {
           ...cel,
           canvas: sharedCanvas,
+          indexBuffer: sharedIndexBuffer,
           linkedCelId,
           linkType
         });
@@ -826,7 +1042,7 @@ class AnimationStore {
   }
 
   /**
-   * Unlink cels - each gets its own copy of the canvas.
+   * Unlink cels - each gets its own copy of the canvas and index buffer.
    */
   unlinkCels(celKeys: string[]) {
     const cels = new Map(this.cels.value);
@@ -847,9 +1063,13 @@ class AnimationStore {
           ctx.drawImage(cel.canvas, 0, 0);
         }
 
+        // Clone index buffer if present
+        const newIndexBuffer = cel.indexBuffer ? cloneIndexBuffer(cel.indexBuffer) : undefined;
+
         cels.set(key, {
           ...cel,
           canvas: newCanvas,
+          indexBuffer: newIndexBuffer,
           linkedCelId: undefined,
           linkType: undefined
         });
@@ -888,7 +1108,7 @@ class AnimationStore {
     // Hard links stay linked - user explicitly wants edits to affect all
     if (cel.linkType === 'hard') return false;
 
-    // Empty cel special case: always give it a new canvas
+    // Empty cel special case: always give it a new canvas and index buffer
     // Empty cels share the transparent canvas singleton
     if (cel.linkedCelId === EMPTY_CEL_LINK_ID) {
       const cels = new Map(this.cels.value);
@@ -906,9 +1126,13 @@ class AnimationStore {
         // Start with transparent (don't copy from shared canvas)
       }
 
+      // Create empty index buffer for this cel
+      const newIndexBuffer = createIndexBuffer(newCanvas.width, newCanvas.height);
+
       cels.set(key, {
         ...cel,
         canvas: newCanvas,
+        indexBuffer: newIndexBuffer,
         linkedCelId: undefined,
         linkType: undefined
       });
@@ -994,6 +1218,7 @@ class AnimationStore {
     } else {
       // Create a new cel for text layer (no canvas needed)
       cels.set(key, {
+        id: crypto.randomUUID(),
         layerId,
         frameId,
         canvas: null as unknown as HTMLCanvasElement, // Text layers don't use canvas
@@ -1023,6 +1248,7 @@ class AnimationStore {
       // Create a new cel for text layer
       const defaultData: TextCelData = { content: '', x: 0, y: 0 };
       cels.set(key, {
+        id: crypto.randomUUID(),
         layerId,
         frameId,
         canvas: null as unknown as HTMLCanvasElement,
