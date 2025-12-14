@@ -46,6 +46,7 @@ export interface Cel {
   layerId: string;
   frameId: string;
   canvas: HTMLCanvasElement;
+  indexBuffer?: Uint8Array; // v3.0+: palette indices (1 byte per pixel, index 0 = transparent)
   linkedCelId?: string;    // Group identifier for linked cels (share same canvas)
   linkType?: CelLinkType;  // Type of link: 'soft' (auto-break) or 'hard' (user explicit)
   opacity?: number;        // Cel-level opacity (0-100, default 100)

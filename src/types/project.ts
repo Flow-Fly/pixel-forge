@@ -3,13 +3,14 @@ import type { LayerType, BlendMode } from './layer';
 import type { TextLayerData, TextCelData } from './text';
 
 /** Current project file format version */
-export const PROJECT_VERSION = '2.2.0';
+export const PROJECT_VERSION = '3.0.0';
 
 export interface ProjectFile {
   version: string;
   name?: string; // Optional for backwards compatibility
   width: number;
   height: number;
+  palette?: string[]; // v3.0+: indexed color palette (hex strings)
   layers: {
     id: string;
     name: string;
@@ -26,6 +27,7 @@ export interface ProjectFile {
     cels: {
       layerId: string;
       data: string | Uint8Array;   // Base64 (v1.x) or binary PNG (v2.0+)
+      indexData?: number[];        // v3.0+: palette indices for indexed color mode
       linkedCelId?: string;        // v2.2+: linked cel group ID (cels with same ID share canvas)
       linkType?: 'soft' | 'hard';  // v2.2+: 'soft' = auto-break on edit, 'hard' = user explicit
       textCelData?: TextCelData;   // v2.1+: text content and position

@@ -1,4 +1,6 @@
 export * from '../stores/history';
+export * from './palette-command';
+export * from './optimized-drawing-command';
 
 import type { Command } from '../stores/history';
 import type { Rect } from '../types/geometry';

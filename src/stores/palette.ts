@@ -10,6 +10,9 @@ const DB32_COLORS = [
   '#696a6a', '#595652', '#76428a', '#ac3232', '#d95763', '#d77bba', '#8f974a', '#8a6f30'
 ];
 
+/** Maximum number of colors in indexed mode (standard limit) */
+const MAX_PALETTE_SIZE = 256;
+
 class PaletteStore {
   colors = signal<string[]>([...DB32_COLORS]);
 
@@ -17,13 +20,231 @@ class PaletteStore {
   extractedColors = signal<string[]>([]);
   isExtracting = signal<boolean>(false);
 
+  // ==========================================
+  // Indexed Color Management
+  // ==========================================
+
+  /** Fast lookup: normalized hex color -> palette index */
+  private colorToIndex = new Map<string, number>();
+
   constructor() {
     this.loadFromStorage();
+    this.rebuildColorMap();
+  }
+
+  /**
+   * Rebuild the color-to-index lookup map.
+   * Call this after any palette modification.
+   */
+  rebuildColorMap() {
+    this.colorToIndex.clear();
+    // Index 0 is reserved for transparent, so palette colors start at index 1
+    this.colors.value.forEach((color, i) => {
+      this.colorToIndex.set(this.normalizeHex(color), i + 1);
+    });
+  }
+
+  /**
+   * Normalize hex color to lowercase 6-digit format.
+   */
+  private normalizeHex(hex: string): string {
+    const clean = hex.replace('#', '').toLowerCase();
+    if (clean.length === 3) {
+      return '#' + clean.split('').map(c => c + c).join('');
+    }
+    return '#' + clean;
+  }
+
+  /**
+   * Get the palette index for a color. Returns 0 (transparent) if not found.
+   */
+  getColorIndex(color: string): number {
+    return this.colorToIndex.get(this.normalizeHex(color)) ?? 0;
+  }
+
+  /**
+   * Get the palette index for a color, adding it to the palette if not present.
+   * New colors are inserted near their closest hue match.
+   * Returns the index (1-based, 0 = transparent).
+   */
+  getOrAddColor(color: string): number {
+    const normalized = this.normalizeHex(color);
+    const existing = this.colorToIndex.get(normalized);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    // Check if we've hit the palette limit
+    if (this.colors.value.length >= MAX_PALETTE_SIZE) {
+      // Find closest existing color instead
+      return this.findClosestColorIndex(normalized);
+    }
+
+    // Find insertion position near similar hue
+    const insertionIndex = this.findInsertionIndex(normalized);
+
+    // Insert color at the calculated position
+    const newColors = [...this.colors.value];
+    newColors.splice(insertionIndex, 0, normalized);
+    this.colors.value = newColors;
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    // Return the new index (insertionIndex in array + 1 for 1-based indexing)
+    return insertionIndex + 1;
+  }
+
+  /**
+   * Find the best insertion index for a new color based on hue proximity.
+   * Returns the array index where the color should be inserted.
+   */
+  private findInsertionIndex(hex: string): number {
+    const rgb = this.hexToRgb(hex);
+    if (!rgb) return this.colors.value.length; // Append at end
+
+    const newHsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
+
+    let bestIndex = this.colors.value.length;
+    let bestDistance = Infinity;
+
+    for (let i = 0; i < this.colors.value.length; i++) {
+      const existingRgb = this.hexToRgb(this.colors.value[i]);
+      if (!existingRgb) continue;
+
+      const existingHsl = this.rgbToHsl(existingRgb.r, existingRgb.g, existingRgb.b);
+      const distance = this.hslDistance(newHsl, existingHsl);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        // Insert after colors that are darker, before colors that are lighter
+        // This creates natural lightness gradients within hue groups
+        bestIndex = existingHsl.l < newHsl.l ? i + 1 : i;
+      }
+    }
+
+    return bestIndex;
+  }
+
+  /**
+   * Find the closest existing color index for a given hex color.
+   * Used when palette is full.
+   */
+  findClosestColorIndex(hex: string): number {
+    const rgb = this.hexToRgb(hex);
+    if (!rgb) return 1; // Return first color if parse fails
+
+    const targetHsl = this.rgbToHsl(rgb.r, rgb.g, rgb.b);
+
+    let bestIndex = 1;
+    let bestDistance = Infinity;
+
+    for (let i = 0; i < this.colors.value.length; i++) {
+      const existingRgb = this.hexToRgb(this.colors.value[i]);
+      if (!existingRgb) continue;
+
+      const existingHsl = this.rgbToHsl(existingRgb.r, existingRgb.g, existingRgb.b);
+      const distance = this.hslDistance(targetHsl, existingHsl);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = i + 1; // 1-based index
+      }
+    }
+
+    return bestIndex;
+  }
+
+  /**
+   * Update a color at a specific palette index.
+   * This will trigger a rebuild of all canvases using this color.
+   * @param index 1-based palette index (0 = transparent, not editable)
+   * @param newColor New hex color value
+   */
+  updateColor(index: number, newColor: string) {
+    const arrayIndex = index - 1; // Convert to 0-based array index
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
+
+    const normalized = this.normalizeHex(newColor);
+    const colors = [...this.colors.value];
+    colors[arrayIndex] = normalized;
+    this.colors.value = colors;
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    // Dispatch event to notify animation store to rebuild canvases
+    window.dispatchEvent(new CustomEvent('palette-color-changed', {
+      detail: { index, color: normalized }
+    }));
+  }
+
+  /**
+   * Update a color directly without dispatching events.
+   * Used by PaletteChangeCommand for undo/redo.
+   * @param index 1-based palette index
+   * @param newColor New hex color value
+   */
+  updateColorDirect(index: number, newColor: string) {
+    const arrayIndex = index - 1;
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
+
+    const normalized = this.normalizeHex(newColor);
+    const colors = [...this.colors.value];
+    colors[arrayIndex] = normalized;
+    this.colors.value = colors;
+    this.rebuildColorMap();
+    this.saveToStorage();
+  }
+
+  /**
+   * Remove a color by its 1-based palette index.
+   * Used by PaletteAddColorCommand for undo.
+   * @param index 1-based palette index
+   */
+  removeColorByIndex(index: number) {
+    const arrayIndex = index - 1;
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
+
+    const newColors = [...this.colors.value];
+    newColors.splice(arrayIndex, 1);
+    this.colors.value = newColors;
+    this.rebuildColorMap();
+    this.saveToStorage();
+  }
+
+  /**
+   * Insert a color at a specific 1-based palette index.
+   * Used by PaletteRemoveColorCommand for undo.
+   * @param index 1-based palette index where to insert
+   * @param color Hex color to insert
+   */
+  insertColorAt(index: number, color: string) {
+    const arrayIndex = index - 1;
+    if (arrayIndex < 0 || arrayIndex > this.colors.value.length) return;
+
+    const normalized = this.normalizeHex(color);
+    const newColors = [...this.colors.value];
+    newColors.splice(arrayIndex, 0, normalized);
+    this.colors.value = newColors;
+    this.rebuildColorMap();
+    this.saveToStorage();
+  }
+
+  /**
+   * Get the hex color for a palette index.
+   * @param index 1-based palette index (0 = transparent)
+   * @returns Hex color string, or null for transparent/invalid
+   */
+  getColorByIndex(index: number): string | null {
+    if (index === 0) return null; // Transparent
+    const arrayIndex = index - 1;
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return null;
+    return this.colors.value[arrayIndex];
   }
 
   addColor(color: string) {
     if (!this.colors.value.includes(color)) {
       this.colors.value = [...this.colors.value, color];
+      this.rebuildColorMap();
       this.saveToStorage();
     }
   }
@@ -33,7 +254,13 @@ class PaletteStore {
       const newColors = [...this.colors.value];
       newColors.splice(index, 1);
       this.colors.value = newColors;
+      this.rebuildColorMap();
       this.saveToStorage();
+
+      // Dispatch event so animation store can remap affected pixels
+      window.dispatchEvent(new CustomEvent('palette-color-removed', {
+        detail: { removedIndex: index + 1 } // 1-based index
+      }));
     }
   }
 
@@ -49,12 +276,35 @@ class PaletteStore {
     const [movedColor] = colors.splice(fromIndex, 1);
     colors.splice(toIndex, 0, movedColor);
     this.colors.value = colors;
+    this.rebuildColorMap();
     this.saveToStorage();
+
+    // Dispatch event so animation store can update index buffers
+    window.dispatchEvent(new CustomEvent('palette-colors-reordered', {
+      detail: { fromIndex: fromIndex + 1, toIndex: toIndex + 1 } // 1-based indices
+    }));
   }
 
   resetToDefault() {
     this.colors.value = [...DB32_COLORS];
+    this.rebuildColorMap();
     this.saveToStorage();
+
+    // Dispatch event to rebuild all canvases
+    window.dispatchEvent(new CustomEvent('palette-reset'));
+  }
+
+  /**
+   * Replace the entire palette with new colors.
+   * Used when loading a project or importing a palette.
+   */
+  setPalette(colors: string[]) {
+    this.colors.value = colors.map(c => this.normalizeHex(c));
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    // Dispatch event to rebuild all canvases
+    window.dispatchEvent(new CustomEvent('palette-replaced'));
   }
 
   // ==========================================

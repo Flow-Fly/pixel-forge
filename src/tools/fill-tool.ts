@@ -1,5 +1,8 @@
 import { BaseTool } from './base-tool';
 import { colorStore } from '../stores/colors';
+import { paletteStore } from '../stores/palette';
+import { animationStore } from '../stores/animation';
+import { layerStore } from '../stores/layers';
 
 export class FillTool extends BaseTool {
   name = 'fill';
@@ -24,12 +27,28 @@ export class FillTool extends BaseTool {
     const imageData = this.ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
 
+    // Get index buffer for indexed color mode
+    const layerId = layerStore.activeLayerId.value;
+    const frameId = animationStore.currentFrameId.value;
+    let indexBuffer: Uint8Array | undefined;
+    let fillPaletteIndex = 0;
+
+    if (layerId) {
+      indexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+      // Get or add fill color to palette
+      const fillHex = colorStore.primaryColor.value;
+      fillPaletteIndex = paletteStore.getOrAddColor(fillHex);
+    }
+
     // Get target color
     const targetPos = (startY * width + startX) * 4;
     const targetR = data[targetPos];
     const targetG = data[targetPos + 1];
     const targetB = data[targetPos + 2];
     const targetA = data[targetPos + 3];
+
+    // For indexed mode, also get target palette index
+    const targetPaletteIndex = indexBuffer ? indexBuffer[startY * width + startX] : 0;
 
     // Get fill color
     const hex = colorStore.primaryColor.value;
@@ -38,7 +57,14 @@ export class FillTool extends BaseTool {
     const b = parseInt(hex.slice(5, 7), 16);
     const a = 255; // Assuming full opacity for now
 
-    if (targetR === r && targetG === g && targetB === b && targetA === a) return;
+    // Don't fill if target is same as fill color
+    if (indexBuffer) {
+      // In indexed mode, compare palette indices
+      if (targetPaletteIndex === fillPaletteIndex) return;
+    } else {
+      // Fallback: compare RGBA
+      if (targetR === r && targetG === g && targetB === b && targetA === a) return;
+    }
 
     // Reset bounds tracking
     this.boundsMinX = Infinity;
@@ -48,20 +74,36 @@ export class FillTool extends BaseTool {
 
     // Flood fill (Stack-based)
     const stack = [[startX, startY]];
+    const visited = new Set<number>(); // Avoid revisiting pixels
 
     while (stack.length) {
       const [cx, cy] = stack.pop()!;
-      const pos = (cy * width + cx) * 4;
+      const pixelIndex = cy * width + cx;
+      const pos = pixelIndex * 4;
 
       if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+      if (visited.has(pixelIndex)) continue;
+      visited.add(pixelIndex);
 
-      // Check if matches target
-      if (data[pos] === targetR && data[pos + 1] === targetG && data[pos + 2] === targetB && data[pos + 3] === targetA) {
-        // Fill
+      // Check if matches target (use index buffer if available, otherwise RGBA)
+      let matches = false;
+      if (indexBuffer) {
+        matches = indexBuffer[pixelIndex] === targetPaletteIndex;
+      } else {
+        matches = data[pos] === targetR && data[pos + 1] === targetG && data[pos + 2] === targetB && data[pos + 3] === targetA;
+      }
+
+      if (matches) {
+        // Fill canvas
         data[pos] = r;
         data[pos + 1] = g;
         data[pos + 2] = b;
         data[pos + 3] = a;
+
+        // Fill index buffer
+        if (indexBuffer) {
+          indexBuffer[pixelIndex] = fillPaletteIndex;
+        }
 
         // Track bounds
         this.boundsMinX = Math.min(this.boundsMinX, cx);
@@ -89,7 +131,7 @@ export class FillTool extends BaseTool {
     }
   }
 
-  onMove(x: number, y: number) {}
-  onDrag(x: number, y: number) {}
-  onUp(x: number, y: number) {}
+  onMove(_x: number, _y: number) {}
+  onDrag(_x: number, _y: number) {}
+  onUp(_x: number, _y: number) {}
 }
