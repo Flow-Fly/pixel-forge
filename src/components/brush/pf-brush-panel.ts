@@ -9,6 +9,7 @@ import {
 } from "../../services/brush-capture";
 import "./pf-brush-editor-overlay";
 import "./pf-brush-create-overlay";
+import "../ui/pf-button";
 
 @customElement("pf-brush-panel")
 export class PFBrushPanel extends BaseComponent {
@@ -81,26 +82,6 @@ export class PFBrushPanel extends BaseComponent {
       border-top: 1px solid var(--pf-color-border);
     }
 
-    .action-btn {
-      flex: 1;
-      padding: 4px 8px;
-      font-size: 11px;
-      background: var(--pf-color-bg-tertiary);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      color: var(--pf-color-text-primary);
-      cursor: pointer;
-    }
-
-    .action-btn:hover:not(:disabled) {
-      background: var(--pf-color-bg-hover);
-    }
-
-    .action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
     .brush-options {
       display: flex;
       align-items: center;
@@ -155,29 +136,29 @@ export class PFBrushPanel extends BaseComponent {
         : ""}
 
       <div class="actions">
-        <button
-          class="action-btn"
+        <pf-button
+          fill
           @click=${this.addBrush}
           title="Create new brush or capture from selection (Ctrl+B)"
         >
           + Add
-        </button>
-        <button
-          class="action-btn"
+        </pf-button>
+        <pf-button
+          fill
           @click=${this.editCurrentBrush}
           ?disabled=${activeBrush.type !== "custom"}
           title="Edit selected brush"
         >
           Edit
-        </button>
-        <button
-          class="action-btn"
+        </pf-button>
+        <pf-button
+          fill
           @click=${this.deleteCurrentBrush}
           ?disabled=${activeBrush.type !== "custom"}
           title="Delete selected brush"
         >
           Delete
-        </button>
+        </pf-button>
       </div>
 
       ${activeBrush.type === "custom"

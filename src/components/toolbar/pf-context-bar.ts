@@ -18,6 +18,7 @@ import "./options/pf-option-checkbox";
 import "./options/pf-option-select";
 import "./pf-alternative-tools";
 import "../color/pf-lightness-bar";
+import "../ui/pf-button";
 
 @customElement("pf-context-bar")
 export class PFContextBar extends BaseComponent {
@@ -149,35 +150,6 @@ export class PFContextBar extends BaseComponent {
       border-color: var(--pf-color-accent);
     }
 
-    .action-btn {
-      padding: 4px 10px;
-      border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
-      background: var(--pf-color-bg-tertiary);
-      color: var(--pf-color-text-primary);
-      font-size: 11px;
-      cursor: pointer;
-    }
-
-    .action-btn:hover {
-      background: var(--pf-color-bg-secondary);
-    }
-
-    .action-btn.primary {
-      background: var(--pf-color-accent);
-      color: white;
-      border-color: var(--pf-color-accent);
-    }
-
-    .action-btn.primary:hover {
-      opacity: 0.9;
-    }
-
-    .action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
     /* Cel controls */
     .cel-section {
       display: flex;
@@ -218,24 +190,6 @@ export class PFContextBar extends BaseComponent {
       background: var(--pf-color-primary-muted);
     }
 
-    .link-btn {
-      padding: 4px 8px;
-      border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
-      background: var(--pf-color-bg-tertiary);
-      color: var(--pf-color-text-secondary);
-      font-size: 11px;
-      cursor: pointer;
-    }
-
-    .link-btn:hover {
-      background: var(--pf-color-bg-secondary);
-    }
-
-    .link-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
   `;
 
   @state() private isCommitting = false;
@@ -336,22 +290,21 @@ export class PFContextBar extends BaseComponent {
 
         <div class="separator"></div>
 
-        <button
-          class="action-btn primary"
+        <pf-button
+          variant="primary"
           @click=${this._commitTransform}
           ?disabled=${this.isCommitting}
           title="Apply rotation (Enter)"
         >
           ${this.isCommitting ? "Applying..." : "Apply"}
-        </button>
-        <button
-          class="action-btn"
+        </pf-button>
+        <pf-button
           @click=${this._cancelTransform}
           ?disabled=${this.isCommitting}
           title="Cancel rotation (Escape)"
         >
           Cancel
-        </button>
+        </pf-button>
       </div>
     `;
   }
@@ -415,20 +368,18 @@ export class PFContextBar extends BaseComponent {
           ${bounds.width} × ${bounds.height} px
         </span>
         <div class="separator"></div>
-        <button
-          class="action-btn"
+        <pf-button
           @click=${this._shrinkToContent}
           title="Shrink selection to fit content (Ctrl+release during draw)"
         >
           Shrink to Content
-        </button>
-        <button
-          class="action-btn"
+        </pf-button>
+        <pf-button
           @click=${this._clearSelection}
           title="Deselect (Escape)"
         >
           Deselect
-        </button>
+        </pf-button>
       </div>
     `;
   }
@@ -554,22 +505,20 @@ export class PFContextBar extends BaseComponent {
 
         ${celKeys.length >= 2
           ? html`
-              <button
-                class="link-btn"
+              <pf-button
                 @click=${this._linkSelectedCels}
                 ?disabled=${!canLink}
                 title="Link selected cels"
               >
                 🔗 Link
-              </button>
-              <button
-                class="link-btn"
+              </pf-button>
+              <pf-button
                 @click=${this._unlinkSelectedCels}
                 ?disabled=${!canUnlink}
                 title="Unlink selected cels"
               >
                 ⛓️‍💥 Unlink
-              </button>
+              </pf-button>
             `
           : ""}
       </div>

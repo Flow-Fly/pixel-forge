@@ -6,6 +6,7 @@ import { paletteStore } from "../../stores/palette";
 import { historyStore } from "../../stores/history";
 import { PaletteChangeCommand } from "../../commands/palette-command";
 import "../ui/pf-popover";
+import "../ui/pf-button";
 import "./pf-color-picker-popup";
 import "./pf-palette-selector";
 import "./pf-save-palette-dialog";
@@ -417,23 +418,6 @@ export class PFPalettePanel extends BaseComponent {
       gap: 6px;
     }
 
-    .extraction-actions .action-btn {
-      flex: 1;
-      padding: 4px 8px;
-      background: var(--pf-color-bg-surface, #1e1e1e);
-      border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
-      color: var(--pf-color-text-muted, #808080);
-      font-size: 10px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .extraction-actions .action-btn:hover {
-      background: var(--pf-color-bg-panel, #141414);
-      color: var(--pf-color-text-main, #e0e0e0);
-    }
-
     .no-colors-msg {
       font-size: 10px;
       color: var(--pf-color-text-muted, #808080);
@@ -548,23 +532,6 @@ export class PFPalettePanel extends BaseComponent {
     .untracked-actions {
       display: flex;
       gap: 6px;
-    }
-
-    .untracked-actions .action-btn {
-      flex: 1;
-      padding: 4px 8px;
-      background: var(--pf-color-bg-surface, #1e1e1e);
-      border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
-      color: var(--pf-color-text-muted, #808080);
-      font-size: 10px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .untracked-actions .action-btn:hover {
-      background: var(--pf-color-bg-panel, #141414);
-      color: var(--pf-color-text-main, #e0e0e0);
     }
   `;
 
@@ -1257,12 +1224,12 @@ export class PFPalettePanel extends BaseComponent {
                       </button>
                     `
                   : nothing}
-                <button class="action-btn" @click=${this.promoteAllUntracked}>
+                <pf-button fill size="sm" @click=${this.promoteAllUntracked}>
                   Add All
-                </button>
-                <button class="action-btn" @click=${this.clearUntracked}>
+                </pf-button>
+                <pf-button fill size="sm" @click=${this.clearUntracked}>
                   Clear
-                </button>
+                </pf-button>
               </div>
             </div>
           `
@@ -1304,18 +1271,20 @@ export class PFPalettePanel extends BaseComponent {
                         )}
                       </div>
                       <div class="extraction-actions">
-                        <button
-                          class="action-btn"
+                        <pf-button
+                          fill
+                          size="sm"
                           @click=${this.addAllExtracted}
                         >
                           Add All
-                        </button>
-                        <button
-                          class="action-btn"
+                        </pf-button>
+                        <pf-button
+                          fill
+                          size="sm"
                           @click=${this.replaceWithExtracted}
                         >
                           Replace All
-                        </button>
+                        </pf-button>
                       </div>
                     `
                   : ""}
