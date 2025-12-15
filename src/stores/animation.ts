@@ -94,9 +94,16 @@ class AnimationStore {
       this.rebuildAllCelCanvases();
     });
 
-    // When palette is replaced (loading project, resetting), rebuild all canvases
-    window.addEventListener('palette-replaced', () => {
-      this.rebuildAllCelCanvases();
+    // When palette is replaced (loading project, switching palettes), remap indices and rebuild
+    window.addEventListener('palette-replaced', (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.oldMainColors) {
+        // We have old palette info - do smart remapping by color
+        this.handlePaletteReplacedWithRemap(detail.oldMainColors, detail.oldEphemeralColors || []);
+      } else {
+        // Legacy behavior - just rebuild canvases
+        this.rebuildAllCelCanvases();
+      }
     });
 
     // When palette is reset to default, rebuild all canvases
@@ -114,6 +121,18 @@ class AnimationStore {
     window.addEventListener('palette-color-removed', (event: Event) => {
       const { removedIndex } = (event as CustomEvent).detail;
       this.handlePaletteColorRemoved(removedIndex);
+    });
+
+    // When a color is moved from main palette to ephemeral
+    window.addEventListener('palette-color-moved-to-ephemeral', (event: Event) => {
+      const { removedIndex, newIndex } = (event as CustomEvent).detail;
+      this.handlePaletteColorMovedToEphemeral(removedIndex, newIndex);
+    });
+
+    // When a color is inserted into the palette (from untracked via drag-drop)
+    window.addEventListener('palette-color-inserted', (event: Event) => {
+      const { insertedIndex } = (event as CustomEvent).detail;
+      this.handlePaletteColorInserted(insertedIndex);
     });
   }
 
@@ -476,6 +495,32 @@ class AnimationStore {
   }
 
   /**
+   * Scan all index buffers and return the set of colors actually used in the drawing.
+   * Used to preserve colors when switching palettes.
+   */
+  scanUsedColors(): Set<string> {
+    const usedColors = new Set<string>();
+
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+      if (cel.textCelData) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const paletteIndex = buffer[i];
+        if (paletteIndex === 0) continue; // Skip transparent
+
+        const color = paletteStore.getColorByIndex(paletteIndex);
+        if (color) {
+          usedColors.add(color.toLowerCase());
+        }
+      }
+    }
+
+    return usedColors;
+  }
+
+  /**
    * Handle palette color reorder - update index buffers to use new indices.
    */
   private handlePaletteReorder(fromIndex: number, toIndex: number): void {
@@ -536,6 +581,103 @@ class AnimationStore {
           // Indices after removed one shift down
           buffer[i] = oldIndex - 1;
         }
+      }
+    }
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette color moved to ephemeral.
+   * Remaps index buffers: pixels at removedIndex get newIndex, higher indices shift down.
+   */
+  private handlePaletteColorMovedToEphemeral(removedIndex: number, newIndex: number): void {
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        if (oldIndex === removedIndex) {
+          // This pixel used the removed color - remap to its new ephemeral index
+          buffer[i] = newIndex;
+        } else if (oldIndex > removedIndex) {
+          // Indices after removed one shift down by 1
+          buffer[i] = oldIndex - 1;
+        }
+      }
+    }
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette color insertion.
+   * Shift all indices >= insertedIndex up by 1.
+   */
+  private handlePaletteColorInserted(insertedIndex: number): void {
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        // Shift up all indices at or after the insertion point
+        if (oldIndex >= insertedIndex) {
+          buffer[i] = oldIndex + 1;
+        }
+      }
+    }
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette replacement with color-based index remapping.
+   * Maps each pixel's color from old palette to new palette position.
+   */
+  private handlePaletteReplacedWithRemap(oldMainColors: string[], oldEphemeralColors: string[]): void {
+    // Build lookup: old 1-based index -> hex color
+    const oldIndexToColor = new Map<number, string>();
+
+    // Old main colors: indices 1 to oldMainColors.length
+    oldMainColors.forEach((color, i) => {
+      oldIndexToColor.set(i + 1, color.toLowerCase());
+    });
+
+    // Old ephemeral colors: indices oldMainColors.length + 1 onwards
+    oldEphemeralColors.forEach((color, i) => {
+      oldIndexToColor.set(oldMainColors.length + i + 1, color.toLowerCase());
+    });
+
+    // Remap each pixel by color
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+      if (cel.textCelData) continue; // Skip text cels
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        // Get the color this pixel had
+        const color = oldIndexToColor.get(oldIndex);
+        if (!color) continue;
+
+        // Find this color's new index in the current palette
+        const newIndex = paletteStore.getColorIndex(color);
+        if (newIndex !== 0) {
+          buffer[i] = newIndex;
+        }
+        // If color not found (newIndex === 0), keep transparent
+        // This shouldn't happen since preserveColorsOnSwitch adds orphans to ephemeral
       }
     }
 
