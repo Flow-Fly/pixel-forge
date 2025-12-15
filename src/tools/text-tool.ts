@@ -1,14 +1,19 @@
-import { BaseTool, type ModifierKeys } from './base-tool';
-import { layerStore } from '../stores/layers';
-import { animationStore } from '../stores/animation';
-import { historyStore } from '../stores/history';
-import { textSettings } from '../stores/tool-settings';
-import { colorStore } from '../stores/colors';
-import { projectStore } from '../stores/project';
-import { signal } from '../core/signal';
-import type { TextEditingState } from '../types/text';
-import { defaultFontId, getFont, getDefaultFont, measureText } from '../utils/pixel-fonts';
-import { MoveTextCommand } from '../commands/text-commands';
+import { BaseTool, type ModifierKeys } from "./base-tool";
+import { layerStore } from "../stores/layers";
+import { animationStore } from "../stores/animation";
+import { historyStore } from "../stores/history";
+import { textSettings } from "../stores/tool-settings";
+import { colorStore } from "../stores/colors";
+import { projectStore } from "../stores/project";
+import { signal } from "../core/signal";
+import type { TextEditingState } from "../types/text";
+import {
+  defaultFontId,
+  getFont,
+  getDefaultFont,
+  measureText,
+} from "../utils/pixel-fonts";
+import { MoveTextCommand } from "../commands/text-commands";
 
 /**
  * Text tool for creating and editing text layers.
@@ -22,8 +27,8 @@ import { MoveTextCommand } from '../commands/text-commands';
  * - Double-click on existing text: enter edit mode
  */
 export class TextTool extends BaseTool {
-  name = 'text';
-  cursor = 'text';
+  name = "text";
+  cursor = "text";
 
   // Drag state for moving text
   private isDragging = false;
@@ -119,7 +124,10 @@ export class TextTool extends BaseTool {
     };
 
     // Only create command if position actually changed
-    if (newPos.x !== this.originalTextPos.x || newPos.y !== this.originalTextPos.y) {
+    if (
+      newPos.x !== this.originalTextPos.x ||
+      newPos.y !== this.originalTextPos.y
+    ) {
       // First, revert to original position (command will re-apply)
       animationStore.updateTextCelData(this.dragLayerId, currentFrameId, {
         x: this.originalTextPos.x,
@@ -166,7 +174,7 @@ export class TextTool extends BaseTool {
     if (!state.isEditing) return;
 
     // Handle escape to commit
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       e.preventDefault();
       this.commitText();
     }
@@ -190,7 +198,7 @@ export class TextTool extends BaseTool {
 
     // Set initial text cel data (empty content at click position)
     animationStore.setTextCelData(layer.id, currentFrameId, {
-      content: '',
+      content: "",
       x: Math.floor(x),
       y: Math.floor(y),
     });
@@ -220,10 +228,10 @@ export class TextTool extends BaseTool {
     };
 
     // Emit event for input component to focus
-    this.emitEvent('start-editing', {
+    this.emitEvent("start-editing", {
       layerId,
       celKey,
-      initialContent: textCelData?.content ?? '',
+      initialContent: textCelData?.content ?? "",
     });
   }
 
@@ -237,9 +245,12 @@ export class TextTool extends BaseTool {
 
     // Check if text is empty - if so, delete the layer
     const currentFrameId = animationStore.currentFrameId.value;
-    const textCelData = animationStore.getTextCelData(state.layerId, currentFrameId);
+    const textCelData = animationStore.getTextCelData(
+      state.layerId,
+      currentFrameId
+    );
 
-    if (!textCelData?.content || textCelData.content.trim() === '') {
+    if (!textCelData?.content || textCelData.content.trim() === "") {
       // Delete empty text layer
       layerStore.removeLayer(state.layerId);
     }
@@ -254,7 +265,7 @@ export class TextTool extends BaseTool {
     };
 
     // Emit event for input component to blur
-    this.emitEvent('stop-editing');
+    this.emitEvent("stop-editing");
   }
 
   /**
@@ -266,7 +277,10 @@ export class TextTool extends BaseTool {
     if (!state.isEditing || !state.layerId) return;
 
     const currentFrameId = animationStore.currentFrameId.value;
-    const existingData = animationStore.getTextCelData(state.layerId, currentFrameId);
+    const existingData = animationStore.getTextCelData(
+      state.layerId,
+      currentFrameId
+    );
 
     if (existingData) {
       animationStore.updateTextCelData(state.layerId, currentFrameId, {
@@ -296,16 +310,22 @@ export class TextTool extends BaseTool {
    * Find a text layer at the given canvas position.
    * Returns the layer ID if found, null otherwise.
    */
-  private findTextLayerAtPosition(x: number, y: number): { layerId: string } | null {
+  private findTextLayerAtPosition(
+    x: number,
+    y: number
+  ): { layerId: string } | null {
     const layers = layerStore.layers.value;
     const currentFrameId = animationStore.currentFrameId.value;
 
     // Check text layers from top to bottom (reverse order)
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i];
-      if (layer.type !== 'text' || !layer.visible || !layer.textData) continue;
+      if (layer.type !== "text" || !layer.visible || !layer.textData) continue;
 
-      const textCelData = animationStore.getTextCelData(layer.id, currentFrameId);
+      const textCelData = animationStore.getTextCelData(
+        layer.id,
+        currentFrameId
+      );
       if (!textCelData || !textCelData.content) continue;
 
       // Get the font for accurate measurement
@@ -336,13 +356,15 @@ export class TextTool extends BaseTool {
    * Called from the canvas component on dblclick.
    */
   static handleDoubleClick(layerId: string): boolean {
-    const layer = layerStore.layers.value.find(l => l.id === layerId);
-    if (layer?.type !== 'text') return false;
+    const layer = layerStore.layers.value.find((l) => l.id === layerId);
+    if (layer?.type !== "text") return false;
 
     // Trigger editing via event
-    window.dispatchEvent(new CustomEvent('text-tool:edit-layer', {
-      detail: { layerId }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("text-tool:edit-layer", {
+        detail: { layerId },
+      })
+    );
 
     return true;
   }
