@@ -1,28 +1,22 @@
-import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { layerStore } from '../../stores/layers';
-import { historyStore } from '../../stores/history';
-import { AddLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../commands/layer-commands';
-import './pf-layer-item';
+import { html, css } from "lit";
+import { customElement } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { layerStore } from "../../stores/layers";
+import { historyStore } from "../../stores/history";
+import {
+  AddLayerCommand,
+  RemoveLayerCommand,
+  UpdateLayerCommand,
+} from "../../commands/layer-commands";
+import "./pf-layer-item";
 
-@customElement('pf-layers-panel')
+@customElement("pf-layers-panel")
 export class PFLayersPanel extends BaseComponent {
   static styles = css`
     :host {
       display: flex;
       flex-direction: column;
       height: 100%;
-    }
-
-    .header {
-      padding: 8px;
-      border-bottom: 1px solid var(--pf-color-border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 12px;
-      color: var(--pf-color-text-muted);
     }
 
     .layer-list {
@@ -54,24 +48,23 @@ export class PFLayersPanel extends BaseComponent {
     const reversedLayers = [...layers].reverse();
 
     return html`
-      <div class="header">
-        <span>Layers</span>
-      </div>
       <div class="layer-list">
-        ${reversedLayers.map(layer => html`
-          <pf-layer-item
-            .layer=${layer}
-            ?active=${layer.id === activeId}
-            @click=${() => this.selectLayer(layer.id)}
-            @dblclick=${() => this.startRenaming(layer)}
-          ></pf-layer-item>
-        `)}
+        ${reversedLayers.map(
+          (layer) => html`
+            <pf-layer-item
+              .layer=${layer}
+              ?active=${layer.id === activeId}
+              @click=${() => this.selectLayer(layer.id)}
+              @dblclick=${() => this.startRenaming(layer)}
+            ></pf-layer-item>
+          `
+        )}
       </div>
       <div class="controls">
         <button @click=${this.addLayer} title="New Layer">+</button>
         <button @click=${() => this.deleteLayer()} title="Delete Layer">-</button>
-        <button @click=${() => this.moveLayer('up')} title="Move Up">↑</button>
-        <button @click=${() => this.moveLayer('down')} title="Move Down">↓</button>
+        <button @click=${() => this.moveLayer("up")} title="Move Up">↑</button>
+        <button @click=${() => this.moveLayer("down")} title="Move Down">↓</button>
       </div>
     `;
   }
@@ -83,7 +76,7 @@ export class PFLayersPanel extends BaseComponent {
     }
   }
 
-  moveLayer(direction: 'up' | 'down') {
+  moveLayer(direction: "up" | "down") {
     const activeId = layerStore.activeLayerId.value;
     if (activeId) {
       layerStore.reorderLayer(activeId, direction);
@@ -92,12 +85,12 @@ export class PFLayersPanel extends BaseComponent {
 
   startRenaming(layer: any) {
     // For text layers, double-click enters edit mode
-    if (layer.type === 'text') {
+    if (layer.type === "text") {
       this.editTextLayer(layer.id);
       return;
     }
 
-    const newName = prompt('Rename Layer', layer.name);
+    const newName = prompt("Rename Layer", layer.name);
     if (newName && newName !== layer.name) {
       historyStore.execute(new UpdateLayerCommand(layer.id, { name: newName }));
     }
@@ -105,8 +98,10 @@ export class PFLayersPanel extends BaseComponent {
 
   editTextLayer(layerId: string) {
     // Dispatch event to trigger text editing
-    window.dispatchEvent(new CustomEvent('text-tool:edit-layer', {
-      detail: { layerId }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("text-tool:edit-layer", {
+        detail: { layerId },
+      })
+    );
   }
 }

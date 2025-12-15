@@ -15,17 +15,6 @@ export class PFUndoHistory extends BaseComponent {
       display: flex;
       flex-direction: column;
       height: 100%;
-      background-color: var(--pf-color-bg-surface);
-      border-left: 1px solid var(--pf-color-border);
-      overflow: hidden;
-    }
-
-    .header {
-      padding: 8px;
-      font-size: 12px;
-      font-weight: bold;
-      border-bottom: 1px solid var(--pf-color-border);
-      background-color: var(--pf-color-bg-panel-header);
     }
 
     .list {
@@ -449,7 +438,6 @@ export class PFUndoHistory extends BaseComponent {
                         this.tooltipAnchorRect !== null;
 
     return html`
-      <div class="header">History</div>
       <div class="list">
         ${undoStack.map((cmd, i) => {
           const isHighlighted = cmd.id === highlightedId;
