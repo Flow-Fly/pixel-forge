@@ -19,7 +19,7 @@ import "../dialogs/pf-new-project-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
-import "../ui/pf-collapsible-panel";
+import "../ui/pf-panel";
 import "../shape/pf-shape-options";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
@@ -125,7 +125,7 @@ export class PixelForgeApp extends BaseComponent {
       overflow-x: hidden;
     }
 
-    .panels pf-collapsible-panel {
+    .panels > * {
       flex-shrink: 0;
     }
 
@@ -282,27 +282,15 @@ export class PixelForgeApp extends BaseComponent {
       </main>
 
       <aside class="panels">
-        <!-- Color Selector 
-        <div style="padding: 8px; border-bottom: 1px solid var(--pf-color-border);">
-          <pf-color-selector></pf-color-selector>
-        </div>
-        
-        <pf-collapsible-panel panelId="color-sliders" title="Color Sliders">
-        <pf-color-sliders></pf-color-sliders>
-        </pf-collapsible-panel>
-        -->
-
-        <pf-collapsible-panel panelId="brush" title="Brushes" }>
+        <pf-panel header="Brushes" collapsible panel-id="brush" bordered>
           <pf-brush-panel></pf-brush-panel>
-        </pf-collapsible-panel>
-
-        <pf-collapsible-panel panelId="palette" title="Palette">
+        </pf-panel>
+        <pf-panel header="Palette" collapsible panel-id="palette" bordered>
           <pf-palette-panel></pf-palette-panel>
-        </pf-collapsible-panel>
-
-        <pf-collapsible-panel panelId="history" title="History">
+        </pf-panel>
+        <pf-panel header="History" collapsible panel-id="history" bordered>
           <pf-undo-history></pf-undo-history>
-        </pf-collapsible-panel>
+        </pf-panel>
       </aside>
 
       <footer class="status-bar">

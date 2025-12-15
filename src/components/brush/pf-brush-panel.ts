@@ -18,22 +18,7 @@ export class PFBrushPanel extends BaseComponent {
       flex-direction: column;
       height: 100%;
       padding: 8px;
-    }
-
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 12px;
-      color: var(--pf-color-text-muted);
-      margin-bottom: 8px;
-      border-bottom: 1px solid var(--pf-color-border);
-      padding-bottom: 4px;
-    }
-
-    .header-hint {
-      font-size: 10px;
-      opacity: 0.7;
+      gap: 8px;
     }
 
     .brush-grid {
@@ -63,7 +48,6 @@ export class PFBrushPanel extends BaseComponent {
 
     .brush-item.active {
       border-color: var(--pf-color-primary);
-      // background-color: var(--pf-color-bg-active);
     }
 
     .brush-item.custom::after {
@@ -83,10 +67,16 @@ export class PFBrushPanel extends BaseComponent {
       image-rendering: pixelated;
     }
 
+    .empty-state {
+      text-align: center;
+      padding: 16px 8px;
+      color: var(--pf-color-text-muted);
+      font-size: 11px;
+    }
+
     .actions {
       display: flex;
       gap: 4px;
-      margin-top: 8px;
       padding-top: 8px;
       border-top: 1px solid var(--pf-color-border);
     }
@@ -111,18 +101,10 @@ export class PFBrushPanel extends BaseComponent {
       cursor: not-allowed;
     }
 
-    .empty-state {
-      text-align: center;
-      padding: 16px 8px;
-      color: var(--pf-color-text-muted);
-      font-size: 11px;
-    }
-
     .brush-options {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-top: 8px;
       padding-top: 8px;
       border-top: 1px solid var(--pf-color-border);
       font-size: 11px;
@@ -147,14 +129,8 @@ export class PFBrushPanel extends BaseComponent {
   render() {
     const allBrushes = brushStore.allBrushes;
     const activeBrush = brushStore.activeBrush.value;
-    const hasSelection = canCaptureBrush();
 
     return html`
-      <div class="header">
-        <span>Brushes</span>
-        <span class="header-hint">Ctrl+B to capture</span>
-      </div>
-
       <div class="brush-grid">
         ${allBrushes.map(
           (brush) => html`
@@ -243,7 +219,6 @@ export class PFBrushPanel extends BaseComponent {
 
   private renderBrushPreview(brush: Brush) {
     if (brush.type === "builtin" || !brush.imageData) {
-      // Render builtin brush as canvas showing actual pixel pattern
       return html`
         <canvas
           class="brush-preview-canvas builtin-brush"
@@ -254,7 +229,6 @@ export class PFBrushPanel extends BaseComponent {
       `;
     }
 
-    // Render custom brush as canvas
     return html`
       <canvas
         class="brush-preview-canvas"
@@ -265,8 +239,8 @@ export class PFBrushPanel extends BaseComponent {
   }
 
   updated() {
-    // Draw builtin brush previews
-    const builtinCanvases = this.shadowRoot?.querySelectorAll(".builtin-brush");
+    const builtinCanvases =
+      this.shadowRoot?.querySelectorAll(".builtin-brush");
     builtinCanvases?.forEach((canvas) => {
       const canvasEl = canvas as HTMLCanvasElement;
       const size = parseInt(canvasEl.dataset.brushSize || "1", 10);
@@ -274,7 +248,6 @@ export class PFBrushPanel extends BaseComponent {
       this.drawBuiltinBrushPreview(canvasEl, size, shape);
     });
 
-    // Draw custom brush previews
     const customCanvases = this.shadowRoot?.querySelectorAll(
       ".brush-preview-canvas:not(.builtin-brush)"
     );
@@ -296,7 +269,6 @@ export class PFBrushPanel extends BaseComponent {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Convert stored data to ImageData
     const data = new ImageData(
       new Uint8ClampedArray(imageData.data),
       imageData.width,
@@ -310,27 +282,24 @@ export class PFBrushPanel extends BaseComponent {
     size: number,
     shape: string
   ) {
-    // Use a fixed pixel size (4px per brush pixel) to show relative size differences
     const pixelSize = 4;
     const displaySize = size * pixelSize;
 
-    // Set canvas dimensions
     canvas.width = displaySize;
     canvas.height = displaySize;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Clear canvas
     ctx.clearRect(0, 0, displaySize, displaySize);
 
-    // Draw the brush pattern (using light color for visibility on dark bg)
     const computedStyle = getComputedStyle(this);
-    const textColor = computedStyle.getPropertyValue("--pf-color-text-primary").trim() || "#e0e0e0";
+    const textColor =
+      computedStyle.getPropertyValue("--pf-color-text-primary").trim() ||
+      "#e0e0e0";
     ctx.fillStyle = textColor;
 
     if (shape === "circle") {
-      // Draw circle pattern
       const centerX = displaySize / 2;
       const centerY = displaySize / 2;
       const radius = displaySize / 2;
@@ -338,7 +307,6 @@ export class PFBrushPanel extends BaseComponent {
       ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      // Draw square pattern
       ctx.fillRect(0, 0, displaySize, displaySize);
     }
   }

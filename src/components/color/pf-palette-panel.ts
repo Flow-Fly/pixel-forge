@@ -16,6 +16,7 @@ export class PFPalettePanel extends BaseComponent {
   static styles = css`
     :host {
       display: block;
+      height: 100%;
       padding: var(--pf-spacing-2);
     }
 
