@@ -7,7 +7,7 @@ import {
   angleFromCenter,
   snapAngle,
   normalizeAngle,
-} from "../../utils/rotation-utils";
+} from "../../utils/rotation";
 
 /**
  * Handle positions relative to bounding box

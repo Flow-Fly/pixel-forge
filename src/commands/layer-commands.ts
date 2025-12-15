@@ -1,13 +1,13 @@
-import { type Command } from './index';
-import { layerStore } from '../stores/layers';
-import { animationStore } from '../stores/animation';
-import { projectStore } from '../stores/project';
-import { type Layer } from '../types/layer';
-import { type Cel } from '../types/animation';
+import { type Command } from "./index";
+import { layerStore } from "../stores/layers";
+import { animationStore } from "../stores/animation";
+import { projectStore } from "../stores/project";
+import { type Layer } from "../types/layer";
+import { type Cel } from "../types/animation";
 
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Add Layer';
+  name = "Add Layer";
   private layerId: string | null = null;
 
   execute() {
@@ -26,7 +26,7 @@ export class AddLayerCommand implements Command {
 
 export class DuplicateLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Duplicate Layer';
+  name = "Duplicate Layer";
   private sourceLayerId: string;
   private newLayerId: string | null = null;
   private duplicatedCelKeys: string[] = [];
@@ -61,10 +61,13 @@ export class DuplicateLayerCommand implements Command {
         const newKey = animationStore.getCelKey(newLayerId, frame.id);
 
         // Create new canvas and copy content
-        const newCanvas = document.createElement('canvas');
+        const newCanvas = document.createElement("canvas");
         newCanvas.width = sourceCel.canvas.width;
         newCanvas.height = sourceCel.canvas.height;
-        const ctx = newCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+        const ctx = newCanvas.getContext("2d", {
+          alpha: true,
+          willReadFrequently: true,
+        });
         if (ctx) {
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(sourceCel.canvas, 0, 0);
@@ -87,7 +90,9 @@ export class DuplicateLayerCommand implements Command {
           linkedCelId: newLinkedCelId,
           linkType: sourceCel.linkType,
           opacity: sourceCel.opacity,
-          textCelData: sourceCel.textCelData ? { ...sourceCel.textCelData } : undefined,
+          textCelData: sourceCel.textCelData
+            ? { ...sourceCel.textCelData }
+            : undefined,
         };
 
         newCels.set(newKey, newCel);
@@ -117,15 +122,15 @@ export class DuplicateLayerCommand implements Command {
 
 export class RemoveLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Remove Layer';
+  name = "Remove Layer";
   private layer: Layer;
   private index: number;
 
   constructor(layerId: string) {
-    const layer = layerStore.layers.value.find(l => l.id === layerId);
-    if (!layer) throw new Error('Layer not found');
+    const layer = layerStore.layers.value.find((l) => l.id === layerId);
+    if (!layer) throw new Error("Layer not found");
     this.layer = { ...layer }; // Clone
-    this.index = layerStore.layers.value.findIndex(l => l.id === layerId);
+    this.index = layerStore.layers.value.findIndex((l) => l.id === layerId);
   }
 
   execute() {
@@ -136,7 +141,7 @@ export class RemoveLayerCommand implements Command {
     // We need to insert it back at the specific index
     // layerStore.addLayer doesn't support index or restoring existing object
     // We might need to extend layerStore or manually manipulate the array
-    
+
     const layers = [...layerStore.layers.value];
     layers.splice(this.index, 0, this.layer);
     layerStore.layers.value = layers;
@@ -146,7 +151,7 @@ export class RemoveLayerCommand implements Command {
 
 export class UpdateLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Update Layer';
+  name = "Update Layer";
   private layerId: string;
   private oldUpdates: Partial<Layer>;
   private newUpdates: Partial<Layer>;
@@ -154,10 +159,10 @@ export class UpdateLayerCommand implements Command {
   constructor(layerId: string, updates: Partial<Layer>) {
     this.layerId = layerId;
     this.newUpdates = updates;
-    
-    const layer = layerStore.layers.value.find(l => l.id === layerId);
-    if (!layer) throw new Error('Layer not found');
-    
+
+    const layer = layerStore.layers.value.find((l) => l.id === layerId);
+    if (!layer) throw new Error("Layer not found");
+
     this.oldUpdates = {};
     for (const key in updates) {
       // @ts-ignore
@@ -177,11 +182,11 @@ export class UpdateLayerCommand implements Command {
 
 export class FlipLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Flip Layer';
+  name = "Flip Layer";
   private layerId: string;
-  private direction: 'horizontal' | 'vertical';
+  private direction: "horizontal" | "vertical";
 
-  constructor(layerId: string, direction: 'horizontal' | 'vertical') {
+  constructor(layerId: string, direction: "horizontal" | "vertical") {
     this.layerId = layerId;
     this.direction = direction;
     this.name = `Flip Layer ${direction}`;
@@ -196,10 +201,10 @@ export class FlipLayerCommand implements Command {
   }
 
   private flip() {
-    const layer = layerStore.layers.value.find(l => l.id === this.layerId);
+    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
     if (!layer || !layer.canvas) return;
 
-    const ctx = layer.canvas.getContext('2d');
+    const ctx = layer.canvas.getContext("2d");
     if (!ctx) return;
 
     const width = layer.canvas.width;
@@ -207,13 +212,13 @@ export class FlipLayerCommand implements Command {
     const imageData = ctx.getImageData(0, 0, width, height);
 
     // Create temp canvas to draw flipped
-    const tempCanvas = document.createElement('canvas');
+    const tempCanvas = document.createElement("canvas");
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d')!;
+    const tempCtx = tempCanvas.getContext("2d")!;
 
     tempCtx.save();
-    if (this.direction === 'horizontal') {
+    if (this.direction === "horizontal") {
       tempCtx.scale(-1, 1);
       tempCtx.drawImage(layer.canvas, -width, 0);
     } else {
@@ -225,15 +230,15 @@ export class FlipLayerCommand implements Command {
     // Update layer canvas
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(tempCanvas, 0, 0);
-    
+
     // Trigger update
-    layerStore.updateLayer(this.layerId, {}); 
+    layerStore.updateLayer(this.layerId, {});
   }
 }
 
 export class RotateLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Rotate Layer';
+  name = "Rotate Layer";
   private layerId: string;
   private angle: number; // 90, 180, -90
 
@@ -252,24 +257,24 @@ export class RotateLayerCommand implements Command {
   }
 
   private rotate(angle: number) {
-    const layer = layerStore.layers.value.find(l => l.id === this.layerId);
+    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
     if (!layer || !layer.canvas) return;
 
-    const ctx = layer.canvas.getContext('2d');
+    const ctx = layer.canvas.getContext("2d");
     if (!ctx) return;
 
     const width = layer.canvas.width;
     const height = layer.canvas.height;
-    
+
     // Create temp canvas
-    const tempCanvas = document.createElement('canvas');
+    const tempCanvas = document.createElement("canvas");
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d')!;
+    const tempCtx = tempCanvas.getContext("2d")!;
 
     tempCtx.save();
     tempCtx.translate(width / 2, height / 2);
-    tempCtx.rotate(angle * Math.PI / 180);
+    tempCtx.rotate((angle * Math.PI) / 180);
     tempCtx.translate(-width / 2, -height / 2);
     tempCtx.drawImage(layer.canvas, 0, 0);
     tempCtx.restore();
@@ -277,7 +282,7 @@ export class RotateLayerCommand implements Command {
     // Update layer canvas
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(tempCanvas, 0, 0);
-    
+
     // Trigger update
     layerStore.updateLayer(this.layerId, {});
   }

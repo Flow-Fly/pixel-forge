@@ -26,7 +26,10 @@ function getSelectionInfo(): {
   if (state.type === "selected") {
     return {
       bounds: state.bounds,
-      mask: state.shape === "freeform" ? (state as { mask: Uint8Array }).mask : undefined,
+      mask:
+        state.shape === "freeform"
+          ? (state as { mask: Uint8Array }).mask
+          : undefined,
     };
   }
 
@@ -62,12 +65,20 @@ export function captureBrushFromSelection(name?: string): Brush | null {
   const { bounds, mask } = info;
 
   // Validate size
-  if (bounds.width > BRUSH_SIZE_LIMITS.hardMax || bounds.height > BRUSH_SIZE_LIMITS.hardMax) {
-    console.warn(`Selection too large. Maximum size is ${BRUSH_SIZE_LIMITS.hardMax}x${BRUSH_SIZE_LIMITS.hardMax}`);
+  if (
+    bounds.width > BRUSH_SIZE_LIMITS.hardMax ||
+    bounds.height > BRUSH_SIZE_LIMITS.hardMax
+  ) {
+    console.warn(
+      `Selection too large. Maximum size is ${BRUSH_SIZE_LIMITS.hardMax}x${BRUSH_SIZE_LIMITS.hardMax}`
+    );
     return null;
   }
 
-  if (bounds.width < BRUSH_SIZE_LIMITS.min || bounds.height < BRUSH_SIZE_LIMITS.min) {
+  if (
+    bounds.width < BRUSH_SIZE_LIMITS.min ||
+    bounds.height < BRUSH_SIZE_LIMITS.min
+  ) {
     console.warn("Selection too small");
     return null;
   }
@@ -101,7 +112,12 @@ export function captureBrushFromSelection(name?: string): Brush | null {
       return null;
     }
 
-    pixelData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+    pixelData = ctx.getImageData(
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height
+    );
   }
 
   // Apply mask if freeform selection

@@ -148,9 +148,7 @@ export function registerShortcuts() {
     if (state.type === "selected") {
       // Auto-float: cut pixels first, then move
       const activeLayerId = layerStore.activeLayerId.value;
-      const layer = layerStore.layers.value.find(
-        (l) => l.id === activeLayerId
-      );
+      const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
       if (!layer?.canvas) return;
 
       const mask =
@@ -511,7 +509,7 @@ export function registerShortcuts() {
 
   // Ctrl+N / Cmd+N = New Project
   const openNewProjectDialog = () => {
-    window.dispatchEvent(new CustomEvent('show-new-project-dialog'));
+    window.dispatchEvent(new CustomEvent("show-new-project-dialog"));
   };
   keyboardService.register("n", ["ctrl"], openNewProjectDialog, "New project");
   keyboardService.register("n", ["meta"], openNewProjectDialog, "New project");
@@ -528,6 +526,16 @@ export function registerShortcuts() {
     }
     await captureBrushAndAdd();
   };
-  keyboardService.register("b", ["ctrl"], captureBrush, "Capture brush from selection");
-  keyboardService.register("b", ["meta"], captureBrush, "Capture brush from selection");
+  keyboardService.register(
+    "b",
+    ["ctrl"],
+    captureBrush,
+    "Capture brush from selection"
+  );
+  keyboardService.register(
+    "b",
+    ["meta"],
+    captureBrush,
+    "Capture brush from selection"
+  );
 }

@@ -1,13 +1,16 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { animationStore } from '../../stores/animation';
-import { historyStore } from '../../stores/history';
-import { AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
+import { html, css } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { animationStore } from "../../stores/animation";
+import { historyStore } from "../../stores/history";
+import {
+  AddFrameCommand,
+  DeleteFrameCommand,
+} from "../../commands/animation-commands";
 
-const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
+const DURATION_UNIT_KEY = "pf-timeline-duration-unit";
 
-@customElement('pf-playback-controls')
+@customElement("pf-playback-controls")
 export class PFPlaybackControls extends BaseComponent {
   static styles = css`
     :host {
@@ -58,12 +61,12 @@ export class PFPlaybackControls extends BaseComponent {
     }
   `;
 
-  @state() private durationUnit: 'ms' | 'fps' = 'ms';
+  @state() private durationUnit: "ms" | "fps" = "ms";
 
   connectedCallback() {
     super.connectedCallback();
     const saved = localStorage.getItem(DURATION_UNIT_KEY);
-    if (saved === 'fps' || saved === 'ms') {
+    if (saved === "fps" || saved === "ms") {
       this.durationUnit = saved;
     }
   }
@@ -84,15 +87,17 @@ export class PFPlaybackControls extends BaseComponent {
   }
 
   private toggleUnit() {
-    this.durationUnit = this.durationUnit === 'ms' ? 'fps' : 'ms';
+    this.durationUnit = this.durationUnit === "ms" ? "fps" : "ms";
     localStorage.setItem(DURATION_UNIT_KEY, this.durationUnit);
 
     // Dispatch event to notify timeline header
-    this.dispatchEvent(new CustomEvent('unit-change', {
-      detail: { unit: this.durationUnit },
-      bubbles: true,
-      composed: true
-    }));
+    this.dispatchEvent(
+      new CustomEvent("unit-change", {
+        detail: { unit: this.durationUnit },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private getEffectiveFPS(): number {
@@ -119,16 +124,38 @@ export class PFPlaybackControls extends BaseComponent {
     const avgDuration = this.getAverageDuration();
 
     return html`
-      <button @click=${() => animationStore.goToFrame(animationStore.frames.value[0]?.id)}>|&lt;</button>
-      <button class=${isPlaying ? 'active' : ''} @click=${this.togglePlay}>
-        ${isPlaying ? 'Pause' : 'Play'}
+      <button
+        @click=${() =>
+          animationStore.goToFrame(animationStore.frames.value[0]?.id)}
+      >
+        |&lt;
       </button>
-      <button @click=${() => animationStore.goToFrame(animationStore.frames.value[frameCount - 1]?.id)}>&gt;|</button>
+      <button class=${isPlaying ? "active" : ""} @click=${this.togglePlay}>
+        ${isPlaying ? "Pause" : "Play"}
+      </button>
+      <button
+        @click=${() =>
+          animationStore.goToFrame(
+            animationStore.frames.value[frameCount - 1]?.id
+          )}
+      >
+        &gt;|
+      </button>
 
-      <div style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"></div>
+      <div
+        style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
+      ></div>
 
-      <button @click=${this.addFrame} title="Add Duplicate Frame">+ Frame</button>
-      <button @click=${this.deleteFrame} title="Delete Current Frame" ?disabled=${frameCount <= 1}>- Frame</button>
+      <button @click=${this.addFrame} title="Add Duplicate Frame">
+        + Frame
+      </button>
+      <button
+        @click=${this.deleteFrame}
+        title="Delete Current Frame"
+        ?disabled=${frameCount <= 1}
+      >
+        - Frame
+      </button>
 
       <span class="info-text">
         ${frameCount} Frames |
@@ -137,7 +164,7 @@ export class PFPlaybackControls extends BaseComponent {
           @click=${this.toggleUnit}
           title="Click to toggle between ms and FPS"
         >
-          ${this.durationUnit === 'fps'
+          ${this.durationUnit === "fps"
             ? `${effectiveFPS} FPS`
             : `${avgDuration} ms`}
         </span>

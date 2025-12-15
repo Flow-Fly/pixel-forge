@@ -1,18 +1,18 @@
-import { html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { projectStore } from '../../stores/project';
-import { layerStore } from '../../stores/layers';
-import { animationStore } from '../../stores/animation';
-import { FileService } from '../../services/file-service';
-import { exportSpritesheet } from '../../services/spritesheet-export';
-import { exportAnimatedWebP } from '../../services/webp-animation';
-import '../ui/pf-dialog';
+import { html, css } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { projectStore } from "../../stores/project";
+import { layerStore } from "../../stores/layers";
+import { animationStore } from "../../stores/animation";
+import { FileService } from "../../services/file-service";
+// import { exportSpritesheet } from "../../services/spritesheet-export";
+import { exportAnimatedWebP } from "../../services/webp-animation";
+import "../ui/pf-dialog";
 
-export type ExportFormat = 'png' | 'webp' | 'webp-animated' | 'spritesheet';
-export type FrameSelection = 'current' | 'all' | 'range';
+export type ExportFormat = "png" | "webp" | "webp-animated" | "spritesheet";
+export type FrameSelection = "current" | "all" | "range";
 
-@customElement('pf-export-dialog')
+@customElement("pf-export-dialog")
 export class PFExportDialog extends BaseComponent {
   static styles = css`
     .form-group {
@@ -26,7 +26,9 @@ export class PFExportDialog extends BaseComponent {
       color: var(--pf-color-text-muted, #808080);
     }
 
-    select, input[type="text"], input[type="number"] {
+    select,
+    input[type="text"],
+    input[type="number"] {
       width: 100%;
       padding: 8px;
       background: var(--pf-color-bg-surface, #1e1e1e);
@@ -36,7 +38,8 @@ export class PFExportDialog extends BaseComponent {
       font-size: 13px;
     }
 
-    select:focus, input:focus {
+    select:focus,
+    input:focus {
       outline: none;
       border-color: var(--pf-color-accent, #4a9eff);
     }
@@ -130,16 +133,17 @@ export class PFExportDialog extends BaseComponent {
 
   @property({ type: Boolean }) open = false;
 
-  @state() private format: ExportFormat = 'png';
+  @state() private format: ExportFormat = "png";
   @state() private scale: number = 1;
-  @state() private frameSelection: FrameSelection = 'current';
+  @state() private frameSelection: FrameSelection = "current";
   @state() private frameStart: number = 1;
   @state() private frameEnd: number = 1;
   @state() private useBackground: boolean = false;
-  @state() private backgroundColor: string = '#ffffff';
-  @state() private filename: string = 'export';
+  @state() private backgroundColor: string = "#ffffff";
+  @state() private filename: string = "export";
   @state() private includeJson: boolean = true;
-  @state() private spritesheetDirection: 'horizontal' | 'vertical' | 'grid' = 'horizontal';
+  @state() private spritesheetDirection: "horizontal" | "vertical" | "grid" =
+    "horizontal";
   @state() private spritesheetColumns: number = 4;
 
   connectedCallback() {
@@ -152,12 +156,12 @@ export class PFExportDialog extends BaseComponent {
     const baseHeight = projectStore.height.value;
     const frameCount = this.getFrameCount();
 
-    if (this.format === 'spritesheet') {
+    if (this.format === "spritesheet") {
       let cols: number, rows: number;
-      if (this.spritesheetDirection === 'horizontal') {
+      if (this.spritesheetDirection === "horizontal") {
         cols = frameCount;
         rows = 1;
-      } else if (this.spritesheetDirection === 'vertical') {
+      } else if (this.spritesheetDirection === "vertical") {
         cols = 1;
         rows = frameCount;
       } else {
@@ -178,23 +182,23 @@ export class PFExportDialog extends BaseComponent {
 
   private getFrameCount(): number {
     const totalFrames = animationStore.frames.value.length;
-    if (this.frameSelection === 'current') return 1;
-    if (this.frameSelection === 'all') return totalFrames;
+    if (this.frameSelection === "current") return 1;
+    if (this.frameSelection === "all") return totalFrames;
     return Math.max(1, this.frameEnd - this.frameStart + 1);
   }
 
   private close() {
     this.open = false;
-    this.dispatchEvent(new CustomEvent('close'));
+    this.dispatchEvent(new CustomEvent("close"));
   }
 
   private compositeFrame(frameId: string, scale: number): HTMLCanvasElement {
     const width = projectStore.width.value;
     const height = projectStore.height.value;
-    const canvas = document.createElement('canvas');
+    const canvas = document.createElement("canvas");
     canvas.width = width * scale;
     canvas.height = height * scale;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext("2d")!;
 
     // Disable smoothing for pixel art
     ctx.imageSmoothingEnabled = false;
@@ -223,32 +227,32 @@ export class PFExportDialog extends BaseComponent {
 
   private getSelectedFrameIds(): string[] {
     const frames = animationStore.frames.value;
-    if (this.frameSelection === 'current') {
+    if (this.frameSelection === "current") {
       return [animationStore.currentFrameId.value];
     }
-    if (this.frameSelection === 'all') {
-      return frames.map(f => f.id);
+    if (this.frameSelection === "all") {
+      return frames.map((f) => f.id);
     }
     // Range
     const start = Math.max(0, this.frameStart - 1);
     const end = Math.min(frames.length, this.frameEnd);
-    return frames.slice(start, end).map(f => f.id);
+    return frames.slice(start, end).map((f) => f.id);
   }
 
   private async doExport() {
     const frameIds = this.getSelectedFrameIds();
 
     switch (this.format) {
-      case 'png':
-        this.exportImages(frameIds, 'png');
+      case "png":
+        this.exportImages(frameIds, "png");
         break;
-      case 'webp':
-        this.exportImages(frameIds, 'webp');
+      case "webp":
+        this.exportImages(frameIds, "webp");
         break;
-      case 'webp-animated':
+      case "webp-animated":
         await this.exportAnimatedWebP(frameIds);
         break;
-      case 'spritesheet':
+      case "spritesheet":
         this.exportAsSpritesheet(frameIds);
         break;
     }
@@ -256,13 +260,14 @@ export class PFExportDialog extends BaseComponent {
     this.close();
   }
 
-  private exportImages(frameIds: string[], format: 'png' | 'webp') {
+  private exportImages(frameIds: string[], format: "png" | "webp") {
     frameIds.forEach((frameId, index) => {
       const canvas = this.compositeFrame(frameId, this.scale);
-      const suffix = frameIds.length > 1 ? `_${String(index).padStart(3, '0')}` : '';
+      const suffix =
+        frameIds.length > 1 ? `_${String(index).padStart(3, "0")}` : "";
       const filename = `${this.filename}${suffix}`;
 
-      if (format === 'png') {
+      if (format === "png") {
         FileService.exportToPNG(canvas, filename);
       } else {
         FileService.exportToWebP(canvas, filename);
@@ -272,8 +277,8 @@ export class PFExportDialog extends BaseComponent {
 
   private async exportAnimatedWebP(frameIds: string[]) {
     const frames = animationStore.frames.value;
-    const frameData = frameIds.map(id => {
-      const frame = frames.find(f => f.id === id);
+    const frameData = frameIds.map((id) => {
+      const frame = frames.find((f) => f.id === id);
       return {
         canvas: this.compositeFrame(id, this.scale),
         duration: frame?.duration || 100,
@@ -290,10 +295,10 @@ export class PFExportDialog extends BaseComponent {
     const frameCount = frameIds.length;
 
     let cols: number, rows: number;
-    if (this.spritesheetDirection === 'horizontal') {
+    if (this.spritesheetDirection === "horizontal") {
       cols = frameCount;
       rows = 1;
-    } else if (this.spritesheetDirection === 'vertical') {
+    } else if (this.spritesheetDirection === "vertical") {
       cols = 1;
       rows = frameCount;
     } else {
@@ -301,19 +306,19 @@ export class PFExportDialog extends BaseComponent {
       rows = Math.ceil(frameCount / cols);
     }
 
-    const sheetCanvas = document.createElement('canvas');
+    const sheetCanvas = document.createElement("canvas");
     sheetCanvas.width = cols * width;
     sheetCanvas.height = rows * height;
-    const sheetCtx = sheetCanvas.getContext('2d')!;
+    const sheetCtx = sheetCanvas.getContext("2d")!;
 
     const metadata: any = {
       frames: {},
       meta: {
-        app: 'PixelForge',
-        version: '1.0',
+        app: "PixelForge",
+        version: "1.0",
         image: `${this.filename}.png`,
         size: { w: sheetCanvas.width, h: sheetCanvas.height },
-        format: 'RGBA8888',
+        format: "RGBA8888",
       },
     };
 
@@ -327,7 +332,7 @@ export class PFExportDialog extends BaseComponent {
       const frameCanvas = this.compositeFrame(frameId, this.scale);
       sheetCtx.drawImage(frameCanvas, x, y);
 
-      const frame = frames.find(f => f.id === frameId);
+      const frame = frames.find((f) => f.id === frameId);
       metadata.frames[`sprite_${index}`] = {
         frame: { x, y, w: width, h: height },
         sourceSize: { w: width, h: height },
@@ -341,7 +346,7 @@ export class PFExportDialog extends BaseComponent {
     // Download JSON if requested
     if (this.includeJson) {
       const jsonStr = JSON.stringify(metadata, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const blob = new Blob([jsonStr], { type: "application/json" });
       FileService.downloadBlob(blob, `${this.filename}.json`);
     }
   }
@@ -352,11 +357,7 @@ export class PFExportDialog extends BaseComponent {
     const frameCount = this.getFrameCount();
 
     return html`
-      <pf-dialog
-        ?open=${this.open}
-        width="450px"
-        @pf-close=${this.close}
-      >
+      <pf-dialog ?open=${this.open} width="450px" @pf-close=${this.close}>
         <span slot="title">Export Options</span>
 
         <div class="form-group">
@@ -364,7 +365,8 @@ export class PFExportDialog extends BaseComponent {
           <input
             type="text"
             .value=${this.filename}
-            @input=${(e: Event) => this.filename = (e.target as HTMLInputElement).value}
+            @input=${(e: Event) =>
+              (this.filename = (e.target as HTMLInputElement).value)}
           />
         </div>
 
@@ -372,7 +374,9 @@ export class PFExportDialog extends BaseComponent {
           <label>Format</label>
           <select
             .value=${this.format}
-            @change=${(e: Event) => this.format = (e.target as HTMLSelectElement).value as ExportFormat}
+            @change=${(e: Event) =>
+              (this.format = (e.target as HTMLSelectElement)
+                .value as ExportFormat)}
           >
             <option value="png">PNG Image</option>
             <option value="webp">WebP Image</option>
@@ -386,7 +390,8 @@ export class PFExportDialog extends BaseComponent {
             <label>Scale</label>
             <select
               .value=${String(this.scale)}
-              @change=${(e: Event) => this.scale = parseInt((e.target as HTMLSelectElement).value)}
+              @change=${(e: Event) =>
+                (this.scale = parseInt((e.target as HTMLSelectElement).value))}
             >
               <option value="1">1x</option>
               <option value="2">2x</option>
@@ -400,7 +405,9 @@ export class PFExportDialog extends BaseComponent {
             <label>Frames</label>
             <select
               .value=${this.frameSelection}
-              @change=${(e: Event) => this.frameSelection = (e.target as HTMLSelectElement).value as FrameSelection}
+              @change=${(e: Event) =>
+                (this.frameSelection = (e.target as HTMLSelectElement)
+                  .value as FrameSelection)}
             >
               <option value="current">Current Frame</option>
               <option value="all">All Frames (${totalFrames})</option>
@@ -409,70 +416,90 @@ export class PFExportDialog extends BaseComponent {
           </div>
         </div>
 
-        ${this.frameSelection === 'range' ? html`
-          <div class="row">
-            <div class="form-group">
-              <label>Start Frame</label>
-              <input
-                type="number"
-                min="1"
-                max=${totalFrames}
-                .value=${String(this.frameStart)}
-                @input=${(e: Event) => this.frameStart = parseInt((e.target as HTMLInputElement).value) || 1}
-              />
-            </div>
-            <div class="form-group">
-              <label>End Frame</label>
-              <input
-                type="number"
-                min="1"
-                max=${totalFrames}
-                .value=${String(this.frameEnd)}
-                @input=${(e: Event) => this.frameEnd = parseInt((e.target as HTMLInputElement).value) || 1}
-              />
-            </div>
-          </div>
-        ` : ''}
-
-        ${this.format === 'spritesheet' ? html`
-          <div class="row">
-            <div class="form-group">
-              <label>Layout</label>
-              <select
-                .value=${this.spritesheetDirection}
-                @change=${(e: Event) => this.spritesheetDirection = (e.target as HTMLSelectElement).value as any}
-              >
-                <option value="horizontal">Horizontal Strip</option>
-                <option value="vertical">Vertical Strip</option>
-                <option value="grid">Grid</option>
-              </select>
-            </div>
-            ${this.spritesheetDirection === 'grid' ? html`
-              <div class="form-group">
-                <label>Columns</label>
-                <input
-                  type="number"
-                  min="1"
-                  max=${frameCount}
-                  .value=${String(this.spritesheetColumns)}
-                  @input=${(e: Event) => this.spritesheetColumns = parseInt((e.target as HTMLInputElement).value) || 4}
-                />
+        ${this.frameSelection === "range"
+          ? html`
+              <div class="row">
+                <div class="form-group">
+                  <label>Start Frame</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max=${totalFrames}
+                    .value=${String(this.frameStart)}
+                    @input=${(e: Event) =>
+                      (this.frameStart =
+                        parseInt((e.target as HTMLInputElement).value) || 1)}
+                  />
+                </div>
+                <div class="form-group">
+                  <label>End Frame</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max=${totalFrames}
+                    .value=${String(this.frameEnd)}
+                    @input=${(e: Event) =>
+                      (this.frameEnd =
+                        parseInt((e.target as HTMLInputElement).value) || 1)}
+                  />
+                </div>
               </div>
-            ` : ''}
-          </div>
+            `
+          : ""}
+        ${this.format === "spritesheet"
+          ? html`
+              <div class="row">
+                <div class="form-group">
+                  <label>Layout</label>
+                  <select
+                    .value=${this.spritesheetDirection}
+                    @change=${(e: Event) =>
+                      (this.spritesheetDirection = (
+                        e.target as HTMLSelectElement
+                      ).value as any)}
+                  >
+                    <option value="horizontal">Horizontal Strip</option>
+                    <option value="vertical">Vertical Strip</option>
+                    <option value="grid">Grid</option>
+                  </select>
+                </div>
+                ${this.spritesheetDirection === "grid"
+                  ? html`
+                      <div class="form-group">
+                        <label>Columns</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max=${frameCount}
+                          .value=${String(this.spritesheetColumns)}
+                          @input=${(e: Event) =>
+                            (this.spritesheetColumns =
+                              parseInt((e.target as HTMLInputElement).value) ||
+                              4)}
+                        />
+                      </div>
+                    `
+                  : ""}
+              </div>
 
-          <div class="form-group">
-            <div class="checkbox-group">
-              <input
-                type="checkbox"
-                id="include-json"
-                .checked=${this.includeJson}
-                @change=${(e: Event) => this.includeJson = (e.target as HTMLInputElement).checked}
-              />
-              <label for="include-json">Include JSON metadata (TexturePacker format)</label>
-            </div>
-          </div>
-        ` : ''}
+              <div class="form-group">
+                <div class="checkbox-group">
+                  <input
+                    type="checkbox"
+                    id="include-json"
+                    .checked=${this.includeJson}
+                    @change=${(e: Event) =>
+                      (this.includeJson = (
+                        e.target as HTMLInputElement
+                      ).checked)}
+                  />
+                  <label for="include-json"
+                    >Include JSON metadata (TexturePacker format)</label
+                  >
+                </div>
+              </div>
+            `
+          : ""}
 
         <div class="form-group">
           <div class="checkbox-group">
@@ -480,36 +507,49 @@ export class PFExportDialog extends BaseComponent {
               type="checkbox"
               id="use-bg"
               .checked=${this.useBackground}
-              @change=${(e: Event) => this.useBackground = (e.target as HTMLInputElement).checked}
+              @change=${(e: Event) =>
+                (this.useBackground = (e.target as HTMLInputElement).checked)}
             />
             <label for="use-bg">Fill background color</label>
           </div>
         </div>
 
-        ${this.useBackground ? html`
-          <div class="form-group">
-            <label>Background Color</label>
-            <div class="color-input">
-              <input
-                type="color"
-                .value=${this.backgroundColor}
-                @input=${(e: Event) => this.backgroundColor = (e.target as HTMLInputElement).value}
-              />
-              <input
-                type="text"
-                .value=${this.backgroundColor}
-                @input=${(e: Event) => this.backgroundColor = (e.target as HTMLInputElement).value}
-              />
-            </div>
-          </div>
-        ` : ''}
+        ${this.useBackground
+          ? html`
+              <div class="form-group">
+                <label>Background Color</label>
+                <div class="color-input">
+                  <input
+                    type="color"
+                    .value=${this.backgroundColor}
+                    @input=${(e: Event) =>
+                      (this.backgroundColor = (
+                        e.target as HTMLInputElement
+                      ).value)}
+                  />
+                  <input
+                    type="text"
+                    .value=${this.backgroundColor}
+                    @input=${(e: Event) =>
+                      (this.backgroundColor = (
+                        e.target as HTMLInputElement
+                      ).value)}
+                  />
+                </div>
+              </div>
+            `
+          : ""}
 
         <div class="preview-info">
           <strong>Output:</strong> ${width} x ${height} px
-          ${frameCount > 1 && this.format !== 'spritesheet' && this.format !== 'webp-animated'
+          ${frameCount > 1 &&
+          this.format !== "spritesheet" &&
+          this.format !== "webp-animated"
             ? html` (${frameCount} files)`
-            : ''}
-          ${this.format === 'webp-animated' ? html` (${frameCount} frames)` : ''}
+            : ""}
+          ${this.format === "webp-animated"
+            ? html` (${frameCount} frames)`
+            : ""}
         </div>
 
         <div slot="actions">
@@ -523,6 +563,6 @@ export class PFExportDialog extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-export-dialog': PFExportDialog;
+    "pf-export-dialog": PFExportDialog;
   }
 }

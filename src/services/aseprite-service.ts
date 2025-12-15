@@ -1,8 +1,8 @@
-import { parseAseFile, celToImageData, type AseFile } from './aseprite-parser';
-import { exportAseFile } from './aseprite-writer';
-import { projectStore } from '../stores/project';
-import { layerStore } from '../stores/layers';
-import { animationStore } from '../stores/animation';
+import { parseAseFile, celToImageData, type AseFile } from "./aseprite-parser";
+import { exportAseFile } from "./aseprite-writer";
+import { projectStore } from "../stores/project";
+import { layerStore } from "../stores/layers";
+import { animationStore } from "../stores/animation";
 
 // Track linked cels to establish links after all frames are created
 interface LinkedCelRecord {
@@ -38,14 +38,25 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
   imageLayers.forEach((aseLayer) => {
     // Find original index in the full layers array
     const originalIndex = aseFile.layers.indexOf(aseLayer);
-    const layer = layerStore.addLayer(aseLayer.name, aseFile.header.width, aseFile.header.height);
+    const layer = layerStore.addLayer(
+      aseLayer.name,
+      aseFile.header.width,
+      aseFile.header.height
+    );
 
     layer.visible = (aseLayer.flags & 1) !== 0;
     layer.opacity = aseLayer.opacity;
 
     // Map blend mode
-    const blendModes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten'];
-    layer.blendMode = blendModes[aseLayer.blendMode] || 'normal';
+    const blendModes = [
+      "normal",
+      "multiply",
+      "screen",
+      "overlay",
+      "darken",
+      "lighten",
+    ];
+    layer.blendMode = blendModes[aseLayer.blendMode] || "normal";
 
     layerIdMap.set(originalIndex, layer.id);
   });
@@ -109,8 +120,14 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
     if (!sourceFrameId || !targetFrameId) continue;
 
     const groupKey = `${record.sourceFrameIndex}:${record.layerId}`;
-    const sourceCelKey = animationStore.getCelKey(record.layerId, sourceFrameId);
-    const targetCelKey = animationStore.getCelKey(record.layerId, targetFrameId);
+    const sourceCelKey = animationStore.getCelKey(
+      record.layerId,
+      sourceFrameId
+    );
+    const targetCelKey = animationStore.getCelKey(
+      record.layerId,
+      targetFrameId
+    );
 
     if (!linkGroups.has(groupKey)) {
       // Start with source cel
@@ -122,15 +139,24 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
   // Apply hard links
   for (const celKeys of linkGroups.values()) {
     if (celKeys.length >= 2) {
-      animationStore.linkCels(celKeys, 'hard');
+      animationStore.linkCels(celKeys, "hard");
     }
   }
 
   // Import tags
   for (const aseTag of aseFile.tags) {
     // Convert RGB to hex color
-    const color = `#${aseTag.color.r.toString(16).padStart(2, '0')}${aseTag.color.g.toString(16).padStart(2, '0')}${aseTag.color.b.toString(16).padStart(2, '0')}`;
-    animationStore.addFrameTag(aseTag.name, color, aseTag.fromFrame, aseTag.toFrame);
+    const color = `#${aseTag.color.r
+      .toString(16)
+      .padStart(2, "0")}${aseTag.color.g
+      .toString(16)
+      .padStart(2, "0")}${aseTag.color.b.toString(16).padStart(2, "0")}`;
+    animationStore.addFrameTag(
+      aseTag.name,
+      color,
+      aseTag.fromFrame,
+      aseTag.toFrame
+    );
   }
 
   // Go to first frame
@@ -157,13 +183,13 @@ function drawCelToCanvas(
   const celCanvas = animationStore.getCelCanvas(frameId, layerId);
   if (!celCanvas) return;
 
-  const ctx = celCanvas.getContext('2d')!;
+  const ctx = celCanvas.getContext("2d")!;
 
   // Create temporary canvas to hold the image data
-  const tempCanvas = document.createElement('canvas');
+  const tempCanvas = document.createElement("canvas");
   tempCanvas.width = imageData.width;
   tempCanvas.height = imageData.height;
-  const tempCtx = tempCanvas.getContext('2d')!;
+  const tempCtx = tempCanvas.getContext("2d")!;
   tempCtx.putImageData(imageData, 0, 0);
 
   // Draw at position
@@ -175,14 +201,14 @@ function drawCelToCanvas(
  */
 export function openAseFile(): Promise<void> {
   return new Promise((resolve, reject) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.ase,.aseprite';
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ase,.aseprite";
 
     input.onchange = async (e: Event) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) {
-        reject(new Error('No file selected'));
+        reject(new Error("No file selected"));
         return;
       }
 

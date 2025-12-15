@@ -1,28 +1,34 @@
-import { html, css, type PropertyValueMap } from 'lit';
-import { customElement, property, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { layerStore } from '../../stores/layers';
-import { toolStore, type ToolType } from '../../stores/tools';
-import { selectionStore } from '../../stores/selection';
-import { CommitFloatCommand } from '../../commands/selection-commands';
-import { animationStore } from '../../stores/animation';
-import { historyStore } from '../../stores/history';
-import { dirtyRectStore } from '../../stores/dirty-rect';
-import { viewportStore } from '../../stores/viewport';
-import { renderScheduler } from '../../services/render-scheduler';
-import { onionSkinCache } from '../../services/onion-skin-cache';
-import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
-import type { ModifierKeys } from '../../tools/base-tool';
-import { rectClamp, type Rect } from '../../types/geometry';
-import { getFont, renderText, getCursorX, renderCursor, getDefaultFont } from '../../utils/pixel-fonts';
-import { TextTool } from '../../tools/text-tool';
+import { html, css, type PropertyValueMap } from "lit";
+import { customElement, property, query } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { layerStore } from "../../stores/layers";
+import { toolStore, type ToolType } from "../../stores/tools";
+import { selectionStore } from "../../stores/selection";
+import { CommitFloatCommand } from "../../commands/selection-commands";
+import { animationStore } from "../../stores/animation";
+import { historyStore } from "../../stores/history";
+import { dirtyRectStore } from "../../stores/dirty-rect";
+import { viewportStore } from "../../stores/viewport";
+import { renderScheduler } from "../../services/render-scheduler";
+import { onionSkinCache } from "../../services/onion-skin-cache";
+import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
+import type { ModifierKeys } from "../../tools/base-tool";
+import { rectClamp, type Rect } from "../../types/geometry";
+import {
+  getFont,
+  renderText,
+  getCursorX,
+  renderCursor,
+  getDefaultFont,
+} from "../../utils/pixel-fonts";
+import { TextTool } from "../../tools/text-tool";
 
-@customElement('pf-drawing-canvas')
+@customElement("pf-drawing-canvas")
 export class PFDrawingCanvas extends BaseComponent {
   @property({ type: Number }) width = 64;
   @property({ type: Number }) height = 64;
 
-  @query('canvas') canvas!: HTMLCanvasElement;
+  @query("canvas") canvas!: HTMLCanvasElement;
 
   static styles = css`
     :host {
@@ -65,14 +71,16 @@ export class PFDrawingCanvas extends BaseComponent {
   private boundDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
   private isStrokeActive = false;
 
-  protected firstUpdated(_changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>): void {
+  protected firstUpdated(
+    _changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>
+  ): void {
     super.firstUpdated(_changedProperties);
 
     // Get context with performance hints
-    this.ctx = this.canvas.getContext('2d', {
+    this.ctx = this.canvas.getContext("2d", {
       alpha: true,
       desynchronized: true, // Hint for lower latency (may not be supported everywhere)
-      willReadFrequently: false // We mostly write, read only for history snapshots
+      willReadFrequently: false, // We mostly write, read only for history snapshots
     })!;
 
     // Explicit setting for pixel art - critical for crisp rendering
@@ -85,7 +93,9 @@ export class PFDrawingCanvas extends BaseComponent {
     this.renderCanvas();
   }
 
-  protected updated(_changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>): void {
+  protected updated(
+    _changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>
+  ): void {
     super.updated(_changedProperties);
 
     // Check if tool changed
@@ -94,7 +104,7 @@ export class PFDrawingCanvas extends BaseComponent {
       this.loadTool(currentTool);
     }
 
-    if (_changedProperties.has('width') || _changedProperties.has('height')) {
+    if (_changedProperties.has("width") || _changedProperties.has("height")) {
       this.resizeCanvas();
     }
 
@@ -105,12 +115,22 @@ export class PFDrawingCanvas extends BaseComponent {
 
   private async loadTool(toolName: ToolType) {
     // Auto-commit floating selection when switching to drawing tools
-    const drawingTools = ['pencil', 'eraser', 'fill', 'gradient', 'line', 'rectangle', 'ellipse'];
+    const drawingTools = [
+      "pencil",
+      "eraser",
+      "fill",
+      "gradient",
+      "line",
+      "rectangle",
+      "ellipse",
+    ];
     if (drawingTools.includes(toolName)) {
       const state = selectionStore.state.value;
-      if (state.type === 'floating') {
+      if (state.type === "floating") {
         const activeLayerId = layerStore.activeLayerId.value;
-        const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+        const layer = layerStore.layers.value.find(
+          (l) => l.id === activeLayerId
+        );
         if (layer?.canvas) {
           const command = new CommitFloatCommand(
             layer.canvas,
@@ -129,68 +149,74 @@ export class PFDrawingCanvas extends BaseComponent {
     let ToolClass;
 
     switch (toolName) {
-      case 'pencil':
-        const { PencilTool } = await import('../../tools/pencil-tool');
+      case "pencil":
+        const { PencilTool } = await import("../../tools/pencil-tool");
         ToolClass = PencilTool;
         break;
-      case 'eraser':
-        const { EraserTool } = await import('../../tools/eraser-tool');
+      case "eraser":
+        const { EraserTool } = await import("../../tools/eraser-tool");
         ToolClass = EraserTool;
         break;
-      case 'eyedropper':
-        const { EyedropperTool } = await import('../../tools/eyedropper-tool');
+      case "eyedropper":
+        const { EyedropperTool } = await import("../../tools/eyedropper-tool");
         ToolClass = EyedropperTool;
         break;
-      case 'marquee-rect':
-        const { MarqueeRectTool } = await import('../../tools/selection/marquee-rect-tool');
+      case "marquee-rect":
+        const { MarqueeRectTool } = await import(
+          "../../tools/selection/marquee-rect-tool"
+        );
         ToolClass = MarqueeRectTool;
         break;
-      case 'lasso':
-        const { LassoTool } = await import('../../tools/selection/lasso-tool');
+      case "lasso":
+        const { LassoTool } = await import("../../tools/selection/lasso-tool");
         ToolClass = LassoTool;
         break;
-      case 'polygonal-lasso':
-        const { PolygonalLassoTool } = await import('../../tools/selection/polygonal-lasso-tool');
+      case "polygonal-lasso":
+        const { PolygonalLassoTool } = await import(
+          "../../tools/selection/polygonal-lasso-tool"
+        );
         ToolClass = PolygonalLassoTool;
         break;
-      case 'magic-wand':
-        const { MagicWandTool } = await import('../../tools/selection/magic-wand-tool');
+      case "magic-wand":
+        const { MagicWandTool } = await import(
+          "../../tools/selection/magic-wand-tool"
+        );
         ToolClass = MagicWandTool;
         break;
-      case 'line':
-        const { LineTool } = await import('../../tools/shape-tool');
+      case "line":
+        const { LineTool } = await import("../../tools/shape-tool");
         ToolClass = LineTool;
         break;
-      case 'rectangle':
-        const { RectangleTool } = await import('../../tools/shape-tool');
+      case "rectangle":
+        const { RectangleTool } = await import("../../tools/shape-tool");
         ToolClass = RectangleTool;
         break;
-      case 'ellipse':
-        const { EllipseTool } = await import('../../tools/shape-tool');
+      case "ellipse":
+        const { EllipseTool } = await import("../../tools/shape-tool");
         ToolClass = EllipseTool;
         break;
-      case 'fill':
-        const { FillTool } = await import('../../tools/fill-tool');
+      case "fill":
+        const { FillTool } = await import("../../tools/fill-tool");
         ToolClass = FillTool;
         break;
-      case 'gradient':
-        const { GradientTool } = await import('../../tools/gradient-tool');
+      case "gradient":
+        const { GradientTool } = await import("../../tools/gradient-tool");
         ToolClass = GradientTool;
         break;
-      case 'transform':
-        const { TransformTool } = await import('../../tools/transform-tool');
+      case "transform":
+        const { TransformTool } = await import("../../tools/transform-tool");
         ToolClass = TransformTool;
         break;
-      case 'text':
-        const { TextTool } = await import('../../tools/text-tool');
+      case "text":
+        const { TextTool } = await import("../../tools/text-tool");
         ToolClass = TextTool;
         break;
-      case 'hand':
-        const { HandTool } = await import('../../tools/hand-tool');
+      case "hand":
+        const { HandTool } = await import("../../tools/hand-tool");
         ToolClass = HandTool;
         break;
-      case 'zoom':
-        const { ZoomTool } = await import('../../tools/zoom-tool');
+      case "zoom":
+        const { ZoomTool } = await import("../../tools/zoom-tool");
         ToolClass = ZoomTool;
         break;
       default:
@@ -240,11 +266,21 @@ export class PFDrawingCanvas extends BaseComponent {
       // Partial redraw - clip to dirty region
       this.ctx.save();
       this.ctx.beginPath();
-      this.ctx.rect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
+      this.ctx.rect(
+        dirtyRect.x,
+        dirtyRect.y,
+        dirtyRect.width,
+        dirtyRect.height
+      );
       this.ctx.clip();
 
       // Clear just the dirty region
-      this.ctx.clearRect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
+      this.ctx.clearRect(
+        dirtyRect.x,
+        dirtyRect.y,
+        dirtyRect.width,
+        dirtyRect.height
+      );
 
       // Render layers (clipped)
       this.renderLayers(dirtyRect);
@@ -285,9 +321,12 @@ export class PFDrawingCanvas extends BaseComponent {
       const layerOpacity = layer.opacity / 255;
       const celOpacity = (cel?.opacity ?? 100) / 100;
       this.ctx.globalAlpha = layerOpacity * celOpacity;
-      this.ctx.globalCompositeOperation = layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+      this.ctx.globalCompositeOperation =
+        layer.blendMode === "normal"
+          ? "source-over"
+          : (layer.blendMode as GlobalCompositeOperation);
 
-      if (layer.type === 'text') {
+      if (layer.type === "text") {
         // Render text layer using pixel font
         this.renderTextLayer(layer.id, currentFrameId);
       } else if (layer.canvas) {
@@ -296,8 +335,14 @@ export class PFDrawingCanvas extends BaseComponent {
           // Draw only the dirty region from layer
           this.ctx.drawImage(
             layer.canvas,
-            dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height,
-            dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height
+            dirtyRect.x,
+            dirtyRect.y,
+            dirtyRect.width,
+            dirtyRect.height,
+            dirtyRect.x,
+            dirtyRect.y,
+            dirtyRect.width,
+            dirtyRect.height
           );
         } else {
           this.ctx.drawImage(layer.canvas, 0, 0);
@@ -307,15 +352,15 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Reset composite operation
     this.ctx.globalAlpha = 1;
-    this.ctx.globalCompositeOperation = 'source-over';
+    this.ctx.globalCompositeOperation = "source-over";
   }
 
   /**
    * Render a text layer using pixel fonts.
    */
   private renderTextLayer(layerId: string, frameId: string) {
-    const layer = layerStore.layers.value.find(l => l.id === layerId);
-    if (!layer || layer.type !== 'text' || !layer.textData) return;
+    const layer = layerStore.layers.value.find((l) => l.id === layerId);
+    if (!layer || layer.type !== "text" || !layer.textData) return;
 
     const textCelData = animationStore.getTextCelData(layerId, frameId);
     if (!textCelData) return;
@@ -333,19 +378,29 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Render cursor if editing this layer
     const editingState = TextTool.editingState.value;
-    if (editingState.isEditing && editingState.layerId === layerId && editingState.cursorVisible) {
-      const cursorX = getCursorX(content || '', editingState.cursorPosition, font, x);
+    if (
+      editingState.isEditing &&
+      editingState.layerId === layerId &&
+      editingState.cursorVisible
+    ) {
+      const cursorX = getCursorX(
+        content || "",
+        editingState.cursorPosition,
+        font,
+        x
+      );
       renderCursor(this.ctx, cursorX, y, font.charHeight, color);
     }
   }
 
   private drawOnionSkins() {
-    const { enabled, prevFrames, nextFrames, opacityStep, tint } = animationStore.onionSkin.value;
+    const { enabled, prevFrames, nextFrames, opacityStep, tint } =
+      animationStore.onionSkin.value;
     if (!enabled) return;
 
     const frames = animationStore.frames.value;
     const currentFrameId = animationStore.currentFrameId.value;
-    const currentIndex = frames.findIndex(f => f.id === currentFrameId);
+    const currentIndex = frames.findIndex((f) => f.id === currentFrameId);
     if (currentIndex === -1) return;
 
     const activeLayerId = layerStore.activeLayerId.value;
@@ -362,28 +417,32 @@ export class PFDrawingCanvas extends BaseComponent {
       const cel = cels.get(key);
 
       if (cel && cel.canvas) {
-        const opacity = Math.max(0.1, 1 - (distance * opacityStep));
-        const tintColor = isPrev ? '#ff0000' : '#0000ff';
+        const opacity = Math.max(0.1, 1 - distance * opacityStep);
+        const tintColor = isPrev ? "#ff0000" : "#0000ff";
 
         this.ctx.save();
         this.ctx.globalAlpha = opacity;
 
         if (tint) {
           // Try to get cached tinted bitmap (fast path)
-          const cachedBitmap = onionSkinCache.getSync(cel.id, tintColor, opacity);
+          const cachedBitmap = onionSkinCache.getSync(
+            cel.id,
+            tintColor,
+            opacity
+          );
 
           if (cachedBitmap) {
             // Cache hit - draw the cached bitmap
             this.ctx.drawImage(cachedBitmap, 0, 0);
           } else {
             // Cache miss - use sync fallback and populate cache for next time
-            const tempCanvas = document.createElement('canvas');
+            const tempCanvas = document.createElement("canvas");
             tempCanvas.width = this.width;
             tempCanvas.height = this.height;
-            const tempCtx = tempCanvas.getContext('2d')!;
+            const tempCtx = tempCanvas.getContext("2d")!;
 
             tempCtx.drawImage(cel.canvas, 0, 0);
-            tempCtx.globalCompositeOperation = 'source-in';
+            tempCtx.globalCompositeOperation = "source-in";
             tempCtx.fillStyle = tintColor;
             tempCtx.fillRect(0, 0, this.width, this.height);
 
@@ -451,11 +510,11 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private cleanupDocumentListeners() {
     if (this.boundDocumentMouseMove) {
-      document.removeEventListener('mousemove', this.boundDocumentMouseMove);
+      document.removeEventListener("mousemove", this.boundDocumentMouseMove);
       this.boundDocumentMouseMove = null;
     }
     if (this.boundDocumentMouseUp) {
-      document.removeEventListener('mouseup', this.boundDocumentMouseUp);
+      document.removeEventListener("mouseup", this.boundDocumentMouseUp);
       this.boundDocumentMouseUp = null;
     }
     this.isStrokeActive = false;
@@ -470,7 +529,12 @@ export class PFDrawingCanvas extends BaseComponent {
   private handleMouseDown(e: MouseEvent) {
     // Check if current tool is a selection tool (needs Alt for subtract mode)
     const currentTool = toolStore.activeTool.value;
-    const isSelectionTool = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'].includes(currentTool);
+    const isSelectionTool = [
+      "marquee-rect",
+      "lasso",
+      "polygonal-lasso",
+      "magic-wand",
+    ].includes(currentTool);
 
     // Skip drawing when:
     // - Middle mouse button (panning)
@@ -493,23 +557,40 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Update active tool context to the active layer's canvas
     const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    const activeLayer = layerStore.layers.value.find(
+      (l) => l.id === activeLayerId
+    );
 
-    if (activeLayer && activeLayer.canvas && !activeLayer.locked && activeLayer.visible) {
+    if (
+      activeLayer &&
+      activeLayer.canvas &&
+      !activeLayer.locked &&
+      activeLayer.visible
+    ) {
       // Copy-on-write: unlink cel before editing if it's shared with others
       const currentFrameId = animationStore.currentFrameId.value;
-      const wasUnlinked = animationStore.ensureUnlinkedForEdit(activeLayerId!, currentFrameId);
+      const wasUnlinked = animationStore.ensureUnlinkedForEdit(
+        activeLayerId!,
+        currentFrameId
+      );
 
       // If unlinked, the layer's canvas reference has changed - get fresh reference
       let targetLayer = activeLayer;
       if (wasUnlinked) {
-        targetLayer = layerStore.layers.value.find((l) => l.id === activeLayerId)!;
+        targetLayer = layerStore.layers.value.find(
+          (l) => l.id === activeLayerId
+        )!;
       }
 
-      const layerCtx = targetLayer.canvas!.getContext('2d');
+      const layerCtx = targetLayer.canvas!.getContext("2d");
       if (layerCtx) {
         // Capture state before drawing
-        this.previousImageData = layerCtx.getImageData(0, 0, this.width, this.height);
+        this.previousImageData = layerCtx.getImageData(
+          0,
+          0,
+          this.width,
+          this.height
+        );
 
         // Reset stroke dirty region to prevent pollution from previous execute/undo
         dirtyRectStore.resetStroke();
@@ -524,8 +605,8 @@ export class PFDrawingCanvas extends BaseComponent {
         this.isStrokeActive = true;
         this.boundDocumentMouseMove = this.handleDocumentMouseMove.bind(this);
         this.boundDocumentMouseUp = this.handleDocumentMouseUp.bind(this);
-        document.addEventListener('mousemove', this.boundDocumentMouseMove);
-        document.addEventListener('mouseup', this.boundDocumentMouseUp);
+        document.addEventListener("mousemove", this.boundDocumentMouseMove);
+        document.addEventListener("mouseup", this.boundDocumentMouseUp);
 
         // Schedule render instead of immediate call
         renderScheduler.scheduleRender(() => this.renderCanvas());
@@ -550,7 +631,7 @@ export class PFDrawingCanvas extends BaseComponent {
     const modifiers = this.getModifiers(e);
 
     // Emit cursor position (clamped) for brush overlay and status bar
-    const cursorEvent = new CustomEvent('canvas-cursor', {
+    const cursorEvent = new CustomEvent("canvas-cursor", {
       detail: { x: Math.floor(x), y: Math.floor(y) },
       bubbles: true,
       composed: true,
@@ -592,10 +673,18 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Capture state after drawing and create command
     const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    const activeLayer = layerStore.layers.value.find(
+      (l) => l.id === activeLayerId
+    );
 
-    if (activeLayer && activeLayer.canvas && this.previousImageData && strokeBounds && activeLayerId) {
-      const layerCtx = activeLayer.canvas.getContext('2d');
+    if (
+      activeLayer &&
+      activeLayer.canvas &&
+      this.previousImageData &&
+      strokeBounds &&
+      activeLayerId
+    ) {
+      const layerCtx = activeLayer.canvas.getContext("2d");
       if (layerCtx) {
         // Clamp bounds to canvas dimensions
         const bounds = rectClamp(strokeBounds, this.width, this.height);
@@ -611,7 +700,10 @@ export class PFDrawingCanvas extends BaseComponent {
 
         // Get current state of the affected region
         const newImageData = layerCtx.getImageData(
-          bounds.x, bounds.y, bounds.width, bounds.height
+          bounds.x,
+          bounds.y,
+          bounds.width,
+          bounds.height
         );
 
         // Only create command if data actually changed
@@ -627,7 +719,10 @@ export class PFDrawingCanvas extends BaseComponent {
 
           // Invalidate onion skin cache for the modified cel
           const currentFrameId = animationStore.currentFrameId.value;
-          const celKey = animationStore.getCelKey(activeLayerId, currentFrameId);
+          const celKey = animationStore.getCelKey(
+            activeLayerId,
+            currentFrameId
+          );
           const cel = animationStore.cels.value.get(celKey);
           if (cel) {
             onionSkinCache.invalidateCel(cel.id);
@@ -647,7 +742,7 @@ export class PFDrawingCanvas extends BaseComponent {
     const { x, y } = this.getCanvasCoordinates(e);
 
     // Emit cursor position for status bar and brush cursor overlay
-    const cursorEvent = new CustomEvent('canvas-cursor', {
+    const cursorEvent = new CustomEvent("canvas-cursor", {
       detail: { x: Math.floor(x), y: Math.floor(y) },
       bubbles: true,
       composed: true,
@@ -669,7 +764,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
   private handleMouseLeave = (_e: MouseEvent) => {
     // Notify brush cursor overlay that cursor left canvas
-    window.dispatchEvent(new CustomEvent('canvas-cursor-leave'));
+    window.dispatchEvent(new CustomEvent("canvas-cursor-leave"));
 
     // Don't commit stroke here - document-level listeners handle out-of-canvas tracking
     // The stroke will be finalized when mouse is released anywhere
@@ -687,7 +782,10 @@ export class PFDrawingCanvas extends BaseComponent {
   /**
    * Extract a rectangular region from full ImageData.
    */
-  private extractRegion(fullImageData: ImageData, bounds: Rect): Uint8ClampedArray {
+  private extractRegion(
+    fullImageData: ImageData,
+    bounds: Rect
+  ): Uint8ClampedArray {
     const result = new Uint8ClampedArray(bounds.width * bounds.height * 4);
     const fullWidth = fullImageData.width;
 
@@ -706,7 +804,10 @@ export class PFDrawingCanvas extends BaseComponent {
   /**
    * Compare two Uint8ClampedArray for equality.
    */
-  private uint8ArrayEquals(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
+  private uint8ArrayEquals(
+    a: Uint8ClampedArray,
+    b: Uint8ClampedArray
+  ): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
       if (a[i] !== b[i]) return false;
@@ -720,14 +821,22 @@ export class PFDrawingCanvas extends BaseComponent {
   private getCommandNameForTool(): string {
     const toolName = this.activeTool?.name;
     switch (toolName) {
-      case 'pencil': return 'Brush Stroke';
-      case 'eraser': return 'Erase';
-      case 'fill': return 'Fill';
-      case 'gradient': return 'Gradient';
-      case 'line': return 'Draw Line';
-      case 'rectangle': return 'Draw Rectangle';
-      case 'ellipse': return 'Draw Ellipse';
-      default: return 'Drawing';
+      case "pencil":
+        return "Brush Stroke";
+      case "eraser":
+        return "Erase";
+      case "fill":
+        return "Fill";
+      case "gradient":
+        return "Gradient";
+      case "line":
+        return "Draw Line";
+      case "rectangle":
+        return "Draw Rectangle";
+      case "ellipse":
+        return "Draw Ellipse";
+      default:
+        return "Drawing";
     }
   }
 

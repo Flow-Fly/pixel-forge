@@ -1,6 +1,6 @@
-import type { Command } from './index';
-import { paletteStore } from '../stores/palette';
-import { animationStore } from '../stores/animation';
+import type { Command } from "./index";
+import { paletteStore } from "../stores/palette";
+import { animationStore } from "../stores/animation";
 
 /**
  * Command for changing a single palette color.
@@ -19,7 +19,7 @@ export class PaletteChangeCommand implements Command {
 
   constructor(paletteIndex: number, previousColor: string, newColor: string) {
     this.id = crypto.randomUUID();
-    this.name = 'Change Palette Color';
+    this.name = "Change Palette Color";
     this.paletteIndex = paletteIndex;
     this.previousColor = previousColor;
     this.newColor = newColor;
@@ -54,7 +54,7 @@ export class PaletteAddColorCommand implements Command {
 
   constructor(color: string) {
     this.id = crypto.randomUUID();
-    this.name = 'Add Palette Color';
+    this.name = "Add Palette Color";
     this.color = color;
     this.timestamp = Date.now();
   }
@@ -87,7 +87,7 @@ export class PaletteRemoveColorCommand implements Command {
 
   constructor(paletteIndex: number, color: string) {
     this.id = crypto.randomUUID();
-    this.name = 'Remove Palette Color';
+    this.name = "Remove Palette Color";
     this.paletteIndex = paletteIndex;
     this.removedColor = color;
     this.timestamp = Date.now();

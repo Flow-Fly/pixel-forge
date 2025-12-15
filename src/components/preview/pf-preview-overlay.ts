@@ -214,7 +214,7 @@ export class PFPreviewOverlay extends BaseComponent {
 
     .resize-handle::before,
     .resize-handle::after {
-      content: '';
+      content: "";
       position: absolute;
       background: var(--pf-color-text-muted);
     }
@@ -258,7 +258,7 @@ export class PFPreviewOverlay extends BaseComponent {
 
   // Preview sizing constraints
   private readonly MAX_PREVIEW_SIZE = 300; // Max user-resizable size
-  private readonly MIN_PREVIEW_SIZE = 64;  // Min user-resizable size
+  private readonly MIN_PREVIEW_SIZE = 64; // Min user-resizable size
 
   connectedCallback() {
     super.connectedCallback();
@@ -535,7 +535,9 @@ export class PFPreviewOverlay extends BaseComponent {
 
         <div
           class="content ${this.collapsed ? "collapsed" : ""}"
-          style="${!this.collapsed ? `max-height: ${this.previewSize + 100}px` : ""}"
+          style="${!this.collapsed
+            ? `max-height: ${this.previewSize + 100}px`
+            : ""}"
         >
           <div
             class="preview-area bg-${this.bgType}"
