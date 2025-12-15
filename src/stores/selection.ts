@@ -6,7 +6,7 @@ import {
   rotateCleanEdge,
   calculateRotatedBounds,
   normalizeAngle,
-} from "../utils/rotation-utils";
+} from "../utils/rotation";
 
 export type SelectionMode = "replace" | "add" | "subtract";
 

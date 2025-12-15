@@ -1,20 +1,25 @@
-import { signal } from '../core/signal';
-import { layerStore } from './layers';
-import { animationStore, EMPTY_CEL_LINK_ID } from './animation';
-import { historyStore } from './history';
-import { paletteStore } from './palette';
-import { persistenceService } from '../services/persistence/indexed-db';
-import { onionSkinCache } from '../services/onion-skin-cache';
-import { canvasToPngBytes, loadImageDataToCanvas } from '../utils/canvas-binary';
-import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
-import { PROJECT_VERSION, type ProjectFile } from '../types/project';
+import { signal } from "../core/signal";
+import { layerStore } from "./layers";
+import { animationStore, EMPTY_CEL_LINK_ID } from "./animation";
+import { historyStore } from "./history";
+import { paletteStore } from "./palette";
+import { persistenceService } from "../services/persistence/indexed-db";
+import { onionSkinCache } from "../services/onion-skin-cache";
+import {
+  canvasToPngBytes,
+  loadImageDataToCanvas,
+} from "../utils/canvas-binary";
+import { buildIndexBufferFromCanvas } from "../utils/indexed-color";
+import { PROJECT_VERSION, type ProjectFile } from "../types/project";
 
 /**
  * Check if image data has content.
  * Handles string (Base64), Uint8Array, and serialized Uint8Array (object with numeric keys from JSON).
  */
-function hasImageData(data: string | Uint8Array | Record<string, number>): boolean {
-  if (typeof data === 'string') return data.length > 0;
+function hasImageData(
+  data: string | Uint8Array | Record<string, number>
+): boolean {
+  if (typeof data === "string") return data.length > 0;
   if (data instanceof Uint8Array) return data.length > 0;
   // Serialized Uint8Array from JSON has numeric keys
   return Object.keys(data).length > 0;
@@ -26,7 +31,7 @@ class ProjectStore {
   /** Background color for export. null = transparent (default) */
   backgroundColor = signal<string | null>(null);
   /** Project name for display */
-  name = signal('Untitled');
+  name = signal("Untitled");
   /** Timestamp of last auto-save */
   lastSaved = signal<number | null>(null);
 
@@ -43,7 +48,7 @@ class ProjectStore {
   async saveProject(): Promise<ProjectFile> {
     // Convert layers to binary format (including text layer metadata)
     const layers = await Promise.all(
-      layerStore.layers.value.map(async layer => ({
+      layerStore.layers.value.map(async (layer) => ({
         id: layer.id,
         name: layer.name,
         type: layer.type,
@@ -54,19 +59,22 @@ class ProjectStore {
           ? await canvasToPngBytes(layer.canvas)
           : new Uint8Array(0),
         // Include text layer metadata if present
-        ...(layer.textData && { textData: layer.textData })
+        ...(layer.textData && { textData: layer.textData }),
       }))
     );
 
     // Convert frames/cels to binary format (including text cel data, linked cel info, and index buffer)
     const frames = await Promise.all(
-      animationStore.frames.value.map(async frame => {
+      animationStore.frames.value.map(async (frame) => {
         const cels = await Promise.all(
-          layerStore.layers.value.map(async layer => {
+          layerStore.layers.value.map(async (layer) => {
             const celKey = animationStore.getCelKey(layer.id, frame.id);
             const cel = animationStore.cels.value.get(celKey);
             const canvas = cel?.canvas;
-            const textCelData = animationStore.getTextCelData(layer.id, frame.id);
+            const textCelData = animationStore.getTextCelData(
+              layer.id,
+              frame.id
+            );
 
             // Serialize index buffer to array if present
             const indexData = cel?.indexBuffer
@@ -75,16 +83,14 @@ class ProjectStore {
 
             return {
               layerId: layer.id,
-              data: canvas
-                ? await canvasToPngBytes(canvas)
-                : new Uint8Array(0),
+              data: canvas ? await canvasToPngBytes(canvas) : new Uint8Array(0),
               // Include linked cel ID and type if present (v2.2+)
               ...(cel?.linkedCelId && { linkedCelId: cel.linkedCelId }),
               ...(cel?.linkType && { linkType: cel.linkType }),
               // Include text cel data if present
               ...(textCelData && { textCelData }),
               // Include index buffer data if present (v3.0+)
-              ...(indexData && { indexData })
+              ...(indexData && { indexData }),
             };
           })
         );
@@ -92,19 +98,20 @@ class ProjectStore {
         return {
           id: frame.id,
           duration: frame.duration,
-          cels
+          cels,
         };
       })
     );
 
     const currentFrameIndex = animationStore.frames.value.findIndex(
-      f => f.id === animationStore.currentFrameId.value
+      (f) => f.id === animationStore.currentFrameId.value
     );
 
     // Only include ephemeral palette if there are ephemeral colors
-    const ephemeralPalette = paletteStore.ephemeralColors.value.length > 0
-      ? paletteStore.ephemeralColors.value
-      : undefined;
+    const ephemeralPalette =
+      paletteStore.ephemeralColors.value.length > 0
+        ? paletteStore.ephemeralColors.value
+        : undefined;
 
     return {
       version: PROJECT_VERSION,
@@ -117,9 +124,9 @@ class ProjectStore {
       frames,
       animation: {
         fps: animationStore.fps.value,
-        currentFrameIndex: currentFrameIndex === -1 ? 0 : currentFrameIndex
+        currentFrameIndex: currentFrameIndex === -1 ? 0 : currentFrameIndex,
       },
-      tags: animationStore.tags.value
+      tags: animationStore.tags.value,
     };
   }
 
@@ -135,12 +142,17 @@ class ProjectStore {
 
     // 1. Set dimensions and name
     this.setSize(file.width, file.height);
-    this.name.value = file.name || 'Untitled';
+    this.name.value = file.name || "Untitled";
 
     // 2. Restore Palette (v3.0+)
     // For auto-save reload: palette is already correct from localStorage, skip
     // For file import: load palette from file
-    if (!fromAutoSave && file.palette && Array.isArray(file.palette) && file.palette.length > 0) {
+    if (
+      !fromAutoSave &&
+      file.palette &&
+      Array.isArray(file.palette) &&
+      file.palette.length > 0
+    ) {
       paletteStore.setPalette(file.palette);
     }
 
@@ -148,7 +160,11 @@ class ProjectStore {
     // For auto-save reload: ephemeral will be rebuilt from drawing after all data is loaded
     // For file import: restore ephemeral from file
     if (!fromAutoSave) {
-      if (file.ephemeralPalette && Array.isArray(file.ephemeralPalette) && file.ephemeralPalette.length > 0) {
+      if (
+        file.ephemeralPalette &&
+        Array.isArray(file.ephemeralPalette) &&
+        file.ephemeralPalette.length > 0
+      ) {
         paletteStore.ephemeralColors.value = file.ephemeralPalette;
         paletteStore.rebuildColorMap();
       } else {
@@ -165,12 +181,17 @@ class ProjectStore {
 
     for (const l of file.layers) {
       // Check layer type (default to 'image' for backwards compatibility with pre-v2.1 files)
-      const layerType = l.type || 'image';
+      const layerType = l.type || "image";
 
       let layer;
-      if (layerType === 'text' && l.textData) {
+      if (layerType === "text" && l.textData) {
         // Create text layer with its metadata
-        layer = layerStore.addTextLayer(l.textData, l.name, file.width, file.height);
+        layer = layerStore.addTextLayer(
+          l.textData,
+          l.name,
+          file.width,
+          file.height
+        );
       } else {
         // Create regular image layer
         layer = layerStore.addLayer(l.name, file.width, file.height);
@@ -179,7 +200,7 @@ class ProjectStore {
       layer.id = l.id;
       layer.visible = l.visible;
       layer.opacity = l.opacity;
-      layer.blendMode = l.blendMode || 'normal';
+      layer.blendMode = l.blendMode || "normal";
 
       // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
       if (hasImageData(l.data) && layer.canvas) {
@@ -198,12 +219,16 @@ class ProjectStore {
 
     // Track linked cel groups for post-processing (v2.2+)
     // Maps linkedCelId -> { celKeys, linkType }
-    const linkedCelGroups = new Map<string, { celKeys: string[], linkType: 'soft' | 'hard' }>();
+    const linkedCelGroups = new Map<
+      string,
+      { celKeys: string[]; linkType: "soft" | "hard" }
+    >();
 
     // Add frames from file
     for (const f of file.frames) {
       animationStore.addFrame(false); // false = don't duplicate content
-      const newFrame = animationStore.frames.value[animationStore.frames.value.length - 1];
+      const newFrame =
+        animationStore.frames.value[animationStore.frames.value.length - 1];
       newFrame.duration = f.duration;
 
       // Populate cels
@@ -213,11 +238,18 @@ class ProjectStore {
 
         // If cel uses shared transparent canvas and has data to load,
         // give it its own canvas first (fix for Phase 3 regression)
-        if (cel && cel.linkedCelId === EMPTY_CEL_LINK_ID && hasImageData(c.data)) {
-          const newCanvas = document.createElement('canvas');
+        if (
+          cel &&
+          cel.linkedCelId === EMPTY_CEL_LINK_ID &&
+          hasImageData(c.data)
+        ) {
+          const newCanvas = document.createElement("canvas");
           newCanvas.width = file.width;
           newCanvas.height = file.height;
-          const ctx = newCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+          const ctx = newCanvas.getContext("2d", {
+            alpha: true,
+            willReadFrequently: true,
+          });
           if (ctx) ctx.imageSmoothingEnabled = false;
 
           // Update cel to use its own canvas and remove empty marker
@@ -226,7 +258,7 @@ class ProjectStore {
             ...cel,
             canvas: newCanvas,
             linkedCelId: undefined,
-            linkType: undefined
+            linkType: undefined,
           });
           animationStore.cels.value = cels;
         }
@@ -249,7 +281,7 @@ class ProjectStore {
             // v3.0+ file: restore index buffer from saved data
             cels.set(celKey, {
               ...currentCel,
-              indexBuffer: new Uint8Array(c.indexData)
+              indexBuffer: new Uint8Array(c.indexData),
             });
           } else if (canvas && !file.palette) {
             // Legacy file migration: build index buffer from canvas content
@@ -257,7 +289,7 @@ class ProjectStore {
             const indexBuffer = buildIndexBufferFromCanvas(canvas, true);
             cels.set(celKey, {
               ...currentCel,
-              indexBuffer
+              indexBuffer,
             });
           }
 
@@ -275,7 +307,7 @@ class ProjectStore {
           if (!linkedCelGroups.has(c.linkedCelId)) {
             linkedCelGroups.set(c.linkedCelId, {
               celKeys: [],
-              linkType: c.linkType ?? 'soft' // Default to soft for backwards compat
+              linkType: c.linkType ?? "soft", // Default to soft for backwards compat
             });
           }
           linkedCelGroups.get(c.linkedCelId)!.celKeys.push(celKey);
@@ -308,7 +340,8 @@ class ProjectStore {
     // 5. Animation Settings
     animationStore.fps.value = file.animation.fps;
 
-    const targetFrame = animationStore.frames.value[file.animation.currentFrameIndex];
+    const targetFrame =
+      animationStore.frames.value[file.animation.currentFrameIndex];
     if (targetFrame) {
       animationStore.goToFrame(targetFrame.id);
     }
@@ -344,7 +377,7 @@ class ProjectStore {
 
     // 1. Set new dimensions and reset name
     this.setSize(width, height);
-    this.name.value = 'Untitled';
+    this.name.value = "Untitled";
     this.lastSaved.value = null;
 
     // 2. Clear all layers
@@ -364,7 +397,7 @@ class ProjectStore {
     }
 
     // 5. Create a fresh layer with new dimensions
-    layerStore.addLayer('Layer 1', width, height);
+    layerStore.addLayer("Layer 1", width, height);
 
     // 6. Ensure animation store syncs with the new layer
     animationStore.syncLayerCanvases();
@@ -379,7 +412,7 @@ class ProjectStore {
     paletteStore.clearEphemeralColors();
 
     // 8c. Reset palette to default (DB32)
-    paletteStore.loadPreset('db32');
+    paletteStore.loadPreset("db32");
 
     // 9. Reset animation settings
     animationStore.fps.value = 12;
