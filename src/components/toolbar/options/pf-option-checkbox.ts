@@ -2,29 +2,17 @@ import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { SignalWatcher } from "@lit-labs/signals";
 import { getOptionValue, setOptionValue, type StoreType } from "./store-accessor";
+import "../../ui/pf-form-field";
 
 @customElement("pf-option-checkbox")
 export class PfOptionCheckbox extends SignalWatcher(LitElement) {
   static styles = css`
-    :host {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
     input[type="checkbox"] {
       width: 14px;
       height: 14px;
       margin: 0;
       cursor: pointer;
       accent-color: var(--pf-color-accent);
-    }
-
-    label {
-      color: var(--pf-color-text-primary);
-      font-size: 12px;
-      cursor: pointer;
-      user-select: none;
     }
   `;
 
@@ -43,13 +31,16 @@ export class PfOptionCheckbox extends SignalWatcher(LitElement) {
     const id = `opt-${this.store}-${this.storeKey}`;
 
     return html`
-      <input
-        type="checkbox"
-        id=${id}
-        .checked=${checked}
-        @change=${this.handleChange}
-      />
-      <label for=${id} title=${this.title || ""}>${this.label}</label>
+      <pf-form-field label=${this.label} layout="checkbox">
+        <input
+          type="checkbox"
+          id=${id}
+          name=${id}
+          .checked=${checked}
+          title=${this.title || ""}
+          @change=${this.handleChange}
+        />
+      </pf-form-field>
     `;
   }
 }

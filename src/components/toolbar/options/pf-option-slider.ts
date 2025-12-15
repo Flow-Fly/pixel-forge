@@ -2,22 +2,11 @@ import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { SignalWatcher } from "@lit-labs/signals";
 import { getOptionValue, setOptionValue, type StoreType } from "./store-accessor";
+import "../../ui/pf-form-field";
 
 @customElement("pf-option-slider")
 export class PfOptionSlider extends SignalWatcher(LitElement) {
   static styles = css`
-    :host {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    label {
-      color: var(--pf-color-text-muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-
     input[type="range"] {
       width: 60px;
       height: 4px;
@@ -84,16 +73,17 @@ export class PfOptionSlider extends SignalWatcher(LitElement) {
     const displayValue = rawValue * this.multiplier;
 
     return html`
-      <label>${this.label}:</label>
-      <input
-        type="range"
-        .min=${String(this.min)}
-        .max=${String(this.max)}
-        .step=${String(this.step)}
-        .value=${String(displayValue)}
-        @input=${this.handleInput}
-      />
-      <span class="value">${Math.round(displayValue)}${this.unit}</span>
+      <pf-form-field label=${this.label}>
+        <input
+          type="range"
+          .min=${String(this.min)}
+          .max=${String(this.max)}
+          .step=${String(this.step)}
+          .value=${String(displayValue)}
+          @input=${this.handleInput}
+        />
+        <span class="value">${Math.round(displayValue)}${this.unit}</span>
+      </pf-form-field>
     `;
   }
 }

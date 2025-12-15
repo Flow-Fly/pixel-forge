@@ -2,6 +2,7 @@ import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { SignalWatcher } from "@lit-labs/signals";
 import { getOptionValue, setOptionValue, type StoreType } from "./store-accessor";
+import "../../ui/pf-form-field";
 
 export interface SelectOption {
   value: string;
@@ -11,18 +12,6 @@ export interface SelectOption {
 @customElement("pf-option-select")
 export class PfOptionSelect extends SignalWatcher(LitElement) {
   static styles = css`
-    :host {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    label {
-      color: var(--pf-color-text-muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-
     select {
       background: var(--pf-color-bg-tertiary);
       color: var(--pf-color-text-primary);
@@ -57,17 +46,33 @@ export class PfOptionSelect extends SignalWatcher(LitElement) {
   render() {
     const currentValue = (getOptionValue(this.store, this.storeKey) as string) ?? "";
 
+    // If no label, render select directly without wrapper
+    if (!this.label) {
+      return html`
+        <select @change=${this.handleChange}>
+          ${this.options.map(
+            (opt) => html`
+              <option value=${opt.value} ?selected=${opt.value === currentValue}>
+                ${opt.label}
+              </option>
+            `
+          )}
+        </select>
+      `;
+    }
+
     return html`
-      ${this.label ? html`<label>${this.label}:</label>` : ""}
-      <select @change=${this.handleChange}>
-        ${this.options.map(
-          (opt) => html`
-            <option value=${opt.value} ?selected=${opt.value === currentValue}>
-              ${opt.label}
-            </option>
-          `
-        )}
-      </select>
+      <pf-form-field label=${this.label}>
+        <select @change=${this.handleChange}>
+          ${this.options.map(
+            (opt) => html`
+              <option value=${opt.value} ?selected=${opt.value === currentValue}>
+                ${opt.label}
+              </option>
+            `
+          )}
+        </select>
+      </pf-form-field>
     `;
   }
 }
