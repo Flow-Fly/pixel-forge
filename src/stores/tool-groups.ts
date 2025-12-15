@@ -2,10 +2,9 @@
  * Tool Groups Configuration
  *
  * Defines how tools are grouped in the toolbar.
- * Right-clicking a group button shows all tools in that group.
  */
 
-import type { ToolType } from './tools';
+import type { ToolType } from "./tools";
 
 export interface ToolGroup {
   id: string;
@@ -15,53 +14,52 @@ export interface ToolGroup {
 
 /**
  * Toolbar groups - each group appears as one button
- * Right-click to see alternatives within the group
  */
 export const toolGroups: ToolGroup[] = [
   {
-    id: 'pencil',
-    tools: ['pencil'],
-    defaultTool: 'pencil',
+    id: "pencil",
+    tools: ["pencil"],
+    defaultTool: "pencil",
   },
   {
-    id: 'eraser',
-    tools: ['eraser'],
-    defaultTool: 'eraser',
+    id: "eraser",
+    tools: ["eraser"],
+    defaultTool: "eraser",
   },
   {
-    id: 'eyedropper',
-    tools: ['eyedropper'],
-    defaultTool: 'eyedropper',
+    id: "eyedropper",
+    tools: ["eyedropper"],
+    defaultTool: "eyedropper",
   },
   {
-    id: 'selection',
-    tools: ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'],
-    defaultTool: 'marquee-rect',
+    id: "selection",
+    tools: ["marquee-rect", "lasso", "polygonal-lasso", "magic-wand"],
+    defaultTool: "marquee-rect",
   },
   {
-    id: 'shapes',
-    tools: ['rectangle', 'line', 'ellipse'],
-    defaultTool: 'rectangle',
+    id: "shapes",
+    tools: ["rectangle", "line", "ellipse"],
+    defaultTool: "rectangle",
   },
   {
-    id: 'fill',
-    tools: ['fill', 'gradient'],
-    defaultTool: 'fill',
+    id: "fill",
+    tools: ["fill", "gradient"],
+    defaultTool: "fill",
+  },
+  // {
+  //   id: 'transform',
+  //   tools: ['transform'],
+  //   defaultTool: 'transform',
+  // },
+  {
+    id: "text",
+    tools: ["text"],
+    defaultTool: "text",
   },
   {
-    id: 'transform',
-    tools: ['transform'],
-    defaultTool: 'transform',
-  },
-  {
-    id: 'text',
-    tools: ['text'],
-    defaultTool: 'text',
-  },
-  {
-    id: 'navigation',
-    tools: ['hand', 'zoom'],
-    defaultTool: 'hand',
+    id: "navigation",
+    tools: ["hand", "zoom"],
+    defaultTool: "hand",
   },
 ];
 
@@ -69,8 +67,8 @@ export const toolGroups: ToolGroup[] = [
  * Map from tool to its group for quick lookup
  */
 export const toolToGroup: Map<ToolType, ToolGroup> = new Map();
-toolGroups.forEach(group => {
-  group.tools.forEach(tool => {
+toolGroups.forEach((group) => {
+  group.tools.forEach((tool) => {
     toolToGroup.set(tool, group);
   });
 });
