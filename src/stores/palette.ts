@@ -1,16 +1,20 @@
-import { signal } from '../core/signal';
-import { layerStore } from './layers';
-import { animationStore } from './animation';
-import { PRESET_PALETTES, PALETTE_BY_ID, type PresetPalette } from '../data/preset-palettes';
-import { palettePersistence } from '../services/persistence/palette-persistence';
-import type { CustomPalette } from '../types/palette';
+import { signal } from "../core/signal";
+import { layerStore } from "./layers";
+import { animationStore } from "./animation";
+import {
+  PRESET_PALETTES,
+  PALETTE_BY_ID,
+  type PresetPalette,
+} from "../data/preset-palettes";
+import { palettePersistence } from "../services/persistence/palette-persistence";
+import type { CustomPalette } from "../types/palette";
 
 // Re-export for convenience
 export { PRESET_PALETTES, type PresetPalette };
 export type { CustomPalette };
 
 // DB32 Palette - Default colors (kept for backward compatibility)
-const DB32_COLORS = PALETTE_BY_ID.get('db32')!.colors;
+const DB32_COLORS = PALETTE_BY_ID.get("db32")!.colors;
 
 /** Maximum number of colors in indexed mode (standard limit) */
 const MAX_PALETTE_SIZE = 256;
@@ -23,7 +27,7 @@ class PaletteStore {
   ephemeralColors = signal<string[]>([]);
 
   /** Current preset palette ID (null when using custom palette) */
-  currentPresetId = signal<string | null>('db32');
+  currentPresetId = signal<string | null>("db32");
 
   /** Current custom palette ID (null when using preset or unsaved) */
   currentCustomPaletteId = signal<string | null>(null);
@@ -87,7 +91,10 @@ class PaletteStore {
     // Ephemeral colors: indices mainColors.length + 1 to mainColors.length + ephemeralColors.length
     const ephemeralOffset = this.mainColors.value.length;
     this.ephemeralColors.value.forEach((color, i) => {
-      this.ephemeralColorToIndex.set(this.normalizeHex(color), ephemeralOffset + i + 1);
+      this.ephemeralColorToIndex.set(
+        this.normalizeHex(color),
+        ephemeralOffset + i + 1
+      );
     });
   }
 
@@ -95,11 +102,17 @@ class PaletteStore {
    * Normalize hex color to lowercase 6-digit format.
    */
   private normalizeHex(hex: string): string {
-    const clean = hex.replace('#', '').toLowerCase();
+    const clean = hex.replace("#", "").toLowerCase();
     if (clean.length === 3) {
-      return '#' + clean.split('').map(c => c + c).join('');
+      return (
+        "#" +
+        clean
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      );
     }
-    return '#' + clean;
+    return "#" + clean;
   }
 
   /**
@@ -183,7 +196,8 @@ class PaletteStore {
     }
 
     // Check combined palette limit
-    const totalColors = this.mainColors.value.length + this.ephemeralColors.value.length;
+    const totalColors =
+      this.mainColors.value.length + this.ephemeralColors.value.length;
     if (totalColors >= MAX_PALETTE_SIZE) {
       // Find closest existing color instead
       return this.findClosestColorIndex(normalized);
@@ -274,7 +288,11 @@ class PaletteStore {
       const existingRgb = this.hexToRgb(this.colors.value[i]);
       if (!existingRgb) continue;
 
-      const existingHsl = this.rgbToHsl(existingRgb.r, existingRgb.g, existingRgb.b);
+      const existingHsl = this.rgbToHsl(
+        existingRgb.r,
+        existingRgb.g,
+        existingRgb.b
+      );
       const distance = this.hslDistance(newHsl, existingHsl);
 
       if (distance < bestDistance) {
@@ -305,7 +323,11 @@ class PaletteStore {
       const existingRgb = this.hexToRgb(this.colors.value[i]);
       if (!existingRgb) continue;
 
-      const existingHsl = this.rgbToHsl(existingRgb.r, existingRgb.g, existingRgb.b);
+      const existingHsl = this.rgbToHsl(
+        existingRgb.r,
+        existingRgb.g,
+        existingRgb.b
+      );
       const distance = this.hslDistance(targetHsl, existingHsl);
 
       if (distance < bestDistance) {
@@ -336,9 +358,11 @@ class PaletteStore {
     this.saveToStorage();
 
     // Dispatch event to notify animation store to rebuild canvases
-    window.dispatchEvent(new CustomEvent('palette-color-changed', {
-      detail: { index, color: normalized }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-color-changed", {
+        detail: { index, color: normalized },
+      })
+    );
   }
 
   /**
@@ -411,7 +435,10 @@ class PaletteStore {
 
     // Check ephemeral colors (indices mainLength+1 to mainLength+ephemeralLength)
     const ephemeralIndex = index - mainLength - 1;
-    if (ephemeralIndex >= 0 && ephemeralIndex < this.ephemeralColors.value.length) {
+    if (
+      ephemeralIndex >= 0 &&
+      ephemeralIndex < this.ephemeralColors.value.length
+    ) {
       return this.ephemeralColors.value[ephemeralIndex];
     }
 
@@ -437,9 +464,11 @@ class PaletteStore {
       this.saveToStorage();
 
       // Dispatch event so animation store can remap affected pixels
-      window.dispatchEvent(new CustomEvent('palette-color-removed', {
-        detail: { removedIndex: index + 1 } // 1-based index
-      }));
+      window.dispatchEvent(
+        new CustomEvent("palette-color-removed", {
+          detail: { removedIndex: index + 1 }, // 1-based index
+        })
+      );
     }
   }
 
@@ -460,13 +489,15 @@ class PaletteStore {
     this.saveToStorage();
 
     // Dispatch event so animation store can update index buffers
-    window.dispatchEvent(new CustomEvent('palette-colors-reordered', {
-      detail: { fromIndex: fromIndex + 1, toIndex: toIndex + 1 } // 1-based indices
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-colors-reordered", {
+        detail: { fromIndex: fromIndex + 1, toIndex: toIndex + 1 }, // 1-based indices
+      })
+    );
   }
 
   resetToDefault() {
-    this.loadPreset('db32');
+    this.loadPreset("db32");
   }
 
   /**
@@ -500,9 +531,11 @@ class PaletteStore {
     this.saveToStorage();
 
     // Dispatch event to rebuild all canvases (with index remapping)
-    window.dispatchEvent(new CustomEvent('palette-replaced', {
-      detail: { oldMainColors, oldEphemeralColors }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-replaced", {
+        detail: { oldMainColors, oldEphemeralColors },
+      })
+    );
   }
 
   /**
@@ -511,7 +544,7 @@ class PaletteStore {
    * @param id Custom palette ID
    */
   async loadCustomPalette(id: string) {
-    const palette = this.customPalettes.value.find(p => p.id === id);
+    const palette = this.customPalettes.value.find((p) => p.id === id);
     if (!palette) {
       console.warn(`Unknown custom palette: ${id}`);
       return;
@@ -535,9 +568,11 @@ class PaletteStore {
     this.saveToStorage();
 
     // Dispatch event to rebuild all canvases (with index remapping)
-    window.dispatchEvent(new CustomEvent('palette-replaced', {
-      detail: { oldMainColors, oldEphemeralColors }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-replaced", {
+        detail: { oldMainColors, oldEphemeralColors },
+      })
+    );
   }
 
   /**
@@ -554,9 +589,11 @@ class PaletteStore {
     this.saveToStorage();
 
     // Dispatch event to rebuild canvases - skip remapping (no colors to remap to)
-    window.dispatchEvent(new CustomEvent('palette-replaced', {
-      detail: { skipRemap: true }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-replaced", {
+        detail: { skipRemap: true },
+      })
+    );
   }
 
   /**
@@ -567,7 +604,7 @@ class PaletteStore {
    * @param preserveSelection If true, keeps current preset/custom ID (use when loading saved project)
    */
   setPalette(colors: string[], preserveSelection = false) {
-    this.colors.value = colors.map(c => this.normalizeHex(c));
+    this.colors.value = colors.map((c) => this.normalizeHex(c));
 
     if (!preserveSelection) {
       // Clear selection when importing new palette
@@ -581,9 +618,11 @@ class PaletteStore {
 
     // Dispatch event to rebuild canvases - skip remapping since this is a full replacement
     // (index buffers from loaded projects are already correct)
-    window.dispatchEvent(new CustomEvent('palette-replaced', {
-      detail: { skipRemap: true }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-replaced", {
+        detail: { skipRemap: true },
+      })
+    );
   }
 
   // ==========================================
@@ -597,7 +636,7 @@ class PaletteStore {
     this.isExtracting.value = true;
 
     // Use setTimeout to allow UI to update with loading state
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     try {
       const currentFrameId = animationStore.currentFrameId.value;
@@ -614,10 +653,15 @@ class PaletteStore {
         const cel = cels.get(key);
         if (!cel?.canvas) continue;
 
-        const ctx = cel.canvas.getContext('2d');
+        const ctx = cel.canvas.getContext("2d");
         if (!ctx) continue;
 
-        const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+        const imageData = ctx.getImageData(
+          0,
+          0,
+          cel.canvas.width,
+          cel.canvas.height
+        );
         const data = imageData.data;
 
         for (let i = 0; i < data.length; i += 4) {
@@ -639,7 +683,7 @@ class PaletteStore {
 
       // Sort by total pixel count and return all distinct colors (no limit)
       clusters.sort((a, b) => b.count - a.count);
-      const extractedColors = clusters.map(c => c.representative);
+      const extractedColors = clusters.map((c) => c.representative);
 
       this.extractedColors.value = extractedColors;
     } finally {
@@ -656,7 +700,9 @@ class PaletteStore {
       this.saveToStorage();
     }
     // Remove from extracted colors
-    this.extractedColors.value = this.extractedColors.value.filter(c => c !== color);
+    this.extractedColors.value = this.extractedColors.value.filter(
+      (c) => c !== color
+    );
   }
 
   /**
@@ -664,7 +710,7 @@ class PaletteStore {
    */
   addAllExtracted() {
     const newColors = this.extractedColors.value.filter(
-      c => !this.colors.value.includes(c)
+      (c) => !this.colors.value.includes(c)
     );
     if (newColors.length > 0) {
       this.colors.value = [...this.colors.value, ...newColors];
@@ -694,9 +740,14 @@ class PaletteStore {
   /**
    * Cluster similar colors together using HSL distance
    */
-  private clusterColors(colorCounts: Map<string, number>): Array<{ representative: string; count: number }> {
+  private clusterColors(
+    colorCounts: Map<string, number>
+  ): Array<{ representative: string; count: number }> {
     const threshold = 0.15; // HSL distance threshold for clustering
-    const clusters: Array<{ colors: Map<string, number>; hsl: { h: number; s: number; l: number } }> = [];
+    const clusters: Array<{
+      colors: Map<string, number>;
+      hsl: { h: number; s: number; l: number };
+    }> = [];
 
     for (const [hex, count] of colorCounts) {
       const rgb = this.hexToRgb(hex);
@@ -723,9 +774,9 @@ class PaletteStore {
     }
 
     // Convert clusters to result format with representative color (most frequent in cluster)
-    return clusters.map(cluster => {
+    return clusters.map((cluster) => {
       let maxCount = 0;
-      let representative = '';
+      let representative = "";
       let totalCount = 0;
 
       for (const [hex, count] of cluster.colors) {
@@ -743,7 +794,10 @@ class PaletteStore {
   /**
    * Calculate distance between two HSL colors (0-1 range)
    */
-  private hslDistance(a: { h: number; s: number; l: number }, b: { h: number; s: number; l: number }): number {
+  private hslDistance(
+    a: { h: number; s: number; l: number },
+    b: { h: number; s: number; l: number }
+  ): number {
     // Hue is circular, so we need to handle wrap-around
     let hueDiff = Math.abs(a.h - b.h);
     if (hueDiff > 0.5) hueDiff = 1 - hueDiff;
@@ -752,7 +806,9 @@ class PaletteStore {
     const lightDiff = Math.abs(a.l - b.l);
 
     // Weighted distance (hue matters most for color perception)
-    return Math.sqrt(hueDiff * hueDiff * 2 + satDiff * satDiff + lightDiff * lightDiff);
+    return Math.sqrt(
+      hueDiff * hueDiff * 2 + satDiff * satDiff + lightDiff * lightDiff
+    );
   }
 
   // ==========================================
@@ -775,13 +831,13 @@ class PaletteStore {
     // Shade generation parameters: [lightness%, hueShift°, saturationShift%]
     // Positive hue shift = toward blue (shadows), negative = toward yellow (highlights)
     const shadeParams: [number, number, number][] = [
-      [15, 8, -15],   // Dark shadow - moderate shift, significant desat
-      [25, 12, -10],  // Peak shadow shift
-      [35, 6, -5],    // Light shadow
-      [50, 0, 0],     // Base color - no shift
-      [65, -6, -5],   // Light highlight
+      [15, 8, -15], // Dark shadow - moderate shift, significant desat
+      [25, 12, -10], // Peak shadow shift
+      [35, 6, -5], // Light shadow
+      [50, 0, 0], // Base color - no shift
+      [65, -6, -5], // Light highlight
       [75, -12, -10], // Peak highlight shift
-      [85, -8, -15],  // Bright highlight - moderate shift, significant desat
+      [85, -8, -15], // Bright highlight - moderate shift, significant desat
     ];
 
     // Check if color is grayscale (skip hue shifting)
@@ -823,40 +879,65 @@ class PaletteStore {
 
   private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16)
-    } : null;
+    return result
+      ? {
+          r: parseInt(result[1], 16),
+          g: parseInt(result[2], 16),
+          b: parseInt(result[3], 16),
+        }
+      : null;
   }
 
   private rgbToHex(r: number, g: number, b: number): string {
-    return '#' + [r, g, b].map(x => {
-      const hex = Math.round(x).toString(16);
-      return hex.length === 1 ? '0' + hex : hex;
-    }).join('');
+    return (
+      "#" +
+      [r, g, b]
+        .map((x) => {
+          const hex = Math.round(x).toString(16);
+          return hex.length === 1 ? "0" + hex : hex;
+        })
+        .join("")
+    );
   }
 
-  private rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h = 0, s = 0;
+  private rgbToHsl(
+    r: number,
+    g: number,
+    b: number
+  ): { h: number; s: number; l: number } {
+    r /= 255;
+    g /= 255;
+    b /= 255;
+    const max = Math.max(r, g, b),
+      min = Math.min(r, g, b);
+    let h = 0,
+      s = 0;
     const l = (max + min) / 2;
 
     if (max !== min) {
       const d = max - min;
       s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
       switch (max) {
-        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-        case g: h = ((b - r) / d + 2) / 6; break;
-        case b: h = ((r - g) / d + 4) / 6; break;
+        case r:
+          h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+          break;
+        case g:
+          h = ((b - r) / d + 2) / 6;
+          break;
+        case b:
+          h = ((r - g) / d + 4) / 6;
+          break;
       }
     }
 
     return { h, s, l };
   }
 
-  private hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  private hslToRgb(
+    h: number,
+    s: number,
+    l: number
+  ): { r: number; g: number; b: number } {
     let r, g, b;
 
     if (s === 0) {
@@ -865,24 +946,24 @@ class PaletteStore {
       const hue2rgb = (p: number, q: number, t: number) => {
         if (t < 0) t += 1;
         if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
         return p;
       };
 
       const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
       const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1/3);
+      r = hue2rgb(p, q, h + 1 / 3);
       g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
+      b = hue2rgb(p, q, h - 1 / 3);
     }
 
     return { r: r * 255, g: g * 255, b: b * 255 };
   }
 
   private loadFromStorage() {
-    const saved = localStorage.getItem('pf-palette-colors');
+    const saved = localStorage.getItem("pf-palette-colors");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -895,9 +976,9 @@ class PaletteStore {
     }
 
     // Restore palette selection info
-    const presetId = localStorage.getItem('pf-palette-preset-id');
-    const customId = localStorage.getItem('pf-palette-custom-id');
-    const cachedName = localStorage.getItem('pf-palette-name');
+    const presetId = localStorage.getItem("pf-palette-preset-id");
+    const customId = localStorage.getItem("pf-palette-custom-id");
+    const cachedName = localStorage.getItem("pf-palette-name");
 
     if (customId) {
       // Custom palette was selected
@@ -909,7 +990,7 @@ class PaletteStore {
       this.currentCustomPaletteId.value = null;
     } else {
       // No selection found - ensure defaults are set (db32)
-      this.currentPresetId.value = 'db32';
+      this.currentPresetId.value = "db32";
       this.currentCustomPaletteId.value = null;
     }
 
@@ -920,11 +1001,20 @@ class PaletteStore {
   }
 
   private saveToStorage() {
-    localStorage.setItem('pf-palette-colors', JSON.stringify(this.colors.value));
-    localStorage.setItem('pf-palette-preset-id', this.currentPresetId.value ?? '');
-    localStorage.setItem('pf-palette-custom-id', this.currentCustomPaletteId.value ?? '');
+    localStorage.setItem(
+      "pf-palette-colors",
+      JSON.stringify(this.colors.value)
+    );
+    localStorage.setItem(
+      "pf-palette-preset-id",
+      this.currentPresetId.value ?? ""
+    );
+    localStorage.setItem(
+      "pf-palette-custom-id",
+      this.currentCustomPaletteId.value ?? ""
+    );
     // Save palette name for immediate display on reload (before async custom palette load)
-    localStorage.setItem('pf-palette-name', this.getCurrentPaletteName());
+    localStorage.setItem("pf-palette-name", this.getCurrentPaletteName());
   }
 
   // ==========================================
@@ -952,10 +1042,12 @@ class PaletteStore {
     // Update cached palette name now that custom palettes are loaded
     // This ensures the name is correct for next reload
     if (this.currentCustomPaletteId.value) {
-      const palette = palettes.find(p => p.id === this.currentCustomPaletteId.value);
+      const palette = palettes.find(
+        (p) => p.id === this.currentCustomPaletteId.value
+      );
       if (palette) {
         this.cachedPaletteName = palette.name;
-        localStorage.setItem('pf-palette-name', palette.name);
+        localStorage.setItem("pf-palette-name", palette.name);
       }
     }
   }
@@ -991,7 +1083,7 @@ class PaletteStore {
     const now = Date.now();
     const palette: CustomPalette = {
       id,
-      name: name.trim() || 'Untitled Palette',
+      name: name.trim() || "Untitled Palette",
       colors: [...this.mainColors.value],
       createdAt: now,
       updatedAt: now,
@@ -1018,7 +1110,7 @@ class PaletteStore {
 
     // If we deleted the currently loaded palette, switch to default
     if (this.currentCustomPaletteId.value === id) {
-      this.loadPreset('db32');
+      this.loadPreset("db32");
     }
   }
 
@@ -1036,7 +1128,7 @@ class PaletteStore {
   getCurrentPaletteName(): string {
     const customId = this.currentCustomPaletteId.value;
     if (customId) {
-      const palette = this.customPalettes.value.find(p => p.id === customId);
+      const palette = this.customPalettes.value.find((p) => p.id === customId);
       if (palette) {
         return palette.name;
       }
@@ -1044,7 +1136,7 @@ class PaletteStore {
       if (this.cachedPaletteName) {
         return this.cachedPaletteName;
       }
-      return 'Loading...';
+      return "Loading...";
     }
 
     const presetId = this.currentPresetId.value;
@@ -1057,14 +1149,14 @@ class PaletteStore {
       if (this.cachedPaletteName) {
         return this.cachedPaletteName;
       }
-      return 'Unknown Palette';
+      return "Unknown Palette";
     }
 
     // No palette selected - use cached name or default
     if (this.cachedPaletteName) {
       return this.cachedPaletteName;
     }
-    return 'Untitled Palette';
+    return "Untitled Palette";
   }
 
   /**
@@ -1102,7 +1194,7 @@ class PaletteStore {
   removeFromEphemeral(color: string): void {
     const normalized = this.normalizeHex(color);
     const index = this.ephemeralColors.value.findIndex(
-      c => this.normalizeHex(c) === normalized
+      (c) => this.normalizeHex(c) === normalized
     );
     if (index !== -1) {
       const newEphemeral = [...this.ephemeralColors.value];
@@ -1118,9 +1210,11 @@ class PaletteStore {
    * Call this after palette switches to clean up duplicates.
    */
   deduplicateEphemeral(): void {
-    const mainPaletteSet = new Set(this.mainColors.value.map(c => this.normalizeHex(c)));
+    const mainPaletteSet = new Set(
+      this.mainColors.value.map((c) => this.normalizeHex(c))
+    );
     const dedupedEphemeral = this.ephemeralColors.value.filter(
-      c => !mainPaletteSet.has(this.normalizeHex(c))
+      (c) => !mainPaletteSet.has(this.normalizeHex(c))
     );
 
     if (dedupedEphemeral.length !== this.ephemeralColors.value.length) {
@@ -1141,7 +1235,9 @@ class PaletteStore {
     if (usedColors.size === 0) return;
 
     // Build set of main palette colors for O(1) lookup
-    const mainPaletteSet = new Set(this.mainColors.value.map(c => this.normalizeHex(c)));
+    const mainPaletteSet = new Set(
+      this.mainColors.value.map((c) => this.normalizeHex(c))
+    );
 
     // Find colors that are used but not in main palette
     const ephemeralNeeded: string[] = [];
@@ -1197,7 +1293,9 @@ class PaletteStore {
     if (usedColors.size === 0) return;
 
     // Build a set of normalized new palette colors for O(1) lookup
-    const newPaletteSet = new Set(newPaletteColors.map(c => this.normalizeHex(c)));
+    const newPaletteSet = new Set(
+      newPaletteColors.map((c) => this.normalizeHex(c))
+    );
 
     // Find colors that are used but not in new palette
     const orphanedColors: string[] = [];
@@ -1210,7 +1308,9 @@ class PaletteStore {
 
     // Add orphaned colors to ephemeral (if not already there)
     if (orphanedColors.length > 0) {
-      const currentEphemeral = new Set(this.ephemeralColors.value.map(c => this.normalizeHex(c)));
+      const currentEphemeral = new Set(
+        this.ephemeralColors.value.map((c) => this.normalizeHex(c))
+      );
       const newEphemeral = [...this.ephemeralColors.value];
 
       for (const color of orphanedColors) {
@@ -1241,8 +1341,15 @@ class PaletteStore {
 
     // Add to ephemeral if not already there
     const normalizedColor = this.normalizeHex(color);
-    if (!this.ephemeralColors.value.some(c => this.normalizeHex(c) === normalizedColor)) {
-      this.ephemeralColors.value = [...this.ephemeralColors.value, normalizedColor];
+    if (
+      !this.ephemeralColors.value.some(
+        (c) => this.normalizeHex(c) === normalizedColor
+      )
+    ) {
+      this.ephemeralColors.value = [
+        ...this.ephemeralColors.value,
+        normalizedColor,
+      ];
     }
 
     this.markDirty();
@@ -1253,13 +1360,15 @@ class PaletteStore {
     const newEphemeralIndex = this.getColorIndex(normalizedColor);
 
     // Dispatch event with remapping info
-    window.dispatchEvent(new CustomEvent('palette-color-moved-to-ephemeral', {
-      detail: {
-        removedIndex: oneBasedIndex,
-        newIndex: newEphemeralIndex,
-        color: normalizedColor
-      }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-color-moved-to-ephemeral", {
+        detail: {
+          removedIndex: oneBasedIndex,
+          newIndex: newEphemeralIndex,
+          color: normalizedColor,
+        },
+      })
+    );
   }
 
   /**
@@ -1269,7 +1378,8 @@ class PaletteStore {
    * @param ephemeralColor Hex color from ephemeral to swap in
    */
   swapMainWithEphemeral(mainArrayIndex: number, ephemeralColor: string): void {
-    if (mainArrayIndex < 0 || mainArrayIndex >= this.mainColors.value.length) return;
+    if (mainArrayIndex < 0 || mainArrayIndex >= this.mainColors.value.length)
+      return;
 
     const normalizedEphemeral = this.normalizeHex(ephemeralColor);
     const mainColor = this.mainColors.value[mainArrayIndex];
@@ -1281,7 +1391,7 @@ class PaletteStore {
 
     // 2. Remove ephemeral color from ephemeral list
     const ephemeralIdx = this.ephemeralColors.value.findIndex(
-      c => this.normalizeHex(c) === normalizedEphemeral
+      (c) => this.normalizeHex(c) === normalizedEphemeral
     );
     if (ephemeralIdx !== -1) {
       const newEphemeral = [...this.ephemeralColors.value];
@@ -1297,9 +1407,11 @@ class PaletteStore {
 
     // Dispatch event - index buffers don't need to change since we're
     // replacing at the same index position
-    window.dispatchEvent(new CustomEvent('palette-color-changed', {
-      detail: { index: mainArrayIndex + 1, color: normalizedEphemeral }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("palette-color-changed", {
+        detail: { index: mainArrayIndex + 1, color: normalizedEphemeral },
+      })
+    );
   }
 }
 
