@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { projectStore } from '../../stores/project';
+import '../ui/pf-dialog';
 
 const PRESETS = [
   { label: '16x16', width: 16, height: 16 },
@@ -14,46 +15,6 @@ const PRESETS = [
 @customElement('pf-new-project-dialog')
 export class PFNewProjectDialog extends BaseComponent {
   static styles = css`
-    :host {
-      display: none;
-    }
-
-    :host([open]) {
-      display: flex;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background-color: rgba(0, 0, 0, 0.5);
-      z-index: 1000;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .dialog {
-      background-color: var(--pf-color-bg-panel);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      padding: 16px;
-      width: 320px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    }
-
-    .header {
-      font-weight: bold;
-      margin-bottom: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .content {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
     .presets {
       display: flex;
       flex-wrap: wrap;
@@ -115,13 +76,6 @@ export class PFNewProjectDialog extends BaseComponent {
       border-left: 3px solid var(--pf-color-warning, #f0ad4e);
     }
 
-    .actions {
-      margin-top: 16px;
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-
     button {
       padding: 6px 12px;
       border-radius: 4px;
@@ -156,61 +110,60 @@ export class PFNewProjectDialog extends BaseComponent {
   @state() selectedPreset: string | null = '64x64';
 
   render() {
-    if (!this.open) return null;
-
     return html`
-      <div class="dialog" @click=${(e: Event) => e.stopPropagation()}>
-        <div class="header">
-          <span>New Project</span>
-          <button class="secondary" @click=${this.close} style="padding: 2px 6px;">X</button>
-        </div>
-        <div class="content">
-          <div>
-            <label>Presets</label>
-            <div class="presets">
-              ${PRESETS.map(preset => html`
-                <button
-                  class="preset-btn ${this.selectedPreset === preset.label ? 'selected' : ''}"
-                  @click=${() => this.selectPreset(preset)}
-                >
-                  ${preset.label}
-                </button>
-              `)}
-            </div>
-          </div>
+      <pf-dialog
+        ?open=${this.open}
+        width="320px"
+        @pf-close=${this.close}
+      >
+        <span slot="title">New Project</span>
 
-          <div class="dimensions">
-            <div class="input-group">
-              <label>Width (px)</label>
-              <input
-                type="number"
-                min="1"
-                max="4096"
-                .value=${String(this.width)}
-                @input=${this.handleWidthInput}
+        <div>
+          <label>Presets</label>
+          <div class="presets">
+            ${PRESETS.map(preset => html`
+              <button
+                class="preset-btn ${this.selectedPreset === preset.label ? 'selected' : ''}"
+                @click=${() => this.selectPreset(preset)}
               >
-            </div>
-            <div class="input-group">
-              <label>Height (px)</label>
-              <input
-                type="number"
-                min="1"
-                max="4096"
-                .value=${String(this.height)}
-                @input=${this.handleHeightInput}
-              >
-            </div>
-          </div>
-
-          <div class="warning">
-            Current work will be replaced. It's saved automatically.
+                ${preset.label}
+              </button>
+            `)}
           </div>
         </div>
-        <div class="actions">
+
+        <div class="dimensions">
+          <div class="input-group">
+            <label>Width (px)</label>
+            <input
+              type="number"
+              min="1"
+              max="4096"
+              .value=${String(this.width)}
+              @input=${this.handleWidthInput}
+            >
+          </div>
+          <div class="input-group">
+            <label>Height (px)</label>
+            <input
+              type="number"
+              min="1"
+              max="4096"
+              .value=${String(this.height)}
+              @input=${this.handleHeightInput}
+            >
+          </div>
+        </div>
+
+        <div class="warning">
+          Current work will be replaced. It's saved automatically.
+        </div>
+
+        <div slot="actions">
           <button class="secondary" @click=${this.close}>Cancel</button>
           <button class="primary" @click=${this.create}>Create</button>
         </div>
-      </div>
+      </pf-dialog>
     `;
   }
 
