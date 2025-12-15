@@ -1,17 +1,17 @@
-import { html, css, nothing } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { colorStore } from '../../stores/colors';
-import { paletteStore } from '../../stores/palette';
-import { historyStore } from '../../stores/history';
-import { PaletteChangeCommand } from '../../commands/palette-command';
-import '../ui/pf-popover';
-import './pf-color-picker-popup';
-import './pf-palette-selector';
-import './pf-save-palette-dialog';
-import './pf-unsaved-changes-dialog';
+import { html, css, nothing } from "lit";
+import { customElement, state, query } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { colorStore } from "../../stores/colors";
+import { paletteStore } from "../../stores/palette";
+import { historyStore } from "../../stores/history";
+import { PaletteChangeCommand } from "../../commands/palette-command";
+import "../ui/pf-popover";
+import "./pf-color-picker-popup";
+import "./pf-palette-selector";
+import "./pf-save-palette-dialog";
+import "./pf-unsaved-changes-dialog";
 
-@customElement('pf-palette-panel')
+@customElement("pf-palette-panel")
 export class PFPalettePanel extends BaseComponent {
   static styles = css`
     :host {
@@ -90,7 +90,7 @@ export class PFPalettePanel extends BaseComponent {
     }
 
     .save-btn.dirty::after {
-      content: '';
+      content: "";
       position: absolute;
       top: 4px;
       right: 4px;
@@ -252,7 +252,7 @@ export class PFPalettePanel extends BaseComponent {
     .swatch-container:hover .swatch {
       transform: scale(1.1);
       z-index: 1;
-      box-shadow: 0 0 4px rgba(0,0,0,0.5);
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
     }
 
     .swatch-delete {
@@ -291,7 +291,7 @@ export class PFPalettePanel extends BaseComponent {
     }
 
     .swatch-container.drag-before::before {
-      content: '';
+      content: "";
       position: absolute;
       left: -2px;
       top: 0;
@@ -303,7 +303,7 @@ export class PFPalettePanel extends BaseComponent {
     }
 
     .swatch-container.drag-after::after {
-      content: '';
+      content: "";
       position: absolute;
       right: -2px;
       top: 0;
@@ -320,7 +320,7 @@ export class PFPalettePanel extends BaseComponent {
 
     /* Usage indicator - small dot in corner for colors in use */
     .swatch-used::after {
-      content: '';
+      content: "";
       position: absolute;
       bottom: 2px;
       right: 2px;
@@ -331,7 +331,6 @@ export class PFPalettePanel extends BaseComponent {
       box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
       pointer-events: none;
     }
-
 
     /* Extraction section styles */
     .extraction-section {
@@ -495,8 +494,13 @@ export class PFPalettePanel extends BaseComponent {
 
     /* Replace mode wiggle animation */
     @keyframes wiggle {
-      0%, 100% { transform: rotate(-2deg); }
-      50% { transform: rotate(2deg); }
+      0%,
+      100% {
+        transform: rotate(-2deg);
+      }
+      50% {
+        transform: rotate(2deg);
+      }
     }
 
     .palette-grid.replace-mode .swatch-container .swatch {
@@ -563,7 +567,7 @@ export class PFPalettePanel extends BaseComponent {
     }
   `;
 
-  @state() private hexInput = '';
+  @state() private hexInput = "";
   @state() private hexInvalid = false;
   @state() private showAddPopover = false;
   @state() private extractionExpanded = false;
@@ -571,7 +575,7 @@ export class PFPalettePanel extends BaseComponent {
 
   // Color picker popup state
   @state() private showColorPicker = false;
-  @state() private editingColor = '';
+  @state() private editingColor = "";
   @state() private editingIndex = 0;
   @state() private anchorElement: HTMLElement | null = null;
 
@@ -581,8 +585,8 @@ export class PFPalettePanel extends BaseComponent {
 
   // Save dialog state
   @state() private showSaveDialog = false;
-  @state() private saveDialogTitle = 'Save Palette';
-  @state() private saveDialogDefaultName = '';
+  @state() private saveDialogTitle = "Save Palette";
+  @state() private saveDialogDefaultName = "";
   @state() private isRenaming = false;
 
   // Unsaved changes dialog state
@@ -598,8 +602,8 @@ export class PFPalettePanel extends BaseComponent {
   @state() private selectedUntrackedColor: string | null = null;
   @state() private isReplaceMode: boolean = false;
 
-  @query('.add-btn') private addButton!: HTMLButtonElement;
-  @query('.menu-btn') private menuButton!: HTMLButtonElement;
+  @query(".add-btn") private addButton!: HTMLButtonElement;
+  @query(".menu-btn") private menuButton!: HTMLButtonElement;
 
   private selectColor(color: string) {
     colorStore.setPrimaryColor(color);
@@ -622,7 +626,11 @@ export class PFPalettePanel extends BaseComponent {
 
     if (previousColor && previousColor !== color) {
       // Create and execute command for undo/redo support
-      const command = new PaletteChangeCommand(oneBasedIndex, previousColor, color);
+      const command = new PaletteChangeCommand(
+        oneBasedIndex,
+        previousColor,
+        color
+      );
       historyStore.execute(command);
     }
 
@@ -642,11 +650,15 @@ export class PFPalettePanel extends BaseComponent {
   // Drag-Drop Methods
   // ==========================================
 
-  private handlePaletteSwatchDragStart(index: number, color: string, e: DragEvent) {
+  private handlePaletteSwatchDragStart(
+    index: number,
+    color: string,
+    e: DragEvent
+  ) {
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('application/x-palette-index', String(index));
-      e.dataTransfer.setData('application/x-palette-color', color);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("application/x-palette-index", String(index));
+      e.dataTransfer.setData("application/x-palette-color", color);
     }
     this.isDraggingPaletteColor = true;
     this.draggedPaletteIndex = index;
@@ -661,7 +673,7 @@ export class PFPalettePanel extends BaseComponent {
   private handlePaletteDragOver(index: number, e: DragEvent) {
     e.preventDefault();
     if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'move';
+      e.dataTransfer.dropEffect = "move";
     }
     // Only update if changed (prevents flickering)
     if (this.dragOverIndex !== index) {
@@ -677,16 +689,20 @@ export class PFPalettePanel extends BaseComponent {
     e.preventDefault();
     e.stopPropagation();
 
-    const paletteIndexStr = e.dataTransfer?.getData('application/x-palette-index');
-    const color = e.dataTransfer?.getData('application/x-palette-color');
-    const isEphemeral = e.dataTransfer?.getData('application/x-ephemeral-color') === 'true';
+    const paletteIndexStr = e.dataTransfer?.getData(
+      "application/x-palette-index"
+    );
+    const color = e.dataTransfer?.getData("application/x-palette-color");
+    const isEphemeral =
+      e.dataTransfer?.getData("application/x-ephemeral-color") === "true";
 
-    if (paletteIndexStr !== undefined && paletteIndexStr !== '') {
+    if (paletteIndexStr !== undefined && paletteIndexStr !== "") {
       // Reordering within palette
       const fromIndex = parseInt(paletteIndexStr, 10);
       if (fromIndex !== targetIndex && fromIndex !== targetIndex - 1) {
         // Adjust target if moving forward (since we're inserting, not swapping)
-        const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        const adjustedTarget =
+          fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
         paletteStore.moveColor(fromIndex, adjustedTarget);
       }
     } else if (color && isEphemeral) {
@@ -695,9 +711,11 @@ export class PFPalettePanel extends BaseComponent {
       // Insert at targetIndex (1-based for insertColorAt)
       paletteStore.insertColorAt(targetIndex + 1, color);
       // Dispatch event for index buffer update
-      window.dispatchEvent(new CustomEvent('palette-color-inserted', {
-        detail: { insertedIndex: targetIndex + 1, color }
-      }));
+      window.dispatchEvent(
+        new CustomEvent("palette-color-inserted", {
+          detail: { insertedIndex: targetIndex + 1, color },
+        })
+      );
     }
 
     // Clean up drag state
@@ -709,15 +727,18 @@ export class PFPalettePanel extends BaseComponent {
   private handlePaletteGridDragOver(e: DragEvent) {
     e.preventDefault();
     if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'move';
+      e.dataTransfer.dropEffect = "move";
     }
   }
 
   private handlePaletteGridDrop(e: DragEvent) {
     e.preventDefault();
-    const color = e.dataTransfer?.getData('application/x-palette-color');
-    const isEphemeral = e.dataTransfer?.getData('application/x-ephemeral-color') === 'true';
-    const paletteIndexStr = e.dataTransfer?.getData('application/x-palette-index');
+    const color = e.dataTransfer?.getData("application/x-palette-color");
+    const isEphemeral =
+      e.dataTransfer?.getData("application/x-ephemeral-color") === "true";
+    const paletteIndexStr = e.dataTransfer?.getData(
+      "application/x-palette-index"
+    );
 
     // Only handle if dropping on the grid itself (not on a swatch)
     // and it's from ephemeral (insert at end)
@@ -746,7 +767,7 @@ export class PFPalettePanel extends BaseComponent {
 
   private closeAddPopover() {
     this.showAddPopover = false;
-    this.hexInput = '';
+    this.hexInput = "";
     this.hexInvalid = false;
   }
 
@@ -757,7 +778,7 @@ export class PFPalettePanel extends BaseComponent {
   }
 
   private handleHexKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       this.addHexColor();
     }
   }
@@ -766,8 +787,8 @@ export class PFPalettePanel extends BaseComponent {
     let hex = this.hexInput.trim();
 
     // Add # if missing
-    if (hex && !hex.startsWith('#')) {
-      hex = '#' + hex;
+    if (hex && !hex.startsWith("#")) {
+      hex = "#" + hex;
     }
 
     // Validate hex format
@@ -778,11 +799,11 @@ export class PFPalettePanel extends BaseComponent {
 
     // Expand 3-char hex to 6-char
     if (hex.length === 4) {
-      hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+      hex = "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
     }
 
     paletteStore.addColor(hex.toLowerCase());
-    this.hexInput = '';
+    this.hexInput = "";
     this.hexInvalid = false;
   }
 
@@ -790,7 +811,6 @@ export class PFPalettePanel extends BaseComponent {
     const color = (e.target as HTMLInputElement).value;
     paletteStore.addColor(color);
   }
-
 
   // ==========================================
   // Extraction Methods
@@ -810,8 +830,8 @@ export class PFPalettePanel extends BaseComponent {
 
   private handleExtractedDragStart(color: string, e: DragEvent) {
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'copy';
-      e.dataTransfer.setData('application/x-palette-color', color);
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData("application/x-palette-color", color);
     }
   }
 
@@ -869,7 +889,10 @@ export class PFPalettePanel extends BaseComponent {
     if (!this.isReplaceMode || !this.selectedUntrackedColor) return;
 
     // Perform the swap
-    paletteStore.swapMainWithEphemeral(targetIndex, this.selectedUntrackedColor);
+    paletteStore.swapMainWithEphemeral(
+      targetIndex,
+      this.selectedUntrackedColor
+    );
 
     // Exit replace mode and clear selection
     this.isReplaceMode = false;
@@ -878,9 +901,9 @@ export class PFPalettePanel extends BaseComponent {
 
   private handleUntrackedDragStart(color: string, e: DragEvent) {
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'copy';
-      e.dataTransfer.setData('application/x-palette-color', color);
-      e.dataTransfer.setData('application/x-ephemeral-color', 'true');
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData("application/x-palette-color", color);
+      e.dataTransfer.setData("application/x-ephemeral-color", "true");
     }
   }
 
@@ -909,17 +932,17 @@ export class PFPalettePanel extends BaseComponent {
   }
 
   private openSaveAsDialog() {
-    this.saveDialogTitle = 'Save Palette';
+    this.saveDialogTitle = "Save Palette";
     this.saveDialogDefaultName = paletteStore.getCurrentPaletteName();
-    if (this.saveDialogDefaultName === 'Untitled Palette') {
-      this.saveDialogDefaultName = '';
+    if (this.saveDialogDefaultName === "Untitled Palette") {
+      this.saveDialogDefaultName = "";
     }
     this.isRenaming = false;
     this.showSaveDialog = true;
   }
 
   private openRenameDialog() {
-    this.saveDialogTitle = 'Rename Palette';
+    this.saveDialogTitle = "Rename Palette";
     this.saveDialogDefaultName = paletteStore.getCurrentPaletteName();
     this.isRenaming = true;
     this.showSaveDialog = true;
@@ -987,13 +1010,13 @@ export class PFPalettePanel extends BaseComponent {
     // Create the switch action
     let switchAction: () => void;
     switch (type) {
-      case 'preset':
+      case "preset":
         switchAction = () => paletteStore.loadPreset(id);
         break;
-      case 'custom':
+      case "custom":
         switchAction = () => paletteStore.loadCustomPalette(id);
         break;
-      case 'empty':
+      case "empty":
         switchAction = () => paletteStore.createEmpty();
         break;
       default:
@@ -1051,22 +1074,30 @@ export class PFPalettePanel extends BaseComponent {
 
     return html`
       <div class="toolbar">
-        <pf-palette-selector @request-switch=${this.handleRequestSwitch}></pf-palette-selector>
+        <pf-palette-selector
+          @request-switch=${this.handleRequestSwitch}
+        ></pf-palette-selector>
         <button
-          class="save-btn ${isDirty ? 'dirty' : ''}"
+          class="save-btn ${isDirty ? "dirty" : ""}"
           @click=${this.handleSaveClick}
-          title="${isDirty ? 'Save palette (unsaved changes)' : 'Save palette'}"
-        >&#128190;</button>
+          title="${isDirty ? "Save palette (unsaved changes)" : "Save palette"}"
+        >
+          &#128190;
+        </button>
         <button
           class="menu-btn"
           @click=${(e: Event) => this.toggleMenu(e)}
           title="Palette options"
-        >&#8942;</button>
+        >
+          &#8942;
+        </button>
         <button
           class="add-btn"
           @click=${(e: Event) => this.toggleAddPopover(e)}
           title="Add color"
-        >+</button>
+        >
+          +
+        </button>
       </div>
 
       <!-- Menu Popover -->
@@ -1077,16 +1108,22 @@ export class PFPalettePanel extends BaseComponent {
         @close=${this.closeMenu}
       >
         <div class="menu-content">
-          <div class="menu-item" @click=${this.handleMenuSaveAs}>Save As...</div>
+          <div class="menu-item" @click=${this.handleMenuSaveAs}>
+            Save As...
+          </div>
           <div
-            class="menu-item ${canRename ? '' : 'disabled'}"
+            class="menu-item ${canRename ? "" : "disabled"}"
             @click=${this.handleMenuRename}
-          >Rename...</div>
+          >
+            Rename...
+          </div>
           <div class="menu-divider"></div>
           <div
-            class="menu-item ${canReset ? '' : 'disabled'}"
+            class="menu-item ${canReset ? "" : "disabled"}"
             @click=${this.handleMenuReset}
-          >Reset to Original</div>
+          >
+            Reset to Original
+          </div>
         </div>
       </pf-popover>
 
@@ -1100,7 +1137,7 @@ export class PFPalettePanel extends BaseComponent {
           <div class="form-row">
             <input
               type="text"
-              class="hex-input ${this.hexInvalid ? 'invalid' : ''}"
+              class="hex-input ${this.hexInvalid ? "invalid" : ""}"
               placeholder="#hex"
               .value=${this.hexInput}
               @input=${this.handleHexInput}
@@ -1121,110 +1158,169 @@ export class PFPalettePanel extends BaseComponent {
       </pf-popover>
 
       <div
-        class="palette-grid ${this.isDraggingPaletteColor || this.dragOverIndex !== null ? 'drag-active' : ''} ${this.isReplaceMode ? 'replace-mode' : ''}"
+        class="palette-grid ${this.isDraggingPaletteColor ||
+        this.dragOverIndex !== null
+          ? "drag-active"
+          : ""} ${this.isReplaceMode ? "replace-mode" : ""}"
         @dragover=${this.handlePaletteGridDragOver}
         @drop=${this.handlePaletteGridDrop}
       >
         ${colors.map((color, index) => {
           const isUsed = usedColors.has(color.toLowerCase());
           return html`
-          <div
-            class="swatch-container ${this.dragOverIndex === index ? 'drag-before' : ''} ${this.draggedPaletteIndex === index ? 'dragging' : ''}"
-            @dragover=${(e: DragEvent) => this.handlePaletteDragOver(index, e)}
-            @dragleave=${this.handlePaletteDragLeave}
-            @drop=${(e: DragEvent) => this.handlePaletteDrop(index, e)}
-          >
             <div
-              class="swatch ${isUsed ? 'swatch-used' : ''}"
-              style="background-color: ${color}"
-              title="${this.isReplaceMode ? `Click to replace with ${this.selectedUntrackedColor}` : color}${isUsed ? ' (in use)' : ''}"
-              draggable="${!this.isReplaceMode}"
-              @click=${this.isReplaceMode
-                ? (e: Event) => this.handleReplaceTarget(index, e)
-                : () => this.selectColor(color)}
-              @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color, index)}
-              @dragstart=${(e: DragEvent) => this.handlePaletteSwatchDragStart(index, color, e)}
-              @dragend=${this.handlePaletteSwatchDragEnd}
-            ></div>
-            <button
-              class="swatch-delete"
-              @click=${(e: Event) => this.handleDeleteColor(e, index)}
-              title="Remove from palette (move to untracked)"
-            >×</button>
-          </div>
-        `})}
+              class="swatch-container ${this.dragOverIndex === index
+                ? "drag-before"
+                : ""} ${this.draggedPaletteIndex === index ? "dragging" : ""}"
+              @dragover=${(e: DragEvent) =>
+                this.handlePaletteDragOver(index, e)}
+              @dragleave=${this.handlePaletteDragLeave}
+              @drop=${(e: DragEvent) => this.handlePaletteDrop(index, e)}
+            >
+              <div
+                class="swatch ${isUsed ? "swatch-used" : ""}"
+                style="background-color: ${color}"
+                title="${this.isReplaceMode
+                  ? `Click to replace with ${this.selectedUntrackedColor}`
+                  : color}${isUsed ? " (in use)" : ""}"
+                draggable="${!this.isReplaceMode}"
+                @click=${this.isReplaceMode
+                  ? (e: Event) => this.handleReplaceTarget(index, e)
+                  : () => this.selectColor(color)}
+                @contextmenu=${(e: MouseEvent) =>
+                  this.handleSwatchRightClick(e, color, index)}
+                @dragstart=${(e: DragEvent) =>
+                  this.handlePaletteSwatchDragStart(index, color, e)}
+                @dragend=${this.handlePaletteSwatchDragEnd}
+              ></div>
+              <button
+                class="swatch-delete"
+                @click=${(e: Event) => this.handleDeleteColor(e, index)}
+                title="Remove from palette (move to untracked)"
+              >
+                ×
+              </button>
+            </div>
+          `;
+        })}
       </div>
 
-      ${ephemeralColors.length > 0 ? html`
-        <div class="untracked-section">
-          <div class="untracked-header">
-            <span class="untracked-title">
-              Untracked <span class="untracked-count">(${ephemeralColors.length})</span>
-            </span>
-          </div>
-          <div class="untracked-grid">
-            ${ephemeralColors.map(color => html`
-              <div
-                class="untracked-swatch ${this.selectedUntrackedColor === color ? 'selected' : ''}"
-                style="background-color: ${color}"
-                title="${color} - Click to select, right-click to add to palette"
-                draggable="true"
-                @click=${() => this.selectUntrackedColor(color)}
-                @contextmenu=${(e: MouseEvent) => this.handleUntrackedRightClick(e, color)}
-                @dragstart=${(e: DragEvent) => this.handleUntrackedDragStart(color, e)}
-              ></div>
-            `)}
-          </div>
-          <div class="untracked-actions">
-            ${this.selectedUntrackedColor && !this.isReplaceMode ? html`
-              <button class="replace-btn" @click=${this.enterReplaceMode}>Replace in Palette</button>
-            ` : this.isReplaceMode ? html`
-              <button class="replace-btn cancel" @click=${this.cancelReplaceMode}>Cancel Replace</button>
-            ` : nothing}
-            <button class="action-btn" @click=${this.promoteAllUntracked}>Add All</button>
-            <button class="action-btn" @click=${this.clearUntracked}>Clear</button>
-          </div>
-        </div>
-      ` : ''}
+      ${ephemeralColors.length > 0
+        ? html`
+            <div class="untracked-section">
+              <div class="untracked-header">
+                <span class="untracked-title">
+                  Untracked
+                  <span class="untracked-count"
+                    >(${ephemeralColors.length})</span
+                  >
+                </span>
+              </div>
+              <div class="untracked-grid">
+                ${ephemeralColors.map(
+                  (color) => html`
+                    <div
+                      class="untracked-swatch ${this.selectedUntrackedColor ===
+                      color
+                        ? "selected"
+                        : ""}"
+                      style="background-color: ${color}"
+                      title="${color} - Click to select, right-click to add to palette"
+                      draggable="true"
+                      @click=${() => this.selectUntrackedColor(color)}
+                      @contextmenu=${(e: MouseEvent) =>
+                        this.handleUntrackedRightClick(e, color)}
+                      @dragstart=${(e: DragEvent) =>
+                        this.handleUntrackedDragStart(color, e)}
+                    ></div>
+                  `
+                )}
+              </div>
+              <div class="untracked-actions">
+                ${this.selectedUntrackedColor && !this.isReplaceMode
+                  ? html`
+                      <button
+                        class="replace-btn"
+                        @click=${this.enterReplaceMode}
+                      >
+                        Replace in Palette
+                      </button>
+                    `
+                  : this.isReplaceMode
+                  ? html`
+                      <button
+                        class="replace-btn cancel"
+                        @click=${this.cancelReplaceMode}
+                      >
+                        Cancel Replace
+                      </button>
+                    `
+                  : nothing}
+                <button class="action-btn" @click=${this.promoteAllUntracked}>
+                  Add All
+                </button>
+                <button class="action-btn" @click=${this.clearUntracked}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          `
+        : ""}
 
       <div class="extraction-section">
-        <div
-          class="extraction-header"
-          @click=${this.toggleExtraction}
-        >
-          <span class="chevron ${this.extractionExpanded ? '' : 'collapsed'}">▼</span>
+        <div class="extraction-header" @click=${this.toggleExtraction}>
+          <span class="chevron ${this.extractionExpanded ? "" : "collapsed"}"
+            >▼</span
+          >
           <span>Extract from Drawing</span>
         </div>
-        ${this.extractionExpanded ? html`
-          <div class="extraction-content">
-            <button
-              class="extract-btn"
-              @click=${this.handleExtract}
-              ?disabled=${isExtracting}
-            >
-              ${isExtracting ? 'Extracting...' : 'Extract Colors'}
-            </button>
+        ${this.extractionExpanded
+          ? html`
+              <div class="extraction-content">
+                <button
+                  class="extract-btn"
+                  @click=${this.handleExtract}
+                  ?disabled=${isExtracting}
+                >
+                  ${isExtracting ? "Extracting..." : "Extract Colors"}
+                </button>
 
-            ${extractedColors.length > 0 ? html`
-              <div class="extracted-grid">
-                ${extractedColors.map(color => html`
-                  <div
-                    class="extracted-swatch"
-                    style="background-color: ${color}"
-                    draggable="true"
-                    @dragstart=${(e: DragEvent) => this.handleExtractedDragStart(color, e)}
-                    @click=${() => this.handleExtractedClick(color)}
-                    title="${color} - Click to add, drag to palette"
-                  ></div>
-                `)}
+                ${extractedColors.length > 0
+                  ? html`
+                      <div class="extracted-grid">
+                        ${extractedColors.map(
+                          (color) => html`
+                            <div
+                              class="extracted-swatch"
+                              style="background-color: ${color}"
+                              draggable="true"
+                              @dragstart=${(e: DragEvent) =>
+                                this.handleExtractedDragStart(color, e)}
+                              @click=${() => this.handleExtractedClick(color)}
+                              title="${color} - Click to add, drag to palette"
+                            ></div>
+                          `
+                        )}
+                      </div>
+                      <div class="extraction-actions">
+                        <button
+                          class="action-btn"
+                          @click=${this.addAllExtracted}
+                        >
+                          Add All
+                        </button>
+                        <button
+                          class="action-btn"
+                          @click=${this.replaceWithExtracted}
+                        >
+                          Replace All
+                        </button>
+                      </div>
+                    `
+                  : ""}
               </div>
-              <div class="extraction-actions">
-                <button class="action-btn" @click=${this.addAllExtracted}>Add All</button>
-                <button class="action-btn" @click=${this.replaceWithExtracted}>Replace All</button>
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
+            `
+          : ""}
       </div>
 
       <pf-color-picker-popup
