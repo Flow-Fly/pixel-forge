@@ -1,6 +1,7 @@
-import { html, css, LitElement } from "lit";
+import { html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { ToolType } from "../../stores/tools";
+import { toolStore, type ToolType } from "../../stores/tools";
+import { BaseComponent } from "../../core/base-component";
 import {
   getToolMeta,
   getToolIcon,
@@ -12,7 +13,7 @@ import {
  * Appears on right-click of a tool button
  */
 @customElement("pf-tool-group-menu")
-export class PFToolGroupMenu extends LitElement {
+export class PFToolGroupMenu extends BaseComponent {
   static styles = css`
     :host {
       position: fixed;
@@ -68,7 +69,6 @@ export class PFToolGroupMenu extends LitElement {
   `;
 
   @property({ type: Array }) tools: ToolType[] = [];
-  @property({ type: String }) activeTool: ToolType = "pencil";
   @property({ type: Number }) x = 0;
   @property({ type: Number }) y = 0;
 
@@ -98,11 +98,12 @@ export class PFToolGroupMenu extends LitElement {
   }
 
   render() {
+    const activeTool = toolStore.activeTool.value;
     return html`
       ${this.tools.map((tool) => {
         const meta = getToolMeta(tool);
         const name = meta?.name || tool;
-        const isActive = tool === this.activeTool;
+        const isActive = tool === activeTool;
         const shortcut = this.formatShortcut(getToolShortcutKey(tool));
 
         return html`
@@ -110,7 +111,7 @@ export class PFToolGroupMenu extends LitElement {
             class="menu-item ${isActive ? "active" : ""}"
             @click=${() => this.selectTool(tool)}
           >
-            <span class="tool-icon">${getToolIcon(tool)}</span>
+            <img class="tool-icon" src="${getToolIcon(tool)}" alt="${name}" />
             <span class="tool-name">${name}</span>
             <span class="shortcut">${shortcut}</span>
           </button>

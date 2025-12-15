@@ -46,9 +46,9 @@ export class PFToolButton extends BaseComponent {
 
     :host([active]) button {
       background-color: var(--pf-color-bg-surface);
-      border-color: var(--pf-color-accent-cyan);
-      color: var(--pf-color-accent-cyan);
-      box-shadow: var(--pf-shadow-glow-cyan);
+      border-color: var(--pf-color-accent);
+      color: var(--pf-color-accent);
+      box-shadow: var(--pf-shadow-glow);
     }
 
     /* Triangle indicator for tool groups */
@@ -63,7 +63,7 @@ export class PFToolButton extends BaseComponent {
     }
 
     :host([active]) .group-indicator {
-      border-bottom-color: var(--pf-color-accent-cyan);
+      border-bottom-color: var(--pf-color-accent);
     }
 
     // .gear-icon {
@@ -140,9 +140,7 @@ export class PFToolButton extends BaseComponent {
             : ""}"
           @contextmenu=${this.handleContextMenu}
         >
-          ${this.icon
-            ? html`<span class="icon">${this.icon}</span>`
-            : html`<span>${getToolIcon(this.tool)}</span>`}
+          <img class="icon" src="${getToolIcon(this.tool)}" alt="${toolName}" />
         </button>
         ${this.hasGroup ? html`<div class="group-indicator"></div>` : ""}
       </div>
@@ -151,7 +149,6 @@ export class PFToolButton extends BaseComponent {
         ? html`
             <pf-tool-group-menu
               .tools=${this.groupTools}
-              .activeTool=${toolStore.activeTool.value}
               .x=${this.menuX}
               .y=${this.menuY}
               @tool-selected=${this.handleToolSelected}

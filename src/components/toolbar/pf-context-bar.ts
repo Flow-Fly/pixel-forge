@@ -25,7 +25,7 @@ export class PFContextBar extends BaseComponent {
     :host {
       display: flex;
       align-items: center;
-      height: 100%;
+      height: 1.75rem;
       padding: 0 var(--pf-spacing-2);
       gap: var(--pf-spacing-2);
       font-size: 12px;
@@ -398,14 +398,19 @@ export class PFContextBar extends BaseComponent {
     selectionStore.cancelTransform();
   }
 
-  private _renderSelectionControls(selectionState: { bounds: { width: number; height: number } }) {
+  private _renderSelectionControls(selectionState: {
+    bounds: { width: number; height: number };
+  }) {
     const bounds = selectionState.bounds;
 
     return html`
       <span class="tool-name">Selection</span>
       <div class="separator"></div>
 
-      <div class="selection-section" style="display: flex; align-items: center; gap: var(--pf-spacing-2);">
+      <div
+        class="selection-section"
+        style="display: flex; align-items: center; gap: var(--pf-spacing-2);"
+      >
         <span style="color: var(--pf-color-text-muted); font-size: 11px;">
           ${bounds.width} × ${bounds.height} px
         </span>

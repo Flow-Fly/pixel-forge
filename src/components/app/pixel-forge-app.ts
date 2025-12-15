@@ -180,7 +180,9 @@ export class PixelForgeApp extends BaseComponent {
     try {
       const savedProject = await persistenceService.loadCurrentProject();
       if (savedProject) {
-        await projectStore.loadProject(savedProject);
+        // fromAutoSave = true: palette is already loaded from localStorage,
+        // don't overwrite with stale palette data from IndexedDB
+        await projectStore.loadProject(savedProject, true);
         historyStore.clear();
       }
     } catch (error) {

@@ -4,11 +4,15 @@ import { brushStore } from '../stores/brush';
 import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-settings';
 import { guidesStore } from '../stores/guides';
 import { projectStore } from '../stores/project';
+import { paletteStore } from '../stores/palette';
+import { animationStore } from '../stores/animation';
+import { layerStore } from '../stores/layers';
 import {
   bresenhamLine,
   constrainTo45Degrees,
   isLShape,
 } from '../services/drawing/algorithms';
+import { setIndexBufferPixel } from '../utils/indexed-color';
 
 // Default spacing multiplier (0.25 = stamp every size/4 pixels)
 const SPACING_MULTIPLIER = 0.25;
@@ -43,6 +47,10 @@ export class EraserTool extends BaseTool {
   // Snapshot of canvas before current stroke (for pixel-perfect restore)
   private strokeStartSnapshot: ImageData | null = null;
 
+  // Cached index buffer and background palette index for current stroke
+  private currentIndexBuffer: Uint8Array | null = null;
+  private backgroundPaletteIndex: number = 0;
+
   constructor(context: CanvasRenderingContext2D) {
     super();
     this.setContext(context);
@@ -73,6 +81,18 @@ export class EraserTool extends BaseTool {
     // Capture canvas state before stroke for pixel-perfect restore
     const canvas = this.context.canvas;
     this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Initialize indexed color support for this stroke
+    const layerId = layerStore.activeLayerId.value;
+    const frameId = animationStore.currentFrameId.value;
+    if (layerId) {
+      this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+      // For background mode, get the palette index of the secondary color
+      if (eraserSettings.mode.value === 'background') {
+        const bgColor = colorStore.secondaryColor.value;
+        this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
+      }
+    }
 
     // Shift+Click: erase line from last stroke end to current position
     if (modifiers?.shift && EraserTool.lastStrokeEnd) {
@@ -136,6 +156,8 @@ export class EraserTool extends BaseTool {
     this.isDrawing = false;
     this.erasedPoints = [];
     this.strokeStartSnapshot = null; // Free memory
+    this.currentIndexBuffer = null;
+    this.backgroundPaletteIndex = 0;
   }
 
   onMove(x: number, y: number, modifiers?: ModifierKeys) {
@@ -267,15 +289,48 @@ export class EraserTool extends BaseTool {
   private eraseSinglePoint(x: number, y: number, size: number, halfSize: number, opacity: number) {
     if (!this.context) return;
 
+    const canvas = this.context.canvas;
+    const canvasWidth = canvas.width;
+
     if (eraserSettings.mode.value === 'background') {
       // Fill with secondary (background) color
       this.context.fillStyle = colorStore.secondaryColor.value;
       this.context.globalAlpha = opacity;
       this.context.fillRect(x - halfSize, y - halfSize, size, size);
       this.context.globalAlpha = 1;
+
+      // Update index buffer with background color
+      if (this.currentIndexBuffer && this.backgroundPaletteIndex > 0) {
+        for (let py = 0; py < size; py++) {
+          for (let px = 0; px < size; px++) {
+            setIndexBufferPixel(
+              this.currentIndexBuffer,
+              canvasWidth,
+              x - halfSize + px,
+              y - halfSize + py,
+              this.backgroundPaletteIndex
+            );
+          }
+        }
+      }
     } else {
       // Transparent mode - clear pixels
       this.context.clearRect(x - halfSize, y - halfSize, size, size);
+
+      // Update index buffer to transparent (0)
+      if (this.currentIndexBuffer) {
+        for (let py = 0; py < size; py++) {
+          for (let px = 0; px < size; px++) {
+            setIndexBufferPixel(
+              this.currentIndexBuffer,
+              canvasWidth,
+              x - halfSize + px,
+              y - halfSize + py,
+              0 // 0 = transparent
+            );
+          }
+        }
+      }
     }
 
     // Mark dirty region for partial redraw (convert center to top-left)
@@ -347,11 +402,21 @@ export class EraserTool extends BaseTool {
     if (a === 0) {
       // Original was transparent, clear it
       this.context.clearRect(x, y, 1, 1);
+      // Also clear index buffer
+      if (this.currentIndexBuffer) {
+        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, 0);
+      }
     } else {
       // Restore original color
       this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
       this.context.globalAlpha = 1;
       this.context.fillRect(x, y, 1, 1);
+      // Restore index buffer - get the original color's palette index
+      if (this.currentIndexBuffer) {
+        const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+        const originalIndex = paletteStore.getColorIndex(hex);
+        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, originalIndex);
+      }
     }
   }
 

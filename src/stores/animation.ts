@@ -94,9 +94,19 @@ class AnimationStore {
       this.rebuildAllCelCanvases();
     });
 
-    // When palette is replaced (loading project, resetting), rebuild all canvases
-    window.addEventListener('palette-replaced', () => {
-      this.rebuildAllCelCanvases();
+    // When palette is replaced (loading project, switching palettes), remap indices and rebuild
+    window.addEventListener('palette-replaced', (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.skipRemap) {
+        // Full palette replacement (loading project) - indices are already correct, just rebuild
+        this.rebuildAllCelCanvases();
+      } else if (detail?.oldMainColors) {
+        // Switching palettes - do smart remapping by color
+        this.handlePaletteReplacedWithRemap(detail.oldMainColors, detail.oldEphemeralColors || []);
+      } else {
+        // Legacy behavior - just rebuild canvases
+        this.rebuildAllCelCanvases();
+      }
     });
 
     // When palette is reset to default, rebuild all canvases
@@ -114,6 +124,18 @@ class AnimationStore {
     window.addEventListener('palette-color-removed', (event: Event) => {
       const { removedIndex } = (event as CustomEvent).detail;
       this.handlePaletteColorRemoved(removedIndex);
+    });
+
+    // When a color is moved from main palette to ephemeral
+    window.addEventListener('palette-color-moved-to-ephemeral', (event: Event) => {
+      const { removedIndex, newIndex } = (event as CustomEvent).detail;
+      this.handlePaletteColorMovedToEphemeral(removedIndex, newIndex);
+    });
+
+    // When a color is inserted into the palette (from untracked via drag-drop)
+    window.addEventListener('palette-color-inserted', (event: Event) => {
+      const { insertedIndex } = (event as CustomEvent).detail;
+      this.handlePaletteColorInserted(insertedIndex);
     });
   }
 
@@ -470,9 +492,97 @@ class AnimationStore {
       // Rebuild canvas from index buffer
       rebuildCanvasFromIndices(cel.canvas, cel.indexBuffer, palette);
     }
+  }
+
+  /**
+   * Rebuild all cel index buffers from their canvas content.
+   * Called after loading with a different palette to sync index buffers to new palette.
+   * This does NOT add new colors to the palette - colors should already exist.
+   */
+  rebuildAllIndexBuffers(): void {
+    const cels = new Map(this.cels.value);
+
+    for (const [key, cel] of cels) {
+      if (!cel.canvas) continue;
+      if (cel.textCelData) continue;
+
+      // Rebuild index buffer from canvas pixels (don't add missing colors)
+      const newIndexBuffer = buildIndexBufferFromCanvas(cel.canvas, false);
+      cels.set(key, { ...cel, indexBuffer: newIndexBuffer });
+    }
+
+    this.cels.value = cels;
 
     // Force UI update by triggering canvas refresh
     // The canvas component will re-render on signal change
+  }
+
+  /**
+   * Scan all index buffers and return the set of colors actually used in the drawing.
+   * Used to preserve colors when switching palettes.
+   * NOTE: This relies on palette index lookups, so it only works when the current
+   * palette matches the one used when drawing. For reload scenarios, use
+   * scanUsedColorsFromCanvas() instead.
+   */
+  scanUsedColors(): Set<string> {
+    const usedColors = new Set<string>();
+
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+      if (cel.textCelData) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const paletteIndex = buffer[i];
+        if (paletteIndex === 0) continue; // Skip transparent
+
+        const color = paletteStore.getColorByIndex(paletteIndex);
+        if (color) {
+          usedColors.add(color.toLowerCase());
+        }
+      }
+    }
+
+    return usedColors;
+  }
+
+  /**
+   * Scan actual canvas pixels to get colors used in the drawing.
+   * Unlike scanUsedColors(), this doesn't rely on index buffer → palette lookups,
+   * so it works correctly when the palette has changed since the drawing was made.
+   */
+  scanUsedColorsFromCanvas(): Set<string> {
+    const usedColors = new Set<string>();
+
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.canvas) continue;
+      if (cel.textCelData) continue;
+
+      const ctx = cel.canvas.getContext('2d');
+      if (!ctx) continue;
+
+      const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a === 0) continue; // Skip transparent pixels
+
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // Convert to hex
+        const hex = '#' +
+          r.toString(16).padStart(2, '0') +
+          g.toString(16).padStart(2, '0') +
+          b.toString(16).padStart(2, '0');
+
+        usedColors.add(hex.toLowerCase());
+      }
+    }
+
+    return usedColors;
   }
 
   /**
@@ -509,6 +619,9 @@ class AnimationStore {
       }
     }
 
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
   }
@@ -538,6 +651,115 @@ class AnimationStore {
         }
       }
     }
+
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette color moved to ephemeral.
+   * Remaps index buffers: pixels at removedIndex get newIndex, higher indices shift down.
+   */
+  private handlePaletteColorMovedToEphemeral(removedIndex: number, newIndex: number): void {
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        if (oldIndex === removedIndex) {
+          // This pixel used the removed color - remap to its new ephemeral index
+          buffer[i] = newIndex;
+        } else if (oldIndex > removedIndex) {
+          // Indices after removed one shift down by 1
+          buffer[i] = oldIndex - 1;
+        }
+      }
+    }
+
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette color insertion.
+   * Shift all indices >= insertedIndex up by 1.
+   */
+  private handlePaletteColorInserted(insertedIndex: number): void {
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        // Shift up all indices at or after the insertion point
+        if (oldIndex >= insertedIndex) {
+          buffer[i] = oldIndex + 1;
+        }
+      }
+    }
+
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
+    // Rebuild canvases with updated indices
+    this.rebuildAllCelCanvases();
+  }
+
+  /**
+   * Handle palette replacement with color-based index remapping.
+   * Maps each pixel's color from old palette to new palette position.
+   */
+  private handlePaletteReplacedWithRemap(oldMainColors: string[], oldEphemeralColors: string[]): void {
+    // Build lookup: old 1-based index -> hex color
+    const oldIndexToColor = new Map<number, string>();
+
+    // Old main colors: indices 1 to oldMainColors.length
+    oldMainColors.forEach((color, i) => {
+      oldIndexToColor.set(i + 1, color.toLowerCase());
+    });
+
+    // Old ephemeral colors: indices oldMainColors.length + 1 onwards
+    oldEphemeralColors.forEach((color, i) => {
+      oldIndexToColor.set(oldMainColors.length + i + 1, color.toLowerCase());
+    });
+
+    // Remap each pixel by color
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.indexBuffer) continue;
+      if (cel.textCelData) continue; // Skip text cels
+
+      const buffer = cel.indexBuffer;
+      for (let i = 0; i < buffer.length; i++) {
+        const oldIndex = buffer[i];
+        if (oldIndex === 0) continue; // Skip transparent
+
+        // Get the color this pixel had
+        const color = oldIndexToColor.get(oldIndex);
+        if (!color) continue;
+
+        // Find this color's new index in the current palette
+        const newIndex = paletteStore.getColorIndex(color);
+        if (newIndex !== 0) {
+          buffer[i] = newIndex;
+        }
+        // If color not found (newIndex === 0), keep transparent
+        // This shouldn't happen since preserveColorsOnSwitch adds orphans to ephemeral
+      }
+    }
+
+    // Force signal update to trigger UI reactivity (index buffers were modified in-place)
+    this.cels.value = new Map(this.cels.value);
 
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
@@ -1100,10 +1322,18 @@ class AnimationStore {
    */
   ensureUnlinkedForEdit(layerId: string, frameId: string): boolean {
     const key = this.getCelKey(layerId, frameId);
-    const cel = this.cels.value.get(key);
+    let cel = this.cels.value.get(key);
 
-    // Not linked - nothing to do
-    if (!cel?.linkedCelId) return false;
+    // Cel doesn't exist yet (new layer) - create it first
+    if (!cel) {
+      this.syncLayerCanvases();
+      cel = this.cels.value.get(key);
+      // After sync, cel should exist. Return true so caller refreshes layer reference.
+      return true;
+    }
+
+    // Cel exists but not linked - nothing to do
+    if (!cel.linkedCelId) return false;
 
     // Hard links stay linked - user explicitly wants edits to affect all
     if (cel.linkType === 'hard') return false;

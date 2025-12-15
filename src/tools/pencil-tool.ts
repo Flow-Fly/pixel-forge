@@ -111,14 +111,9 @@ export class PencilTool extends BaseTool {
     if (layerId) {
       // Ensure cel has an index buffer (creates if needed, migrates from canvas if has content)
       this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
-      // Get or add color to palette, get the palette index
-      // Use ephemeral color system for shade-generated colors to avoid polluting main palette
+      // Get palette index for drawing - adds to ephemeral if not in main palette
       const color = colorStore.primaryColor.value;
-      if (colorStore.isEphemeralColor.value) {
-        this.currentPaletteIndex = paletteStore.getOrAddEphemeralColor(color);
-      } else {
-        this.currentPaletteIndex = paletteStore.getOrAddColor(color);
-      }
+      this.currentPaletteIndex = paletteStore.getOrAddColorForDrawing(color);
     }
 
     // Shift+Click: draw line from last stroke end to current position

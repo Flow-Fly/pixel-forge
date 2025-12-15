@@ -1,10 +1,15 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { paletteStore, PRESET_PALETTES, type PresetPalette } from '../../stores/palette';
-import '../ui/pf-popover';
+import { html, css, nothing } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import {
+  paletteStore,
+  PRESET_PALETTES,
+  type PresetPalette,
+  type CustomPalette,
+} from "../../stores/palette";
+import "../ui/pf-popover";
 
-@customElement('pf-palette-selector')
+@customElement("pf-palette-selector")
 export class PfPaletteSelector extends BaseComponent {
   static styles = css`
     :host {
@@ -45,8 +50,8 @@ export class PfPaletteSelector extends BaseComponent {
     }
 
     .selector-content {
-      width: 220px;
-      max-height: 320px;
+      width: 240px;
+      max-height: 380px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -78,10 +83,20 @@ export class PfPaletteSelector extends BaseComponent {
       padding: 4px 0;
     }
 
+    .section-header {
+      padding: 6px 10px 4px;
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--pf-color-text-muted, #808080);
+    }
+
     .palette-item {
       padding: 6px 10px;
       cursor: pointer;
       transition: background 0.1s ease;
+      position: relative;
     }
 
     .palette-item:hover {
@@ -89,7 +104,6 @@ export class PfPaletteSelector extends BaseComponent {
     }
 
     .palette-item.selected {
-      background: var(--pf-color-accent, #4a9eff);
       background: rgba(74, 158, 255, 0.15);
     }
 
@@ -104,11 +118,42 @@ export class PfPaletteSelector extends BaseComponent {
       font-size: 11px;
       color: var(--pf-color-text-main, #e0e0e0);
       font-weight: 500;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .palette-count {
       font-size: 10px;
       color: var(--pf-color-text-muted, #808080);
+      margin-left: 8px;
+    }
+
+    .delete-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--pf-color-bg-surface, #1e1e1e);
+      border: 1px solid var(--pf-color-border, #333);
+      border-radius: 3px;
+      color: var(--pf-color-text-muted, #808080);
+      font-size: 10px;
+      padding: 2px 6px;
+      cursor: pointer;
+      opacity: 0;
+      transition: all 0.1s ease;
+    }
+
+    .palette-item:hover .delete-btn {
+      opacity: 1;
+    }
+
+    .delete-btn:hover {
+      background: #c53030;
+      border-color: #c53030;
+      color: white;
     }
 
     .palette-preview {
@@ -155,32 +200,99 @@ export class PfPaletteSelector extends BaseComponent {
       font-size: 11px;
       color: var(--pf-color-text-muted, #808080);
     }
+
+    /* Confirm delete dialog */
+    .confirm-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 10;
+    }
+
+    .confirm-message {
+      font-size: 12px;
+      color: var(--pf-color-text-main, #e0e0e0);
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    .confirm-name {
+      font-weight: 600;
+      color: var(--pf-color-accent, #4a9eff);
+    }
+
+    .confirm-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .confirm-btn {
+      padding: 6px 12px;
+      border-radius: 3px;
+      font-size: 11px;
+      cursor: pointer;
+      border: 1px solid var(--pf-color-border, #333);
+      transition: all 0.1s ease;
+    }
+
+    .confirm-btn.cancel {
+      background: var(--pf-color-bg-surface, #1e1e1e);
+      color: var(--pf-color-text-main, #e0e0e0);
+    }
+
+    .confirm-btn.cancel:hover {
+      background: var(--pf-color-bg-panel, #141414);
+    }
+
+    .confirm-btn.delete {
+      background: #c53030;
+      border-color: #c53030;
+      color: white;
+    }
+
+    .confirm-btn.delete:hover {
+      background: #9b2c2c;
+    }
   `;
 
   @state() private isOpen = false;
-  @state() private searchQuery = '';
+  @state() private searchQuery = "";
   @state() private triggerRect: DOMRect | null = null;
+  @state() private confirmDeleteId: string | null = null;
+  @state() private confirmDeleteName: string = "";
 
-  private get filteredPalettes(): PresetPalette[] {
+  private get filteredCustomPalettes(): CustomPalette[] {
+    const custom = paletteStore.customPalettes.value;
+    if (!this.searchQuery.trim()) {
+      return custom;
+    }
+    const query = this.searchQuery.toLowerCase();
+    return custom.filter((p) => p.name.toLowerCase().includes(query));
+  }
+
+  private get filteredPresetPalettes(): PresetPalette[] {
     if (!this.searchQuery.trim()) {
       return PRESET_PALETTES;
     }
     const query = this.searchQuery.toLowerCase();
-    return PRESET_PALETTES.filter(p =>
-      p.name.toLowerCase().includes(query) ||
-      p.author.toLowerCase().includes(query)
+    return PRESET_PALETTES.filter(
+      (p) =>
+        p.name.toLowerCase().includes(query) ||
+        p.author.toLowerCase().includes(query)
     );
   }
 
   private get currentPaletteName(): string {
-    const id = paletteStore.currentPaletteId.value;
-    if (id === 'custom') return 'Custom';
-    const preset = PRESET_PALETTES.find(p => p.id === id);
-    return preset?.name ?? 'Custom';
+    return paletteStore.getCurrentPaletteName();
   }
 
   private handleTriggerClick(e: Event) {
-    e.stopPropagation(); // Prevent popover's outside-click handler from immediately closing
+    e.stopPropagation();
     const target = e.currentTarget as HTMLElement;
     this.triggerRect = target.getBoundingClientRect();
     this.isOpen = !this.isOpen;
@@ -188,36 +300,126 @@ export class PfPaletteSelector extends BaseComponent {
 
   private handleClose() {
     this.isOpen = false;
-    this.searchQuery = '';
+    this.searchQuery = "";
+    this.confirmDeleteId = null;
   }
 
   private handleSearchInput(e: Event) {
     this.searchQuery = (e.target as HTMLInputElement).value;
   }
 
-  private handlePaletteSelect(palette: PresetPalette) {
+  private handlePresetSelect(palette: PresetPalette) {
+    // Check if we need to confirm unsaved changes when leaving a custom palette
+    if (paletteStore.isDirty.value && paletteStore.isCustomPalette()) {
+      this.dispatchEvent(
+        new CustomEvent("request-switch", {
+          bubbles: true,
+          composed: true,
+          detail: { type: "preset", id: palette.id },
+        })
+      );
+      this.handleClose();
+      return;
+    }
     paletteStore.loadPreset(palette.id);
     this.handleClose();
   }
 
+  private handleCustomSelect(palette: CustomPalette) {
+    // Check if we need to confirm unsaved changes when leaving a custom palette
+    if (paletteStore.isDirty.value && paletteStore.isCustomPalette()) {
+      this.dispatchEvent(
+        new CustomEvent("request-switch", {
+          bubbles: true,
+          composed: true,
+          detail: { type: "custom", id: palette.id },
+        })
+      );
+      this.handleClose();
+      return;
+    }
+    paletteStore.loadCustomPalette(palette.id);
+    this.handleClose();
+  }
+
   private handleNewEmpty() {
+    // Check if we need to confirm unsaved changes when leaving a custom palette
+    if (paletteStore.isDirty.value && paletteStore.isCustomPalette()) {
+      this.dispatchEvent(
+        new CustomEvent("request-switch", {
+          bubbles: true,
+          composed: true,
+          detail: { type: "empty" },
+        })
+      );
+      this.handleClose();
+      return;
+    }
     paletteStore.createEmpty();
     this.handleClose();
   }
 
+  private handleDeleteClick(e: Event, palette: CustomPalette) {
+    e.stopPropagation();
+    this.confirmDeleteId = palette.id;
+    this.confirmDeleteName = palette.name;
+  }
+
+  private handleConfirmDelete() {
+    if (this.confirmDeleteId) {
+      paletteStore.deleteCustomPalette(this.confirmDeleteId);
+      this.confirmDeleteId = null;
+      this.confirmDeleteName = "";
+    }
+  }
+
+  private handleCancelDelete() {
+    this.confirmDeleteId = null;
+    this.confirmDeleteName = "";
+  }
+
   private renderPalettePreview(colors: string[]) {
+    // Show max 16 colors in preview
+    const displayColors = colors.slice(0, 16);
     return html`
       <div class="palette-preview">
-        ${colors.map(color => html`
-          <div class="preview-color" style="background-color: ${color}"></div>
-        `)}
+        ${displayColors.map(
+          (color) => html`
+            <div class="preview-color" style="background-color: ${color}"></div>
+          `
+        )}
+      </div>
+    `;
+  }
+
+  private renderConfirmDialog() {
+    if (!this.confirmDeleteId) return nothing;
+
+    return html`
+      <div class="confirm-overlay" @click=${(e: Event) => e.stopPropagation()}>
+        <div class="confirm-message">
+          Delete <span class="confirm-name">${this.confirmDeleteName}</span>?
+        </div>
+        <div class="confirm-buttons">
+          <button class="confirm-btn cancel" @click=${this.handleCancelDelete}>
+            Cancel
+          </button>
+          <button class="confirm-btn delete" @click=${this.handleConfirmDelete}>
+            Delete
+          </button>
+        </div>
       </div>
     `;
   }
 
   render() {
-    const currentId = paletteStore.currentPaletteId.value;
-    const filtered = this.filteredPalettes;
+    const currentPresetId = paletteStore.currentPresetId.value;
+    const currentCustomId = paletteStore.currentCustomPaletteId.value;
+    const filteredCustom = this.filteredCustomPalettes;
+    const filteredPreset = this.filteredPresetPalettes;
+    const hasCustomPalettes = filteredCustom.length > 0;
+    const hasPresets = filteredPreset.length > 0;
+    const hasResults = hasCustomPalettes || hasPresets;
 
     return html`
       <button
@@ -236,6 +438,8 @@ export class PfPaletteSelector extends BaseComponent {
         @close=${this.handleClose}
       >
         <div class="selector-content">
+          ${this.renderConfirmDialog()}
+
           <input
             type="text"
             class="search-input"
@@ -245,20 +449,66 @@ export class PfPaletteSelector extends BaseComponent {
           />
 
           <div class="palette-list">
-            ${filtered.length > 0 ? filtered.map(palette => html`
-              <div
-                class="palette-item ${currentId === palette.id ? 'selected' : ''}"
-                @click=${() => this.handlePaletteSelect(palette)}
-              >
-                <div class="palette-header">
-                  <span class="palette-name">${palette.name}</span>
-                  <span class="palette-count">${palette.colors.length}</span>
-                </div>
-                ${this.renderPalettePreview(palette.colors)}
-              </div>
-            `) : html`
-              <div class="no-results">No palettes found</div>
-            `}
+            ${!hasResults
+              ? html` <div class="no-results">No palettes found</div> `
+              : nothing}
+            ${hasCustomPalettes
+              ? html`
+                  <div class="section-header">My Palettes</div>
+                  ${filteredCustom.map(
+                    (palette) => html`
+                      <div
+                        class="palette-item ${currentCustomId === palette.id
+                          ? "selected"
+                          : ""}"
+                        @click=${() => this.handleCustomSelect(palette)}
+                      >
+                        <div class="palette-header">
+                          <span class="palette-name">${palette.name}</span>
+                          <span class="palette-count"
+                            >${palette.colors.length}</span
+                          >
+                        </div>
+                        ${this.renderPalettePreview(palette.colors)}
+                        <button
+                          class="delete-btn"
+                          @click=${(e: Event) =>
+                            this.handleDeleteClick(e, palette)}
+                          title="Delete palette"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    `
+                  )}
+                `
+              : nothing}
+            ${hasCustomPalettes && hasPresets
+              ? html` <div class="divider"></div> `
+              : nothing}
+            ${hasPresets
+              ? html`
+                  <div class="section-header">Presets</div>
+                  ${filteredPreset.map(
+                    (palette) => html`
+                      <div
+                        class="palette-item ${currentPresetId === palette.id
+                          ? "selected"
+                          : ""}"
+                        @click=${() => this.handlePresetSelect(palette)}
+                      >
+                        <div class="palette-header">
+                          <span class="palette-name">${palette.name}</span>
+                          <span class="palette-count"
+                            >${palette.colors.length}</span
+                          >
+                        </div>
+                        ${this.renderPalettePreview(palette.colors)}
+                      </div>
+                    `
+                  )}
+                `
+              : nothing}
           </div>
 
           <div class="divider"></div>

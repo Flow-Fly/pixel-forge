@@ -19,7 +19,11 @@ CLAUDE.md
 feature.md
 readme.md
 research.md
-# tasks.md
+tasks.md
+/analysis/
+*.ase
+*.pf
+*.aseprite
 
 # Editor directories and files
 .vscode/*
