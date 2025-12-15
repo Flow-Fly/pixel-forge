@@ -123,7 +123,13 @@ class ProjectStore {
     };
   }
 
-  async loadProject(file: ProjectFile) {
+  /**
+   * Load a project from file data.
+   * @param file The project file data
+   * @param fromAutoSave If true, palette is preserved from localStorage (auto-save reload).
+   *                     If false, palette is loaded from file (explicit file import).
+   */
+  async loadProject(file: ProjectFile, fromAutoSave = false) {
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
 
@@ -132,20 +138,23 @@ class ProjectStore {
     this.name.value = file.name || 'Untitled';
 
     // 2. Restore Palette (v3.0+)
-    // If file has palette, use it; otherwise keep current palette
-    // (legacy files will have index buffers built from canvas content during cel loading)
-    if (file.palette && Array.isArray(file.palette) && file.palette.length > 0) {
+    // For auto-save reload: palette is already correct from localStorage, skip
+    // For file import: load palette from file
+    if (!fromAutoSave && file.palette && Array.isArray(file.palette) && file.palette.length > 0) {
       paletteStore.setPalette(file.palette);
     }
 
     // 2b. Restore Ephemeral Palette (v3.1+)
-    // If file has ephemeral colors, restore them
-    if (file.ephemeralPalette && Array.isArray(file.ephemeralPalette) && file.ephemeralPalette.length > 0) {
-      paletteStore.ephemeralColors.value = file.ephemeralPalette;
-      paletteStore.rebuildColorMap();
-    } else {
-      // Clear any existing ephemeral colors when loading a project without them
-      paletteStore.clearEphemeralColors();
+    // For auto-save reload: ephemeral will be rebuilt from drawing after all data is loaded
+    // For file import: restore ephemeral from file
+    if (!fromAutoSave) {
+      if (file.ephemeralPalette && Array.isArray(file.ephemeralPalette) && file.ephemeralPalette.length > 0) {
+        paletteStore.ephemeralColors.value = file.ephemeralPalette;
+        paletteStore.rebuildColorMap();
+      } else {
+        // Clear any existing ephemeral colors when loading a project without them
+        paletteStore.clearEphemeralColors();
+      }
     }
 
     // 3. Restore Layers
@@ -310,6 +319,19 @@ class ProjectStore {
     } else {
       animationStore.tags.value = [];
     }
+
+    // 7. Rebuild ephemeral colors from drawing (auto-save reload only)
+    // When loading from auto-save, the palette comes from localStorage but the
+    // index buffers might reference colors not in that palette. Scan the drawing
+    // and add any missing colors to ephemeral.
+    if (fromAutoSave) {
+      paletteStore.rebuildEphemeralFromDrawing();
+      // Now rebuild index buffers to match the new palette (main + ephemeral)
+      animationStore.rebuildAllIndexBuffers();
+    }
+
+    // 8. Update used colors for palette usage indicators
+    paletteStore.refreshUsedColors();
   }
 
   /**
@@ -353,8 +375,11 @@ class ProjectStore {
     // 8. Clear tags
     animationStore.tags.value = [];
 
-    // 8b. Clear ephemeral colors
+    // 8b. Clear ephemeral colors (fresh start - no preserved colors needed)
     paletteStore.clearEphemeralColors();
+
+    // 8c. Reset palette to default (DB32)
+    paletteStore.loadPreset('db32');
 
     // 9. Reset animation settings
     animationStore.fps.value = 12;

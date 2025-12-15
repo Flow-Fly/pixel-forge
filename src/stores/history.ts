@@ -2,6 +2,7 @@ import { signal } from '../core/signal';
 import { userStore } from './user';
 import { persistenceService } from '../services/persistence/indexed-db';
 import { projectStore } from './project';
+import { paletteStore } from './palette';
 
 // Configuration constants for history limits
 const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
@@ -129,6 +130,9 @@ class HistoryStore {
     this.enforceHistoryLimits();
     this.updateComputed();
     this.scheduleAutoSave();
+
+    // Update palette usage indicators
+    paletteStore.refreshUsedColors();
   }
 
   /**
@@ -193,6 +197,9 @@ class HistoryStore {
 
     this.updateComputed();
     this.scheduleAutoSave();
+
+    // Update palette usage indicators
+    paletteStore.refreshUsedColors();
   }
 
   async redo() {
@@ -224,6 +231,9 @@ class HistoryStore {
 
     this.updateComputed();
     this.scheduleAutoSave();
+
+    // Update palette usage indicators
+    paletteStore.refreshUsedColors();
   }
 
   private updateComputed() {

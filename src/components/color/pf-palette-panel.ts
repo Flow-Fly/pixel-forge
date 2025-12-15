@@ -318,6 +318,20 @@ export class PFPalettePanel extends BaseComponent {
       opacity: 0.4;
     }
 
+    /* Usage indicator - small dot in corner for colors in use */
+    .swatch-used::after {
+      content: '';
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      width: 5px;
+      height: 5px;
+      background: white;
+      border-radius: 50%;
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+      pointer-events: none;
+    }
+
 
     /* Extraction section styles */
     .extraction-section {
@@ -1033,6 +1047,7 @@ export class PFPalettePanel extends BaseComponent {
     const isPresetPalette = paletteStore.isPresetPalette();
     const canRename = isCustomPalette;
     const canReset = isPresetPalette && isDirty;
+    const usedColors = paletteStore.usedColors.value;
 
     return html`
       <div class="toolbar">
@@ -1110,7 +1125,9 @@ export class PFPalettePanel extends BaseComponent {
         @dragover=${this.handlePaletteGridDragOver}
         @drop=${this.handlePaletteGridDrop}
       >
-        ${colors.map((color, index) => html`
+        ${colors.map((color, index) => {
+          const isUsed = usedColors.has(color.toLowerCase());
+          return html`
           <div
             class="swatch-container ${this.dragOverIndex === index ? 'drag-before' : ''} ${this.draggedPaletteIndex === index ? 'dragging' : ''}"
             @dragover=${(e: DragEvent) => this.handlePaletteDragOver(index, e)}
@@ -1118,9 +1135,9 @@ export class PFPalettePanel extends BaseComponent {
             @drop=${(e: DragEvent) => this.handlePaletteDrop(index, e)}
           >
             <div
-              class="swatch"
+              class="swatch ${isUsed ? 'swatch-used' : ''}"
               style="background-color: ${color}"
-              title="${this.isReplaceMode ? `Click to replace with ${this.selectedUntrackedColor}` : color}"
+              title="${this.isReplaceMode ? `Click to replace with ${this.selectedUntrackedColor}` : color}${isUsed ? ' (in use)' : ''}"
               draggable="${!this.isReplaceMode}"
               @click=${this.isReplaceMode
                 ? (e: Event) => this.handleReplaceTarget(index, e)
@@ -1135,7 +1152,7 @@ export class PFPalettePanel extends BaseComponent {
               title="Remove from palette (move to untracked)"
             >×</button>
           </div>
-        `)}
+        `})}
       </div>
 
       ${ephemeralColors.length > 0 ? html`

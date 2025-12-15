@@ -97,8 +97,11 @@ class AnimationStore {
     // When palette is replaced (loading project, switching palettes), remap indices and rebuild
     window.addEventListener('palette-replaced', (event: Event) => {
       const detail = (event as CustomEvent).detail;
-      if (detail?.oldMainColors) {
-        // We have old palette info - do smart remapping by color
+      if (detail?.skipRemap) {
+        // Full palette replacement (loading project) - indices are already correct, just rebuild
+        this.rebuildAllCelCanvases();
+      } else if (detail?.oldMainColors) {
+        // Switching palettes - do smart remapping by color
         this.handlePaletteReplacedWithRemap(detail.oldMainColors, detail.oldEphemeralColors || []);
       } else {
         // Legacy behavior - just rebuild canvases
@@ -489,6 +492,26 @@ class AnimationStore {
       // Rebuild canvas from index buffer
       rebuildCanvasFromIndices(cel.canvas, cel.indexBuffer, palette);
     }
+  }
+
+  /**
+   * Rebuild all cel index buffers from their canvas content.
+   * Called after loading with a different palette to sync index buffers to new palette.
+   * This does NOT add new colors to the palette - colors should already exist.
+   */
+  rebuildAllIndexBuffers(): void {
+    const cels = new Map(this.cels.value);
+
+    for (const [key, cel] of cels) {
+      if (!cel.canvas) continue;
+      if (cel.textCelData) continue;
+
+      // Rebuild index buffer from canvas pixels (don't add missing colors)
+      const newIndexBuffer = buildIndexBufferFromCanvas(cel.canvas, false);
+      cels.set(key, { ...cel, indexBuffer: newIndexBuffer });
+    }
+
+    this.cels.value = cels;
 
     // Force UI update by triggering canvas refresh
     // The canvas component will re-render on signal change
@@ -497,6 +520,9 @@ class AnimationStore {
   /**
    * Scan all index buffers and return the set of colors actually used in the drawing.
    * Used to preserve colors when switching palettes.
+   * NOTE: This relies on palette index lookups, so it only works when the current
+   * palette matches the one used when drawing. For reload scenarios, use
+   * scanUsedColorsFromCanvas() instead.
    */
   scanUsedColors(): Set<string> {
     const usedColors = new Set<string>();
@@ -514,6 +540,45 @@ class AnimationStore {
         if (color) {
           usedColors.add(color.toLowerCase());
         }
+      }
+    }
+
+    return usedColors;
+  }
+
+  /**
+   * Scan actual canvas pixels to get colors used in the drawing.
+   * Unlike scanUsedColors(), this doesn't rely on index buffer → palette lookups,
+   * so it works correctly when the palette has changed since the drawing was made.
+   */
+  scanUsedColorsFromCanvas(): Set<string> {
+    const usedColors = new Set<string>();
+
+    for (const [_key, cel] of this.cels.value) {
+      if (!cel.canvas) continue;
+      if (cel.textCelData) continue;
+
+      const ctx = cel.canvas.getContext('2d');
+      if (!ctx) continue;
+
+      const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a === 0) continue; // Skip transparent pixels
+
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // Convert to hex
+        const hex = '#' +
+          r.toString(16).padStart(2, '0') +
+          g.toString(16).padStart(2, '0') +
+          b.toString(16).padStart(2, '0');
+
+        usedColors.add(hex.toLowerCase());
       }
     }
 
@@ -554,6 +619,9 @@ class AnimationStore {
       }
     }
 
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
   }
@@ -584,6 +652,9 @@ class AnimationStore {
       }
     }
 
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
   }
@@ -611,6 +682,9 @@ class AnimationStore {
       }
     }
 
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
+
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
   }
@@ -634,6 +708,9 @@ class AnimationStore {
         }
       }
     }
+
+    // Force signal update to trigger UI reactivity
+    this.cels.value = new Map(this.cels.value);
 
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
@@ -680,6 +757,9 @@ class AnimationStore {
         // This shouldn't happen since preserveColorsOnSwitch adds orphans to ephemeral
       }
     }
+
+    // Force signal update to trigger UI reactivity (index buffers were modified in-place)
+    this.cels.value = new Map(this.cels.value);
 
     // Rebuild canvases with updated indices
     this.rebuildAllCelCanvases();
@@ -1242,10 +1322,18 @@ class AnimationStore {
    */
   ensureUnlinkedForEdit(layerId: string, frameId: string): boolean {
     const key = this.getCelKey(layerId, frameId);
-    const cel = this.cels.value.get(key);
+    let cel = this.cels.value.get(key);
 
-    // Not linked - nothing to do
-    if (!cel?.linkedCelId) return false;
+    // Cel doesn't exist yet (new layer) - create it first
+    if (!cel) {
+      this.syncLayerCanvases();
+      cel = this.cels.value.get(key);
+      // After sync, cel should exist. Return true so caller refreshes layer reference.
+      return true;
+    }
+
+    // Cel exists but not linked - nothing to do
+    if (!cel.linkedCelId) return false;
 
     // Hard links stay linked - user explicitly wants edits to affect all
     if (cel.linkType === 'hard') return false;

@@ -34,6 +34,9 @@ class PaletteStore {
   /** List of saved custom palettes (loaded from IndexedDB) */
   customPalettes = signal<CustomPalette[]>([]);
 
+  /** Cached palette name for display before async custom palette load completes */
+  private cachedPaletteName: string | null = null;
+
   /** @deprecated Use currentPresetId instead - kept for compatibility */
   get currentPaletteId() {
     return this.currentPresetId;
@@ -47,6 +50,9 @@ class PaletteStore {
   // Extracted colors staging area
   extractedColors = signal<string[]>([]);
   isExtracting = signal<boolean>(false);
+
+  /** Colors currently in use in the drawing (for usage indicators) */
+  usedColors = signal<Set<string>>(new Set());
 
   // ==========================================
   // Indexed Color Management
@@ -156,11 +162,12 @@ class PaletteStore {
   }
 
   /**
-   * Get the palette index for a color, adding it to EPHEMERAL if not present anywhere.
-   * Use this when drawing with generated shades to avoid polluting the main palette.
+   * Get the palette index for a color when drawing.
+   * If in main palette, returns main index. If in ephemeral, returns ephemeral index.
+   * If not in either, adds to ephemeral (never pollutes main palette).
    * Returns the index (1-based, 0 = transparent).
    */
-  getOrAddEphemeralColor(color: string): number {
+  getOrAddColorForDrawing(color: string): number {
     const normalized = this.normalizeHex(color);
 
     // Check main palette first - if it's there, use that index
@@ -190,6 +197,13 @@ class PaletteStore {
 
     // Return the new ephemeral index
     return this.mainColors.value.length + newEphemeral.length;
+  }
+
+  /**
+   * @deprecated Use getOrAddColorForDrawing instead
+   */
+  getOrAddEphemeralColor(color: string): number {
+    return this.getOrAddColorForDrawing(color);
   }
 
   /**
@@ -481,6 +495,8 @@ class PaletteStore {
     this.currentCustomPaletteId.value = null;
     this.isDirty.value = false;
     this.rebuildColorMap();
+    // Remove any ephemeral colors that now exist in the new palette
+    this.deduplicateEphemeral();
     this.saveToStorage();
 
     // Dispatch event to rebuild all canvases (with index remapping)
@@ -514,6 +530,8 @@ class PaletteStore {
     this.currentCustomPaletteId.value = id;
     this.isDirty.value = false;
     this.rebuildColorMap();
+    // Remove any ephemeral colors that now exist in the new palette
+    this.deduplicateEphemeral();
     this.saveToStorage();
 
     // Dispatch event to rebuild all canvases (with index remapping)
@@ -535,24 +553,37 @@ class PaletteStore {
     this.rebuildColorMap();
     this.saveToStorage();
 
-    // Dispatch event to rebuild all canvases
-    window.dispatchEvent(new CustomEvent('palette-replaced'));
+    // Dispatch event to rebuild canvases - skip remapping (no colors to remap to)
+    window.dispatchEvent(new CustomEvent('palette-replaced', {
+      detail: { skipRemap: true }
+    }));
   }
 
   /**
    * Replace the entire palette with new colors.
    * Used when loading a project or importing a palette.
+   * Index buffers from loaded project files are already correct - no remapping needed.
+   * @param colors The new palette colors
+   * @param preserveSelection If true, keeps current preset/custom ID (use when loading saved project)
    */
-  setPalette(colors: string[]) {
+  setPalette(colors: string[], preserveSelection = false) {
     this.colors.value = colors.map(c => this.normalizeHex(c));
-    this.currentPresetId.value = null;
-    this.currentCustomPaletteId.value = null;
-    this.isDirty.value = true;
-    this.rebuildColorMap();
-    this.saveToStorage();
 
-    // Dispatch event to rebuild all canvases
-    window.dispatchEvent(new CustomEvent('palette-replaced'));
+    if (!preserveSelection) {
+      // Clear selection when importing new palette
+      this.currentPresetId.value = null;
+      this.currentCustomPaletteId.value = null;
+      this.isDirty.value = true;
+      this.saveToStorage();
+    }
+
+    this.rebuildColorMap();
+
+    // Dispatch event to rebuild canvases - skip remapping since this is a full replacement
+    // (index buffers from loaded projects are already correct)
+    window.dispatchEvent(new CustomEvent('palette-replaced', {
+      detail: { skipRemap: true }
+    }));
   }
 
   // ==========================================
@@ -862,10 +893,38 @@ class PaletteStore {
         // Invalid JSON, use defaults
       }
     }
+
+    // Restore palette selection info
+    const presetId = localStorage.getItem('pf-palette-preset-id');
+    const customId = localStorage.getItem('pf-palette-custom-id');
+    const cachedName = localStorage.getItem('pf-palette-name');
+
+    if (customId) {
+      // Custom palette was selected
+      this.currentPresetId.value = null;
+      this.currentCustomPaletteId.value = customId;
+    } else if (presetId) {
+      // Preset palette was selected
+      this.currentPresetId.value = presetId;
+      this.currentCustomPaletteId.value = null;
+    } else {
+      // No selection found - ensure defaults are set (db32)
+      this.currentPresetId.value = 'db32';
+      this.currentCustomPaletteId.value = null;
+    }
+
+    // Cache palette name for immediate display (before async custom palette load)
+    if (cachedName) {
+      this.cachedPaletteName = cachedName;
+    }
   }
 
   private saveToStorage() {
     localStorage.setItem('pf-palette-colors', JSON.stringify(this.colors.value));
+    localStorage.setItem('pf-palette-preset-id', this.currentPresetId.value ?? '');
+    localStorage.setItem('pf-palette-custom-id', this.currentCustomPaletteId.value ?? '');
+    // Save palette name for immediate display on reload (before async custom palette load)
+    localStorage.setItem('pf-palette-name', this.getCurrentPaletteName());
   }
 
   // ==========================================
@@ -889,6 +948,16 @@ class PaletteStore {
   async loadCustomPalettes() {
     const palettes = await palettePersistence.getAllPalettes();
     this.customPalettes.value = palettes;
+
+    // Update cached palette name now that custom palettes are loaded
+    // This ensures the name is correct for next reload
+    if (this.currentCustomPaletteId.value) {
+      const palette = palettes.find(p => p.id === this.currentCustomPaletteId.value);
+      if (palette) {
+        this.cachedPaletteName = palette.name;
+        localStorage.setItem('pf-palette-name', palette.name);
+      }
+    }
   }
 
   /**
@@ -968,15 +1037,33 @@ class PaletteStore {
     const customId = this.currentCustomPaletteId.value;
     if (customId) {
       const palette = this.customPalettes.value.find(p => p.id === customId);
-      return palette?.name ?? 'Untitled Palette';
+      if (palette) {
+        return palette.name;
+      }
+      // Custom palettes not loaded yet - use cached name from localStorage
+      if (this.cachedPaletteName) {
+        return this.cachedPaletteName;
+      }
+      return 'Loading...';
     }
 
     const presetId = this.currentPresetId.value;
     if (presetId) {
       const preset = PALETTE_BY_ID.get(presetId);
-      return preset?.name ?? 'Unknown Palette';
+      if (preset) {
+        return preset.name;
+      }
+      // Fallback to cached name if preset lookup fails
+      if (this.cachedPaletteName) {
+        return this.cachedPaletteName;
+      }
+      return 'Unknown Palette';
     }
 
+    // No palette selected - use cached name or default
+    if (this.cachedPaletteName) {
+      return this.cachedPaletteName;
+    }
     return 'Untitled Palette';
   }
 
@@ -1026,15 +1113,84 @@ class PaletteStore {
   }
 
   /**
+   * Remove any ephemeral colors that also exist in the main palette.
+   * A color should never be in both - main palette is the source of truth.
+   * Call this after palette switches to clean up duplicates.
+   */
+  deduplicateEphemeral(): void {
+    const mainPaletteSet = new Set(this.mainColors.value.map(c => this.normalizeHex(c)));
+    const dedupedEphemeral = this.ephemeralColors.value.filter(
+      c => !mainPaletteSet.has(this.normalizeHex(c))
+    );
+
+    if (dedupedEphemeral.length !== this.ephemeralColors.value.length) {
+      this.ephemeralColors.value = dedupedEphemeral;
+      this.rebuildColorMap();
+    }
+  }
+
+  /**
+   * Rebuild ephemeral colors from what's actually used in the drawing.
+   * Call this on startup/reload to restore ephemeral colors that weren't persisted.
+   * Scans actual canvas pixels (not index buffers) to find colors not in main palette.
+   */
+  rebuildEphemeralFromDrawing(): void {
+    // Get all colors actually used in the drawing by scanning canvas pixels
+    // This is more reliable than index buffer lookup when palette has changed
+    const usedColors = animationStore.scanUsedColorsFromCanvas();
+    if (usedColors.size === 0) return;
+
+    // Build set of main palette colors for O(1) lookup
+    const mainPaletteSet = new Set(this.mainColors.value.map(c => this.normalizeHex(c)));
+
+    // Find colors that are used but not in main palette
+    const ephemeralNeeded: string[] = [];
+    for (const color of usedColors) {
+      const normalized = this.normalizeHex(color);
+      if (!mainPaletteSet.has(normalized)) {
+        ephemeralNeeded.push(normalized);
+      }
+    }
+
+    if (ephemeralNeeded.length > 0) {
+      // Start fresh - don't keep stale ephemeral colors
+      this.ephemeralColors.value = ephemeralNeeded;
+      this.rebuildColorMap();
+    } else {
+      // No ephemeral colors needed - clear any stale ones
+      this.ephemeralColors.value = [];
+      this.rebuildColorMap();
+    }
+  }
+
+  /**
+   * Refresh the usedColors signal by scanning canvas pixels.
+   * Call this after drawing operations complete to update usage indicators.
+   */
+  refreshUsedColors(): void {
+    const colors = animationStore.scanUsedColorsFromCanvas();
+    // Normalize all colors for consistent comparison
+    const normalized = new Set<string>();
+    for (const color of colors) {
+      normalized.add(this.normalizeHex(color));
+    }
+    this.usedColors.value = normalized;
+  }
+
+  /**
+   * Check if a color is currently used in the drawing.
+   */
+  isColorUsed(color: string): boolean {
+    return this.usedColors.value.has(this.normalizeHex(color));
+  }
+
+  /**
    * Preserve colors when switching to a new palette.
    * Scans all used colors and adds any that don't exist in the new palette to ephemeral.
    * Call this BEFORE changing mainColors.
    * @param newPaletteColors The colors of the new palette being switched to
    */
   preserveColorsOnSwitch(newPaletteColors: string[]): void {
-    // Import here to avoid circular dependency
-    const { animationStore } = require('./animation');
-
     // Get currently used colors from all index buffers
     const usedColors = animationStore.scanUsedColors();
 
