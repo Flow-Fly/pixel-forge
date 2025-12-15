@@ -7,6 +7,7 @@ import { isDrawableCommand } from '../../commands/index';
 import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
 import './pf-history-diff-tooltip';
+import './pf-button';
 
 @customElement('pf-undo-history')
 export class PFUndoHistory extends BaseComponent {
@@ -109,34 +110,6 @@ export class PFUndoHistory extends BaseComponent {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-    }
-
-    .action-btn {
-      padding: 4px 8px;
-      font-size: 10px;
-      border: 1px solid var(--pf-color-border);
-      background-color: var(--pf-color-bg-surface);
-      color: var(--pf-color-text-main);
-      border-radius: 3px;
-      cursor: pointer;
-    }
-
-    .action-btn:hover:not(:disabled) {
-      background-color: var(--pf-color-bg-hover);
-    }
-
-    .action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .action-btn.primary {
-      background-color: var(--pf-color-accent, #0078d4);
-      border-color: var(--pf-color-accent, #0078d4);
-    }
-
-    .action-btn.primary:hover:not(:disabled) {
-      background-color: var(--pf-color-accent-hover, #106ebe);
     }
 
     .text-description {
@@ -373,20 +346,21 @@ export class PFUndoHistory extends BaseComponent {
         }
 
         <div class="actions">
-          <button
-            class="action-btn primary"
+          <pf-button
+            variant="primary"
+            size="sm"
             @click=${(e: Event) => { e.stopPropagation(); this.revertToHere(index, type); }}
           >
             Revert to here
-          </button>
-          <button
-            class="action-btn"
+          </pf-button>
+          <pf-button
+            size="sm"
             ?disabled=${!canPatch}
             @click=${(e: Event) => { e.stopPropagation(); this.patchThisOut(cmd, index); }}
             title=${!canPatch ? (type === 'redo' ? 'Cannot patch redo items' : 'Cannot patch this command') : 'Remove only this change'}
           >
             Patch this out
-          </button>
+          </pf-button>
         </div>
       </div>
     `;
