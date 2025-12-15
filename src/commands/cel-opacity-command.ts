@@ -1,5 +1,5 @@
-import { type Command } from './index';
-import { animationStore } from '../stores/animation';
+import { type Command } from "./index";
+import { animationStore } from "../stores/animation";
 
 /**
  * Command to set the opacity of one or more cels.
@@ -7,12 +7,16 @@ import { animationStore } from '../stores/animation';
  */
 export class SetCelOpacityCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Set Cel Opacity';
+  name = "Set Cel Opacity";
   celKeys: string[];
   beforeOpacities: Map<string, number>;
   afterOpacity: number;
 
-  constructor(celKeys: string[], beforeOpacities: Map<string, number>, afterOpacity: number) {
+  constructor(
+    celKeys: string[],
+    beforeOpacities: Map<string, number>,
+    afterOpacity: number
+  ) {
     this.celKeys = celKeys;
     this.beforeOpacities = beforeOpacities;
     this.afterOpacity = afterOpacity;

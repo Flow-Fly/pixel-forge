@@ -1,8 +1,8 @@
-import type { Command } from './index';
-import type { Rect } from '../types/geometry';
-import { layerStore } from '../stores/layers';
-import { dirtyRectStore } from '../stores/dirty-rect';
-import { animationStore } from '../stores/animation';
+import type { Command } from "./index";
+import type { Rect } from "../types/geometry";
+import { layerStore } from "../stores/layers";
+import { dirtyRectStore } from "../stores/dirty-rect";
+import { animationStore } from "../stores/animation";
 
 /**
  * Memory-efficient drawing command that stores only the dirty region.
@@ -30,17 +30,25 @@ export class OptimizedDrawingCommand implements Command {
   readonly memorySize: number;
 
   // Public getters for accessing private drawing data (used by history preview)
-  get drawBounds(): Rect { return { ...this.bounds }; }
-  get drawPreviousData(): Uint8ClampedArray { return this.previousData; }
-  get drawNewData(): Uint8ClampedArray { return this.newData; }
-  get drawLayerId(): string { return this.layerId; }
+  get drawBounds(): Rect {
+    return { ...this.bounds };
+  }
+  get drawPreviousData(): Uint8ClampedArray {
+    return this.previousData;
+  }
+  get drawNewData(): Uint8ClampedArray {
+    return this.newData;
+  }
+  get drawLayerId(): string {
+    return this.layerId;
+  }
 
   constructor(
     layerId: string,
     bounds: Rect,
     previousData: Uint8ClampedArray,
     newData: Uint8ClampedArray,
-    name: string = 'Drawing',
+    name: string = "Drawing",
     indexBufferData?: {
       frameId: string;
       canvasWidth: number;
@@ -51,7 +59,8 @@ export class OptimizedDrawingCommand implements Command {
     this.id = crypto.randomUUID();
     this.name = name;
     this.layerId = layerId;
-    this.frameId = indexBufferData?.frameId ?? animationStore.currentFrameId.value;
+    this.frameId =
+      indexBufferData?.frameId ?? animationStore.currentFrameId.value;
     this.bounds = { ...bounds }; // Copy to avoid reference issues
     this.previousData = previousData;
     this.newData = newData;
@@ -67,16 +76,18 @@ export class OptimizedDrawingCommand implements Command {
     // Calculate memory: 2 RGBA arrays + 2 index arrays (if present) + object overhead
     let indexMemory = 0;
     if (this.previousIndexData && this.newIndexData) {
-      indexMemory = this.previousIndexData.byteLength + this.newIndexData.byteLength;
+      indexMemory =
+        this.previousIndexData.byteLength + this.newIndexData.byteLength;
     }
-    this.memorySize = previousData.byteLength + newData.byteLength + indexMemory + 200;
+    this.memorySize =
+      previousData.byteLength + newData.byteLength + indexMemory + 200;
   }
 
   execute(): void {
-    const layer = layerStore.layers.value.find(l => l.id === this.layerId);
+    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
     if (!layer?.canvas) return;
 
-    const ctx = layer.canvas.getContext('2d');
+    const ctx = layer.canvas.getContext("2d");
     if (!ctx) return;
 
     // Create ImageData from stored array
@@ -97,10 +108,10 @@ export class OptimizedDrawingCommand implements Command {
   }
 
   undo(): void {
-    const layer = layerStore.layers.value.find(l => l.id === this.layerId);
+    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
     if (!layer?.canvas) return;
 
-    const ctx = layer.canvas.getContext('2d');
+    const ctx = layer.canvas.getContext("2d");
     if (!ctx) return;
 
     // Create ImageData from stored array
@@ -124,7 +135,10 @@ export class OptimizedDrawingCommand implements Command {
    * Restore a region of the index buffer from stored data.
    */
   private restoreIndexBufferRegion(indexData: Uint8Array): void {
-    const indexBuffer = animationStore.getCelIndexBuffer(this.layerId, this.frameId);
+    const indexBuffer = animationStore.getCelIndexBuffer(
+      this.layerId,
+      this.frameId
+    );
     if (!indexBuffer || this.canvasWidth === 0) return;
 
     // Copy the stored region back to the index buffer
@@ -160,7 +174,14 @@ export class OptimizedBrushCommand extends OptimizedDrawingCommand {
     newData: Uint8ClampedArray,
     indexBufferData?: IndexBufferData
   ) {
-    super(layerId, bounds, previousData, newData, 'Brush Stroke', indexBufferData);
+    super(
+      layerId,
+      bounds,
+      previousData,
+      newData,
+      "Brush Stroke",
+      indexBufferData
+    );
   }
 }
 
@@ -175,7 +196,7 @@ export class OptimizedFillCommand extends OptimizedDrawingCommand {
     newData: Uint8ClampedArray,
     indexBufferData?: IndexBufferData
   ) {
-    super(layerId, bounds, previousData, newData, 'Fill', indexBufferData);
+    super(layerId, bounds, previousData, newData, "Fill", indexBufferData);
   }
 }
 
@@ -188,9 +209,16 @@ export class OptimizedShapeCommand extends OptimizedDrawingCommand {
     bounds: Rect,
     previousData: Uint8ClampedArray,
     newData: Uint8ClampedArray,
-    shapeType: 'Line' | 'Rectangle' | 'Ellipse',
+    shapeType: "Line" | "Rectangle" | "Ellipse",
     indexBufferData?: IndexBufferData
   ) {
-    super(layerId, bounds, previousData, newData, `Draw ${shapeType}`, indexBufferData);
+    super(
+      layerId,
+      bounds,
+      previousData,
+      newData,
+      `Draw ${shapeType}`,
+      indexBufferData
+    );
   }
 }

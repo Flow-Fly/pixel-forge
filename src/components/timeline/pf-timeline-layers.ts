@@ -1,18 +1,23 @@
-import { html, css } from 'lit';
-import { customElement, property, state, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { layerStore } from '../../stores/layers';
-import { animationStore } from '../../stores/animation';
-import { projectStore } from '../../stores/project';
-import { historyStore } from '../../stores/history';
-import { AddLayerCommand, DuplicateLayerCommand, RemoveLayerCommand, UpdateLayerCommand } from '../../commands/layer-commands';
-import { compositeLayer } from '../../utils/canvas-utils';
-import './pf-timeline-tooltip';
-import type { PFTimelineTooltip } from './pf-timeline-tooltip';
-import '../ui/pf-context-menu';
-import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
+import { html, css } from "lit";
+import { customElement, property, state, query } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { layerStore } from "../../stores/layers";
+import { animationStore } from "../../stores/animation";
+import { projectStore } from "../../stores/project";
+import { historyStore } from "../../stores/history";
+import {
+  AddLayerCommand,
+  DuplicateLayerCommand,
+  RemoveLayerCommand,
+  UpdateLayerCommand,
+} from "../../commands/layer-commands";
+import { compositeLayer } from "../../utils/canvas-utils";
+import "./pf-timeline-tooltip";
+import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
+import "../ui/pf-context-menu";
+import type { PFContextMenu, ContextMenuItem } from "../ui/pf-context-menu";
 
-@customElement('pf-timeline-layers')
+@customElement("pf-timeline-layers")
 export class PFTimelineLayers extends BaseComponent {
   static styles = css`
     :host {
@@ -153,20 +158,24 @@ export class PFTimelineLayers extends BaseComponent {
     }
   `;
 
-  @property({ type: Boolean, attribute: 'no-toolbar' }) noToolbar = false;
+  @property({ type: Boolean, attribute: "no-toolbar" }) noToolbar = false;
 
   @state() private editingLayerId: string | null = null;
-  @state() private editingName: string = '';
+  @state() private editingName: string = "";
   @state() private draggedLayerId: string | null = null;
   @state() private dragOverLayerId: string | null = null;
 
-  @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
-  @query('pf-context-menu') private contextMenu!: PFContextMenu;
+  @query("pf-timeline-tooltip") private tooltip!: PFTimelineTooltip;
+  @query("pf-context-menu") private contextMenu!: PFContextMenu;
 
   // Track original opacity for undo/redo
   private contextMenuOriginalOpacity: number = 255;
 
-  private handleLayerMouseEnter(e: MouseEvent, layerId: string, layerName: string) {
+  private handleLayerMouseEnter(
+    e: MouseEvent,
+    layerId: string,
+    layerName: string
+  ) {
     const target = e.currentTarget as HTMLElement;
     if (!this.tooltip) return;
 
@@ -174,7 +183,7 @@ export class PFTimelineLayers extends BaseComponent {
 
     // Update tooltip - layer preview doesn't need secondary text
     this.tooltip.primaryText = layerName;
-    this.tooltip.secondaryText = '';
+    this.tooltip.secondaryText = "";
     this.tooltip.canvasWidth = projectStore.width.value;
     this.tooltip.canvasHeight = projectStore.height.value;
 
@@ -205,7 +214,7 @@ export class PFTimelineLayers extends BaseComponent {
     }
   }
 
-  private moveLayer(direction: 'up' | 'down') {
+  private moveLayer(direction: "up" | "down") {
     const activeId = layerStore.activeLayerId.value;
     if (activeId) {
       layerStore.reorderLayer(activeId, direction);
@@ -232,7 +241,9 @@ export class PFTimelineLayers extends BaseComponent {
     this.editingName = currentName;
     // Focus the input after render
     this.updateComplete.then(() => {
-      const input = this.shadowRoot?.querySelector('.layer-name-input') as HTMLInputElement;
+      const input = this.shadowRoot?.querySelector(
+        ".layer-name-input"
+      ) as HTMLInputElement;
       input?.focus();
       input?.select();
     });
@@ -244,21 +255,25 @@ export class PFTimelineLayers extends BaseComponent {
 
   private finishRename() {
     if (this.editingLayerId && this.editingName.trim()) {
-      historyStore.execute(new UpdateLayerCommand(this.editingLayerId, { name: this.editingName.trim() }));
+      historyStore.execute(
+        new UpdateLayerCommand(this.editingLayerId, {
+          name: this.editingName.trim(),
+        })
+      );
     }
     this.editingLayerId = null;
-    this.editingName = '';
+    this.editingName = "";
   }
 
   private cancelRename() {
     this.editingLayerId = null;
-    this.editingName = '';
+    this.editingName = "";
   }
 
   private handleRenameKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       this.finishRename();
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       this.cancelRename();
     }
   }
@@ -267,7 +282,7 @@ export class PFTimelineLayers extends BaseComponent {
     e.preventDefault();
     e.stopPropagation();
 
-    const layer = layerStore.layers.value.find(l => l.id === layerId);
+    const layer = layerStore.layers.value.find((l) => l.id === layerId);
     if (!layer) return;
 
     // Store for undo/redo
@@ -277,42 +292,48 @@ export class PFTimelineLayers extends BaseComponent {
 
     const items: ContextMenuItem[] = [
       {
-        type: 'slider',
-        label: 'Opacity',
+        type: "slider",
+        label: "Opacity",
         min: 0,
         max: 100,
         value: currentOpacity,
-        unit: '%',
+        unit: "%",
         onSliderChange: (value: number) => {
           // Live preview
-          layerStore.updateLayer(layerId, { opacity: Math.round((value / 100) * 255) });
+          layerStore.updateLayer(layerId, {
+            opacity: Math.round((value / 100) * 255),
+          });
         },
         onSliderCommit: (value: number) => {
           // Add to history for undo/redo
           const newOpacity = Math.round((value / 100) * 255);
           if (newOpacity !== this.contextMenuOriginalOpacity) {
             // First restore original, then execute command to record in history
-            layerStore.updateLayer(layerId, { opacity: this.contextMenuOriginalOpacity });
-            historyStore.execute(new UpdateLayerCommand(layerId, { opacity: newOpacity }));
+            layerStore.updateLayer(layerId, {
+              opacity: this.contextMenuOriginalOpacity,
+            });
+            historyStore.execute(
+              new UpdateLayerCommand(layerId, { opacity: newOpacity })
+            );
           }
-        }
+        },
       },
-      { type: 'divider' },
+      { type: "divider" },
       {
-        type: 'item',
-        label: '📋 Duplicate Layer',
+        type: "item",
+        label: "📋 Duplicate Layer",
         action: () => {
           historyStore.execute(new DuplicateLayerCommand(layerId));
-        }
+        },
       },
       {
-        type: 'item',
-        label: '🗑️ Delete Layer',
+        type: "item",
+        label: "🗑️ Delete Layer",
         disabled: layerStore.layers.value.length <= 1,
         action: () => {
           historyStore.execute(new RemoveLayerCommand(layerId));
-        }
-      }
+        },
+      },
     ];
 
     this.contextMenu.show(e.clientX, e.clientY, items);
@@ -322,8 +343,8 @@ export class PFTimelineLayers extends BaseComponent {
   private handleDragStart(id: string, e: DragEvent) {
     this.draggedLayerId = id;
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", id);
     }
   }
 
@@ -348,8 +369,8 @@ export class PFTimelineLayers extends BaseComponent {
     if (!this.draggedLayerId || this.draggedLayerId === targetId) return;
 
     const layers = [...layerStore.layers.value];
-    const draggedIndex = layers.findIndex(l => l.id === this.draggedLayerId);
-    const targetIndex = layers.findIndex(l => l.id === targetId);
+    const draggedIndex = layers.findIndex((l) => l.id === this.draggedLayerId);
+    const targetIndex = layers.findIndex((l) => l.id === targetId);
 
     if (draggedIndex !== -1 && targetIndex !== -1) {
       const [draggedLayer] = layers.splice(draggedIndex, 1);
@@ -368,69 +389,102 @@ export class PFTimelineLayers extends BaseComponent {
     const canDelete = layerStore.layers.value.length > 1;
 
     // Check if we can move up/down
-    const activeIndex = layerStore.layers.value.findIndex(l => l.id === activeLayerId);
+    const activeIndex = layerStore.layers.value.findIndex(
+      (l) => l.id === activeLayerId
+    );
     const canMoveUp = activeIndex < layerStore.layers.value.length - 1;
     const canMoveDown = activeIndex > 0;
 
     return html`
-      ${!this.noToolbar ? html`
-        <div class="toolbar">
-          <button @click=${this.addLayer} title="Add Layer">+</button>
-          <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>-</button>
-          <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>↑</button>
-          <button @click=${() => this.moveLayer('down')} title="Move Down" ?disabled=${!canMoveDown}>↓</button>
-        </div>
-      ` : ''}
-      <div class="layer-list">
-        ${layers.map(layer => html`
-          <div
-            class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${this.draggedLayerId === layer.id ? 'dragging' : ''} ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
-            @click=${() => this.selectLayer(layer.id)}
-            @contextmenu=${(e: MouseEvent) => this.handleLayerContextMenu(e, layer.id)}
-            @mouseenter=${(e: MouseEvent) => this.handleLayerMouseEnter(e, layer.id, layer.name)}
-            @mouseleave=${this.handleLayerMouseLeave}
-            draggable="true"
-            @dragstart=${(e: DragEvent) => this.handleDragStart(layer.id, e)}
-            @dragend=${this.handleDragEnd}
-            @dragover=${(e: DragEvent) => this.handleDragOver(layer.id, e)}
-            @dragleave=${this.handleDragLeave}
-            @drop=${(e: DragEvent) => this.handleDrop(layer.id, e)}
-          >
-            <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
-            <button
-              class="icon-btn ${!layer.visible ? 'hidden-layer' : ''}"
-              @click=${(e: Event) => this.toggleVisibility(layer.id, e)}
-              title="${layer.visible ? 'Hide' : 'Show'} layer"
-            >
-              ${layer.visible ? '👁' : '👁'}
-            </button>
-            <button
-              class="icon-btn ${layer.locked ? 'locked-layer' : ''}"
-              @click=${(e: Event) => this.toggleLock(layer.id, e)}
-              title="${layer.locked ? 'Unlock' : 'Lock'} layer"
-            >
-              ${layer.locked ? '🔒' : '🔓'}
-            </button>
-            ${this.editingLayerId === layer.id ? html`
-              <input
-                class="layer-name-input"
-                type="text"
-                .value=${this.editingName}
-                @input=${this.handleRenameInput}
-                @blur=${this.finishRename}
-                @keydown=${this.handleRenameKeydown}
-                @click=${(e: Event) => e.stopPropagation()}
-              />
-            ` : html`
-              <span
-                class="layer-name"
-                @dblclick=${(e: Event) => this.startRename(layer.id, layer.name, e)}
+      ${!this.noToolbar
+        ? html`
+            <div class="toolbar">
+              <button @click=${this.addLayer} title="Add Layer">+</button>
+              <button
+                @click=${this.deleteLayer}
+                title="Delete Layer"
+                ?disabled=${!canDelete}
               >
-                ${layer.name}
-              </span>
-            `}
-          </div>
-        `)}
+                -
+              </button>
+              <button
+                @click=${() => this.moveLayer("up")}
+                title="Move Up"
+                ?disabled=${!canMoveUp}
+              >
+                ↑
+              </button>
+              <button
+                @click=${() => this.moveLayer("down")}
+                title="Move Down"
+                ?disabled=${!canMoveDown}
+              >
+                ↓
+              </button>
+            </div>
+          `
+        : ""}
+      <div class="layer-list">
+        ${layers.map(
+          (layer) => html`
+            <div
+              class="layer-row ${layer.id === activeLayerId
+                ? "active"
+                : ""} ${this.draggedLayerId === layer.id
+                ? "dragging"
+                : ""} ${this.dragOverLayerId === layer.id ? "drag-over" : ""}"
+              @click=${() => this.selectLayer(layer.id)}
+              @contextmenu=${(e: MouseEvent) =>
+                this.handleLayerContextMenu(e, layer.id)}
+              @mouseenter=${(e: MouseEvent) =>
+                this.handleLayerMouseEnter(e, layer.id, layer.name)}
+              @mouseleave=${this.handleLayerMouseLeave}
+              draggable="true"
+              @dragstart=${(e: DragEvent) => this.handleDragStart(layer.id, e)}
+              @dragend=${this.handleDragEnd}
+              @dragover=${(e: DragEvent) => this.handleDragOver(layer.id, e)}
+              @dragleave=${this.handleDragLeave}
+              @drop=${(e: DragEvent) => this.handleDrop(layer.id, e)}
+            >
+              <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+              <button
+                class="icon-btn ${!layer.visible ? "hidden-layer" : ""}"
+                @click=${(e: Event) => this.toggleVisibility(layer.id, e)}
+                title="${layer.visible ? "Hide" : "Show"} layer"
+              >
+                ${layer.visible ? "👁" : "👁"}
+              </button>
+              <button
+                class="icon-btn ${layer.locked ? "locked-layer" : ""}"
+                @click=${(e: Event) => this.toggleLock(layer.id, e)}
+                title="${layer.locked ? "Unlock" : "Lock"} layer"
+              >
+                ${layer.locked ? "🔒" : "🔓"}
+              </button>
+              ${this.editingLayerId === layer.id
+                ? html`
+                    <input
+                      class="layer-name-input"
+                      type="text"
+                      .value=${this.editingName}
+                      @input=${this.handleRenameInput}
+                      @blur=${this.finishRename}
+                      @keydown=${this.handleRenameKeydown}
+                      @click=${(e: Event) => e.stopPropagation()}
+                    />
+                  `
+                : html`
+                    <span
+                      class="layer-name"
+                      @dblclick=${(e: Event) =>
+                        this.startRename(layer.id, layer.name, e)}
+                    >
+                      ${layer.name}
+                    </span>
+                  `}
+            </div>
+          `
+        )}
       </div>
       <pf-timeline-tooltip></pf-timeline-tooltip>
       <pf-context-menu></pf-context-menu>

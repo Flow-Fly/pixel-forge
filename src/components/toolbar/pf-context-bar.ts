@@ -189,7 +189,6 @@ export class PFContextBar extends BaseComponent {
     .opacity-scrubber.scrubbing {
       background: var(--pf-color-primary-muted);
     }
-
   `;
 
   @state() private isCommitting = false;
@@ -374,10 +373,7 @@ export class PFContextBar extends BaseComponent {
         >
           Shrink to Content
         </pf-button>
-        <pf-button
-          @click=${this._clearSelection}
-          title="Deselect (Escape)"
-        >
+        <pf-button @click=${this._clearSelection} title="Deselect (Escape)">
           Deselect
         </pf-button>
       </div>

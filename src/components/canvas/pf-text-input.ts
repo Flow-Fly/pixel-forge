@@ -1,10 +1,10 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { TextTool } from '../../tools/text-tool';
-import { toolStore } from '../../stores/tools';
-import { layerStore } from '../../stores/layers';
-import { animationStore } from '../../stores/animation';
+import { html, css } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { TextTool } from "../../tools/text-tool";
+import { toolStore } from "../../stores/tools";
+import { layerStore } from "../../stores/layers";
+import { animationStore } from "../../stores/animation";
 
 /**
  * Hidden input component for capturing text input.
@@ -18,7 +18,7 @@ import { animationStore } from '../../stores/animation';
  *
  * The actual text rendering happens on the canvas - this is just for input capture.
  */
-@customElement('pf-text-input')
+@customElement("pf-text-input")
 export class PfTextInput extends BaseComponent {
   static styles = css`
     :host {
@@ -60,19 +60,25 @@ export class PfTextInput extends BaseComponent {
     super.connectedCallback();
 
     // Listen for text tool events
-    window.addEventListener('text-tool:start-editing', this.handleStartEditing);
-    window.addEventListener('text-tool:stop-editing', this.handleStopEditing);
-    window.addEventListener('text-tool:edit-layer', this.handleEditLayer);
-    window.addEventListener('text-tool:commit', this.handleCommit);
+    window.addEventListener("text-tool:start-editing", this.handleStartEditing);
+    window.addEventListener("text-tool:stop-editing", this.handleStopEditing);
+    window.addEventListener("text-tool:edit-layer", this.handleEditLayer);
+    window.addEventListener("text-tool:commit", this.handleCommit);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
 
-    window.removeEventListener('text-tool:start-editing', this.handleStartEditing);
-    window.removeEventListener('text-tool:stop-editing', this.handleStopEditing);
-    window.removeEventListener('text-tool:edit-layer', this.handleEditLayer);
-    window.removeEventListener('text-tool:commit', this.handleCommit);
+    window.removeEventListener(
+      "text-tool:start-editing",
+      this.handleStartEditing
+    );
+    window.removeEventListener(
+      "text-tool:stop-editing",
+      this.handleStopEditing
+    );
+    window.removeEventListener("text-tool:edit-layer", this.handleEditLayer);
+    window.removeEventListener("text-tool:commit", this.handleCommit);
 
     this.stopCursorBlink();
   }
@@ -88,9 +94,9 @@ export class PfTextInput extends BaseComponent {
     // Use setTimeout to defer focus until after all mouse events complete
     // This prevents the canvas from stealing focus back
     setTimeout(() => {
-      const input = this.shadowRoot?.querySelector('input');
+      const input = this.shadowRoot?.querySelector("input");
       if (input) {
-        input.value = detail.initialContent || '';
+        input.value = detail.initialContent || "";
         input.focus();
 
         // Position cursor at end
@@ -118,7 +124,7 @@ export class PfTextInput extends BaseComponent {
 
     if (this.inputRef) {
       this.inputRef.blur();
-      this.inputRef.value = '';
+      this.inputRef.value = "";
     }
   };
 
@@ -127,8 +133,8 @@ export class PfTextInput extends BaseComponent {
     const { layerId } = detail;
 
     // Switch to text tool if not already active
-    if (toolStore.activeTool.value !== 'text') {
-      toolStore.setActiveTool('text');
+    if (toolStore.activeTool.value !== "text") {
+      toolStore.setActiveTool("text");
     }
 
     // Get the text content for this layer
@@ -149,13 +155,15 @@ export class PfTextInput extends BaseComponent {
     };
 
     // Trigger start editing with the content
-    this.handleStartEditing(new CustomEvent('text-tool:start-editing', {
-      detail: {
-        layerId,
-        celKey,
-        initialContent: textCelData?.content ?? '',
-      }
-    }));
+    this.handleStartEditing(
+      new CustomEvent("text-tool:start-editing", {
+        detail: {
+          layerId,
+          celKey,
+          initialContent: textCelData?.content ?? "",
+        },
+      })
+    );
   };
 
   private handleCommit = () => {
@@ -164,9 +172,12 @@ export class PfTextInput extends BaseComponent {
 
     // Check if text is empty - if so, delete the layer
     const currentFrameId = animationStore.currentFrameId.value;
-    const textCelData = animationStore.getTextCelData(state.layerId, currentFrameId);
+    const textCelData = animationStore.getTextCelData(
+      state.layerId,
+      currentFrameId
+    );
 
-    if (!textCelData?.content || textCelData.content.trim() === '') {
+    if (!textCelData?.content || textCelData.content.trim() === "") {
       // Delete empty text layer
       layerStore.removeLayer(state.layerId);
     }
@@ -194,7 +205,7 @@ export class PfTextInput extends BaseComponent {
 
   private handleKeyDown = (e: KeyboardEvent) => {
     // Handle escape or enter to commit
-    if (e.key === 'Escape' || e.key === 'Enter') {
+    if (e.key === "Escape" || e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
       this.handleCommit();
@@ -279,12 +290,12 @@ export class PfTextInput extends BaseComponent {
 
   protected updated() {
     // Keep inputRef in sync after each render
-    this.inputRef = this.shadowRoot?.querySelector('input') ?? null;
+    this.inputRef = this.shadowRoot?.querySelector("input") ?? null;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-text-input': PfTextInput;
+    "pf-text-input": PfTextInput;
   }
 }

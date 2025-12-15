@@ -1,10 +1,10 @@
-import { type Command } from './index';
-import { animationStore } from '../stores/animation';
-import { type Frame } from '../types/animation';
+import { type Command } from "./index";
+import { animationStore } from "../stores/animation";
+import { type Frame } from "../types/animation";
 
 export class AddFrameCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Add Frame';
+  name = "Add Frame";
   private frameId: string | null = null;
   private duplicate: boolean;
   private sourceFrameId?: string;
@@ -36,7 +36,7 @@ export class AddFrameCommand implements Command {
 
 export class DeleteFrameCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Delete Frame';
+  name = "Delete Frame";
   private frameId: string;
   private frame: Frame | null = null;
   private index: number = -1;
@@ -47,11 +47,13 @@ export class DeleteFrameCommand implements Command {
 
   constructor(frameId: string) {
     this.frameId = frameId;
-    const frame = animationStore.frames.value.find(f => f.id === frameId);
+    const frame = animationStore.frames.value.find((f) => f.id === frameId);
     if (frame) {
       this.frame = { ...frame };
-      this.index = animationStore.frames.value.findIndex(f => f.id === frameId);
-      
+      this.index = animationStore.frames.value.findIndex(
+        (f) => f.id === frameId
+      );
+
       // Capture cels
       const storeCels = animationStore.cels.value;
       // We can iterate or construct keys
@@ -89,7 +91,7 @@ export class DeleteFrameCommand implements Command {
 
 export class SetFrameDurationCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Set Frame Duration';
+  name = "Set Frame Duration";
   private frameId: string;
   private newDuration: number;
   private oldDuration: number;
@@ -101,7 +103,7 @@ export class SetFrameDurationCommand implements Command {
     if (oldDuration !== undefined) {
       this.oldDuration = oldDuration;
     } else {
-      const frame = animationStore.frames.value.find(f => f.id === frameId);
+      const frame = animationStore.frames.value.find((f) => f.id === frameId);
       this.oldDuration = frame?.duration ?? 100;
     }
   }
@@ -117,7 +119,7 @@ export class SetFrameDurationCommand implements Command {
 
 export class ReorderFrameCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Reorder Frame';
+  name = "Reorder Frame";
   private fromIndex: number;
   private toIndex: number;
 
@@ -142,7 +144,7 @@ export class ReorderFrameCommand implements Command {
  */
 export class LinkCelsCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Link Cels';
+  name = "Link Cels";
   private celKeys: string[];
   private linkedCelId: string | null = null;
 
@@ -168,7 +170,7 @@ export class LinkCelsCommand implements Command {
  */
 export class UnlinkCelsCommand implements Command {
   id = crypto.randomUUID();
-  name = 'Unlink Cels';
+  name = "Unlink Cels";
   private celKeys: string[];
   private previousLinkedCelId: string | null = null;
 
