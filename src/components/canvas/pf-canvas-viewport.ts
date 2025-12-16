@@ -1,133 +1,71 @@
-import { html, css } from "lit";
-import { customElement, state, query } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { viewportStore } from "../../stores/viewport";
-import { gridStore } from "../../stores/grid";
-import { projectStore } from "../../stores/project";
-import { colorStore } from "../../stores/colors";
-import { toolStore } from "../../stores/tools";
-import { selectionStore } from "../../stores/selection";
-import { historyStore } from "../../stores/history";
-import { getToolSize, setToolSize } from "../../stores/tool-settings";
-import { CutToFloatCommand, TransformSelectionCommand } from "../../commands/selection-commands";
-import { layerStore } from "../../stores/layers";
-import "./pf-selection-overlay";
-import "./pf-marching-ants-overlay";
-import "./pf-brush-cursor-overlay";
-import "./pf-transform-handles";
-import "./pf-text-input";
-import "./pf-ruler";
-import "./pf-guides-overlay";
+import { html } from 'lit';
+import { customElement, query } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { viewportStore } from '../../stores/viewport';
+import { gridStore } from '../../stores/grid';
+import { projectStore } from '../../stores/project';
+import './pf-selection-overlay';
+import './pf-marching-ants-overlay';
+import './pf-brush-cursor-overlay';
+import './pf-transform-handles';
+import './pf-text-input';
+import './pf-ruler';
+import './pf-guides-overlay';
 
-@customElement("pf-canvas-viewport")
+import {
+  viewportStyles,
+  initGridCanvas,
+  resizeGridCanvas,
+  drawGrids,
+  createKeyboardState,
+  handleKeyDown,
+  handleKeyUp,
+  handleWindowBlur,
+  createPanState,
+  handleGlobalMouseDown,
+  handleMouseDown as panHandleMouseDown,
+  startDragging as panStartDragging,
+  handleGlobalMouseMove,
+  handleGlobalMouseUp,
+  handleMouseMove as panHandleMouseMove,
+  handleMouseLeave,
+  handleContextMenu,
+  handleWheel as wheelHandleWheel,
+  handleGlobalWheel,
+  handleRotationStart,
+  handleRotationEnd,
+  commitTransform,
+  type KeyboardState,
+  type PanState,
+} from './viewport';
+
+@customElement('pf-canvas-viewport')
 export class PFCanvasViewport extends BaseComponent {
-  static styles = css`
-    :host {
-      display: block;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #1a1a1a;
-      position: relative;
-      /* Prevent browser back/forward gesture on two-finger horizontal swipe */
-      overscroll-behavior: none;
-      touch-action: none;
-    }
+  static styles = viewportStyles;
 
-    .viewport-content {
-      position: absolute;
-      transform-origin: 0 0;
-      will-change: transform;
-    }
-
-    /* Checkerboard pattern to indicate transparency */
-    ::slotted(pf-drawing-canvas) {
-      background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
-        linear-gradient(-45deg, #404040 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #404040 75%),
-        linear-gradient(-45deg, transparent 75%, #404040 75%);
-      background-size: 16px 16px;
-      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-      background-color: #2a2a2a;
-    }
-
-    /* Show grab cursor when spacebar is down */
-    :host([space-down]) {
-      cursor: grab;
-    }
-    :host([space-down]) ::slotted(*) {
-      cursor: grab !important;
-    }
-
-    /* Show grabbing cursor when panning */
-    :host([panning]) {
-      cursor: grabbing;
-    }
-    :host([panning]) ::slotted(*) {
-      cursor: grabbing !important;
-    }
-
-    /* Grid overlay canvas - renders at screen resolution, not scaled */
-    #grid-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-
-    /* Ruler positioning */
-    pf-ruler[orientation="horizontal"] {
-      left: 24px; /* Account for vertical ruler width */
-    }
-
-    pf-ruler[orientation="vertical"] {
-      top: 24px; /* Account for horizontal ruler height */
-    }
-
-    /* Corner piece where rulers meet */
-    .ruler-corner {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 24px;
-      height: 24px;
-      background: var(--color-bg-secondary, #252525);
-      z-index: 101;
-    }
-  `;
-
-  @query("#grid-overlay") gridCanvas!: HTMLCanvasElement;
+  @query('#grid-overlay') gridCanvas!: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D | null = null;
 
-  // Local state for drag tracking
-  @state() private isDragging = false;
-  @state() private lastMouseX = 0;
-  @state() private lastMouseY = 0;
+  // State trackers
+  private keyboardState: KeyboardState = createKeyboardState();
+  private panState: PanState = createPanState();
 
-  // Track actual modifier key presses to distinguish from macOS pinch gestures
-  // macOS injects ctrlKey=true for pinch-to-zoom, but we want pinch=zoom, Ctrl+scroll=brush
-  private isCtrlActuallyPressed = false;
-  private isMetaActuallyPressed = false;
-
-  // ResizeObserver to detect flex layout changes (e.g., timeline resize)
+  // ResizeObserver to detect flex layout changes
   private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-    window.addEventListener("keydown", this.handleKeyDown);
-    window.addEventListener("keyup", this.handleKeyUp);
-    window.addEventListener("blur", this.handleWindowBlur);
-    window.addEventListener("commit-transform", this.handleCommitTransform);
-    window.addEventListener("mousedown", this.handleGlobalMouseDown);
-    window.addEventListener("wheel", this.handleGlobalWheel, { passive: false });
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onWindowBlur);
+    window.addEventListener('commit-transform', this.onCommitTransform);
+    window.addEventListener('mousedown', this.onGlobalMouseDown);
+    window.addEventListener('wheel', this.onGlobalWheel, { passive: false });
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions();
 
-    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
-    // This replaces window resize listener which doesn't fire for flex changes
+    // Use ResizeObserver to detect size changes from flex layout
     this.resizeObserver = new ResizeObserver(() => {
       this.handleResize();
     });
@@ -136,60 +74,44 @@ export class PFCanvasViewport extends BaseComponent {
     // Center canvas on launch
     requestAnimationFrame(() => {
       viewportStore.zoomToFit(this.clientWidth, this.clientHeight);
-      this.initGridCanvas();
+      this.initGrid();
       this.requestUpdate();
     });
   }
 
-  private initGridCanvas() {
-    if (!this.gridCanvas) return;
-    this.gridCtx = this.gridCanvas.getContext("2d");
-    this.resizeGridCanvas();
-  }
-
-  private handleResize = () => {
-    this.updateContainerDimensions();
-    this.resizeGridCanvas();
-    // Trigger re-render to redraw grids after resize
-    this.requestUpdate();
-  };
-
-  private resizeGridCanvas() {
-    if (!this.gridCanvas) return;
-    // Match canvas resolution to actual pixel size for crisp lines
-    const dpr = window.devicePixelRatio || 1;
-    this.gridCanvas.width = this.clientWidth * dpr;
-    this.gridCanvas.height = this.clientHeight * dpr;
-    if (this.gridCtx) {
-      this.gridCtx.scale(dpr, dpr);
-    }
-  }
-
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("keydown", this.handleKeyDown);
-    window.removeEventListener("keyup", this.handleKeyUp);
-    window.removeEventListener("blur", this.handleWindowBlur);
-    window.removeEventListener("commit-transform", this.handleCommitTransform);
-    window.removeEventListener("mousedown", this.handleGlobalMouseDown);
-    window.removeEventListener("wheel", this.handleGlobalWheel);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onWindowBlur);
+    window.removeEventListener('commit-transform', this.onCommitTransform);
+    window.removeEventListener('mousedown', this.onGlobalMouseDown);
+    window.removeEventListener('wheel', this.onGlobalWheel);
 
-    // Clean up ResizeObserver
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     }
 
-    // Clean up any active drag listeners
-    window.removeEventListener("mousemove", this.handleGlobalMouseMove);
-    window.removeEventListener("mouseup", this.handleGlobalMouseUp);
+    window.removeEventListener('mousemove', this.onGlobalMouseMove);
+    window.removeEventListener('mouseup', this.onGlobalMouseUp);
   }
 
-  // Reset modifier tracking when window loses focus (prevents stuck state)
-  private handleWindowBlur = () => {
-    this.isCtrlActuallyPressed = false;
-    this.isMetaActuallyPressed = false;
+  private initGrid() {
+    if (!this.gridCanvas) return;
+    this.gridCtx = initGridCanvas(this.gridCanvas);
+    this.resizeGrid();
+  }
+
+  private handleResize = () => {
+    this.updateContainerDimensions();
+    this.resizeGrid();
+    this.requestUpdate();
   };
+
+  private resizeGrid() {
+    resizeGridCanvas(this.gridCanvas, this.gridCtx, this.clientWidth, this.clientHeight);
+  }
 
   private updateContainerDimensions = () => {
     viewportStore.containerWidth.value = this.clientWidth;
@@ -217,33 +139,33 @@ export class PFCanvasViewport extends BaseComponent {
     void projectStore.height.value;
 
     // Update host attributes for cursor styling
-    this.toggleAttribute("space-down", isSpaceDown && !isPanning);
-    this.toggleAttribute("panning", isPanning);
+    this.toggleAttribute('space-down', isSpaceDown && !isPanning);
+    this.toggleAttribute('panning', isPanning);
 
     // Update slotted drawing canvas cursor for pan mode
-    const drawingCanvas = this.querySelector("pf-drawing-canvas");
+    const drawingCanvas = this.querySelector('pf-drawing-canvas');
     if (drawingCanvas) {
       if (isPanning) {
-        drawingCanvas.setAttribute("pan-cursor", "grabbing");
+        drawingCanvas.setAttribute('pan-cursor', 'grabbing');
       } else if (isSpaceDown) {
-        drawingCanvas.setAttribute("pan-cursor", "grab");
+        drawingCanvas.setAttribute('pan-cursor', 'grab');
       } else {
-        drawingCanvas.removeAttribute("pan-cursor");
+        drawingCanvas.removeAttribute('pan-cursor');
       }
     }
 
     // Draw grids after render
-    requestAnimationFrame(() => this.drawGrids());
+    requestAnimationFrame(() => this.renderGrids());
 
     return html`
       <div
         class="viewport-content"
         style="transform: translate(${panX}px, ${panY}px) scale(${zoom})"
-        @mousedown=${this.handleMouseDown}
-        @mousemove=${this.handleMouseMove}
-        @mouseleave=${this.handleMouseLeave}
-        @wheel=${this.handleWheel}
-        @contextmenu=${this.handleContextMenu}
+        @mousedown=${this.onMouseDown}
+        @mousemove=${this.onMouseMove}
+        @mouseleave=${this.onMouseLeave}
+        @wheel=${this.onWheel}
+        @contextmenu=${this.onContextMenu}
       >
         <slot></slot>
       </div>
@@ -252,8 +174,8 @@ export class PFCanvasViewport extends BaseComponent {
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
       <pf-brush-cursor-overlay></pf-brush-cursor-overlay>
       <pf-transform-handles
-        @rotation-start=${this.handleRotationStart}
-        @rotation-end=${this.handleRotationEnd}
+        @rotation-start=${this.onRotationStart}
+        @rotation-end=${this.onRotationEnd}
       ></pf-transform-handles>
       <pf-text-input></pf-text-input>
       <pf-guides-overlay></pf-guides-overlay>
@@ -263,639 +185,105 @@ export class PFCanvasViewport extends BaseComponent {
     `;
   }
 
-  /**
-   * Draw grids at screen resolution (not affected by viewport transform)
-   */
-  private drawGrids() {
+  private renderGrids() {
     if (!this.gridCtx) {
-      this.initGridCanvas();
+      this.initGrid();
       if (!this.gridCtx) return;
     }
-
-    const ctx = this.gridCtx;
-    const dpr = window.devicePixelRatio || 1;
-    const viewWidth = this.clientWidth;
-    const viewHeight = this.clientHeight;
-
-    // Clear the grid canvas
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
-    ctx.clearRect(0, 0, this.gridCanvas.width, this.gridCanvas.height);
-    ctx.scale(dpr, dpr); // Re-apply DPR scaling
-
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-
-    // Pixel grid: only show at or above threshold
-    if (
-      gridStore.pixelGridEnabled.value &&
-      zoom >= gridStore.autoShowThreshold.value
-    ) {
-      this.drawPixelGrid(
-        ctx,
-        viewWidth,
-        viewHeight,
-        zoom,
-        panX,
-        panY,
-        canvasWidth,
-        canvasHeight
-      );
-    }
-
-    // Tile grid: always show if enabled
-    if (gridStore.tileGridEnabled.value) {
-      this.drawTileGrid(
-        ctx,
-        viewWidth,
-        viewHeight,
-        zoom,
-        panX,
-        panY,
-        canvasWidth,
-        canvasHeight
-      );
-    }
+    drawGrids(this.gridCanvas, this.gridCtx, this.clientWidth, this.clientHeight);
   }
-
-  /**
-   * Draw pixel grid (1px spacing between each pixel)
-   */
-  private drawPixelGrid(
-    ctx: CanvasRenderingContext2D,
-    viewWidth: number,
-    viewHeight: number,
-    zoom: number,
-    panX: number,
-    panY: number,
-    canvasWidth: number,
-    canvasHeight: number
-  ) {
-    ctx.save();
-    ctx.strokeStyle = gridStore.pixelGridColor.value;
-    ctx.globalAlpha = gridStore.pixelGridOpacity.value;
-    ctx.lineWidth = 1;
-
-    ctx.beginPath();
-
-    // Calculate visible range in canvas coordinates
-    const startX = Math.max(0, Math.floor(-panX / zoom));
-    const endX = Math.min(canvasWidth, Math.ceil((viewWidth - panX) / zoom));
-    const startY = Math.max(0, Math.floor(-panY / zoom));
-    const endY = Math.min(canvasHeight, Math.ceil((viewHeight - panY) / zoom));
-
-    // Vertical lines at each pixel boundary
-    for (let x = startX; x <= endX; x++) {
-      const screenX = Math.round(panX + x * zoom) + 0.5;
-      if (screenX >= 0 && screenX <= viewWidth) {
-        ctx.moveTo(screenX, Math.max(0, panY));
-        ctx.lineTo(screenX, Math.min(viewHeight, panY + canvasHeight * zoom));
-      }
-    }
-
-    // Horizontal lines at each pixel boundary
-    for (let y = startY; y <= endY; y++) {
-      const screenY = Math.round(panY + y * zoom) + 0.5;
-      if (screenY >= 0 && screenY <= viewHeight) {
-        ctx.moveTo(Math.max(0, panX), screenY);
-        ctx.lineTo(Math.min(viewWidth, panX + canvasWidth * zoom), screenY);
-      }
-    }
-
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  /**
-   * Draw tile grid (larger spacing for sprite sheets)
-   */
-  private drawTileGrid(
-    ctx: CanvasRenderingContext2D,
-    viewWidth: number,
-    viewHeight: number,
-    zoom: number,
-    panX: number,
-    panY: number,
-    canvasWidth: number,
-    canvasHeight: number
-  ) {
-    const tileSize = gridStore.tileGridSize.value;
-
-    ctx.save();
-    ctx.strokeStyle = gridStore.tileGridColor.value;
-    ctx.globalAlpha = gridStore.tileGridOpacity.value;
-    ctx.lineWidth = 1;
-
-    ctx.beginPath();
-
-    // Calculate visible range
-    const startX = Math.max(0, Math.floor(-panX / zoom / tileSize) * tileSize);
-    const endX = Math.min(canvasWidth, Math.ceil((viewWidth - panX) / zoom));
-    const startY = Math.max(0, Math.floor(-panY / zoom / tileSize) * tileSize);
-    const endY = Math.min(canvasHeight, Math.ceil((viewHeight - panY) / zoom));
-
-    // Vertical lines at tile intervals
-    for (let x = startX; x <= endX; x += tileSize) {
-      const screenX = Math.round(panX + x * zoom) + 0.5;
-      if (screenX >= 0 && screenX <= viewWidth) {
-        ctx.moveTo(screenX, Math.max(0, panY));
-        ctx.lineTo(screenX, Math.min(viewHeight, panY + canvasHeight * zoom));
-      }
-    }
-
-    // Horizontal lines at tile intervals
-    for (let y = startY; y <= endY; y += tileSize) {
-      const screenY = Math.round(panY + y * zoom) + 0.5;
-      if (screenY >= 0 && screenY <= viewHeight) {
-        ctx.moveTo(Math.max(0, panX), screenY);
-        ctx.lineTo(Math.min(viewWidth, panX + canvasWidth * zoom), screenY);
-      }
-    }
-
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  private handleKeyDown = (e: KeyboardEvent) => {
-    // Track actual modifier key presses (to distinguish from macOS pinch injection)
-    if (e.key === "Control") this.isCtrlActuallyPressed = true;
-    if (e.key === "Meta") this.isMetaActuallyPressed = true;
-
-    // Skip if typing in an input
-    if (
-      e.target instanceof HTMLInputElement ||
-      e.target instanceof HTMLTextAreaElement
-    ) {
-      return;
-    }
-
-    // Spacebar for pan mode
-    if (e.code === "Space" && !e.repeat) {
-      e.preventDefault();
-      viewportStore.isSpacebarDown.value = true;
-      this.requestUpdate();
-      return;
-    }
-
-    // Zoom keys 1-6
-    if (e.key >= "1" && e.key <= "6") {
-      viewportStore.zoomToLevel(parseInt(e.key) as 1 | 2 | 3 | 4 | 5 | 6);
-      this.requestUpdate();
-      return;
-    }
-
-    // +/- for zoom in/out
-    if (e.key === "+" || e.key === "=") {
-      viewportStore.zoomIn();
-      this.requestUpdate();
-    } else if (e.key === "-") {
-      viewportStore.zoomOut();
-      this.requestUpdate();
-    } else if (e.key === "0") {
-      viewportStore.zoomToFit(this.clientWidth, this.clientHeight);
-      this.requestUpdate();
-    } else if (e.key === "Home") {
-      viewportStore.resetView();
-      this.requestUpdate();
-    }
-
-    // Ctrl+G for pixel grid toggle
-    if (e.key === "g" && !e.shiftKey && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      gridStore.togglePixelGrid();
-      return;
-    }
-
-    // Ctrl+Shift+G for tile grid toggle
-    if (e.key === "G" && e.shiftKey && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      gridStore.toggleTileGrid();
-      return;
-    }
-
-    // Note: Shift+G for guide visibility is handled by keyboardService
-
-    // Handle transform state Enter/Escape
-    const selectionState = selectionStore.state.value;
-    if (selectionState.type === 'transforming') {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        this.commitTransform();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        selectionStore.cancelTransform();
-      }
-    }
-  };
-
-  private handleKeyUp = (e: KeyboardEvent) => {
-    // Track actual modifier key releases
-    if (e.key === "Control") this.isCtrlActuallyPressed = false;
-    if (e.key === "Meta") this.isMetaActuallyPressed = false;
-
-    if (e.code === "Space") {
-      viewportStore.isSpacebarDown.value = false;
-
-      // If we were panning with spacebar, clamp to bounds
-      if (viewportStore.isPanning.value || this.isDragging) {
-        viewportStore.clampPanToBounds();
-      }
-
-      viewportStore.isPanning.value = false;
-      this.isDragging = false;
-      this.requestUpdate();
-    }
-  };
-
-  /**
-   * Global mousedown handler to allow starting pan from outside the canvas.
-   * Enables spacebar+click and middle-click pan from anywhere (except UI elements).
-   */
-  private handleGlobalMouseDown = (e: MouseEvent) => {
-    // Skip if already dragging
-    if (this.isDragging) return;
-
-    // Check if clicking on UI elements (toolbar, sidebar, timeline, etc.)
-    if (this.isClickOnUI(e)) return;
-
-    // Middle-click pan from anywhere
-    if (e.button === 1) {
-      this.startDragging(e);
-      return;
-    }
-
-    // Spacebar + left-click pan from anywhere
-    if (viewportStore.isSpacebarDown.value && e.button === 0) {
-      this.startDragging(e);
-      return;
-    }
-  };
-
-  /**
-   * Check if the click target is a UI element that should not trigger pan.
-   */
-  private isClickOnUI(e: MouseEvent): boolean {
-    const target = e.target as HTMLElement;
-    // Check if click is on toolbar, sidebar, timeline, dialogs, context bar, menu bar, or panels
-    return target.closest(
-      'pf-toolbar, pf-sidebar, pf-timeline, pf-layers-panel, [role="dialog"], .context-bar, pf-menu-bar, pf-context-bar, pf-palette-panel, pf-brush-panel'
-    ) !== null;
-  }
-
-  private handleMouseDown(e: MouseEvent) {
-    // Check if current tool is a selection tool (needs Alt for subtract mode, Ctrl for shrink-to-content)
-    const currentTool = toolStore.activeTool.value;
-    const isSelectionTool = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'].includes(currentTool);
-
-    // Alt or Cmd/Meta + Click = Quick Eyedropper (but not for selection tools - they use Alt for subtract)
-    // Left click: pick to foreground, Right click: pick to background
-    if ((e.altKey || e.metaKey) && !isSelectionTool) {
-      e.preventDefault();
-      e.stopPropagation();
-      this.triggerQuickEyedropper(e);
-      return;
-    }
-
-    // Ctrl+Click for lightness shifting (Ctrl only, not Meta) - but not for selection tools
-    if (e.ctrlKey && !isSelectionTool) {
-      if (e.button === 0) {
-        // Left click: shift darker
-        e.preventDefault();
-        e.stopPropagation();
-        colorStore.shiftLightnessDarker();
-        return;
-      }
-      if (e.button === 2) {
-        // Right click: shift lighter
-        e.preventDefault();
-        e.stopPropagation();
-        colorStore.shiftLightnessLighter();
-        return;
-      }
-    }
-
-    // Spacebar pan mode
-    if (viewportStore.isSpacebarDown.value) {
-      this.startDragging(e);
-      return;
-    }
-
-    // Middle click to pan (Alt is now used for eyedropper)
-    if (e.button === 1) {
-      this.startDragging(e);
-    }
-  }
-
-  /**
-   * Quick eyedropper: pick color from canvas at mouse position.
-   * Left click = primary/foreground color, Right click = secondary/background color.
-   */
-  private triggerQuickEyedropper(e: MouseEvent) {
-    const drawingCanvas = this.querySelector("pf-drawing-canvas") as any;
-    if (!drawingCanvas?.canvas) return;
-
-    const canvasEl = drawingCanvas.canvas as HTMLCanvasElement;
-    const rect = canvasEl.getBoundingClientRect();
-    const scaleX = canvasEl.width / rect.width;
-    const scaleY = canvasEl.height / rect.height;
-
-    const x = Math.floor((e.clientX - rect.left) * scaleX);
-    const y = Math.floor((e.clientY - rect.top) * scaleY);
-
-    // Bounds check
-    if (x < 0 || x >= canvasEl.width || y < 0 || y >= canvasEl.height) return;
-
-    const ctx = canvasEl.getContext("2d");
-    if (!ctx) return;
-
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    const hex =
-      "#" +
-      pixel[0].toString(16).padStart(2, "0") +
-      pixel[1].toString(16).padStart(2, "0") +
-      pixel[2].toString(16).padStart(2, "0");
-
-    if (e.button === 2) {
-      // Right click: pick to secondary/background color
-      colorStore.setSecondaryColor(hex);
-    } else {
-      // Left click: pick to primary/foreground color
-      colorStore.setPrimaryColor(hex);
-      colorStore.updateLightnessVariations(hex);
-    }
-  }
-
-  private startDragging(e: MouseEvent) {
-    this.isDragging = true;
-    viewportStore.isPanning.value = true;
-    this.lastMouseX = e.clientX;
-    this.lastMouseY = e.clientY;
-    e.preventDefault();
-
-    // Attach global listeners to track mouse even outside viewport
-    window.addEventListener("mousemove", this.handleGlobalMouseMove);
-    window.addEventListener("mouseup", this.handleGlobalMouseUp);
-
-    this.requestUpdate();
-  }
-
-  private handleGlobalMouseMove = (e: MouseEvent) => {
-    if (!this.isDragging) return;
-
-    const dx = e.clientX - this.lastMouseX;
-    const dy = e.clientY - this.lastMouseY;
-
-    viewportStore.panBy(dx, dy);
-
-    this.lastMouseX = e.clientX;
-    this.lastMouseY = e.clientY;
-    this.requestUpdate();
-  };
-
-  private handleGlobalMouseUp = () => {
-    if (!this.isDragging) return;
-
-    this.isDragging = false;
-    viewportStore.isPanning.value = false;
-
-    // Rubber band: snap back to valid bounds
-    viewportStore.clampPanToBounds();
-
-    // Remove global listeners
-    window.removeEventListener("mousemove", this.handleGlobalMouseMove);
-    window.removeEventListener("mouseup", this.handleGlobalMouseUp);
-
-    this.requestUpdate();
-  };
-
-  private handleMouseMove(e: MouseEvent) {
-    // Track cursor position for keyboard zoom (only when not dragging globally)
-    if (!this.isDragging) {
-      const rect = this.getBoundingClientRect();
-      viewportStore.cursorScreenX.value = e.clientX - rect.left;
-      viewportStore.cursorScreenY.value = e.clientY - rect.top;
-    }
-  }
-
-  private handleMouseLeave() {
-    // Clear cursor position when leaving viewport (but not during drag)
-    if (!this.isDragging) {
-      viewportStore.cursorScreenX.value = null;
-      viewportStore.cursorScreenY.value = null;
-    }
-  }
-
-  private handleContextMenu(e: MouseEvent) {
-    // Always prevent context menu on canvas - right-click is used for:
-    // - Drawing with secondary color (pencil)
-    // - Erasing to background color (eraser)
-    // - Ctrl+RightClick lightness shifting
-    e.preventDefault();
-  }
-
-  private handleWheel(e: WheelEvent) {
-    e.preventDefault();
-
-    // Distinguish between actual Ctrl/Cmd+scroll vs macOS pinch gesture
-    // macOS injects ctrlKey=true for pinch-to-zoom, but we want:
-    // - Pinch → zoom (universal expectation)
-    // - Actual Ctrl/Cmd + scroll → brush size (Aseprite-style)
-    // - Regular two-finger scroll → pan
-    const isActualModifierHeld =
-      this.isCtrlActuallyPressed || this.isMetaActuallyPressed;
-    const isPinchGesture = e.ctrlKey && !this.isCtrlActuallyPressed;
-
-    // Only adjust brush size if user actually pressed Ctrl/Cmd
-    if (isActualModifierHeld) {
-      const tool = toolStore.activeTool.value;
-      const currentSize = getToolSize(tool);
-      const scrollDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-      // Scroll up = increase, scroll down = decrease (Aseprite convention)
-      const delta = scrollDelta < 0 ? 1 : -1;
-      setToolSize(tool, currentSize + delta);
-      return;
-    }
-
-    // Pinch gesture = zoom at cursor position
-    if (isPinchGesture) {
-      const rect = this.getBoundingClientRect();
-      const screenX = e.clientX - rect.left;
-      const screenY = e.clientY - rect.top;
-
-      if (e.deltaY < 0) {
-        viewportStore.zoomInAt(screenX, screenY);
-      } else if (e.deltaY > 0) {
-        viewportStore.zoomOutAt(screenX, screenY);
-      }
-
-      this.requestUpdate();
-      return;
-    }
-
-    // Distinguish mouse wheel from trackpad two-finger scroll:
-    // - deltaMode === 1 (LINE) = definitely mouse wheel → zoom
-    // - deltaMode === 0 (PIXEL) with horizontal component = trackpad → pan
-    // - deltaMode === 0 (PIXEL) Y-only = likely mouse wheel → zoom
-    // On macOS, both use deltaMode === 0, but trackpad usually has deltaX due to finger imprecision
-    const isMouseWheel =
-      e.deltaMode === 1 || // LINE mode is definitely mouse wheel
-      (e.deltaMode === 0 && e.deltaX === 0); // Y-only scroll = likely mouse wheel
-
-    if (isMouseWheel) {
-      // Mouse wheel = zoom at cursor position
-      const rect = this.getBoundingClientRect();
-      const screenX = e.clientX - rect.left;
-      const screenY = e.clientY - rect.top;
-
-      if (e.deltaY < 0) {
-        viewportStore.zoomInAt(screenX, screenY);
-      } else if (e.deltaY > 0) {
-        viewportStore.zoomOutAt(screenX, screenY);
-      }
-    } else {
-      // Trackpad two-finger scroll = pan
-      viewportStore.panBy(-e.deltaX, -e.deltaY);
-    }
-
-    this.requestUpdate();
-  }
-
-  /**
-   * Global wheel handler to allow trackpad panning from outside the canvas.
-   * Only handles trackpad gestures (deltaMode === 0), not mouse wheel.
-   */
-  private handleGlobalWheel = (e: WheelEvent) => {
-    // Skip if event originated from within this component (already handled by local handler)
-    if (this.contains(e.target as Node)) return;
-
-    // Skip if on UI elements
-    if (this.isClickOnUI(e)) return;
-
-    // Skip pinch gestures (ctrlKey is injected by macOS for pinch)
-    if (e.ctrlKey) return;
-
-    // Only handle trackpad (has horizontal component), not mouse wheel
-    // Mouse wheels have deltaMode === 1 OR Y-only scroll (deltaX === 0)
-    const isMouseWheel =
-      e.deltaMode === 1 ||
-      (e.deltaMode === 0 && e.deltaX === 0);
-    if (isMouseWheel) return;
-
-    // Trackpad two-finger scroll = pan
-    e.preventDefault();
-    viewportStore.panBy(-e.deltaX, -e.deltaY);
-    this.requestUpdate();
-  };
 
   // ============================================
-  // Rotation handlers
+  // Event handler bindings
   // ============================================
 
-  private handleRotationStart = (e: CustomEvent) => {
-    const state = selectionStore.state.value;
-
-    // If we're in floating state, we need to transition to transforming
-    if (state.type === 'floating') {
-      selectionStore.startTransform(
-        state.imageData,
-        {
-          x: state.originalBounds.x + state.currentOffset.x,
-          y: state.originalBounds.y + state.currentOffset.y,
-          width: state.originalBounds.width,
-          height: state.originalBounds.height,
-        },
-        state.shape,
-        state.mask
-      );
-    } else if (state.type === 'selected') {
-      // For selected state, we need to cut to floating first, then transform
-      // Use the active layer's canvas, not the composited drawing canvas
-      const activeLayerId = layerStore.activeLayerId.value;
-      const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
-      if (!activeLayer?.canvas) return;
-
-      const canvas = activeLayer.canvas;
-      const bounds = state.bounds;
-      const shape = state.shape;
-      const mask = state.shape === 'freeform' ? state.mask : undefined;
-
-      // Cut to float from the active layer
-      const cutCommand = new CutToFloatCommand(canvas, activeLayerId || '', bounds, shape, mask);
-      historyStore.execute(cutCommand);
-
-      // Now we should be in floating state - start transform
-      const floatingState = selectionStore.state.value;
-      if (floatingState.type === 'floating') {
-        selectionStore.startTransform(
-          floatingState.imageData,
-          floatingState.originalBounds,
-          floatingState.shape,
-          floatingState.mask
-        );
-      }
-    }
-    // If already transforming, do nothing (drag tracking continues in transform-handles)
+  private readonly keyboardCallbacks = {
+    requestUpdate: () => this.requestUpdate(),
+    getClientWidth: () => this.clientWidth,
+    getClientHeight: () => this.clientHeight,
+    commitTransform: () => commitTransform(),
+    setDragging: (value: boolean) => { this.panState.isDragging = value; },
+    getDragging: () => this.panState.isDragging,
   };
 
-  private handleRotationEnd = () => {
-    // Rotation drag ended - the transform will be committed when user
-    // clicks outside or presses Enter
+  private readonly panCallbacks = {
+    requestUpdate: () => this.requestUpdate(),
+    querySelector: (selector: string) => this.querySelector(selector),
   };
 
-  /**
-   * Handle commit-transform event from context bar Apply button.
-   */
-  private handleCommitTransform = () => {
-    this.commitTransform();
+  private readonly wheelCallbacks = {
+    requestUpdate: () => this.requestUpdate(),
+    getBoundingClientRect: () => this.getBoundingClientRect(),
+    contains: (node: Node) => this.contains(node),
   };
 
-  /**
-   * Commit the current transform (rotation) to the canvas.
-   * Called when user presses Enter or clicks Apply.
-   */
-  private commitTransform() {
-    const transformState = selectionStore.getTransformState();
-    if (!transformState) return;
+  private onKeyDown = (e: KeyboardEvent) => {
+    handleKeyDown(e, this.keyboardState, this.keyboardCallbacks);
+  };
 
-    const { imageData, originalBounds, currentBounds, currentOffset, rotation, shape, mask } = transformState;
+  private onKeyUp = (e: KeyboardEvent) => {
+    handleKeyUp(e, this.keyboardState, this.keyboardCallbacks);
+  };
 
-    // If rotation is 0 and no movement, just cancel (no change needed)
-    if (rotation === 0 && currentOffset.x === 0 && currentOffset.y === 0) {
-      selectionStore.cancelTransform();
-      return;
-    }
+  private onWindowBlur = () => {
+    handleWindowBlur(this.keyboardState);
+  };
 
-    // Get the active layer's canvas
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
-    if (!activeLayer?.canvas) {
-      console.error('Active layer canvas not found');
-      selectionStore.cancelTransform();
-      return;
-    }
+  private onGlobalMouseDown = (e: MouseEvent) => {
+    handleGlobalMouseDown(e, this.panState, (ev) => this.startDrag(ev));
+  };
 
-    // Use already-computed preview data (same CleanEdge algorithm)
-    const rotatedImageData = selectionStore.getTransformPreview();
-    if (!rotatedImageData) {
-      selectionStore.cancelTransform();
-      return;
-    }
+  private onMouseDown = (e: MouseEvent) => {
+    panHandleMouseDown(e, this.panState, this.panCallbacks, (ev) => this.startDrag(ev));
+  };
 
-    // Create and execute the transform command on the active layer
-    const command = new TransformSelectionCommand(
-      activeLayer.canvas,
-      imageData,
-      originalBounds,
-      rotatedImageData,
-      currentBounds,
-      rotation,
-      shape,
-      mask,
-      currentOffset
-    );
+  private startDrag = (e: MouseEvent) => {
+    panStartDragging(e, this.panState, this.panCallbacks, () => {
+      window.addEventListener('mousemove', this.onGlobalMouseMove);
+      window.addEventListener('mouseup', this.onGlobalMouseUp);
+    });
+  };
 
-    historyStore.execute(command);
-  }
+  private onGlobalMouseMove = (e: MouseEvent) => {
+    handleGlobalMouseMove(e, this.panState, this.panCallbacks);
+  };
+
+  private onGlobalMouseUp = () => {
+    handleGlobalMouseUp(this.panState, this.panCallbacks, () => {
+      window.removeEventListener('mousemove', this.onGlobalMouseMove);
+      window.removeEventListener('mouseup', this.onGlobalMouseUp);
+    });
+  };
+
+  private onMouseMove = (e: MouseEvent) => {
+    panHandleMouseMove(e, this.panState, () => this.getBoundingClientRect());
+  };
+
+  private onMouseLeave = () => {
+    handleMouseLeave(this.panState);
+  };
+
+  private onContextMenu = (e: MouseEvent) => {
+    handleContextMenu(e);
+  };
+
+  private onWheel = (e: WheelEvent) => {
+    wheelHandleWheel(e, this.keyboardState, this.wheelCallbacks);
+  };
+
+  private onGlobalWheel = (e: WheelEvent) => {
+    handleGlobalWheel(e, this.wheelCallbacks);
+  };
+
+  private onRotationStart = () => {
+    handleRotationStart();
+  };
+
+  private onRotationEnd = () => {
+    handleRotationEnd();
+  };
+
+  private onCommitTransform = () => {
+    commitTransform();
+  };
 }
