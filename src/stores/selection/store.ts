@@ -1,18 +1,25 @@
-import { signal } from "../core/signal";
-import { type SelectionState, type SelectionShape } from "../types/selection";
-import { type Rect } from "../types/geometry";
-import { isPointInMask } from "../utils/mask-utils";
+/**
+ * Selection Store - Main state management for selections.
+ *
+ * Manages selection state machine:
+ * none → selecting → selected → floating → transforming
+ */
+
+import { signal } from '../../core/signal';
+import type { SelectionState, SelectionShape } from '../../types/selection';
+import type { Rect } from '../../types/geometry';
+import type { SelectionMode } from './types';
+import { trimBoundsToContent, trimFreeformToContent } from './bounds-utils';
+import { isPointInBounds, isPointInRotatedBounds } from './hit-testing';
 import {
   rotateCleanEdge,
   calculateRotatedBounds,
   normalizeAngle,
-} from "../utils/rotation";
-
-export type SelectionMode = "replace" | "add" | "subtract";
+} from '../../utils/rotation';
 
 class SelectionStore {
-  state = signal<SelectionState>({ type: "none" });
-  mode = signal<SelectionMode>("replace");
+  state = signal<SelectionState>({ type: 'none' });
+  mode = signal<SelectionMode>('replace');
 
   // Track the layer we're operating on
   private activeLayerId: string | null = null;
@@ -22,29 +29,32 @@ class SelectionStore {
   private rotationRafId: number | null = null;
   private isRotationDragging = false;
 
+  // ============================================
   // Convenience getters
+  // ============================================
+
   get isActive(): boolean {
-    return this.state.value.type !== "none";
+    return this.state.value.type !== 'none';
   }
 
   get isFloating(): boolean {
-    return this.state.value.type === "floating";
+    return this.state.value.type === 'floating';
   }
 
   get isSelecting(): boolean {
-    return this.state.value.type === "selecting";
+    return this.state.value.type === 'selecting';
   }
 
   get isTransforming(): boolean {
-    return this.state.value.type === "transforming";
+    return this.state.value.type === 'transforming';
   }
 
   get bounds(): Rect | null {
     const s = this.state.value;
-    if (s.type === "none") return null;
-    if (s.type === "selecting") return s.currentBounds;
-    if (s.type === "selected") return s.bounds;
-    if (s.type === "floating") {
+    if (s.type === 'none') return null;
+    if (s.type === 'selecting') return s.currentBounds;
+    if (s.type === 'selected') return s.bounds;
+    if (s.type === 'floating') {
       return {
         x: s.originalBounds.x + s.currentOffset.x,
         y: s.originalBounds.y + s.currentOffset.y,
@@ -52,7 +62,7 @@ class SelectionStore {
         height: s.originalBounds.height,
       };
     }
-    if (s.type === "transforming") {
+    if (s.type === 'transforming') {
       return s.currentBounds;
     }
     return null;
@@ -60,7 +70,7 @@ class SelectionStore {
 
   get rotation(): number {
     const s = this.state.value;
-    if (s.type === "transforming") return s.rotation;
+    if (s.type === 'transforming') return s.rotation;
     return 0;
   }
 
@@ -70,7 +80,7 @@ class SelectionStore {
 
   startSelection(shape: SelectionShape, point: { x: number; y: number }) {
     this.state.value = {
-      type: "selecting",
+      type: 'selecting',
       shape,
       startPoint: point,
       currentBounds: { x: point.x, y: point.y, width: 1, height: 1 },
@@ -82,7 +92,7 @@ class SelectionStore {
     modifiers?: { shift?: boolean }
   ) {
     const s = this.state.value;
-    if (s.type !== "selecting") return;
+    if (s.type !== 'selecting') return;
 
     let width = Math.abs(currentPoint.x - s.startPoint.x) + 1;
     let height = Math.abs(currentPoint.y - s.startPoint.y) + 1;
@@ -109,7 +119,7 @@ class SelectionStore {
    */
   finalizeSelection(canvas?: HTMLCanvasElement, shrinkToContent: boolean = false) {
     const s = this.state.value;
-    if (s.type !== "selecting") return;
+    if (s.type !== 'selecting') return;
 
     // Don't create selection if too small
     if (s.currentBounds.width < 2 && s.currentBounds.height < 2) {
@@ -117,7 +127,7 @@ class SelectionStore {
       return;
     }
 
-    if (s.shape === "freeform") {
+    if (s.shape === 'freeform') {
       // Freeform needs finalizeFreeformSelection() with mask
       this.clear();
       return;
@@ -127,11 +137,7 @@ class SelectionStore {
 
     // If shrinkToContent is true and canvas provided, trim bounds to content
     if (shrinkToContent && canvas) {
-      const trimmed = this.trimBoundsToContent(
-        canvas,
-        s.currentBounds,
-        s.shape
-      );
+      const trimmed = trimBoundsToContent(canvas, s.currentBounds, s.shape);
       if (!trimmed) {
         // All transparent - no selection
         this.clear();
@@ -141,78 +147,9 @@ class SelectionStore {
     }
 
     this.state.value = {
-      type: "selected",
-      shape: s.shape as "rectangle" | "ellipse",
+      type: 'selected',
+      shape: s.shape as 'rectangle' | 'ellipse',
       bounds: finalBounds,
-    };
-  }
-
-  /**
-   * Trim selection bounds to exclude transparent pixels.
-   * Returns null if all pixels are transparent.
-   */
-  private trimBoundsToContent(
-    canvas: HTMLCanvasElement,
-    bounds: Rect,
-    shape: SelectionShape
-  ): Rect | null {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return bounds;
-
-    const imageData = ctx.getImageData(
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height
-    );
-    const { width, height, data } = imageData;
-
-    // For ellipse, we need to consider only pixels inside the ellipse
-    const isInSelection = (px: number, py: number): boolean => {
-      if (shape === "ellipse") {
-        const dx = (px + 0.5 - width / 2) / (width / 2);
-        const dy = (py + 0.5 - height / 2) / (height / 2);
-        return dx * dx + dy * dy <= 1;
-      }
-      return true; // Rectangle includes all pixels
-    };
-
-    // Find content bounds
-    let minX = width;
-    let minY = height;
-    let maxX = -1;
-    let maxY = -1;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (!isInSelection(x, y)) continue;
-
-        const alpha = data[(y * width + x) * 4 + 3];
-        if (alpha > 0) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    // All transparent
-    if (maxX < 0 || maxY < 0) {
-      return null;
-    }
-
-    // No trimming needed
-    if (minX === 0 && minY === 0 && maxX === width - 1 && maxY === height - 1) {
-      return bounds;
-    }
-
-    // Return trimmed bounds
-    return {
-      x: bounds.x + minX,
-      y: bounds.y + minY,
-      width: maxX - minX + 1,
-      height: maxY - minY + 1,
     };
   }
 
@@ -232,7 +169,7 @@ class SelectionStore {
   ) {
     // Validate mask size matches bounds
     if (mask.length !== bounds.width * bounds.height) {
-      console.error("Mask size does not match bounds");
+      console.error('Mask size does not match bounds');
       this.clear();
       return;
     }
@@ -242,7 +179,7 @@ class SelectionStore {
 
     // If shrinkToContent is true and canvas provided, trim bounds to content
     if (shrinkToContent && canvas) {
-      const trimmed = this.trimFreeformToContent(canvas, bounds, mask);
+      const trimmed = trimFreeformToContent(canvas, bounds, mask);
       if (!trimmed) {
         // All transparent or empty - no selection
         this.clear();
@@ -253,8 +190,8 @@ class SelectionStore {
     }
 
     this.state.value = {
-      type: "selected",
-      shape: "freeform",
+      type: 'selected',
+      shape: 'freeform',
       bounds: finalBounds,
       mask: finalMask,
     };
@@ -266,103 +203,28 @@ class SelectionStore {
    */
   shrinkToContent(canvas: HTMLCanvasElement) {
     const s = this.state.value;
-    if (s.type !== "selected") return;
+    if (s.type !== 'selected') return;
 
-    if (s.shape === "freeform") {
-      const trimmed = this.trimFreeformToContent(canvas, s.bounds, s.mask);
+    if (s.shape === 'freeform') {
+      const trimmed = trimFreeformToContent(canvas, s.bounds, s.mask);
       if (trimmed) {
         this.state.value = {
-          type: "selected",
-          shape: "freeform",
+          type: 'selected',
+          shape: 'freeform',
           bounds: trimmed.bounds,
           mask: trimmed.mask,
         };
       }
     } else {
-      const trimmed = this.trimBoundsToContent(canvas, s.bounds, s.shape);
+      const trimmed = trimBoundsToContent(canvas, s.bounds, s.shape);
       if (trimmed) {
         this.state.value = {
-          type: "selected",
+          type: 'selected',
           shape: s.shape,
           bounds: trimmed,
         };
       }
     }
-  }
-
-  /**
-   * Trim freeform selection to exclude transparent pixels.
-   * Returns null if all selected pixels are transparent.
-   */
-  private trimFreeformToContent(
-    canvas: HTMLCanvasElement,
-    bounds: Rect,
-    mask: Uint8Array
-  ): { bounds: Rect; mask: Uint8Array } | null {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return { bounds, mask };
-
-    const imageData = ctx.getImageData(
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height
-    );
-    const { width, height, data } = imageData;
-
-    // Find content bounds (pixels that are both in mask AND non-transparent)
-    let minX = width;
-    let minY = height;
-    let maxX = -1;
-    let maxY = -1;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = y * width + x;
-        if (mask[idx] !== 255) continue; // Not in selection
-
-        const alpha = data[idx * 4 + 3];
-        if (alpha > 0) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    // All transparent
-    if (maxX < 0 || maxY < 0) {
-      return null;
-    }
-
-    // No trimming needed
-    if (minX === 0 && minY === 0 && maxX === width - 1 && maxY === height - 1) {
-      return { bounds, mask };
-    }
-
-    // Create trimmed mask
-    const newWidth = maxX - minX + 1;
-    const newHeight = maxY - minY + 1;
-    const newMask = new Uint8Array(newWidth * newHeight);
-
-    for (let y = 0; y < newHeight; y++) {
-      for (let x = 0; x < newWidth; x++) {
-        const srcIdx = (minY + y) * width + (minX + x);
-        const dstIdx = y * newWidth + x;
-        newMask[dstIdx] = mask[srcIdx];
-      }
-    }
-
-    return {
-      bounds: {
-        x: bounds.x + minX,
-        y: bounds.y + minY,
-        width: newWidth,
-        height: newHeight,
-      },
-      mask: newMask,
-    };
   }
 
   // ============================================
@@ -380,7 +242,7 @@ class SelectionStore {
     mask?: Uint8Array
   ) {
     this.state.value = {
-      type: "floating",
+      type: 'floating',
       imageData,
       originalBounds,
       currentOffset: { x: 0, y: 0 },
@@ -394,17 +256,17 @@ class SelectionStore {
    * Transitions from 'floating' back to 'selected'
    */
   setSelected(bounds: Rect, shape: SelectionShape, mask?: Uint8Array) {
-    if (shape === "freeform" && mask) {
+    if (shape === 'freeform' && mask) {
       this.state.value = {
-        type: "selected",
-        shape: "freeform",
+        type: 'selected',
+        shape: 'freeform',
         bounds,
         mask,
       };
     } else {
       this.state.value = {
-        type: "selected",
-        shape: shape as "rectangle" | "ellipse",
+        type: 'selected',
+        shape: shape as 'rectangle' | 'ellipse',
         bounds,
       };
     }
@@ -412,7 +274,7 @@ class SelectionStore {
 
   moveFloat(dx: number, dy: number) {
     const s = this.state.value;
-    if (s.type !== "floating") return;
+    if (s.type !== 'floating') return;
 
     this.state.value = {
       ...s,
@@ -428,7 +290,7 @@ class SelectionStore {
    * The command handles the actual pixel operations
    */
   clearAfterCommit() {
-    this.state.value = { type: "none" };
+    this.state.value = { type: 'none' };
   }
 
   /**
@@ -454,7 +316,7 @@ class SelectionStore {
     mask?: Uint8Array
   ) {
     this.state.value = {
-      type: "transforming",
+      type: 'transforming',
       imageData,
       originalBounds: bounds,
       currentBounds: { ...bounds },
@@ -489,13 +351,13 @@ class SelectionStore {
 
     // If there's a pending rotation, apply it at full quality
     if (this.pendingRotation !== null) {
-      this._applyRotation(this.pendingRotation, "final");
+      this._applyRotation(this.pendingRotation, 'final');
       this.pendingRotation = null;
     } else {
       // Regenerate current rotation at full quality
       const s = this.state.value;
-      if (s.type === "transforming" && s.rotation !== 0) {
-        this._applyRotation(s.rotation, "final");
+      if (s.type === 'transforming' && s.rotation !== 0) {
+        this._applyRotation(s.rotation, 'final');
       }
     }
   }
@@ -508,7 +370,7 @@ class SelectionStore {
    */
   updateRotation(angleDegrees: number) {
     const s = this.state.value;
-    if (s.type !== "transforming") return;
+    if (s.type !== 'transforming') return;
 
     // If dragging, use rAF throttling to batch updates
     if (this.isRotationDragging) {
@@ -518,14 +380,14 @@ class SelectionStore {
         this.rotationRafId = requestAnimationFrame(() => {
           this.rotationRafId = null;
           if (this.pendingRotation !== null) {
-            this._applyRotation(this.pendingRotation, "draft");
+            this._applyRotation(this.pendingRotation, 'draft');
             this.pendingRotation = null;
           }
         });
       }
     } else {
       // Not dragging (e.g., slider or direct input) - apply immediately at full quality
-      this._applyRotation(angleDegrees, "final");
+      this._applyRotation(angleDegrees, 'final');
     }
   }
 
@@ -534,10 +396,10 @@ class SelectionStore {
    */
   private _applyRotation(
     angleDegrees: number,
-    quality: "draft" | "final"
+    quality: 'draft' | 'final'
   ) {
     const s = this.state.value;
-    if (s.type !== "transforming") return;
+    if (s.type !== 'transforming') return;
 
     const normalizedAngle = normalizeAngle(angleDegrees);
 
@@ -571,7 +433,7 @@ class SelectionStore {
    */
   moveTransform(dx: number, dy: number) {
     const s = this.state.value;
-    if (s.type !== "transforming") return;
+    if (s.type !== 'transforming') return;
 
     this.state.value = {
       ...s,
@@ -587,7 +449,7 @@ class SelectionStore {
    */
   getTransformImageData(): ImageData | null {
     const s = this.state.value;
-    if (s.type !== "transforming") return null;
+    if (s.type !== 'transforming') return null;
     return s.imageData;
   }
 
@@ -596,7 +458,7 @@ class SelectionStore {
    */
   getTransformPreview(): ImageData | null {
     const s = this.state.value;
-    if (s.type !== "transforming") return null;
+    if (s.type !== 'transforming') return null;
     return s.previewData ?? s.imageData;
   }
 
@@ -613,7 +475,7 @@ class SelectionStore {
     mask?: Uint8Array;
   } | null {
     const s = this.state.value;
-    if (s.type !== "transforming") return null;
+    if (s.type !== 'transforming') return null;
     return {
       imageData: s.imageData,
       originalBounds: s.originalBounds,
@@ -630,11 +492,11 @@ class SelectionStore {
    */
   cancelTransform() {
     const s = this.state.value;
-    if (s.type !== "transforming") return;
+    if (s.type !== 'transforming') return;
 
     // Restore to floating at original position
     this.state.value = {
-      type: "floating",
+      type: 'floating',
       imageData: s.imageData,
       originalBounds: s.originalBounds,
       currentOffset: { x: 0, y: 0 },
@@ -648,7 +510,7 @@ class SelectionStore {
    * The actual pixel operations are handled by the command.
    */
   clearAfterTransform() {
-    this.state.value = { type: "none" };
+    this.state.value = { type: 'none' };
   }
 
   // ============================================
@@ -656,94 +518,38 @@ class SelectionStore {
   // ============================================
 
   clear() {
-    this.state.value = { type: "none" };
+    this.state.value = { type: 'none' };
   }
 
   isPointInSelection(x: number, y: number): boolean {
     const s = this.state.value;
 
-    if (s.type === "selected") {
-      const mask = s.shape === "freeform" ? s.mask : undefined;
-      return this.isPointInBounds(x, y, s.bounds, s.shape, mask);
+    if (s.type === 'selected') {
+      const mask = s.shape === 'freeform' ? s.mask : undefined;
+      return isPointInBounds(x, y, s.bounds, s.shape, mask);
     }
 
-    if (s.type === "floating") {
+    if (s.type === 'floating') {
       const floatBounds = {
         x: s.originalBounds.x + s.currentOffset.x,
         y: s.originalBounds.y + s.currentOffset.y,
         width: s.originalBounds.width,
         height: s.originalBounds.height,
       };
-      return this.isPointInBounds(x, y, floatBounds, s.shape, s.mask);
+      return isPointInBounds(x, y, floatBounds, s.shape, s.mask);
     }
 
-    if (s.type === "transforming") {
-      // Check against the actual rotated bounds, not the expanded axis-aligned bounding box
-      const { originalBounds, currentOffset, rotation } = s;
-
-      // Calculate center of selection (including movement offset)
-      const cx = originalBounds.x + currentOffset.x + originalBounds.width / 2;
-      const cy = originalBounds.y + currentOffset.y + originalBounds.height / 2;
-
-      // Translate point relative to center
-      const px = x - cx;
-      const py = y - cy;
-
-      // Rotate point backwards by -rotation to get position in original coordinate space
-      const angle = (-rotation * Math.PI) / 180;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const rotatedX = px * cos - py * sin;
-      const rotatedY = px * sin + py * cos;
-
-      // Check if rotated point is within original bounds (centered at 0,0)
-      const halfW = originalBounds.width / 2;
-      const halfH = originalBounds.height / 2;
-      return (
-        rotatedX >= -halfW &&
-        rotatedX < halfW &&
-        rotatedY >= -halfH &&
-        rotatedY < halfH
+    if (s.type === 'transforming') {
+      return isPointInRotatedBounds(
+        x,
+        y,
+        s.originalBounds,
+        s.currentOffset,
+        s.rotation
       );
     }
 
     return false;
-  }
-
-  private isPointInBounds(
-    x: number,
-    y: number,
-    bounds: Rect,
-    shape: SelectionShape,
-    mask?: Uint8Array
-  ): boolean {
-    const { x: bx, y: by, width: bw, height: bh } = bounds;
-
-    if (x < bx || x >= bx + bw || y < by || y >= by + bh) {
-      return false;
-    }
-
-    if (shape === "rectangle") {
-      return true;
-    }
-
-    if (shape === "ellipse") {
-      // Point in ellipse test
-      const cx = bx + bw / 2;
-      const cy = by + bh / 2;
-      const rx = bw / 2;
-      const ry = bh / 2;
-      const dx = (x - cx) / rx;
-      const dy = (y - cy) / ry;
-      return dx * dx + dy * dy <= 1;
-    }
-
-    if (shape === "freeform" && mask) {
-      return isPointInMask(x, y, mask, bounds);
-    }
-
-    // Fallback: treat as rectangle
-    return true;
   }
 
   setActiveLayerId(layerId: string) {
@@ -765,7 +571,7 @@ class SelectionStore {
    * Reset mode to 'replace' after selection is finalized.
    */
   resetMode() {
-    this.mode.value = "replace";
+    this.mode.value = 'replace';
   }
 }
 
