@@ -5,7 +5,7 @@ class GridStore {
   pixelGridEnabled = signal<boolean>(true);
   pixelGridColor = signal<string>("#000000");
   pixelGridOpacity = signal<number>(1.0);
-  autoShowThreshold = signal<number>(8); // Zoom level to auto-show
+  autoShowThreshold = signal<number>(16); // Zoom level to auto-show
 
   // Tile grid settings (larger spacing for sprite sheets, tiles)
   tileGridEnabled = signal<boolean>(false);
