@@ -4,9 +4,9 @@
  * Handles mouse-based panning, quick eyedropper, and lightness shifting.
  */
 
-import { viewportStore } from '../../../stores/viewport';
-import { colorStore } from '../../../stores/colors';
-import { toolStore } from '../../../stores/tools';
+import { viewportStore } from "../../../stores/viewport";
+import { colorStore } from "../../../stores/colors";
+import { toolStore } from "../../../stores/tools";
 
 export interface PanState {
   isDragging: boolean;
@@ -36,9 +36,11 @@ export function createPanState(): PanState {
 export function isClickOnUI(e: MouseEvent | WheelEvent): boolean {
   const target = e.target as HTMLElement;
   // Check if click is on toolbar, sidebar, timeline, dialogs, context bar, menu bar, or panels
-  return target.closest(
-    'pf-toolbar, pf-sidebar, pf-timeline, pf-layers-panel, [role="dialog"], .context-bar, pf-menu-bar, pf-context-bar, pf-palette-panel, pf-brush-panel'
-  ) !== null;
+  return (
+    target.closest(
+      'pf-toolbar, pf-sidebar, pf-timeline, pf-layers-panel, [role="dialog"], .context-bar, pf-menu-bar, pf-context-bar, pf-palette-panel, pf-brush-panel'
+    ) !== null
+  );
 }
 
 /**
@@ -79,7 +81,12 @@ export function handleMouseDown(
 ): void {
   // Check if current tool is a selection tool (needs Alt for subtract mode, Ctrl for shrink-to-content)
   const currentTool = toolStore.activeTool.value;
-  const isSelectionTool = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'].includes(currentTool);
+  const isSelectionTool = [
+    "marquee-rect",
+    "lasso",
+    "polygonal-lasso",
+    "magic-wand",
+  ].includes(currentTool);
 
   // Alt or Cmd/Meta + Click = Quick Eyedropper (but not for selection tools - they use Alt for subtract)
   // Left click: pick to foreground, Right click: pick to background
@@ -127,7 +134,7 @@ function triggerQuickEyedropper(
   e: MouseEvent,
   callbacks: PanHandlerCallbacks
 ): void {
-  const drawingCanvas = callbacks.querySelector('pf-drawing-canvas') as any;
+  const drawingCanvas = callbacks.querySelector("pf-drawing-canvas") as any;
   if (!drawingCanvas?.canvas) return;
 
   const canvasEl = drawingCanvas.canvas as HTMLCanvasElement;
@@ -141,15 +148,15 @@ function triggerQuickEyedropper(
   // Bounds check
   if (x < 0 || x >= canvasEl.width || y < 0 || y >= canvasEl.height) return;
 
-  const ctx = canvasEl.getContext('2d');
+  const ctx = canvasEl.getContext("2d");
   if (!ctx) return;
 
   const pixel = ctx.getImageData(x, y, 1, 1).data;
   const hex =
-    '#' +
-    pixel[0].toString(16).padStart(2, '0') +
-    pixel[1].toString(16).padStart(2, '0') +
-    pixel[2].toString(16).padStart(2, '0');
+    "#" +
+    pixel[0].toString(16).padStart(2, "0") +
+    pixel[1].toString(16).padStart(2, "0") +
+    pixel[2].toString(16).padStart(2, "0");
 
   if (e.button === 2) {
     // Right click: pick to secondary/background color
@@ -255,9 +262,6 @@ export function handleMouseLeave(state: PanState): void {
  * Handle context menu (prevent default).
  */
 export function handleContextMenu(e: MouseEvent): void {
-  // Always prevent context menu on canvas - right-click is used for:
-  // - Drawing with secondary color (pencil)
-  // - Erasing to background color (eraser)
-  // - Ctrl+RightClick lightness shifting
+  // Always prevent context menu on canvas
   e.preventDefault();
 }

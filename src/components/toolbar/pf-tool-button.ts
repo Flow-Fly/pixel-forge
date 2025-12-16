@@ -65,39 +65,6 @@ export class PFToolButton extends BaseComponent {
     :host([active]) .group-indicator {
       border-bottom-color: var(--pf-color-accent);
     }
-
-    // .gear-icon {
-    //   position: absolute;
-    //   bottom: 0;
-    //   right: 0;
-    //   width: 12px;
-    //   height: 12px;
-    //   font-size: 8px;
-    //   background: var(--pf-color-bg-panel, #141414);
-    //   border: 1px solid var(--pf-color-border, #333);
-    //   border-radius: 2px;
-    //   color: var(--pf-color-text-muted, #808080);
-    //   cursor: pointer;
-    //   display: flex;
-    //   align-items: center;
-    //   justify-content: center;
-    //   opacity: 0;
-    //   transition: opacity 0.15s ease;
-    // }
-
-    // .button-container:hover .gear-icon {
-    //   opacity: 1;
-    // }
-
-    // .gear-icon:hover {
-    //   background: var(--pf-color-bg-surface, #1e1e1e);
-    //   color: var(--pf-color-text-main, #e0e0e0);
-    // }
-
-    // /* Hide gear icon when showing group indicator */
-    // :host([has-group]) .gear-icon {
-    //   display: none;
-    // }
   `;
 
   @property({ type: String }) tool: ToolType = "pencil";
@@ -113,7 +80,7 @@ export class PFToolButton extends BaseComponent {
   @state() private showGroupMenu = false;
   @state() private menuX = 0;
   @state() private menuY = 0;
-  @state() private anchorRect?: DOMRect;
+  // @state() private anchorRect?: DOMRect;
 
   private documentClickHandler = (e: MouseEvent) => {
     if (this.showGroupMenu && !this.contains(e.target as Node)) {
@@ -136,9 +103,9 @@ export class PFToolButton extends BaseComponent {
       <div class="button-container">
         <button
           title="${toolName} (${this.shortcut})${this.hasGroup
-            ? " - Right-click for more tools"
+            ? " - Click for more tools"
             : ""}"
-          @contextmenu=${this.handleContextMenu}
+          @click=${this.handleContextMenu}
         >
           <img class="icon" src="${getToolIcon(this.tool)}" alt="${toolName}" />
         </button>
@@ -161,32 +128,16 @@ export class PFToolButton extends BaseComponent {
   private handleContextMenu(e: MouseEvent) {
     e.preventDefault();
 
-    if (this.hasGroup) {
-      // Show group menu for tool groups
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menuX = rect.right + 4;
-      this.menuY = rect.top;
-      this.showGroupMenu = true;
+    // Show group menu for tool groups
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    this.menuX = rect.right + 4;
+    this.menuY = rect.top;
+    this.showGroupMenu = true;
 
-      // Close on outside click
-      setTimeout(() => {
-        document.addEventListener("click", this.documentClickHandler);
-      }, 0);
-    } else {
-      // Show options popover for single tools
-      this.openOptionsPopover(e.currentTarget as HTMLElement);
-    }
-  }
-
-  private handleGearClick(e: MouseEvent) {
-    e.stopPropagation();
-    this.openOptionsPopover(e.currentTarget as HTMLElement);
-  }
-
-  private openOptionsPopover(anchor: HTMLElement) {
-    const rect = anchor.getBoundingClientRect();
-    this.anchorRect = rect;
-    this.showOptions = !this.showOptions;
+    // Close on outside click
+    setTimeout(() => {
+      document.addEventListener("click", this.documentClickHandler);
+    }, 0);
   }
 
   private handleToolSelected(e: CustomEvent<{ tool: ToolType }>) {
