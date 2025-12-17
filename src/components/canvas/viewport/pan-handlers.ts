@@ -17,6 +17,7 @@ export interface PanState {
 export interface PanHandlerCallbacks {
   requestUpdate: () => void;
   querySelector: (selector: string) => Element | null;
+  getBoundingClientRect?: () => DOMRect;
 }
 
 /**
@@ -57,6 +58,14 @@ export function handleGlobalMouseDown(
   // Check if clicking on UI elements
   if (isClickOnUI(e)) return;
 
+  const currentTool = toolStore.activeTool.value;
+
+  // Hand tool: pan from anywhere (like spacebar)
+  if (currentTool === "hand" && e.button === 0) {
+    startDragging(e);
+    return;
+  }
+
   // Middle-click pan from anywhere
   if (e.button === 1) {
     startDragging(e);
@@ -87,6 +96,20 @@ export function handleMouseDown(
     "polygonal-lasso",
     "magic-wand",
   ].includes(currentTool);
+
+  // Hand tool: pan on left-click (works at viewport level, doesn't need active layer)
+  if (currentTool === "hand" && e.button === 0) {
+    startDragging(e);
+    return;
+  }
+
+  // Zoom tool: zoom in/out on click (works at viewport level)
+  if (currentTool === "zoom" && (e.button === 0 || e.button === 2)) {
+    e.preventDefault();
+    e.stopPropagation();
+    triggerZoom(e, callbacks, e.altKey || e.button === 2);
+    return;
+  }
 
   // Alt or Cmd/Meta + Click = Quick Eyedropper (but not for selection tools - they use Alt for subtract)
   // Left click: pick to foreground, Right click: pick to background
@@ -125,6 +148,47 @@ export function handleMouseDown(
   if (e.button === 1) {
     startDragging(e);
   }
+}
+
+/**
+ * Zoom at a specific screen position.
+ * @param zoomOut - If true, zoom out; otherwise zoom in
+ */
+function triggerZoom(
+  e: MouseEvent,
+  callbacks: PanHandlerCallbacks,
+  zoomOut: boolean
+): void {
+  let screenX: number;
+  let screenY: number;
+
+  // Try to use getBoundingClientRect if available
+  if (callbacks.getBoundingClientRect) {
+    const rect = callbacks.getBoundingClientRect();
+    screenX = e.clientX - rect.left;
+    screenY = e.clientY - rect.top;
+  } else {
+    // Fallback: use stored cursor position or center
+    const storedX = viewportStore.cursorScreenX.value;
+    const storedY = viewportStore.cursorScreenY.value;
+
+    if (storedX !== null && storedY !== null) {
+      screenX = storedX;
+      screenY = storedY;
+    } else {
+      // Last fallback: center of container
+      screenX = viewportStore.containerWidth.value / 2;
+      screenY = viewportStore.containerHeight.value / 2;
+    }
+  }
+
+  if (zoomOut) {
+    viewportStore.zoomOutAt(screenX, screenY);
+  } else {
+    viewportStore.zoomInAt(screenX, screenY);
+  }
+
+  callbacks.requestUpdate();
 }
 
 /**

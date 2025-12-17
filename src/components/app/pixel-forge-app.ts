@@ -26,6 +26,7 @@ import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
 import { type ToolType } from "../../stores/tools";
+import { panelStore } from "../../stores/panels";
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -254,6 +255,9 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   render() {
+    // Access panel states signal to ensure reactive updates when timeline visibility changes
+    const isTimelineCollapsed = panelStore.panelStates.value.timeline?.collapsed ?? false;
+
     return html`
       <header class="menu-bar">
         <pf-menu-bar
@@ -281,18 +285,22 @@ export class PixelForgeApp extends BaseComponent {
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
         <pf-shortcuts-toggle></pf-shortcuts-toggle>
-        <div
-          class="timeline-resize-handle ${this.isResizingTimeline
-            ? "resizing"
-            : ""}"
-          @mousedown=${this.handleTimelineResizeStart}
-        ></div>
-        <div
-          class="timeline-container"
-          style="height: ${this.timelineHeight}px;"
-        >
-          <pf-timeline></pf-timeline>
-        </div>
+        ${!isTimelineCollapsed
+          ? html`
+              <div
+                class="timeline-resize-handle ${this.isResizingTimeline
+                  ? "resizing"
+                  : ""}"
+                @mousedown=${this.handleTimelineResizeStart}
+              ></div>
+              <div
+                class="timeline-container"
+                style="height: ${this.timelineHeight}px;"
+              >
+                <pf-timeline></pf-timeline>
+              </div>
+            `
+          : ""}
       </main>
 
       <aside class="panels">
