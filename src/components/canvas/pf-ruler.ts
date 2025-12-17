@@ -68,7 +68,7 @@ export class PFRuler extends BaseComponent {
     /* Guide indicator on ruler */
     .guide-marker {
       position: absolute;
-      background: var(--guide-color, #00ffff);
+      background: var(--pf-color-ember-rest, #00ffff);
       pointer-events: none;
     }
 
@@ -90,7 +90,7 @@ export class PFRuler extends BaseComponent {
       width: 14px;
       height: 14px;
       background: var(--color-bg-tertiary, #333);
-      border: 1px solid var(--guide-color, #00ffff);
+      border: 1px solid var(--pf-color-ember-rest, #00ffff);
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -112,7 +112,7 @@ export class PFRuler extends BaseComponent {
       position: absolute;
       width: 8px;
       height: 1.5px;
-      background: var(--guide-color, #00ffff);
+      background: var(--pf-color-ember-rest, #00ffff);
     }
 
     .guide-delete::before {

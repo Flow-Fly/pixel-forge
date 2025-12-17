@@ -5,7 +5,6 @@ import { animationStore } from "../../stores/animation";
 import { layerStore } from "../../stores/layers";
 import { viewportStore } from "../../stores/viewport";
 import { projectStore } from "../../stores/project";
-import { renderFrameToCanvas } from "../../utils/preview-renderer";
 
 type BackgroundType = "white" | "black" | "checker";
 
@@ -450,8 +449,42 @@ export class PFPreviewOverlay extends BaseComponent {
     const currentFrameId = animationStore.currentFrameId.value;
     const layers = layerStore.layers.value;
     const cels = animationStore.cels.value;
+    const canvas = this.previewCanvas;
+    const previewScale = this.getPreviewScale();
 
-    renderFrameToCanvas(this.ctx, currentFrameId, layers, cels);
+    // Clear at actual canvas size
+    this.ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Render each visible layer
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+
+      const key = `${layer.id}:${currentFrameId}`;
+      const cel = cels.get(key);
+      const canvasToUse = cel?.canvas ?? layer.canvas;
+
+      if (canvasToUse) {
+        // Calculate effective opacity: layer opacity * cel opacity
+        const layerOpacity = layer.opacity / 255;
+        const celOpacity = (cel?.opacity ?? 100) / 100;
+        this.ctx.globalAlpha = layerOpacity * celOpacity;
+
+        this.ctx.globalCompositeOperation =
+          layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+
+        if (previewScale >= 1) {
+          // Scaling UP: draw at native resolution, CSS handles pixelated scaling
+          this.ctx.drawImage(canvasToUse, 0, 0);
+        } else {
+          // Scaling DOWN: draw scaled to reduce canvas size for performance
+          this.ctx.drawImage(canvasToUse, 0, 0, canvas.width, canvas.height);
+        }
+      }
+    }
+
+    // Reset composite settings
+    this.ctx.globalAlpha = 1;
+    this.ctx.globalCompositeOperation = 'source-over';
   }
 
   /**
@@ -514,8 +547,13 @@ export class PFPreviewOverlay extends BaseComponent {
     const canvasW = projectStore.width.value;
     const canvasH = projectStore.height.value;
     const previewScale = this.getPreviewScale();
-    const displayW = canvasW * previewScale;
-    const displayH = canvasH * previewScale;
+    const displayW = Math.round(canvasW * previewScale);
+    const displayH = Math.round(canvasH * previewScale);
+
+    // For small canvases (scaling UP): use native resolution, CSS handles pixelated scaling
+    // For large canvases (scaling DOWN): use reduced resolution for performance
+    const actualCanvasW = previewScale >= 1 ? canvasW : displayW;
+    const actualCanvasH = previewScale >= 1 ? canvasH : displayH;
 
     const viewportStyle = this.getViewportIndicatorStyle();
 
@@ -545,8 +583,8 @@ export class PFPreviewOverlay extends BaseComponent {
           >
             <div class="preview-canvas-wrapper">
               <canvas
-                width="${canvasW}"
-                height="${canvasH}"
+                width="${actualCanvasW}"
+                height="${actualCanvasH}"
                 style="width: ${displayW}px; height: ${displayH}px;"
               ></canvas>
               ${viewportStyle

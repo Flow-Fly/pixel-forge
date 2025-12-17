@@ -11,7 +11,6 @@ import {
   RemoveLayerCommand,
   UpdateLayerCommand,
 } from "../../commands/layer-commands";
-import { compositeLayer } from "../../utils/canvas-utils";
 import "./pf-timeline-tooltip";
 import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
 import "../ui/pf-context-menu";
@@ -121,6 +120,14 @@ export class PFTimelineLayers extends BaseComponent {
 
     .icon-btn.locked-layer {
       color: var(--pf-color-accent-yellow, #ffc107);
+    }
+
+    .icon-btn.continuous-layer {
+      color: var(--pf-color-accent-green, #22c55e);
+    }
+
+    .icon-btn.not-continuous {
+      opacity: 0.3;
     }
 
     .layer-name {
@@ -238,18 +245,38 @@ export class PFTimelineLayers extends BaseComponent {
 
     const currentFrameId = animationStore.currentFrameId.value;
 
+    // For large canvases, use a capped preview size for performance
+    const MAX_PREVIEW_SIZE = 128;
+    const width = projectStore.width.value;
+    const height = projectStore.height.value;
+    const maxDim = Math.max(width, height);
+    const previewScale = maxDim > MAX_PREVIEW_SIZE ? MAX_PREVIEW_SIZE / maxDim : 1;
+    const previewWidth = Math.round(width * previewScale);
+    const previewHeight = Math.round(height * previewScale);
+
     // Update tooltip - layer preview doesn't need secondary text
     this.tooltip.primaryText = layerName;
     this.tooltip.secondaryText = "";
-    this.tooltip.canvasWidth = projectStore.width.value;
-    this.tooltip.canvasHeight = projectStore.height.value;
+    this.tooltip.canvasWidth = previewWidth;
+    this.tooltip.canvasHeight = previewHeight;
 
-    // Render the layer preview
+    // Render the layer preview at scaled size
     this.tooltip.show(target);
     requestAnimationFrame(() => {
       const ctx = this.tooltip.getContext();
       if (ctx) {
-        compositeLayer(layerId, currentFrameId, ctx);
+        ctx.clearRect(0, 0, previewWidth, previewHeight);
+
+        // Get the layer's cel canvas and draw it scaled
+        const cels = animationStore.cels.value;
+        const key = `${layerId}:${currentFrameId}`;
+        const cel = cels.get(key);
+        const layer = layerStore.layers.value.find(l => l.id === layerId);
+        const canvasToUse = cel?.canvas ?? layer?.canvas;
+
+        if (canvasToUse) {
+          ctx.drawImage(canvasToUse, 0, 0, previewWidth, previewHeight);
+        }
       }
     });
   }
@@ -290,6 +317,11 @@ export class PFTimelineLayers extends BaseComponent {
   private toggleLock(id: string, e: Event) {
     e.stopPropagation();
     layerStore.toggleLock(id);
+  }
+
+  private toggleContinuous(id: string, e: Event) {
+    e.stopPropagation();
+    layerStore.toggleContinuous(id);
   }
 
   private startRename(id: string, currentName: string, e: Event) {
@@ -373,6 +405,14 @@ export class PFTimelineLayers extends BaseComponent {
               new UpdateLayerCommand(layerId, { opacity: newOpacity })
             );
           }
+        },
+      },
+      { type: "divider" },
+      {
+        type: "item",
+        label: layer.continuous ? "◯ Make Non-Continuous" : "∞ Make Continuous",
+        action: () => {
+          layerStore.toggleContinuous(layerId);
         },
       },
       { type: "divider" },
@@ -604,6 +644,13 @@ export class PFTimelineLayers extends BaseComponent {
                 title="${layer.locked ? "Unlock" : "Lock"} layer"
               >
                 ${layer.locked ? "🔒" : "🔓"}
+              </button>
+              <button
+                class="icon-btn ${layer.continuous ? "continuous-layer" : "not-continuous"}"
+                @click=${(e: Event) => this.toggleContinuous(layer.id, e)}
+                title="${layer.continuous ? "Continuous (linked new cels)" : "Non-continuous (empty new cels)"}"
+              >
+                ∞
               </button>
               ${this.editingLayerId === layer.id
                 ? html`

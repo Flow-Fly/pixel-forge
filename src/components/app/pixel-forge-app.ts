@@ -166,10 +166,22 @@ export class PixelForgeApp extends BaseComponent {
     }
 
     @keyframes toastFadeInOut {
-      0% { opacity: 0; transform: translate(-50%, -50%) translateY(10px); }
-      15% { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
-      85% { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
-      100% { opacity: 0; transform: translate(-50%, -50%) translateY(-10px); }
+      0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) translateY(10px);
+      }
+      15% {
+        opacity: 1;
+        transform: translate(-50%, -50%) translateY(0);
+      }
+      85% {
+        opacity: 1;
+        transform: translate(-50%, -50%) translateY(0);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) translateY(-10px);
+      }
     }
   `;
 
@@ -209,18 +221,12 @@ export class PixelForgeApp extends BaseComponent {
       "show-keyboard-shortcuts-dialog",
       this.handleShowKeyboardShortcutsDialog
     );
-    window.addEventListener(
-      "show-resize-dialog",
-      this.handleShowResizeDialog
-    );
+    window.addEventListener("show-resize-dialog", this.handleShowResizeDialog);
     window.addEventListener(
       "show-open-file-dialog",
       this.handleShowOpenFileDialog
     );
-    window.addEventListener(
-      "show-export-dialog",
-      this.handleShowExportDialog
-    );
+    window.addEventListener("show-export-dialog", this.handleShowExportDialog);
 
     // Warn user about unsaved changes before leaving
     window.addEventListener("beforeunload", this.handleBeforeUnload);
@@ -275,7 +281,8 @@ export class PixelForgeApp extends BaseComponent {
     if (hasUnsavedChanges) {
       // Modern browsers ignore custom messages, but the prompt will still show
       e.preventDefault();
-      e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+      e.returnValue =
+        "You have unsaved changes. Are you sure you want to leave?";
       return e.returnValue;
     }
   };
@@ -366,7 +373,8 @@ export class PixelForgeApp extends BaseComponent {
 
   render() {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
-    const isTimelineCollapsed = panelStore.panelStates.value.timeline?.collapsed ?? false;
+    const isTimelineCollapsed =
+      panelStore.panelStates.value.timeline?.collapsed ?? false;
 
     return html`
       <header class="menu-bar">
@@ -394,7 +402,7 @@ export class PixelForgeApp extends BaseComponent {
         </pf-canvas-viewport>
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
-        <pf-shortcuts-toggle></pf-shortcuts-toggle>
+        <!-- <pf-shortcuts-toggle></pf-shortcuts-toggle> -->
         ${!isTimelineCollapsed
           ? html`
               <div
@@ -459,7 +467,9 @@ export class PixelForgeApp extends BaseComponent {
       <pf-grid-settings-dialog></pf-grid-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
 
-      ${this.warningMessage ? html`<div class="warning-toast">${this.warningMessage}</div>` : ""}
+      ${this.warningMessage
+        ? html`<div class="warning-toast">${this.warningMessage}</div>`
+        : ""}
     `;
   }
 }

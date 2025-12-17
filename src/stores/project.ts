@@ -56,6 +56,7 @@ class ProjectStore {
         visible: layer.visible,
         opacity: layer.opacity,
         blendMode: layer.blendMode,
+        continuous: layer.continuous,
         data: layer.canvas
           ? await canvasToPngBytes(layer.canvas)
           : new Uint8Array(0),
@@ -202,6 +203,7 @@ class ProjectStore {
       layer.visible = l.visible;
       layer.opacity = l.opacity;
       layer.blendMode = l.blendMode || "normal";
+      layer.continuous = l.continuous || false;
 
       // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
       if (hasImageData(l.data) && layer.canvas) {
@@ -354,13 +356,15 @@ class ProjectStore {
       animationStore.tags.value = [];
     }
 
-    // 7. Rebuild ephemeral colors from drawing (auto-save reload only)
-    // When loading from auto-save, the palette comes from localStorage but the
-    // index buffers might reference colors not in that palette. Scan the drawing
-    // and add any missing colors to ephemeral.
+    // 7. Rebuild ephemeral colors from drawing
+    // Scan the drawing for colors not in the palette and add them as ephemeral.
+    // This handles:
+    // - Auto-save reload: palette from localStorage, drawing might have extra colors
+    // - File import: file might have colors in canvas not in saved palette (older formats)
+    paletteStore.rebuildEphemeralFromDrawing();
+
+    // For auto-save, also rebuild index buffers to match the new palette
     if (fromAutoSave) {
-      paletteStore.rebuildEphemeralFromDrawing();
-      // Now rebuild index buffers to match the new palette (main + ephemeral)
       animationStore.rebuildAllIndexBuffers();
     }
 

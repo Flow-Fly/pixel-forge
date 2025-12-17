@@ -138,7 +138,7 @@ export class PFNewProjectDialog extends BaseComponent {
             <input
               type="number"
               min="1"
-              max="4096"
+              max="2048"
               .value=${String(this.width)}
               @input=${this.handleWidthInput}
             >
@@ -148,7 +148,7 @@ export class PFNewProjectDialog extends BaseComponent {
             <input
               type="number"
               min="1"
-              max="4096"
+              max="2048"
               .value=${String(this.height)}
               @input=${this.handleHeightInput}
             >
@@ -189,8 +189,8 @@ export class PFNewProjectDialog extends BaseComponent {
   }
 
   async create() {
-    const width = Math.max(1, Math.min(4096, this.width));
-    const height = Math.max(1, Math.min(4096, this.height));
+    const width = Math.max(1, Math.min(2048, this.width));
+    const height = Math.max(1, Math.min(2048, this.height));
 
     await projectStore.newProject(width, height);
     this.close();

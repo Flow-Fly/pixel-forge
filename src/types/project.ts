@@ -19,6 +19,7 @@ export interface ProjectFile {
     visible: boolean;
     opacity: number;
     blendMode?: BlendMode;     // v2.1+: blend mode (default: 'normal')
+    continuous?: boolean;      // v3.2+: continuous layer (new cels linked to previous frame)
     data: string | Uint8Array; // Base64 (v1.x) or binary PNG (v2.0+)
     textData?: TextLayerData;  // v2.1+: text layer metadata (font, color)
   }[];

@@ -71,6 +71,8 @@ export class PFResizeDialog extends BaseComponent {
           <label>Width (px)</label>
           <input
             type="number"
+            min="1"
+            max="2048"
             .value=${this.width}
             @input=${(e: Event) => this.width = parseInt((e.target as HTMLInputElement).value)}
           >
@@ -79,6 +81,8 @@ export class PFResizeDialog extends BaseComponent {
           <label>Height (px)</label>
           <input
             type="number"
+            min="1"
+            max="2048"
             .value=${this.height}
             @input=${(e: Event) => this.height = parseInt((e.target as HTMLInputElement).value)}
           >
@@ -98,7 +102,9 @@ export class PFResizeDialog extends BaseComponent {
   }
 
   apply() {
-    projectStore.resizeCanvas(this.width, this.height);
+    const width = Math.max(1, Math.min(2048, this.width));
+    const height = Math.max(1, Math.min(2048, this.height));
+    projectStore.resizeCanvas(width, height);
     this.close();
   }
 }
