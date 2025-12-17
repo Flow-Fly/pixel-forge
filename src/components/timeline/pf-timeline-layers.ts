@@ -136,6 +136,58 @@ export class PFTimelineLayers extends BaseComponent {
       background: var(--pf-color-bg-surface);
     }
 
+    .opacity-control {
+      display: flex;
+      align-items: center;
+      font-size: 10px;
+      color: var(--pf-color-text-muted);
+      margin-left: auto;
+      padding-right: 4px;
+    }
+
+    .opacity-value {
+      cursor: ew-resize;
+      padding: 2px 4px;
+      border-radius: 2px;
+      min-width: 32px;
+      text-align: right;
+      user-select: none;
+    }
+
+    .opacity-value:hover {
+      background: var(--pf-color-bg-hover);
+    }
+
+    .opacity-value.scrubbing {
+      background: var(--pf-color-primary-muted, rgba(74, 158, 255, 0.3));
+    }
+
+    .opacity-input {
+      width: 40px;
+      padding: 2px 4px;
+      background: var(--pf-color-bg-dark);
+      border: 1px solid var(--pf-color-border);
+      border-radius: 2px;
+      color: var(--pf-color-text-main);
+      font-size: 10px;
+      text-align: right;
+    }
+
+    .opacity-input:focus {
+      outline: none;
+      border-color: var(--pf-color-accent);
+    }
+
+    .layer-type-badge {
+      font-size: 9px;
+      font-weight: bold;
+      padding: 1px 3px;
+      border-radius: 2px;
+      margin-right: 4px;
+      background: var(--pf-color-accent-cyan, #22d3ee);
+      color: var(--pf-color-bg-dark);
+    }
+
     .layer-name-input {
       flex: 1;
       background: var(--pf-color-bg-surface);
@@ -164,12 +216,17 @@ export class PFTimelineLayers extends BaseComponent {
   @state() private editingName: string = "";
   @state() private draggedLayerId: string | null = null;
   @state() private dragOverLayerId: string | null = null;
+  @state() private scrubbingLayerId: string | null = null;
+  @state() private editingOpacityLayerId: string | null = null;
 
   @query("pf-timeline-tooltip") private tooltip!: PFTimelineTooltip;
   @query("pf-context-menu") private contextMenu!: PFContextMenu;
 
   // Track original opacity for undo/redo
   private contextMenuOriginalOpacity: number = 255;
+  private scrubStartX = 0;
+  private scrubStartOpacity = 0;
+  private scrubOriginalOpacity = 0;
 
   private handleLayerMouseEnter(
     e: MouseEvent,
@@ -382,6 +439,93 @@ export class PFTimelineLayers extends BaseComponent {
     this.dragOverLayerId = null;
   }
 
+  // Opacity scrubbing handlers
+  private handleOpacityScrubStart = (layerId: string, currentOpacity: number, e: MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    this.scrubbingLayerId = layerId;
+    this.scrubStartX = e.clientX;
+    this.scrubStartOpacity = Math.round((currentOpacity / 255) * 100);
+    this.scrubOriginalOpacity = currentOpacity;
+
+    window.addEventListener("mousemove", this.handleOpacityScrubMove);
+    window.addEventListener("mouseup", this.handleOpacityScrubEnd);
+  };
+
+  private handleOpacityScrubMove = (e: MouseEvent) => {
+    if (!this.scrubbingLayerId) return;
+
+    const deltaX = e.clientX - this.scrubStartX;
+    const deltaPercent = Math.round(deltaX / 2);
+    const newPercent = Math.max(0, Math.min(100, this.scrubStartOpacity + deltaPercent));
+    const newOpacity = Math.round((newPercent / 100) * 255);
+
+    layerStore.updateLayer(this.scrubbingLayerId, { opacity: newOpacity });
+  };
+
+  private handleOpacityScrubEnd = () => {
+    if (this.scrubbingLayerId) {
+      const layer = layerStore.layers.value.find((l) => l.id === this.scrubbingLayerId);
+      if (layer && layer.opacity !== this.scrubOriginalOpacity) {
+        // Restore original value first so command captures correct old state
+        layerStore.updateLayer(this.scrubbingLayerId, { opacity: this.scrubOriginalOpacity });
+        historyStore.execute(
+          new UpdateLayerCommand(this.scrubbingLayerId, { opacity: layer.opacity })
+        );
+      }
+    }
+    this.scrubbingLayerId = null;
+    window.removeEventListener("mousemove", this.handleOpacityScrubMove);
+    window.removeEventListener("mouseup", this.handleOpacityScrubEnd);
+  };
+
+  private handleOpacityDoubleClick = (layerId: string, e: MouseEvent) => {
+    e.stopPropagation();
+    const layer = layerStore.layers.value.find((l) => l.id === layerId);
+    if (layer) {
+      this.scrubOriginalOpacity = layer.opacity;
+      this.editingOpacityLayerId = layerId;
+      this.updateComplete.then(() => {
+        const input = this.shadowRoot?.querySelector(".opacity-input") as HTMLInputElement;
+        input?.focus();
+        input?.select();
+      });
+    }
+  };
+
+  private handleOpacityInputKeyDown = (layerId: string, e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      this.commitOpacityInput(layerId, e.target as HTMLInputElement);
+    } else if (e.key === "Escape") {
+      this.editingOpacityLayerId = null;
+    }
+    e.stopPropagation();
+  };
+
+  private handleOpacityInputBlur = (layerId: string, e: FocusEvent) => {
+    this.commitOpacityInput(layerId, e.target as HTMLInputElement);
+  };
+
+  private commitOpacityInput(layerId: string, input: HTMLInputElement) {
+    const value = parseInt(input.value, 10);
+    if (!isNaN(value)) {
+      const clampedPercent = Math.max(0, Math.min(100, value));
+      const newOpacity = Math.round((clampedPercent / 100) * 255);
+      if (newOpacity !== this.scrubOriginalOpacity) {
+        historyStore.execute(
+          new UpdateLayerCommand(layerId, { opacity: newOpacity })
+        );
+      }
+    }
+    this.editingOpacityLayerId = null;
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("mousemove", this.handleOpacityScrubMove);
+    window.removeEventListener("mouseup", this.handleOpacityScrubEnd);
+  }
+
   render() {
     // Render layers in reverse order (top layer at top of list)
     const layers = [...layerStore.layers.value].reverse();
@@ -479,9 +623,34 @@ export class PFTimelineLayers extends BaseComponent {
                       @dblclick=${(e: Event) =>
                         this.startRename(layer.id, layer.name, e)}
                     >
-                      ${layer.name}
+                      ${layer.type === "text" ? html`<span class="layer-type-badge">T</span>` : ""}${layer.name}
                     </span>
                   `}
+              <div class="opacity-control" @click=${(e: Event) => e.stopPropagation()}>
+                ${this.editingOpacityLayerId === layer.id
+                  ? html`
+                      <input
+                        type="number"
+                        class="opacity-input"
+                        min="0"
+                        max="100"
+                        .value=${String(Math.round((layer.opacity / 255) * 100))}
+                        @keydown=${(e: KeyboardEvent) => this.handleOpacityInputKeyDown(layer.id, e)}
+                        @blur=${(e: FocusEvent) => this.handleOpacityInputBlur(layer.id, e)}
+                        @click=${(e: Event) => e.stopPropagation()}
+                      />
+                    `
+                  : html`
+                      <span
+                        class="opacity-value ${this.scrubbingLayerId === layer.id ? "scrubbing" : ""}"
+                        @mousedown=${(e: MouseEvent) => this.handleOpacityScrubStart(layer.id, layer.opacity, e)}
+                        @dblclick=${(e: MouseEvent) => this.handleOpacityDoubleClick(layer.id, e)}
+                        title="Drag to adjust, double-click to edit"
+                      >
+                        ${Math.round((layer.opacity / 255) * 100)}%
+                      </span>
+                    `}
+              </div>
             </div>
           `
         )}

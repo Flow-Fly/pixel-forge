@@ -94,7 +94,10 @@ export class PFPopover extends BaseComponent {
     super.updated(changedProperties);
     if (changedProperties.has('open') || changedProperties.has('anchorRect')) {
       if (this.open && this.anchorRect) {
+        // Initial position update
         this.updatePosition();
+        // Recalculate after content renders (for accurate dimensions)
+        requestAnimationFrame(() => this.updatePosition());
       }
     }
   }
@@ -105,6 +108,11 @@ export class PFPopover extends BaseComponent {
     const rect = this.anchorRect;
     const gap = 8;
 
+    // Get actual popover dimensions after render
+    const popover = this.shadowRoot?.querySelector('.popover') as HTMLElement;
+    const popoverWidth = popover?.offsetWidth || 280;
+    const popoverHeight = popover?.offsetHeight || 400;
+
     switch (this.position) {
       case 'right':
         this.computedTop = rect.top;
@@ -112,23 +120,24 @@ export class PFPopover extends BaseComponent {
         break;
       case 'left':
         this.computedTop = rect.top;
-        this.computedLeft = rect.left - gap - 200; // Approximate width
+        this.computedLeft = rect.left - gap - popoverWidth;
         break;
       case 'bottom':
         this.computedTop = rect.bottom + gap;
         this.computedLeft = rect.left;
         break;
       case 'top':
-        this.computedTop = rect.top - gap - 100; // Approximate height
+        this.computedTop = rect.top - gap - popoverHeight;
         this.computedLeft = rect.left;
         break;
     }
 
-    // Keep within viewport
-    const maxLeft = window.innerWidth - 220;
-    const maxTop = window.innerHeight - 200;
-    this.computedLeft = Math.max(8, Math.min(this.computedLeft, maxLeft));
-    this.computedTop = Math.max(8, Math.min(this.computedTop, maxTop));
+    // Keep within viewport with proper margins
+    const margin = 8;
+    const maxLeft = window.innerWidth - popoverWidth - margin;
+    const maxTop = window.innerHeight - popoverHeight - margin;
+    this.computedLeft = Math.max(margin, Math.min(this.computedLeft, maxLeft));
+    this.computedTop = Math.max(margin, Math.min(this.computedTop, maxTop));
 
     this.style.top = `${this.computedTop}px`;
     this.style.left = `${this.computedLeft}px`;

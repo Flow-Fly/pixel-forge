@@ -3,6 +3,7 @@ import { layerStore } from "./layers";
 import { animationStore, EMPTY_CEL_LINK_ID } from "./animation";
 import { historyStore } from "./history";
 import { paletteStore } from "./palette";
+import { viewportStore } from "./viewport";
 import { persistenceService } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
 import {
@@ -365,6 +366,20 @@ class ProjectStore {
 
     // 8. Update used colors for palette usage indicators
     paletteStore.refreshUsedColors();
+
+    // 9. Auto-select the first layer (prevents confusing "no layer selected" state)
+    // Note: addLayer sets activeLayerId to a temp UUID, but we then overwrite layer.id
+    // with the saved ID, leaving activeLayerId pointing to a non-existent layer.
+    const layers = layerStore.layers.value;
+    if (layers.length > 0) {
+      layerStore.setActiveLayer(layers[0].id);
+    }
+
+    // 10. Auto-fit canvas to viewport
+    // Use setTimeout to ensure the viewport has rendered with new dimensions
+    setTimeout(() => {
+      viewportStore.resetView();
+    }, 0);
   }
 
   /**

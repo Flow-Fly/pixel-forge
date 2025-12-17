@@ -60,6 +60,7 @@ export class PFDrawingCanvas extends BaseComponent {
     :host([pan-cursor="grabbing"]) canvas {
       cursor: grabbing !important;
     }
+
   `;
 
   private ctx!: CanvasRenderingContext2D;
@@ -617,6 +618,19 @@ export class PFDrawingCanvas extends BaseComponent {
         // Schedule render instead of immediate call
         renderScheduler.scheduleRender(() => this.renderCanvas());
       }
+    } else {
+      // Show warning for drawing tools only (not selection/transform/eyedropper)
+      const drawingTools = ["pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "text"];
+      const currentTool = toolStore.activeTool.value;
+      if (drawingTools.includes(currentTool)) {
+        if (!activeLayerId || !activeLayer) {
+          this.showWarning("No layer selected");
+        } else if (activeLayer.locked) {
+          this.showWarning("Layer is locked");
+        } else if (!activeLayer.visible) {
+          this.showWarning("Layer is hidden");
+        }
+      }
     }
   }
 
@@ -844,6 +858,17 @@ export class PFDrawingCanvas extends BaseComponent {
       default:
         return "Drawing";
     }
+  }
+
+  /**
+   * Show a warning message (dispatches event to app level)
+   */
+  private showWarning(message: string) {
+    window.dispatchEvent(
+      new CustomEvent("show-warning-toast", {
+        detail: { message },
+      })
+    );
   }
 
   render() {

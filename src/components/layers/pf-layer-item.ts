@@ -156,8 +156,9 @@ export class PFLayerItem extends BaseComponent {
     if (this.isScrubbing) {
       const currentOpacity = this.layer.opacity;
       if (currentOpacity !== this.originalOpacity) {
-        // Add to history for undo
-        historyStore.execute(new UpdateLayerCommand(this.layer.id, { opacity: currentOpacity }, { opacity: this.originalOpacity }));
+        // Restore original so command captures correct old state, then execute
+        layerStore.updateLayer(this.layer.id, { opacity: this.originalOpacity });
+        historyStore.execute(new UpdateLayerCommand(this.layer.id, { opacity: currentOpacity }));
       }
     }
     this.isScrubbing = false;
@@ -190,7 +191,7 @@ export class PFLayerItem extends BaseComponent {
       const clampedPercent = Math.max(0, Math.min(100, value));
       const newOpacity = Math.round((clampedPercent / 100) * 255);
       if (newOpacity !== this.originalOpacity) {
-        historyStore.execute(new UpdateLayerCommand(this.layer.id, { opacity: newOpacity }, { opacity: this.originalOpacity }));
+        historyStore.execute(new UpdateLayerCommand(this.layer.id, { opacity: newOpacity }));
       }
     }
     this.isEditingOpacity = false;
