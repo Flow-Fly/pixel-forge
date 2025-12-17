@@ -70,18 +70,26 @@ const keyMap: Record<string, string> = {
  * formatShortcut('alt+click') // '⌥+Click' on Mac, 'Alt+Click' on Windows
  */
 export function formatShortcut(shortcut: string): string {
+  // Handle special case where shortcut is just "+" (splitting on + would give empty strings)
+  if (shortcut === "+") {
+    return "+";
+  }
+
   const parts = shortcut.toLowerCase().split("+");
-  const formatted = parts.map((part) => {
-    const trimmed = part.trim();
-    if (keyMap[trimmed]) {
-      return keyMap[trimmed];
-    }
-    // Capitalize single letters, title case for words
-    if (trimmed.length === 1) {
-      return trimmed.toUpperCase();
-    }
-    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-  });
+  const formatted = parts
+    .map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) return null; // Filter out empty parts
+      if (keyMap[trimmed]) {
+        return keyMap[trimmed];
+      }
+      // Capitalize single letters, title case for words
+      if (trimmed.length === 1) {
+        return trimmed.toUpperCase();
+      }
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    })
+    .filter(Boolean) as string[];
 
   // On Mac, modifiers are typically shown without + separator
   if (isMac) {
