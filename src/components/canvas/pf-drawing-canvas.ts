@@ -539,7 +539,13 @@ export class PFDrawingCanvas extends BaseComponent {
     // Skip drawing when:
     // - Middle mouse button (panning)
     // - Spacebar pan mode
+    // - Hand or Zoom tool (handled at viewport level)
     if (e.button === 1 || viewportStore.isSpacebarDown.value) {
+      return;
+    }
+
+    // Hand and Zoom tools are handled at viewport level, not here
+    if (currentTool === "hand" || currentTool === "zoom") {
       return;
     }
 

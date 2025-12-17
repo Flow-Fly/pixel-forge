@@ -209,6 +209,7 @@ export class PFCanvasViewport extends BaseComponent {
   private readonly panCallbacks = {
     requestUpdate: () => this.requestUpdate(),
     querySelector: (selector: string) => this.querySelector(selector),
+    getBoundingClientRect: () => this.getBoundingClientRect(),
   };
 
   private readonly wheelCallbacks = {

@@ -9,6 +9,7 @@ import {
   DeleteSelectionCommand,
   CommitFloatCommand,
   CutToFloatCommand,
+  FillSelectionCommand,
 } from "../../commands/selection-commands";
 import { colorStore } from "../../stores/colors";
 import { animationStore } from "../../stores/animation";
@@ -20,6 +21,7 @@ import { AddFrameCommand } from "../../commands/animation-commands";
 import { toolRegistry } from "../../tools/tool-registry";
 import { canCaptureBrush, captureBrushAndAdd } from "../brush-capture";
 import { MOD_PRIMARY } from "../../utils/platform";
+import { getToolSize, setToolSize } from "../../stores/tool-settings";
 
 export function registerShortcuts() {
   // ============================================
@@ -84,64 +86,100 @@ export function registerShortcuts() {
   // VIEW & NAVIGATION
   // ============================================
 
-  // Mod+1-6 = Zoom levels (industry standard: numbers for opacity)
+  // 0 = Fit to window (reset view)
+  keyboardService.register(
+    "0",
+    [],
+    () => viewportStore.resetView(),
+    "Fit to window"
+  );
+
+  // 1-6 = Zoom levels (Aseprite style)
   keyboardService.register(
     "1",
-    [MOD_PRIMARY],
+    [],
     () => viewportStore.zoomToLevel(1),
     "Zoom 100%"
   );
   keyboardService.register(
     "2",
-    [MOD_PRIMARY],
+    [],
     () => viewportStore.zoomToLevel(2),
     "Zoom 200%"
   );
   keyboardService.register(
     "3",
-    [MOD_PRIMARY],
+    [],
     () => viewportStore.zoomToLevel(3),
     "Zoom 400%"
   );
   keyboardService.register(
     "4",
-    [MOD_PRIMARY],
+    [],
     () => viewportStore.zoomToLevel(4),
     "Zoom 800%"
   );
   keyboardService.register(
     "5",
-    [MOD_PRIMARY],
+    [],
     () => viewportStore.zoomToLevel(5),
     "Zoom 1600%"
   );
   keyboardService.register(
     "6",
-    [MOD_PRIMARY],
+    [],
     () => viewportStore.zoomToLevel(6),
     "Zoom 3200%"
   );
 
   // ============================================
-  // OPACITY SHORTCUTS (Industry standard: 1-9, 0)
+  // OPACITY SHORTCUTS (Mod + number keys)
   // ============================================
 
-  // 1-9 = Set brush opacity 10%-90%
+  // Mod+1-9 = Set brush opacity 10%-90%
   for (let i = 1; i <= 9; i++) {
     const opacity = i * 10;
     keyboardService.register(
       String(i),
-      [],
+      [MOD_PRIMARY],
       () => brushStore.setOpacity(opacity),
       `Opacity ${opacity}%`
     );
   }
-  // 0 = 100% opacity
+  // Mod+0 = 100% opacity
   keyboardService.register(
     "0",
-    [],
+    [MOD_PRIMARY],
     () => brushStore.setOpacity(100),
     "Opacity 100%"
+  );
+
+  // ============================================
+  // BRUSH SIZE SHORTCUTS
+  // ============================================
+
+  // [ = Decrease brush size
+  keyboardService.register(
+    "[",
+    [],
+    () => {
+      const tool = toolStore.activeTool.value;
+      const currentSize = getToolSize(tool);
+      setToolSize(tool, Math.max(1, currentSize - 1));
+    },
+    "Decrease brush size"
+  );
+
+  // ] = Increase brush size
+  keyboardService.register(
+    "]",
+    [],
+    () => {
+      const tool = toolStore.activeTool.value;
+      const currentSize = getToolSize(tool);
+      setToolSize(tool, currentSize + 1);
+    },
+    "Increase brush size"
   );
 
   // Tab = Toggle timeline
@@ -320,20 +358,39 @@ export function registerShortcuts() {
   );
 
   // ============================================
-  // SHAPE OPTIONS
+  // FILL & STROKE
   // ============================================
 
-  // F = Toggle filled shape (when shape tool is active)
+  // F = Fill selection with foreground color
   keyboardService.register(
     "f",
     [],
     () => {
-      const tool = toolStore.activeTool.value;
-      if (tool === "rectangle" || tool === "ellipse" || tool === "line") {
-        shapeStore.toggleFilled();
+      const state = selectionStore.state.value;
+      if (state.type === "selected") {
+        const activeLayerId = layerStore.activeLayerId.value;
+        const layer = layerStore.layers.value.find(
+          (l) => l.id === activeLayerId
+        );
+        if (!layer?.canvas) return;
+
+        const fillColor = colorStore.primaryColor.value;
+        const mask =
+          state.shape === "freeform"
+            ? (state as { mask: Uint8Array }).mask
+            : undefined;
+
+        const command = new FillSelectionCommand(
+          layer.canvas,
+          state.bounds,
+          state.shape,
+          fillColor,
+          mask
+        );
+        historyStore.execute(command);
       }
     },
-    "Toggle filled shape"
+    "Fill selection"
   );
 
   // ============================================

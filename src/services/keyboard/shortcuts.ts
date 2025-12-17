@@ -79,6 +79,29 @@ class KeyboardService {
     return false;
   }
 
+  /**
+   * Get the logical key from a keyboard event.
+   * On Mac, Alt+key produces special characters (e.g., Alt+1 = ¡).
+   * We use e.code to get the physical key when Alt is pressed.
+   */
+  private getLogicalKey(e: KeyboardEvent): string {
+    // When Alt is pressed on Mac, e.key might be a special character
+    // Use e.code to map back to the physical key
+    if (e.altKey && e.code) {
+      // Map key codes to logical keys for common cases
+      if (e.code.startsWith('Digit')) {
+        return e.code.replace('Digit', '');
+      }
+      if (e.code.startsWith('Key')) {
+        return e.code.replace('Key', '').toLowerCase();
+      }
+      // For bracket keys
+      if (e.code === 'BracketLeft') return '[';
+      if (e.code === 'BracketRight') return ']';
+    }
+    return e.key;
+  }
+
   private handleKeyDown(e: KeyboardEvent) {
     if (!this.enabled.get()) return;
 
@@ -93,7 +116,8 @@ class KeyboardService {
     if (e.shiftKey) modifiers.push('shift');
     if (e.altKey) modifiers.push('alt');
 
-    const id = this.getShortcutId(e.key, modifiers);
+    const key = this.getLogicalKey(e);
+    const id = this.getShortcutId(key, modifiers);
 
     const shortcut = this.shortcuts.get(id);
     if (shortcut) {
