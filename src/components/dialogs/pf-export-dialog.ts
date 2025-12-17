@@ -10,7 +10,13 @@ import { exportAnimatedWebP } from "../../services/webp-animation";
 import { exportAseFile } from "../../services/aseprite-service";
 import "../ui/pf-dialog";
 
-export type ExportFormat = "png" | "webp" | "webp-animated" | "spritesheet" | "aseprite" | "pixelforge";
+export type ExportFormat =
+  | "png"
+  | "webp"
+  | "webp-animated"
+  | "spritesheet"
+  | "aseprite"
+  | "pixelforge";
 export type FrameSelection = "current" | "all" | "range";
 
 @customElement("pf-export-dialog")
@@ -134,7 +140,7 @@ export class PFExportDialog extends BaseComponent {
 
   @property({ type: Boolean }) open = false;
 
-  @state() private format: ExportFormat = "png";
+  @state() private format: ExportFormat = "pixelforge";
   @state() private scale: number = 1;
   @state() private frameSelection: FrameSelection = "current";
   @state() private frameStart: number = 1;
