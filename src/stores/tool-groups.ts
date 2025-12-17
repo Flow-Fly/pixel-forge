@@ -46,11 +46,11 @@ export const toolGroups: ToolGroup[] = [
     tools: ["fill", "gradient"],
     defaultTool: "fill",
   },
-  // {
-  //   id: 'transform',
-  //   tools: ['transform'],
-  //   defaultTool: 'transform',
-  // },
+  {
+    id: "transform",
+    tools: ["transform"],
+    defaultTool: "transform",
+  },
   {
     id: "text",
     tools: ["text"],

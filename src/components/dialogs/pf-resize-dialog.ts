@@ -50,9 +50,12 @@ export class PFResizeDialog extends BaseComponent {
   @state() width = 64;
   @state() height = 64;
 
-  firstUpdated() {
-    this.width = projectStore.width.value;
-    this.height = projectStore.height.value;
+  willUpdate(changedProperties: Map<string, unknown>) {
+    // Update dimensions when dialog opens
+    if (changedProperties.has('open') && this.open) {
+      this.width = projectStore.width.value;
+      this.height = projectStore.height.value;
+    }
   }
 
   render() {

@@ -1,4 +1,7 @@
 import { signal } from '../core/signal';
+import { selectionStore } from './selection';
+import { layerStore } from './layers';
+import { animationStore } from './animation';
 
 export type ToolType =
   | 'pencil'
@@ -60,6 +63,29 @@ class ToolStore {
 
   setActiveTool(tool: ToolType) {
     this.activeTool.value = tool;
+
+    // Auto-select layer content when switching to transform tool
+    if (tool === 'transform') {
+      this.autoSelectForTransform();
+    }
+  }
+
+  /**
+   * Auto-select layer content when switching to transform tool.
+   * Only activates if there's no current selection.
+   */
+  private autoSelectForTransform() {
+    // Skip if there's already an active selection
+    if (selectionStore.isActive) return;
+
+    const activeLayerId = layerStore.activeLayerId.value;
+    if (!activeLayerId) return;
+
+    const currentFrameId = animationStore.currentFrameId.value;
+    const canvas = animationStore.getCelCanvas(currentFrameId, activeLayerId);
+    if (!canvas) return;
+
+    selectionStore.selectLayerContent(canvas);
   }
 
   /**

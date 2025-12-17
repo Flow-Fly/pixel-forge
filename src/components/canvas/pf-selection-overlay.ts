@@ -134,6 +134,18 @@ export class PFSelectionOverlay extends BaseComponent {
     const panY = viewportStore.panY.value;
 
     if (state.type === 'selecting') {
+      // Draw previous selection if in add/subtract mode
+      const prevSelection = selectionStore.previousSelectionForVisual.value;
+      if (prevSelection) {
+        if (prevSelection.shape === 'freeform' && prevSelection.mask) {
+          this.drawFreeformMarchingAnts(ctx, prevSelection.bounds, prevSelection.mask, zoom, panX, panY);
+        } else if (prevSelection.shape === 'ellipse') {
+          this.drawEllipseMarchingAnts(ctx, prevSelection.bounds, zoom, panX, panY);
+        } else {
+          this.drawRectMarchingAnts(ctx, prevSelection.bounds, zoom, panX, panY);
+        }
+      }
+
       // Draw preview path if available (lasso tools), otherwise fall back to bounding box
       if (state.previewPath && state.previewPath.length >= 2) {
         this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
@@ -640,6 +652,7 @@ export class PFSelectionOverlay extends BaseComponent {
   render() {
     // Access signals for reactivity
     void selectionStore.state.value;
+    void selectionStore.previousSelectionForVisual.value;
     void viewportStore.zoom.value;
     void viewportStore.panX.value;
     void viewportStore.panY.value;

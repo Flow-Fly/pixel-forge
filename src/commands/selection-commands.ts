@@ -799,3 +799,123 @@ export class TransformSelectionCommand implements Command {
     ctx.putImageData(destData, this.actualDestX, this.actualDestY);
   }
 }
+
+/**
+ * Command for flipping selected pixels horizontally or vertically.
+ * Works on "selected" state only - flips pixels in-place on the canvas.
+ */
+export class FlipSelectionCommand implements Command {
+  id: string;
+  name: string;
+  timestamp: number;
+
+  private canvas: HTMLCanvasElement;
+  private bounds: Rect;
+  private shape: SelectionShape;
+  private mask?: Uint8Array;
+  private direction: 'horizontal' | 'vertical';
+
+  // Store original pixels for undo
+  private originalImageData: ImageData;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    bounds: Rect,
+    shape: SelectionShape,
+    direction: 'horizontal' | 'vertical',
+    mask?: Uint8Array
+  ) {
+    this.id = crypto.randomUUID();
+    this.timestamp = Date.now();
+    this.name = `Flip Selection ${direction === 'horizontal' ? 'Horizontal' : 'Vertical'}`;
+    this.canvas = canvas;
+    this.bounds = { ...bounds };
+    this.shape = shape;
+    this.direction = direction;
+    this.mask = mask;
+
+    // Capture original pixels
+    const ctx = canvas.getContext('2d')!;
+    this.originalImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+  }
+
+  execute() {
+    this.flip();
+  }
+
+  undo() {
+    // Restore original pixels
+    const ctx = this.canvas.getContext('2d')!;
+    ctx.putImageData(this.originalImageData, this.bounds.x, this.bounds.y);
+  }
+
+  private flip() {
+    const ctx = this.canvas.getContext('2d')!;
+    const { x, y, width, height } = this.bounds;
+
+    // Get current pixels
+    const imageData = ctx.getImageData(x, y, width, height);
+    const data = imageData.data;
+
+    // Create flipped version
+    const flippedData = new Uint8ClampedArray(data.length);
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const srcIdx = (py * width + px) * 4;
+
+        // Check if this pixel is within the selection mask
+        let inSelection = true;
+        if (this.shape === 'freeform' && this.mask) {
+          inSelection = this.mask[py * width + px] === 255;
+        } else if (this.shape === 'ellipse') {
+          // Check ellipse bounds
+          const cx = width / 2;
+          const cy = height / 2;
+          const rx = width / 2;
+          const ry = height / 2;
+          const dx = (px + 0.5 - cx) / rx;
+          const dy = (py + 0.5 - cy) / ry;
+          inSelection = dx * dx + dy * dy <= 1;
+        }
+
+        let destPx: number, destPy: number;
+
+        if (inSelection) {
+          // Calculate flipped position
+          if (this.direction === 'horizontal') {
+            destPx = width - 1 - px;
+            destPy = py;
+          } else {
+            destPx = px;
+            destPy = height - 1 - py;
+          }
+        } else {
+          // Keep original position for pixels outside selection
+          destPx = px;
+          destPy = py;
+        }
+
+        const destIdx = (destPy * width + destPx) * 4;
+
+        // For pixels inside selection, swap with flipped position
+        // For pixels outside, just copy as-is
+        if (inSelection) {
+          flippedData[destIdx] = data[srcIdx];
+          flippedData[destIdx + 1] = data[srcIdx + 1];
+          flippedData[destIdx + 2] = data[srcIdx + 2];
+          flippedData[destIdx + 3] = data[srcIdx + 3];
+        } else {
+          flippedData[srcIdx] = data[srcIdx];
+          flippedData[srcIdx + 1] = data[srcIdx + 1];
+          flippedData[srcIdx + 2] = data[srcIdx + 2];
+          flippedData[srcIdx + 3] = data[srcIdx + 3];
+        }
+      }
+    }
+
+    // Put flipped pixels back
+    const flippedImageData = new ImageData(flippedData, width, height);
+    ctx.putImageData(flippedImageData, x, y);
+  }
+}

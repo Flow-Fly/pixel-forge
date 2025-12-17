@@ -42,7 +42,10 @@ export class MarqueeRectTool extends BaseTool {
     }
 
     // Set selection mode based on modifiers
-    if (modifiers?.shift) {
+    // Shift+Alt = intersect, Shift = add, Alt = subtract
+    if (modifiers?.shift && modifiers?.alt) {
+      selectionStore.setMode('intersect');
+    } else if (modifiers?.shift) {
       selectionStore.setMode('add');
     } else if (modifiers?.alt) {
       selectionStore.setMode('subtract');
@@ -139,17 +142,18 @@ export class MarqueeRectTool extends BaseTool {
     }
 
     selectionStore.resetMode();
+    selectionStore.previousSelectionForVisual.value = null;
     this.previousSelection = null;
   }
 
   /**
-   * Combine two masks with add or subtract operation.
+   * Combine two masks with add, subtract, or intersect operation.
    */
   private combineMasks(
     previousState: { bounds: { x: number; y: number; width: number; height: number }; shape: string; mask?: Uint8Array },
     newBounds: { x: number; y: number; width: number; height: number },
     newMask: Uint8Array,
-    operation: 'add' | 'subtract' | 'replace'
+    operation: 'add' | 'subtract' | 'replace' | 'intersect'
   ): { mask: Uint8Array; bounds: { x: number; y: number; width: number; height: number } } | null {
     if (operation === 'replace') {
       return { mask: newMask, bounds: newBounds };
@@ -157,19 +161,33 @@ export class MarqueeRectTool extends BaseTool {
 
     const oldBounds = previousState.bounds;
 
-    // Calculate combined bounds
-    const minX = operation === 'add'
-      ? Math.min(oldBounds.x, newBounds.x)
-      : oldBounds.x;
-    const minY = operation === 'add'
-      ? Math.min(oldBounds.y, newBounds.y)
-      : oldBounds.y;
-    const maxX = operation === 'add'
-      ? Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width)
-      : oldBounds.x + oldBounds.width;
-    const maxY = operation === 'add'
-      ? Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height)
-      : oldBounds.y + oldBounds.height;
+    // Calculate combined bounds based on operation
+    let minX: number, minY: number, maxX: number, maxY: number;
+
+    if (operation === 'add') {
+      // Union of bounds
+      minX = Math.min(oldBounds.x, newBounds.x);
+      minY = Math.min(oldBounds.y, newBounds.y);
+      maxX = Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+      maxY = Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+    } else if (operation === 'intersect') {
+      // Intersection of bounds
+      minX = Math.max(oldBounds.x, newBounds.x);
+      minY = Math.max(oldBounds.y, newBounds.y);
+      maxX = Math.min(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+      maxY = Math.min(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+
+      // If no overlap, return null
+      if (minX >= maxX || minY >= maxY) {
+        return null;
+      }
+    } else {
+      // Subtract - use old bounds
+      minX = oldBounds.x;
+      minY = oldBounds.y;
+      maxX = oldBounds.x + oldBounds.width;
+      maxY = oldBounds.y + oldBounds.height;
+    }
 
     const combinedBounds = {
       x: minX,
@@ -231,7 +249,10 @@ export class MarqueeRectTool extends BaseTool {
         let finalValue: boolean;
         if (operation === 'add') {
           finalValue = oldValue || newValue;
+        } else if (operation === 'intersect') {
+          finalValue = oldValue && newValue;
         } else {
+          // subtract
           finalValue = oldValue && !newValue;
         }
 
@@ -285,6 +306,7 @@ export class MarqueeRectTool extends BaseTool {
   private startNewSelection(x: number, y: number) {
     // Save previous selection for add/subtract operations
     const currentState = selectionStore.state.value;
+    const mode = selectionStore.mode.value;
     if (currentState.type === 'selected') {
       this.previousSelection = {
         bounds: { ...currentState.bounds },
@@ -293,8 +315,13 @@ export class MarqueeRectTool extends BaseTool {
           ? (currentState as { mask: Uint8Array }).mask
           : undefined,
       };
+      // Set visual signal for marching ants overlay (only in add/subtract mode)
+      if (mode !== 'replace') {
+        selectionStore.previousSelectionForVisual.value = this.previousSelection;
+      }
     } else {
       this.previousSelection = null;
+      selectionStore.previousSelectionForVisual.value = null;
     }
 
     this.mode = 'selecting';

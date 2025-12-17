@@ -21,6 +21,20 @@ class SelectionStore {
   state = signal<SelectionState>({ type: 'none' });
   mode = signal<SelectionMode>('replace');
 
+  // Track previous selection for visual feedback during add/subtract operations
+  previousSelectionForVisual = signal<{
+    bounds: { x: number; y: number; width: number; height: number };
+    shape: SelectionShape;
+    mask?: Uint8Array;
+  } | null>(null);
+
+  // Track last selection for reselect functionality (Mod+Shift+D)
+  private lastSelection = signal<{
+    bounds: Rect;
+    shape: SelectionShape;
+    mask?: Uint8Array;
+  } | null>(null);
+
   // Track the layer we're operating on
   private activeLayerId: string | null = null;
 
@@ -518,7 +532,100 @@ class SelectionStore {
   // ============================================
 
   clear() {
+    // Save current selection before clearing for reselect functionality
+    const currentState = this.state.value;
+    if (currentState.type === 'selected') {
+      this.lastSelection.value = {
+        bounds: { ...currentState.bounds },
+        shape: currentState.shape,
+        mask: currentState.shape === 'freeform' ? (currentState as { mask: Uint8Array }).mask : undefined,
+      };
+    }
     this.state.value = { type: 'none' };
+  }
+
+  /**
+   * Reselect the last cleared selection.
+   * Used by Mod+Shift+D shortcut.
+   */
+  reselect() {
+    const last = this.lastSelection.value;
+    if (!last) return false;
+
+    if (last.shape === 'freeform' && last.mask) {
+      this.state.value = {
+        type: 'selected',
+        shape: 'freeform',
+        bounds: { ...last.bounds },
+        mask: last.mask,
+      };
+    } else {
+      this.state.value = {
+        type: 'selected',
+        shape: last.shape as 'rectangle' | 'ellipse',
+        bounds: { ...last.bounds },
+      };
+    }
+    return true;
+  }
+
+  /**
+   * Check if there is a last selection to restore.
+   */
+  get hasLastSelection(): boolean {
+    return this.lastSelection.value !== null;
+  }
+
+  /**
+   * Select all non-transparent pixels on a canvas.
+   * Used by transform tool auto-select on tool switch.
+   * Returns true if content was found and selected, false otherwise.
+   */
+  selectLayerContent(canvas: HTMLCanvasElement): boolean {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+
+    // Find non-transparent bounds
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha > 0) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    // No content found
+    if (maxX < 0 || maxY < 0) {
+      return false;
+    }
+
+    // Create selection from bounds
+    this.state.value = {
+      type: 'selected',
+      shape: 'rectangle',
+      bounds: {
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+      },
+    };
+
+    return true;
   }
 
   isPointInSelection(x: number, y: number): boolean {
@@ -558,6 +665,103 @@ class SelectionStore {
 
   getActiveLayerId(): string | null {
     return this.activeLayerId;
+  }
+
+  /**
+   * Invert the current selection.
+   * What was selected becomes deselected, and vice versa.
+   */
+  invertSelection(canvasWidth: number, canvasHeight: number) {
+    const s = this.state.value;
+    if (s.type !== 'selected') return;
+
+    // Create a full-canvas mask with everything selected
+    const fullMask = new Uint8Array(canvasWidth * canvasHeight);
+    fullMask.fill(255);
+
+    // Subtract the current selection
+    const { bounds, shape } = s;
+    const currentMask = shape === 'freeform' ? (s as { mask: Uint8Array }).mask : null;
+
+    for (let y = 0; y < canvasHeight; y++) {
+      for (let x = 0; x < canvasWidth; x++) {
+        const idx = y * canvasWidth + x;
+
+        // Check if point is in current selection
+        let inSelection = false;
+
+        if (x >= bounds.x && x < bounds.x + bounds.width &&
+            y >= bounds.y && y < bounds.y + bounds.height) {
+          if (shape === 'rectangle') {
+            inSelection = true;
+          } else if (shape === 'ellipse') {
+            const cx = bounds.x + bounds.width / 2;
+            const cy = bounds.y + bounds.height / 2;
+            const rx = bounds.width / 2;
+            const ry = bounds.height / 2;
+            const dx = (x - cx) / rx;
+            const dy = (y - cy) / ry;
+            inSelection = dx * dx + dy * dy <= 1;
+          } else if (shape === 'freeform' && currentMask) {
+            const localX = x - bounds.x;
+            const localY = y - bounds.y;
+            const maskIdx = localY * bounds.width + localX;
+            inSelection = currentMask[maskIdx] === 255;
+          }
+        }
+
+        // Invert: if in selection, clear; if not, keep selected
+        if (inSelection) {
+          fullMask[idx] = 0;
+        }
+      }
+    }
+
+    // Find the bounds of the inverted selection
+    let minX = canvasWidth, minY = canvasHeight;
+    let maxX = -1, maxY = -1;
+
+    for (let y = 0; y < canvasHeight; y++) {
+      for (let x = 0; x < canvasWidth; x++) {
+        if (fullMask[y * canvasWidth + x] === 255) {
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+
+    // If nothing selected after inversion, clear
+    if (maxX < 0) {
+      this.clear();
+      return;
+    }
+
+    // Create tight bounds and mask
+    const newBounds = {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
+
+    const newMask = new Uint8Array(newBounds.width * newBounds.height);
+    for (let y = 0; y < newBounds.height; y++) {
+      for (let x = 0; x < newBounds.width; x++) {
+        const srcIdx = (minY + y) * canvasWidth + (minX + x);
+        const dstIdx = y * newBounds.width + x;
+        newMask[dstIdx] = fullMask[srcIdx];
+      }
+    }
+
+    // Set the inverted selection
+    this.state.value = {
+      type: 'selected',
+      shape: 'freeform',
+      bounds: newBounds,
+      mask: newMask,
+    };
   }
 
   /**

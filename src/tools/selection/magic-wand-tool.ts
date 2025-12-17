@@ -41,7 +41,10 @@ export class MagicWandTool extends BaseTool {
     }
 
     // Determine selection mode based on modifiers
-    if (modifiers?.shift) {
+    // Shift+Alt = intersect, Shift = add, Alt = subtract
+    if (modifiers?.shift && modifiers?.alt) {
+      selectionStore.setMode('intersect');
+    } else if (modifiers?.shift) {
       selectionStore.setMode('add');
     } else if (modifiers?.alt) {
       selectionStore.setMode('subtract');
@@ -194,15 +197,9 @@ export class MagicWandTool extends BaseTool {
     if (mode === 'replace' || currentState.type === 'none') {
       // Simple replace
       selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
-    } else if (mode === 'add' && currentState.type === 'selected') {
-      // Add to existing selection
-      const combined = this.combineMasks(currentState, bounds, mask, 'add');
-      if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
-      }
-    } else if (mode === 'subtract' && currentState.type === 'selected') {
-      // Subtract from existing selection
-      const combined = this.combineMasks(currentState, bounds, mask, 'subtract');
+    } else if (currentState.type === 'selected') {
+      // Add, subtract, or intersect with existing selection
+      const combined = this.combineMasks(currentState, bounds, mask, mode);
       if (combined) {
         selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
@@ -212,29 +209,47 @@ export class MagicWandTool extends BaseTool {
   }
 
   /**
-   * Combine two masks with add or subtract operation.
+   * Combine two masks with add, subtract, or intersect operation.
    */
   private combineMasks(
     currentState: { bounds: { x: number; y: number; width: number; height: number }; shape: string; mask?: Uint8Array },
     newBounds: { x: number; y: number; width: number; height: number },
     newMask: Uint8Array,
-    operation: 'add' | 'subtract'
+    operation: 'add' | 'subtract' | 'replace' | 'intersect'
   ): { mask: Uint8Array; bounds: { x: number; y: number; width: number; height: number } } | null {
+    if (operation === 'replace') {
+      return { mask: newMask, bounds: newBounds };
+    }
+
     const oldBounds = currentState.bounds;
 
-    // Calculate combined bounds
-    const minX = operation === 'add'
-      ? Math.min(oldBounds.x, newBounds.x)
-      : oldBounds.x;
-    const minY = operation === 'add'
-      ? Math.min(oldBounds.y, newBounds.y)
-      : oldBounds.y;
-    const maxX = operation === 'add'
-      ? Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width)
-      : oldBounds.x + oldBounds.width;
-    const maxY = operation === 'add'
-      ? Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height)
-      : oldBounds.y + oldBounds.height;
+    // Calculate combined bounds based on operation
+    let minX: number, minY: number, maxX: number, maxY: number;
+
+    if (operation === 'add') {
+      // Union of bounds
+      minX = Math.min(oldBounds.x, newBounds.x);
+      minY = Math.min(oldBounds.y, newBounds.y);
+      maxX = Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+      maxY = Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+    } else if (operation === 'intersect') {
+      // Intersection of bounds
+      minX = Math.max(oldBounds.x, newBounds.x);
+      minY = Math.max(oldBounds.y, newBounds.y);
+      maxX = Math.min(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+      maxY = Math.min(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+
+      // If no overlap, return null
+      if (minX >= maxX || minY >= maxY) {
+        return null;
+      }
+    } else {
+      // Subtract - use old bounds
+      minX = oldBounds.x;
+      minY = oldBounds.y;
+      maxX = oldBounds.x + oldBounds.width;
+      maxY = oldBounds.y + oldBounds.height;
+    }
 
     const combinedBounds = {
       x: minX,
@@ -295,7 +310,10 @@ export class MagicWandTool extends BaseTool {
         let finalValue: boolean;
         if (operation === 'add') {
           finalValue = oldValue || newValue;
+        } else if (operation === 'intersect') {
+          finalValue = oldValue && newValue;
         } else {
+          // subtract
           finalValue = oldValue && !newValue;
         }
 

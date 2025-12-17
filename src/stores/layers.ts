@@ -200,6 +200,111 @@ class LayerStore {
 
     this.layers.value = layers;
   }
+
+  /**
+   * Create a group layer containing the specified layers.
+   * Returns the group layer ID, or null if grouping failed.
+   */
+  createGroup(layerIds: string[], groupName?: string): string | null {
+    if (layerIds.length === 0) return null;
+
+    const layers = this.layers.value;
+    const layersToGroup = layers.filter(l => layerIds.includes(l.id));
+
+    // Don't group layers that are already in different groups
+    const parentIds = new Set(layersToGroup.map(l => l.parentId));
+    if (parentIds.size > 1) return null;
+
+    // Create the group layer
+    const groupId = uuidv4();
+    const groupLayer: Layer = {
+      id: groupId,
+      name: groupName || `Group ${layers.filter(l => l.type === 'group').length + 1}`,
+      type: 'group',
+      visible: true,
+      locked: false,
+      opacity: 255,
+      blendMode: 'normal',
+      parentId: layersToGroup[0]?.parentId || null, // Inherit parent from first layer
+    };
+
+    // Find the position to insert the group (where the topmost layer is)
+    const indices = layerIds.map(id => layers.findIndex(l => l.id === id)).filter(i => i !== -1);
+    const insertIndex = Math.max(...indices);
+
+    // Build new layers array:
+    // 1. Insert group at the position of the topmost layer
+    // 2. Update parentId of grouped layers
+    // 3. Move grouped layers right after the group
+    const newLayers = layers.filter(l => !layerIds.includes(l.id));
+
+    // Update parentId for grouped layers
+    const groupedLayers = layersToGroup.map(l => ({
+      ...l,
+      parentId: groupId,
+    }));
+
+    // Insert group and its children at the correct position
+    const adjustedIndex = Math.min(insertIndex, newLayers.length);
+    newLayers.splice(adjustedIndex, 0, groupLayer, ...groupedLayers);
+
+    this.layers.value = newLayers;
+    this.activeLayerId.value = groupId;
+    return groupId;
+  }
+
+  /**
+   * Ungroup a group layer, moving its children to the group's parent.
+   * Returns the IDs of the ungrouped layers, or null if ungrouping failed.
+   */
+  ungroup(groupId: string): string[] | null {
+    const layers = this.layers.value;
+    const group = layers.find(l => l.id === groupId);
+
+    if (!group || group.type !== 'group') return null;
+
+    // Find children of this group
+    const children = layers.filter(l => l.parentId === groupId);
+    if (children.length === 0) {
+      // Empty group - just remove it
+      this.layers.value = layers.filter(l => l.id !== groupId);
+      return [];
+    }
+
+    // Move children to the group's parent and remove the group
+    const newLayers = layers
+      .filter(l => l.id !== groupId)
+      .map(l => {
+        if (l.parentId === groupId) {
+          return { ...l, parentId: group.parentId };
+        }
+        return l;
+      });
+
+    this.layers.value = newLayers;
+
+    // Select the first child
+    if (children.length > 0) {
+      this.activeLayerId.value = children[0].id;
+    }
+
+    return children.map(c => c.id);
+  }
+
+  /**
+   * Get all children of a group layer (direct children only).
+   */
+  getGroupChildren(groupId: string): Layer[] {
+    return this.layers.value.filter(l => l.parentId === groupId);
+  }
+
+  /**
+   * Check if a layer is inside a group.
+   */
+  isInGroup(layerId: string): boolean {
+    const layer = this.layers.value.find(l => l.id === layerId);
+    return layer?.parentId !== null;
+  }
 }
 
 export const layerStore = new LayerStore();

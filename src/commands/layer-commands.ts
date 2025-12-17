@@ -287,3 +287,110 @@ export class RotateLayerCommand implements Command {
     layerStore.updateLayer(this.layerId, {});
   }
 }
+
+export class GroupLayersCommand implements Command {
+  id = crypto.randomUUID();
+  name = "Group Layers";
+  private layerIds: string[];
+  private groupId: string | null = null;
+  private originalParentIds: Map<string, string | null> = new Map();
+  private originalLayerOrder: string[] = [];
+
+  constructor(layerIds: string[]) {
+    this.layerIds = layerIds;
+    // Store original state for undo
+    for (const id of layerIds) {
+      const layer = layerStore.layers.value.find((l) => l.id === id);
+      if (layer) {
+        this.originalParentIds.set(id, layer.parentId);
+      }
+    }
+    this.originalLayerOrder = layerStore.layers.value.map((l) => l.id);
+  }
+
+  execute() {
+    this.groupId = layerStore.createGroup(this.layerIds);
+  }
+
+  undo() {
+    if (!this.groupId) return;
+
+    // Restore original parent IDs
+    const layers = layerStore.layers.value.map((l) => {
+      if (this.originalParentIds.has(l.id)) {
+        return { ...l, parentId: this.originalParentIds.get(l.id) ?? null };
+      }
+      return l;
+    });
+
+    // Remove the group layer and restore order
+    const withoutGroup = layers.filter((l) => l.id !== this.groupId);
+    const reordered: Layer[] = [];
+
+    for (const id of this.originalLayerOrder) {
+      const layer = withoutGroup.find((l) => l.id === id);
+      if (layer) {
+        reordered.push(layer);
+      }
+    }
+
+    layerStore.layers.value = reordered;
+
+    // Select first of the original layers
+    if (this.layerIds.length > 0) {
+      layerStore.activeLayerId.value = this.layerIds[0];
+    }
+  }
+}
+
+export class UngroupLayersCommand implements Command {
+  id = crypto.randomUUID();
+  name = "Ungroup Layers";
+  private groupId: string;
+  private groupLayer: Layer | null = null;
+  private childIds: string[] = [];
+  private originalLayerOrder: string[] = [];
+
+  constructor(groupId: string) {
+    this.groupId = groupId;
+    // Store original state for undo
+    const group = layerStore.layers.value.find((l) => l.id === groupId);
+    if (group) {
+      this.groupLayer = { ...group };
+    }
+    this.childIds = layerStore.getGroupChildren(groupId).map((l) => l.id);
+    this.originalLayerOrder = layerStore.layers.value.map((l) => l.id);
+  }
+
+  execute() {
+    layerStore.ungroup(this.groupId);
+  }
+
+  undo() {
+    if (!this.groupLayer) return;
+
+    // Restore children's parentId and add the group back
+    const layers = layerStore.layers.value.map((l) => {
+      if (this.childIds.includes(l.id)) {
+        return { ...l, parentId: this.groupId };
+      }
+      return l;
+    });
+
+    // Restore original order with group
+    const reordered: Layer[] = [];
+    for (const id of this.originalLayerOrder) {
+      if (id === this.groupId) {
+        reordered.push(this.groupLayer);
+      } else {
+        const layer = layers.find((l) => l.id === id);
+        if (layer) {
+          reordered.push(layer);
+        }
+      }
+    }
+
+    layerStore.layers.value = reordered;
+    layerStore.activeLayerId.value = this.groupId;
+  }
+}
