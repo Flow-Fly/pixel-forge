@@ -4,11 +4,14 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseComponent } from "../../core/base-component";
 import { animationStore, EMPTY_CEL_LINK_ID } from "../../stores/animation";
 import { layerStore } from "../../stores/layers";
+import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { SetCelOpacityCommand } from "../../commands/cel-opacity-command";
 import type { FrameTag } from "../../types/animation";
 import "../ui/pf-context-menu";
 import type { PFContextMenu, ContextMenuItem } from "../ui/pf-context-menu";
+import "./pf-timeline-tooltip";
+import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
 
 @customElement("pf-timeline-grid")
 export class PFTimelineGrid extends BaseComponent {
@@ -143,9 +146,19 @@ export class PFTimelineGrid extends BaseComponent {
       transform: translateY(-50%);
       z-index: 1;
     }
+
+    /* Hard link / continuous layer lines (thicker for visual distinction) */
+    .cel.hard-linked.link-continues-right::after {
+      height: 6px;
+    }
+
+    .cel.hard-linked.link-continues-left::before {
+      height: 6px;
+    }
   `;
 
   @query("pf-context-menu") private contextMenu!: PFContextMenu;
+  @query("pf-timeline-tooltip") private tooltip!: PFTimelineTooltip;
 
   // Track original opacity for undo/redo
   private contextMenuOriginalOpacity: number = 100;
@@ -178,6 +191,52 @@ export class PFTimelineGrid extends BaseComponent {
 
   private handleCollapsedTagClick(tag: FrameTag) {
     animationStore.toggleTagCollapsed(tag.id);
+  }
+
+  private handleCelMouseEnter(
+    e: MouseEvent,
+    layerId: string,
+    frameId: string,
+    layerName: string,
+    frameIndex: number
+  ) {
+    const target = e.currentTarget as HTMLElement;
+    if (!this.tooltip) return;
+
+    // For large canvases, use a capped preview size for performance
+    const MAX_PREVIEW_SIZE = 128;
+    const width = projectStore.width.value;
+    const height = projectStore.height.value;
+    const maxDim = Math.max(width, height);
+    const previewScale = maxDim > MAX_PREVIEW_SIZE ? MAX_PREVIEW_SIZE / maxDim : 1;
+    const previewWidth = Math.round(width * previewScale);
+    const previewHeight = Math.round(height * previewScale);
+
+    // Update tooltip with cel info
+    this.tooltip.primaryText = layerName;
+    this.tooltip.secondaryText = `Frame ${frameIndex + 1}`;
+    this.tooltip.canvasWidth = previewWidth;
+    this.tooltip.canvasHeight = previewHeight;
+
+    // Show tooltip and render cel preview
+    this.tooltip.show(target);
+    requestAnimationFrame(() => {
+      const ctx = this.tooltip.getContext();
+      if (ctx) {
+        ctx.clearRect(0, 0, previewWidth, previewHeight);
+        // Get the cel's canvas and draw it scaled
+        const celCanvas = animationStore.getCelCanvas(frameId, layerId);
+        if (celCanvas) {
+          ctx.drawImage(celCanvas, 0, 0, previewWidth, previewHeight);
+        }
+      }
+    });
+  }
+
+  private handleCelMouseLeave() {
+    if (this.tooltip) {
+      this.tooltip.hide();
+    }
   }
 
   private handleCelContextMenu(e: MouseEvent, celKey: string) {
@@ -424,6 +483,9 @@ export class PFTimelineGrid extends BaseComponent {
                     this.selectCel(layer.id, frame.id, e)}
                   @contextmenu=${(e: MouseEvent) =>
                     this.handleCelContextMenu(e, key)}
+                  @mouseenter=${(e: MouseEvent) =>
+                    this.handleCelMouseEnter(e, layer.id, frame.id, layer.name, frameIndex)}
+                  @mouseleave=${this.handleCelMouseLeave}
                 >
                   ${hasTint ? html`<div class="tag-tint"></div>` : ""}
                   ${hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ""}
@@ -441,6 +503,7 @@ export class PFTimelineGrid extends BaseComponent {
         `
       )}
       <pf-context-menu></pf-context-menu>
+      <pf-timeline-tooltip></pf-timeline-tooltip>
     `;
   }
 }

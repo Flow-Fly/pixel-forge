@@ -15,12 +15,15 @@ export const viewportStyles = css`
     /* Prevent browser back/forward gesture on two-finger horizontal swipe */
     overscroll-behavior: none;
     touch-action: none;
+    /* Isolate this container - layout/paint changes don't affect outside */
+    contain: strict;
   }
 
   .viewport-content {
     position: absolute;
     transform-origin: 0 0;
-    will-change: transform;
+    /* will-change: transform removed - causes GPU layer issues with large canvases */
+    /* Browser will still hardware accelerate due to transform property */
   }
 
   /* Checkerboard pattern to indicate transparency */

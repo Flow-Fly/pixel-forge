@@ -77,6 +77,8 @@ export class PFTimelineTooltip extends LitElement {
 
   // Max display size for preview (constrains large canvases)
   private readonly MAX_PREVIEW_SIZE = 128;
+  // Min display size for preview (enhances visibility for tiny canvases)
+  private readonly MIN_PREVIEW_SIZE = 64;
 
   @state() private isVisible = false;
   @state() private posX = 0;
@@ -188,19 +190,20 @@ export class PFTimelineTooltip extends LitElement {
   }
 
   /**
-   * Calculate the preview scale to fit within MAX_PREVIEW_SIZE.
+   * Calculate the preview scale to fit within MIN/MAX_PREVIEW_SIZE bounds.
+   * Ensures preview is at least MIN_PREVIEW_SIZE and at most MAX_PREVIEW_SIZE.
    */
   private getPreviewScale(): number {
     const maxDim = Math.max(this.canvasWidth, this.canvasHeight);
 
-    // For large canvases, scale down to fit
+    // For large canvases, scale down to fit MAX_PREVIEW_SIZE
     if (maxDim > this.MAX_PREVIEW_SIZE) {
       return this.MAX_PREVIEW_SIZE / maxDim;
     }
 
-    // For small canvases, scale up (1.5x for small, 1x for medium)
-    if (maxDim <= 64) {
-      return 1.5;
+    // For small canvases, scale up to reach MIN_PREVIEW_SIZE
+    if (maxDim < this.MIN_PREVIEW_SIZE) {
+      return this.MIN_PREVIEW_SIZE / maxDim;
     }
 
     return 1;

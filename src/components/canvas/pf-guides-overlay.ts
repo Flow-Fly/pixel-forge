@@ -24,7 +24,7 @@ export class PFGuidesOverlay extends BaseComponent {
 
     .guide {
       position: absolute;
-      background: var(--guide-color, #00ffff);
+      background: var(--pf-color-ember-rest, #00ffff);
       opacity: 0.8;
     }
 
@@ -44,7 +44,7 @@ export class PFGuidesOverlay extends BaseComponent {
     .guide::before {
       content: "";
       position: absolute;
-      background: var(--guide-color, #00ffff);
+      background: var(--pf-color-ember-rest, #00ffff);
       opacity: 0.3;
     }
 
@@ -67,8 +67,8 @@ export class PFGuidesOverlay extends BaseComponent {
       opacity: 0.6;
       background: repeating-linear-gradient(
         90deg,
-        var(--guide-color, #00ffff) 0px,
-        var(--guide-color, #00ffff) 4px,
+        var(--pf-color-ember-rest, #00ffff) 0px,
+        var(--pf-color-ember-rest, #00ffff) 4px,
         transparent 4px,
         transparent 8px
       );
@@ -77,8 +77,8 @@ export class PFGuidesOverlay extends BaseComponent {
     .guide.horizontal.preview {
       background: repeating-linear-gradient(
         90deg,
-        var(--guide-color, #00ffff) 0px,
-        var(--guide-color, #00ffff) 4px,
+        var(--pf-color-ember-rest, #00ffff) 0px,
+        var(--pf-color-ember-rest, #00ffff) 4px,
         transparent 4px,
         transparent 8px
       );
@@ -87,8 +87,8 @@ export class PFGuidesOverlay extends BaseComponent {
     .guide.vertical.preview {
       background: repeating-linear-gradient(
         0deg,
-        var(--guide-color, #00ffff) 0px,
-        var(--guide-color, #00ffff) 4px,
+        var(--pf-color-ember-rest, #00ffff) 0px,
+        var(--pf-color-ember-rest, #00ffff) 4px,
         transparent 4px,
         transparent 8px
       );
@@ -120,20 +120,14 @@ export class PFGuidesOverlay extends BaseComponent {
         : null;
 
     const verticalScreenX =
-      visible && verticalGuide !== null
-        ? panX + verticalGuide * zoom
-        : null;
+      visible && verticalGuide !== null ? panX + verticalGuide * zoom : null;
 
     // Calculate screen positions for drag previews
     const previewHorizontalY =
-      dragPreviewH !== null
-        ? panY + dragPreviewH * zoom
-        : null;
+      dragPreviewH !== null ? panY + dragPreviewH * zoom : null;
 
     const previewVerticalX =
-      dragPreviewV !== null
-        ? panX + dragPreviewV * zoom
-        : null;
+      dragPreviewV !== null ? panX + dragPreviewV * zoom : null;
 
     return html`
       ${horizontalScreenY !== null

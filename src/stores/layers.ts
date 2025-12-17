@@ -183,6 +183,13 @@ class LayerStore {
     }
   }
 
+  toggleContinuous(id: string) {
+    const layer = this.layers.value.find(l => l.id === id);
+    if (layer) {
+      this.updateLayer(id, { continuous: !layer.continuous });
+    }
+  }
+
   setActiveLayer(id: string) {
     this.activeLayerId.value = id;
   }
