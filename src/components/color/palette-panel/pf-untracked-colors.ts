@@ -24,6 +24,28 @@ export class PFUntrackedColors extends BaseComponent {
       align-items: center;
       justify-content: space-between;
       margin-bottom: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .header:hover {
+      opacity: 0.9;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .collapse-icon {
+      font-size: 8px;
+      color: var(--pf-color-text-muted, #808080);
+      transition: transform 0.15s ease;
+    }
+
+    .collapse-icon.collapsed {
+      transform: rotate(-90deg);
     }
 
     .title {
@@ -33,6 +55,15 @@ export class PFUntrackedColors extends BaseComponent {
 
     .count {
       color: var(--pf-color-accent-cyan, #00e5ff);
+    }
+
+    .content {
+      overflow: hidden;
+      transition: max-height 0.2s ease;
+    }
+
+    .content.collapsed {
+      max-height: 0;
     }
 
     .grid {
@@ -97,6 +128,7 @@ export class PFUntrackedColors extends BaseComponent {
 
   @state() private selectedColor: string | null = null;
   @state() private isReplaceMode = false;
+  @state() private isCollapsed = false;
 
   private selectColor(color: string) {
     if (this.selectedColor === color) {
@@ -167,6 +199,10 @@ export class PFUntrackedColors extends BaseComponent {
     paletteStore.clearEphemeralColors();
   }
 
+  private toggleCollapsed() {
+    this.isCollapsed = !this.isCollapsed;
+  }
+
   render() {
     const colors = paletteStore.ephemeralColors.value;
 
@@ -175,38 +211,43 @@ export class PFUntrackedColors extends BaseComponent {
     }
 
     return html`
-      <div class="header">
-        <span class="title">
-          Untracked <span class="count">(${colors.length})</span>
-        </span>
+      <div class="header" @click=${this.toggleCollapsed}>
+        <div class="header-left">
+          <span class="collapse-icon ${this.isCollapsed ? 'collapsed' : ''}">▼</span>
+          <span class="title">
+            Untracked <span class="count">(${colors.length})</span>
+          </span>
+        </div>
       </div>
 
-      <div class="grid">
-        ${colors.map(color => html`
-          <div
-            class="swatch ${this.selectedColor === color ? "selected" : ""}"
-            style="background-color: ${color}"
-            title="${color} - Click to select, right-click to add to palette"
-            draggable="true"
-            @click=${() => this.selectColor(color)}
-            @contextmenu=${(e: MouseEvent) => this.handleRightClick(e, color)}
-            @dragstart=${(e: DragEvent) => this.handleDragStart(color, e)}
-          ></div>
-        `)}
-      </div>
+      <div class="content ${this.isCollapsed ? 'collapsed' : ''}">
+        <div class="grid">
+          ${colors.map(color => html`
+            <div
+              class="swatch ${this.selectedColor === color ? "selected" : ""}"
+              style="background-color: ${color}"
+              title="${color} - Click to select, right-click to add to palette"
+              draggable="true"
+              @click=${() => this.selectColor(color)}
+              @contextmenu=${(e: MouseEvent) => this.handleRightClick(e, color)}
+              @dragstart=${(e: DragEvent) => this.handleDragStart(color, e)}
+            ></div>
+          `)}
+        </div>
 
-      <div class="actions">
-        ${this.selectedColor && !this.isReplaceMode ? html`
-          <button class="replace-btn" @click=${this.enterReplaceMode}>
-            Replace in Palette
-          </button>
-        ` : this.isReplaceMode ? html`
-          <button class="replace-btn cancel" @click=${this.cancelReplaceMode}>
-            Cancel Replace
-          </button>
-        ` : nothing}
-        <pf-button fill size="sm" @click=${this.promoteAll}>Add All</pf-button>
-        <pf-button fill size="sm" @click=${this.clearAll}>Clear</pf-button>
+        <div class="actions">
+          ${this.selectedColor && !this.isReplaceMode ? html`
+            <button class="replace-btn" @click=${this.enterReplaceMode}>
+              Replace in Palette
+            </button>
+          ` : this.isReplaceMode ? html`
+            <button class="replace-btn cancel" @click=${this.cancelReplaceMode}>
+              Cancel Replace
+            </button>
+          ` : nothing}
+          <pf-button fill size="sm" @click=${this.promoteAll}>Add All</pf-button>
+          <pf-button fill size="sm" @click=${this.clearAll}>Clear</pf-button>
+        </div>
       </div>
     `;
   }

@@ -1,9 +1,10 @@
-import { html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { shapeStore } from '../../stores/shape';
+import { html, css } from "lit";
+import { customElement } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { shapeStore } from "../../stores/shape";
+import { shapeSettings, type ShapeFillColor } from "../../stores/tool-settings";
 
-@customElement('pf-shape-options')
+@customElement("pf-shape-options")
 export class PFShapeOptions extends BaseComponent {
   static styles = css`
     :host {
@@ -44,11 +45,29 @@ export class PFShapeOptions extends BaseComponent {
       color: var(--pf-color-text-muted, #808080);
       font-size: 11px;
     }
+
+    .radio-group {
+      display: flex;
+      gap: 12px;
+    }
+
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    input[type="radio"] {
+      accent-color: var(--pf-color-accent, #4a9eff);
+      cursor: pointer;
+      margin: 0;
+    }
   `;
 
   render() {
     const filled = shapeStore.filled.value;
     const strokeWidth = shapeStore.strokeWidth.value;
+    const fillColor = shapeSettings.fillColor.value;
 
     return html`
       <div class="option-row">
@@ -57,8 +76,32 @@ export class PFShapeOptions extends BaseComponent {
           id="shape-fill"
           .checked=${filled}
           @change=${this.handleFillChange}
-        >
+        />
         <label for="shape-fill">Fill Shape</label>
+        ${filled ? html`
+          <div class="radio-group">
+            <label class="radio-option">
+              <input
+                type="radio"
+                name="fill-color"
+                value="foreground"
+                .checked=${fillColor === "foreground"}
+                @change=${this.handleFillColorChange}
+              />
+              FG
+            </label>
+            <label class="radio-option">
+              <input
+                type="radio"
+                name="fill-color"
+                value="background"
+                .checked=${fillColor === "background"}
+                @change=${this.handleFillColorChange}
+              />
+              BG
+            </label>
+          </div>
+        ` : ""}
       </div>
       <div class="option-row">
         <label>Stroke:</label>
@@ -68,7 +111,7 @@ export class PFShapeOptions extends BaseComponent {
           max="10"
           .value=${String(strokeWidth)}
           @input=${this.handleStrokeChange}
-        >
+        />
         <span class="value">${strokeWidth}px</span>
       </div>
     `;
@@ -79,6 +122,11 @@ export class PFShapeOptions extends BaseComponent {
     shapeStore.setFilled(checked);
   }
 
+  private handleFillColorChange(e: Event) {
+    const value = (e.target as HTMLInputElement).value as ShapeFillColor;
+    shapeSettings.fillColor.value = value;
+  }
+
   private handleStrokeChange(e: Event) {
     const value = parseInt((e.target as HTMLInputElement).value);
     shapeStore.setStrokeWidth(value);
@@ -87,6 +135,6 @@ export class PFShapeOptions extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-shape-options': PFShapeOptions;
+    "pf-shape-options": PFShapeOptions;
   }
 }

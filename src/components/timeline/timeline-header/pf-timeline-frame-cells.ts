@@ -78,6 +78,8 @@ export class PFTimelineFrameCells extends BaseComponent {
   @state() private dragOverFrameIndex: number | null = null;
 
   private selectFrame(frameId: string) {
+    // Clear cel selection when clicking a frame header
+    animationStore.clearCelSelection();
     animationStore.goToFrame(frameId);
   }
 

@@ -17,6 +17,7 @@ import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
 import "../dialogs/pf-grid-settings-dialog";
+import "../dialogs/pf-accent-color-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
@@ -143,6 +144,33 @@ export class PixelForgeApp extends BaseComponent {
       padding: 0 var(--pf-spacing-2);
       font-size: var(--pf-font-size-xs);
     }
+
+    /* Warning toast - rendered at app level to avoid viewport transform issues */
+    .warning-toast {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(40, 40, 40, 0.95);
+      border: 1px solid rgba(200, 80, 80, 0.8);
+      color: #ff8080;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 10000;
+      pointer-events: none;
+      animation: toastFadeInOut 2s ease-in-out forwards;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      white-space: nowrap;
+    }
+
+    @keyframes toastFadeInOut {
+      0% { opacity: 0; transform: translate(-50%, -50%) translateY(10px); }
+      15% { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
+      85% { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
+      100% { opacity: 0; transform: translate(-50%, -50%) translateY(-10px); }
+    }
   `;
 
   @state() showResizeDialog = false;
@@ -152,9 +180,11 @@ export class PixelForgeApp extends BaseComponent {
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
+  @state() private warningMessage: string | null = null;
 
   private resizeStartY = 0;
   private resizeStartHeight = 0;
+  private warningTimer: number | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -191,7 +221,31 @@ export class PixelForgeApp extends BaseComponent {
       "show-export-dialog",
       this.handleShowExportDialog
     );
+
+    // Warn user about unsaved changes before leaving
+    window.addEventListener("beforeunload", this.handleBeforeUnload);
+
+    // Listen for warning toast events from canvas
+    window.addEventListener(
+      "show-warning-toast",
+      this.handleShowWarningToast as EventListener
+    );
   }
+
+  private handleShowWarningToast = (e: CustomEvent<{ message: string }>) => {
+    // Clear any existing timer
+    if (this.warningTimer !== null) {
+      clearTimeout(this.warningTimer);
+    }
+
+    this.warningMessage = e.detail.message;
+
+    // Auto-hide after animation completes
+    this.warningTimer = window.setTimeout(() => {
+      this.warningMessage = null;
+      this.warningTimer = null;
+    }, 2000);
+  };
 
   private handleShowNewProjectDialog = () => {
     this.showNewProjectDialog = true;
@@ -213,6 +267,17 @@ export class PixelForgeApp extends BaseComponent {
 
   private handleShowExportDialog = () => {
     this.showExportDialog = true;
+  };
+
+  private handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    // Check if there are unsaved changes (history has items)
+    const hasUnsavedChanges = historyStore.undoStack.value.length > 0;
+    if (hasUnsavedChanges) {
+      // Modern browsers ignore custom messages, but the prompt will still show
+      e.preventDefault();
+      e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+      return e.returnValue;
+    }
   };
 
   private async loadSavedProject() {
@@ -252,6 +317,11 @@ export class PixelForgeApp extends BaseComponent {
     window.removeEventListener(
       "show-export-dialog",
       this.handleShowExportDialog
+    );
+    window.removeEventListener("beforeunload", this.handleBeforeUnload);
+    window.removeEventListener(
+      "show-warning-toast",
+      this.handleShowWarningToast as EventListener
     );
   }
 
@@ -387,6 +457,9 @@ export class PixelForgeApp extends BaseComponent {
       ></pf-resize-dialog>
 
       <pf-grid-settings-dialog></pf-grid-settings-dialog>
+      <pf-accent-color-dialog></pf-accent-color-dialog>
+
+      ${this.warningMessage ? html`<div class="warning-toast">${this.warningMessage}</div>` : ""}
     `;
   }
 }

@@ -15,7 +15,7 @@ import { colorStore } from "../../stores/colors";
 import { animationStore } from "../../stores/animation";
 import { viewportStore } from "../../stores/viewport";
 import { panelStore } from "../../stores/panels";
-import { shapeStore } from "../../stores/shape";
+import { shapeSettings } from "../../stores/tool-settings";
 import { guidesStore } from "../../stores/guides";
 import { AddFrameCommand } from "../../commands/animation-commands";
 import {
@@ -387,11 +387,21 @@ export function registerShortcuts() {
   // FILL & STROKE
   // ============================================
 
-  // F = Fill selection with foreground color
+  // F = Toggle shape fill mode OR fill selection with foreground color
   keyboardService.register(
     "f",
     [],
     () => {
+      const currentTool = toolStore.activeTool.value;
+      const isShapeTool = ["rectangle", "ellipse", "line"].includes(currentTool);
+
+      if (isShapeTool) {
+        // Toggle shape fill mode
+        shapeSettings.fill.value = !shapeSettings.fill.value;
+        return;
+      }
+
+      // Fill selection with foreground color
       const state = selectionStore.state.value;
       if (state.type === "selected") {
         const activeLayerId = layerStore.activeLayerId.value;
@@ -416,7 +426,7 @@ export function registerShortcuts() {
         historyStore.execute(command);
       }
     },
-    "Fill selection"
+    "Toggle fill / Fill selection"
   );
 
   // ============================================

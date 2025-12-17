@@ -269,6 +269,10 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("show-grid-settings-dialog"));
   }
 
+  showAccentColorDialog() {
+    window.dispatchEvent(new CustomEvent("show-accent-color-dialog"));
+  }
+
   private startEditingName() {
     this.isEditingName = true;
     // Focus the input after render
@@ -365,6 +369,10 @@ export class PFMenuBar extends BaseComponent {
           </div>
           <div class="menu-item" @click=${this.showKeyboardShortcutsDialog}>
             Keyboard Shortcuts... <span class="shortcut">${formatShortcut(menuShortcuts.keyboardShortcuts)}</span>
+          </div>
+          <div class="divider"></div>
+          <div class="menu-item" @click=${this.showAccentColorDialog}>
+            Accent Color...
           </div>
         </div>
 

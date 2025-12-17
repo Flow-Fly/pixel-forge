@@ -139,9 +139,29 @@ export abstract class ShapeTool extends BaseTool {
 
   protected abstract drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean, thickness: number): void;
 
+  /** Get the stroke color (always foreground) */
+  protected getStrokeColor(): string {
+    return colorStore.primaryColor.value;
+  }
+
+  /** Get the fill color based on settings (foreground or background) */
+  protected getFillColor(): string {
+    return shapeSettings.fillColor.value === "background"
+      ? colorStore.secondaryColor.value
+      : colorStore.primaryColor.value;
+  }
+
   protected setPixel(x: number, y: number) {
     if (!this.ctx) return;
-    const color = colorStore.primaryColor.value;
+    const color = this.getStrokeColor();
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(x, y, 1, 1);
+    this.expandBounds(x, y, 1);
+  }
+
+  protected setFillPixel(x: number, y: number) {
+    if (!this.ctx) return;
+    const color = this.getFillColor();
     this.ctx.fillStyle = color;
     this.ctx.fillRect(x, y, 1, 1);
     this.expandBounds(x, y, 1);
@@ -149,7 +169,7 @@ export abstract class ShapeTool extends BaseTool {
 
   protected setThickPixel(x: number, y: number, thickness: number) {
     if (!this.ctx || thickness <= 0) return;
-    const color = colorStore.primaryColor.value;
+    const color = this.getStrokeColor();
     this.ctx.fillStyle = color;
     const offset = Math.floor((thickness - 1) / 2);
     this.ctx.fillRect(x - offset, y - offset, thickness, thickness);
@@ -163,7 +183,7 @@ export abstract class ShapeTool extends BaseTool {
     const minY = Math.min(y1, y2);
     const maxY = Math.max(y1, y2);
 
-    const color = colorStore.primaryColor.value;
+    const color = this.getFillColor();
     this.ctx.fillStyle = color;
     this.ctx.fillRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
 
@@ -352,7 +372,7 @@ export class EllipseTool extends ShapeTool {
       // x = a * sqrt(1 - y^2/b^2)
       const xRange = Math.round(a * Math.sqrt(1 - (y * y) / (b * b)));
       for (let x = -xRange; x <= xRange; x++) {
-        this.setPixel(xc + x, yc + y);
+        this.setFillPixel(xc + x, yc + y);
       }
     }
   }

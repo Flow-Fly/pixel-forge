@@ -1,23 +1,34 @@
-import { signal } from "../core/signal";
+/**
+ * Shape Store
+ *
+ * Wrapper around shapeSettings from tool-settings.ts for backwards compatibility.
+ * The context bar and shape tools all use shapeSettings directly.
+ */
+import { shapeSettings } from "./tool-settings";
 
 class ShapeStore {
   // Whether shapes should be filled or just outlines
-  filled = signal(false);
+  // Points to the same signal as shapeSettings.fill
+  get filled() {
+    return shapeSettings.fill;
+  }
 
   // Stroke width for shape outlines
-  strokeWidth = signal(1);
+  // Points to the same signal as shapeSettings.thickness
+  get strokeWidth() {
+    return shapeSettings.thickness;
+  }
 
   setFilled(filled: boolean) {
-    this.filled.value = filled;
+    shapeSettings.fill.value = filled;
   }
 
   setStrokeWidth(width: number) {
-    this.strokeWidth.value = Math.max(1, Math.min(width, 10));
+    shapeSettings.thickness.value = Math.max(1, Math.min(width, 10));
   }
 
   toggleFilled() {
-    console.log("Toggling filled state");
-    this.filled.value = !this.filled.value;
+    shapeSettings.fill.value = !shapeSettings.fill.value;
   }
 }
 
