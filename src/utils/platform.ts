@@ -10,6 +10,13 @@
 export const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC");
 
 /**
+ * Primary modifier key for the platform
+ * Mac: 'meta' (Command)
+ * Windows/Linux: 'ctrl'
+ */
+export const MOD_PRIMARY = isMac ? "meta" : "ctrl";
+
+/**
  * Platform-specific key labels
  */
 export const keyLabels = {

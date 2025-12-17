@@ -6,7 +6,6 @@
  */
 
 import { signal } from "../core/signal";
-import { shapeStore } from "./shape";
 import type { ToolType } from "./tools";
 
 /**
@@ -16,7 +15,7 @@ import type { ToolType } from "./tools";
 export const toolSizes = {
   pencil: signal(1),
   eraser: signal(1),
-  // Shapes use shapeStore.strokeWidth
+  // Shapes use shapeSettings.thickness below
 };
 
 /**
@@ -26,7 +25,7 @@ export function getToolSize(tool: ToolType): number {
   if (tool === "pencil") return toolSizes.pencil.value;
   if (tool === "eraser") return toolSizes.eraser.value;
   if (tool === "line" || tool === "rectangle" || tool === "ellipse") {
-    return shapeStore.strokeWidth.value;
+    return shapeSettings.thickness.value;
   }
   return 1;
 }
@@ -35,13 +34,16 @@ export function getToolSize(tool: ToolType): number {
  * Set the size for a tool
  */
 export function setToolSize(tool: ToolType, size: number): void {
-  const clamped = Math.max(1, Math.min(50, size));
   if (tool === "pencil") {
+    const clamped = Math.max(1, Math.min(50, size));
     toolSizes.pencil.value = clamped;
   } else if (tool === "eraser") {
+    const clamped = Math.max(1, Math.min(50, size));
     toolSizes.eraser.value = clamped;
   } else if (tool === "line" || tool === "rectangle" || tool === "ellipse") {
-    shapeStore.setStrokeWidth(clamped);
+    // Shape thickness has a max of 10
+    const clamped = Math.max(1, Math.min(10, size));
+    shapeSettings.thickness.value = clamped;
   }
 }
 

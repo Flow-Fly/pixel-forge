@@ -20,6 +20,13 @@ export class LassoTool extends BaseTool {
   private lastDragX = 0;
   private lastDragY = 0;
 
+  // Store previous selection for add/subtract operations
+  private previousSelection: {
+    bounds: { x: number; y: number; width: number; height: number };
+    shape: string;
+    mask?: Uint8Array;
+  } | null = null;
+
   constructor(_context: CanvasRenderingContext2D) {
     super();
   }
@@ -29,7 +36,9 @@ export class LassoTool extends BaseTool {
     const canvasY = Math.floor(y);
 
     // Check if clicking inside existing selection (for dragging)
-    if (selectionStore.isPointInSelection(canvasX, canvasY)) {
+    // Only drag if no add/subtract modifiers are pressed
+    const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
+    if (!isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
       return;
     }
@@ -47,6 +56,20 @@ export class LassoTool extends BaseTool {
       selectionStore.setMode('subtract');
     } else {
       selectionStore.setMode('replace');
+    }
+
+    // Save previous selection for add/subtract operations
+    const currentState = selectionStore.state.value;
+    if (currentState.type === 'selected') {
+      this.previousSelection = {
+        bounds: { ...currentState.bounds },
+        shape: currentState.shape,
+        mask: currentState.shape === 'freeform'
+          ? (currentState as { mask: Uint8Array }).mask
+          : undefined,
+      };
+    } else {
+      this.previousSelection = null;
     }
 
     this.mode = 'selecting';
@@ -110,6 +133,7 @@ export class LassoTool extends BaseTool {
     if (this.points.length < 3) {
       selectionStore.clear();
       selectionStore.resetMode();
+      this.previousSelection = null;
       return;
     }
 
@@ -119,6 +143,7 @@ export class LassoTool extends BaseTool {
     if (simplified.length < 3) {
       selectionStore.clear();
       selectionStore.resetMode();
+      this.previousSelection = null;
       return;
     }
 
@@ -132,6 +157,7 @@ export class LassoTool extends BaseTool {
     if (!result) {
       selectionStore.clear();
       selectionStore.resetMode();
+      this.previousSelection = null;
       return;
     }
 
@@ -143,12 +169,11 @@ export class LassoTool extends BaseTool {
     const canvas = layer?.canvas;
 
     // Handle selection modes
-    const currentState = selectionStore.state.value;
     const mode = selectionStore.mode.value;
 
-    // For add/subtract, we need to combine with existing selection
-    if (mode !== 'replace' && currentState.type === 'selected') {
-      const combined = this.combineMasks(currentState, bounds, mask, mode);
+    // For add/subtract, we need to combine with saved previous selection
+    if (mode !== 'replace' && this.previousSelection) {
+      const combined = this.combineMasks(this.previousSelection, bounds, mask, mode);
       if (combined) {
         selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
@@ -159,6 +184,7 @@ export class LassoTool extends BaseTool {
     }
 
     selectionStore.resetMode();
+    this.previousSelection = null;
     this.points = [];
   }
 

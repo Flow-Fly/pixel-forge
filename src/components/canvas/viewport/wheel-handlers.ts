@@ -4,11 +4,11 @@
  * Handles zoom and pan via mouse wheel and trackpad gestures.
  */
 
-import { viewportStore } from '../../../stores/viewport';
-import { toolStore } from '../../../stores/tools';
-import { getToolSize, setToolSize } from '../../../stores/tool-settings';
-import type { KeyboardState } from './keyboard-handlers';
-import { isClickOnUI } from './pan-handlers';
+import { viewportStore } from "../../../stores/viewport";
+import { toolStore } from "../../../stores/tools";
+import { getToolSize, setToolSize } from "../../../stores/tool-settings";
+import type { KeyboardState } from "./keyboard-handlers";
+import { isClickOnUI } from "./pan-handlers";
 
 export interface WheelHandlerCallbacks {
   requestUpdate: () => void;
@@ -26,22 +26,16 @@ export function handleWheel(
 ): void {
   e.preventDefault();
 
-  // Distinguish between actual Ctrl/Cmd+scroll vs macOS pinch gesture
-  // macOS injects ctrlKey=true for pinch-to-zoom, but we want:
-  // - Pinch → zoom (universal expectation)
-  // - Actual Ctrl/Cmd + scroll → brush size (Aseprite-style)
-  // - Regular two-finger scroll → pan
-  const isActualModifierHeld =
-    keyboardState.isCtrlActuallyPressed || keyboardState.isMetaActuallyPressed;
   const isPinchGesture = e.ctrlKey && !keyboardState.isCtrlActuallyPressed;
 
-  // Only adjust brush size if user actually pressed Ctrl/Cmd
-  if (isActualModifierHeld) {
+  // Alt+Wheel = adjust brush size / thickness (for tools that support it)
+  if (keyboardState.isAltActuallyPressed) {
     const tool = toolStore.activeTool.value;
     const currentSize = getToolSize(tool);
     const scrollDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-    // Scroll up = increase, scroll down = decrease (Aseprite convention)
-    const delta = scrollDelta < 0 ? 1 : -1;
+    // Positive deltaY (natural scroll up on Mac, traditional scroll down) = increase
+    // Negative deltaY = decrease
+    const delta = scrollDelta > 0 ? 1 : -1;
     setToolSize(tool, currentSize + delta);
     return;
   }
@@ -110,8 +104,7 @@ export function handleGlobalWheel(
   // Only handle trackpad (has horizontal component), not mouse wheel
   // Mouse wheels have deltaMode === 1 OR Y-only scroll (deltaX === 0)
   const isMouseWheel =
-    e.deltaMode === 1 ||
-    (e.deltaMode === 0 && e.deltaX === 0);
+    e.deltaMode === 1 || (e.deltaMode === 0 && e.deltaX === 0);
   if (isMouseWheel) return;
 
   // Trackpad two-finger scroll = pan

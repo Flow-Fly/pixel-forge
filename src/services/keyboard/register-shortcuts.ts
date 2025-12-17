@@ -19,6 +19,7 @@ import { guidesStore } from "../../stores/guides";
 import { AddFrameCommand } from "../../commands/animation-commands";
 import { toolRegistry } from "../../tools/tool-registry";
 import { canCaptureBrush, captureBrushAndAdd } from "../brush-capture";
+import { MOD_PRIMARY } from "../../utils/platform";
 
 export function registerShortcuts() {
   // ============================================
@@ -83,42 +84,64 @@ export function registerShortcuts() {
   // VIEW & NAVIGATION
   // ============================================
 
-  // 1-6 = Zoom levels
+  // Mod+1-6 = Zoom levels (industry standard: numbers for opacity)
   keyboardService.register(
     "1",
-    [],
+    [MOD_PRIMARY],
     () => viewportStore.zoomToLevel(1),
     "Zoom 100%"
   );
   keyboardService.register(
     "2",
-    [],
+    [MOD_PRIMARY],
     () => viewportStore.zoomToLevel(2),
     "Zoom 200%"
   );
   keyboardService.register(
     "3",
-    [],
+    [MOD_PRIMARY],
     () => viewportStore.zoomToLevel(3),
     "Zoom 400%"
   );
   keyboardService.register(
     "4",
-    [],
+    [MOD_PRIMARY],
     () => viewportStore.zoomToLevel(4),
     "Zoom 800%"
   );
   keyboardService.register(
     "5",
-    [],
+    [MOD_PRIMARY],
     () => viewportStore.zoomToLevel(5),
     "Zoom 1600%"
   );
   keyboardService.register(
     "6",
-    [],
+    [MOD_PRIMARY],
     () => viewportStore.zoomToLevel(6),
     "Zoom 3200%"
+  );
+
+  // ============================================
+  // OPACITY SHORTCUTS (Industry standard: 1-9, 0)
+  // ============================================
+
+  // 1-9 = Set brush opacity 10%-90%
+  for (let i = 1; i <= 9; i++) {
+    const opacity = i * 10;
+    keyboardService.register(
+      String(i),
+      [],
+      () => brushStore.setOpacity(opacity),
+      `Opacity ${opacity}%`
+    );
+  }
+  // 0 = 100% opacity
+  keyboardService.register(
+    "0",
+    [],
+    () => brushStore.setOpacity(100),
+    "Opacity 100%"
   );
 
   // Tab = Toggle timeline
@@ -317,28 +340,22 @@ export function registerShortcuts() {
   // EDIT SHORTCUTS
   // ============================================
 
-  // Undo: Ctrl+Z / Cmd+Z
-  keyboardService.register("z", ["ctrl"], () => historyStore.undo(), "Undo");
-  keyboardService.register("z", ["meta"], () => historyStore.undo(), "Undo");
+  // Undo: Mod+Z
+  keyboardService.register(
+    "z",
+    [MOD_PRIMARY],
+    () => historyStore.undo(),
+    "Undo"
+  );
 
-  // Redo: Ctrl+Y, Ctrl+Shift+Z, Cmd+Shift+Z
+  // Redo: Mod+Shift+Z (also Ctrl+Y on Windows for compatibility)
+  keyboardService.register(
+    "z",
+    [MOD_PRIMARY, "shift"],
+    () => historyStore.redo(),
+    "Redo"
+  );
   keyboardService.register("y", ["ctrl"], () => historyStore.redo(), "Redo");
-  keyboardService.register(
-    "z",
-    ["ctrl", "shift"],
-    () => historyStore.redo(),
-    "Redo"
-  );
-  keyboardService.register(
-    "z",
-    ["meta", "shift"],
-    () => historyStore.redo(),
-    "Redo"
-  );
-
-  // Big Pixel Mode: Ctrl+Shift+B / Cmd+Shift+B
-  //keyboardService.register('b', ['ctrl', 'shift'], () => brushStore.toggleBigPixelMode(), 'Toggle Big Pixel Mode');
-  //keyboardService.register('b', ['meta', 'shift'], () => brushStore.toggleBigPixelMode(), 'Toggle Big Pixel Mode');
 
   // ============================================
   // SELECTION SHORTCUTS
@@ -441,7 +458,7 @@ export function registerShortcuts() {
     "Delete selection"
   );
 
-  // Ctrl+D / Cmd+D = Deselect
+  // Mod+D = Deselect
   const deselect = () => {
     const state = selectionStore.state.value;
     if (state.type === "floating") {
@@ -464,10 +481,9 @@ export function registerShortcuts() {
       selectionStore.clear();
     }
   };
-  keyboardService.register("d", ["ctrl"], deselect, "Deselect");
-  keyboardService.register("d", ["meta"], deselect, "Deselect");
+  keyboardService.register("d", [MOD_PRIMARY], deselect, "Deselect");
 
-  // Ctrl+A / Cmd+A = Select all
+  // Mod+A = Select all
   const selectAll = () => {
     const width = projectStore.width.value;
     const height = projectStore.height.value;
@@ -477,23 +493,12 @@ export function registerShortcuts() {
       bounds: { x: 0, y: 0, width, height },
     };
   };
-  keyboardService.register("a", ["ctrl"], selectAll, "Select all");
-  keyboardService.register("a", ["meta"], selectAll, "Select all");
-  // Big Pixel Mode: Ctrl+Shift+B / Cmd+Shift+B (toggle pixelPerfect on active brush)
+  keyboardService.register("a", [MOD_PRIMARY], selectAll, "Select all");
+
+  // Mod+Shift+B = Toggle Pixel Perfect Mode
   keyboardService.register(
     "b",
-    ["ctrl", "shift"],
-    () => {
-      const currentBrush = brushStore.activeBrush.value;
-      brushStore.updateActiveBrushSettings({
-        pixelPerfect: !currentBrush.pixelPerfect,
-      });
-    },
-    "Toggle Pixel Perfect Mode"
-  );
-  keyboardService.register(
-    "b",
-    ["meta", "shift"],
+    [MOD_PRIMARY, "shift"],
     () => {
       const currentBrush = brushStore.activeBrush.value;
       brushStore.updateActiveBrushSettings({
@@ -507,18 +512,17 @@ export function registerShortcuts() {
   // FILE SHORTCUTS
   // ============================================
 
-  // Ctrl+N / Cmd+N = New Project
+  // Ctrl+N = New Project (Cmd+N conflicts with browser on Mac)
   const openNewProjectDialog = () => {
     window.dispatchEvent(new CustomEvent("show-new-project-dialog"));
   };
   keyboardService.register("n", ["ctrl"], openNewProjectDialog, "New project");
-  keyboardService.register("n", ["meta"], openNewProjectDialog, "New project");
 
   // ============================================
   // BRUSH SHORTCUTS
   // ============================================
 
-  // Ctrl+B / Cmd+B = Capture brush from selection
+  // Mod+B = Capture brush from selection
   const captureBrush = async () => {
     if (!canCaptureBrush()) {
       console.log("No selection to capture as brush");
@@ -528,14 +532,22 @@ export function registerShortcuts() {
   };
   keyboardService.register(
     "b",
-    ["ctrl"],
+    [MOD_PRIMARY],
     captureBrush,
     "Capture brush from selection"
   );
+
+  // ============================================
+  // HELP SHORTCUTS
+  // ============================================
+
+  // ? = Show keyboard shortcuts dialog
   keyboardService.register(
-    "b",
-    ["meta"],
-    captureBrush,
-    "Capture brush from selection"
+    "?",
+    [],
+    () => {
+      window.dispatchEvent(new CustomEvent("show-keyboard-shortcuts-dialog"));
+    },
+    "Keyboard shortcuts"
   );
 }

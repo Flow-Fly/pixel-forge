@@ -11,6 +11,7 @@ import { selectionStore } from '../../../stores/selection';
 export interface KeyboardState {
   isCtrlActuallyPressed: boolean;
   isMetaActuallyPressed: boolean;
+  isAltActuallyPressed: boolean;
 }
 
 export interface KeyboardHandlerCallbacks {
@@ -29,6 +30,7 @@ export function createKeyboardState(): KeyboardState {
   return {
     isCtrlActuallyPressed: false,
     isMetaActuallyPressed: false,
+    isAltActuallyPressed: false,
   };
 }
 
@@ -43,6 +45,7 @@ export function handleKeyDown(
   // Track actual modifier key presses (to distinguish from macOS pinch injection)
   if (e.key === 'Control') state.isCtrlActuallyPressed = true;
   if (e.key === 'Meta') state.isMetaActuallyPressed = true;
+  if (e.key === 'Alt') state.isAltActuallyPressed = true;
 
   // Skip if typing in an input
   if (
@@ -60,22 +63,15 @@ export function handleKeyDown(
     return;
   }
 
-  // Zoom keys 1-6
-  if (e.key >= '1' && e.key <= '6') {
-    viewportStore.zoomToLevel(parseInt(e.key) as 1 | 2 | 3 | 4 | 5 | 6);
-    callbacks.requestUpdate();
-    return;
-  }
+  // Note: Number keys (1-9, 0) are now handled by keyboard service for opacity
+  // Zoom is now Mod+1-6 (also handled by keyboard service)
 
-  // +/- for zoom in/out
+  // +/- for zoom in/out (no modifier)
   if (e.key === '+' || e.key === '=') {
     viewportStore.zoomIn();
     callbacks.requestUpdate();
   } else if (e.key === '-') {
     viewportStore.zoomOut();
-    callbacks.requestUpdate();
-  } else if (e.key === '0') {
-    viewportStore.zoomToFit(callbacks.getClientWidth(), callbacks.getClientHeight());
     callbacks.requestUpdate();
   } else if (e.key === 'Home') {
     viewportStore.resetView();
@@ -122,6 +118,7 @@ export function handleKeyUp(
   // Track actual modifier key releases
   if (e.key === 'Control') state.isCtrlActuallyPressed = false;
   if (e.key === 'Meta') state.isMetaActuallyPressed = false;
+  if (e.key === 'Alt') state.isAltActuallyPressed = false;
 
   if (e.code === 'Space') {
     viewportStore.isSpacebarDown.value = false;
@@ -143,4 +140,5 @@ export function handleKeyUp(
 export function handleWindowBlur(state: KeyboardState): void {
   state.isCtrlActuallyPressed = false;
   state.isMetaActuallyPressed = false;
+  state.isAltActuallyPressed = false;
 }
