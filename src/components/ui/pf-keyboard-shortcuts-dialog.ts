@@ -5,109 +5,12 @@ import { toolRegistry } from "../../tools/tool-registry";
 import { formatShortcut } from "../../utils/platform";
 import type { ToolShortcut, ToolMeta } from "../../types/tool-meta";
 import type { ToolType } from "../../stores/tools";
+import {
+  globalShortcutCategories,
+  animationShortcutCategories,
+} from "../../services/keyboard/shortcut-definitions";
 
 type TabId = "tools" | "global" | "animation";
-
-interface ShortcutCategory {
-  name: string;
-  shortcuts: Array<{ key: string; action: string }>;
-}
-
-/**
- * Global shortcuts that are registered in register-shortcuts.ts
- */
-const globalShortcuts: ShortcutCategory[] = [
-  {
-    name: "Edit",
-    shortcuts: [
-      { key: "mod+z", action: "Undo" },
-      { key: "mod+shift+z", action: "Redo" },
-      { key: "mod+y", action: "Redo (alt)" },
-      { key: "delete", action: "Delete selection" },
-      { key: "backspace", action: "Delete selection" },
-      { key: "mod+a", action: "Select all" },
-      { key: "mod+d", action: "Deselect" },
-      { key: "mod+b", action: "Capture brush from selection" },
-    ],
-  },
-  {
-    name: "View",
-    shortcuts: [
-      { key: "+", action: "Zoom in" },
-      { key: "-", action: "Zoom out" },
-      { key: "mod+1-6", action: "Zoom levels (100%-3200%)" },
-      { key: "tab", action: "Toggle timeline" },
-      { key: "shift+g", action: "Toggle guides" },
-    ],
-  },
-  {
-    name: "Colors & Opacity",
-    shortcuts: [
-      { key: "x", action: "Swap foreground/background" },
-      { key: "1-9", action: "Set opacity 10%-90%" },
-      { key: "0", action: "Set opacity 100%" },
-    ],
-  },
-  {
-    name: "Quick Tools",
-    shortcuts: [
-      { key: "alt (hold)", action: "Eyedropper" },
-      { key: "space (hold)", action: "Pan" },
-    ],
-  },
-  {
-    name: "File",
-    shortcuts: [
-      { key: "ctrl+n", action: "New project" },
-    ],
-  },
-  {
-    name: "Shape Tools",
-    shortcuts: [
-      { key: "f", action: "Toggle fill (when shape tool active)" },
-    ],
-  },
-  {
-    name: "Brush",
-    shortcuts: [
-      { key: "alt+wheel", action: "Change brush size" },
-      { key: "mod+shift+b", action: "Toggle pixel perfect mode" },
-    ],
-  },
-];
-
-const animationShortcuts: ShortcutCategory[] = [
-  {
-    name: "Playback",
-    shortcuts: [
-      { key: "enter", action: "Play/Stop" },
-    ],
-  },
-  {
-    name: "Navigation",
-    shortcuts: [
-      { key: "left", action: "Previous frame" },
-      { key: "right", action: "Next frame" },
-      { key: "home", action: "First frame" },
-      { key: "end", action: "Last frame" },
-    ],
-  },
-  {
-    name: "Frames",
-    shortcuts: [
-      { key: "alt+n", action: "New frame" },
-    ],
-  },
-  {
-    name: "Selection Movement",
-    shortcuts: [
-      { key: "arrows", action: "Move selection 1px" },
-      { key: "shift+arrows", action: "Move selection 10px" },
-      { key: "enter", action: "Commit floating selection" },
-      { key: "escape", action: "Cancel selection" },
-    ],
-  },
-];
 
 /**
  * Tool groups for organized display
@@ -410,7 +313,7 @@ export class PfKeyboardShortcutsDialog extends BaseComponent {
 
   private renderGlobalTab() {
     return html`
-      ${globalShortcuts.map(
+      ${globalShortcutCategories.map(
         (category) => html`
           <div class="category-section">
             <div class="category-header">${category.name}</div>
@@ -432,7 +335,7 @@ export class PfKeyboardShortcutsDialog extends BaseComponent {
 
   private renderAnimationTab() {
     return html`
-      ${animationShortcuts.map(
+      ${animationShortcutCategories.map(
         (category) => html`
           <div class="category-section">
             <div class="category-header">${category.name}</div>

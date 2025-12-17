@@ -7,9 +7,10 @@ import { animationStore } from "../../stores/animation";
 import { FileService } from "../../services/file-service";
 // import { exportSpritesheet } from "../../services/spritesheet-export";
 import { exportAnimatedWebP } from "../../services/webp-animation";
+import { exportAseFile } from "../../services/aseprite-service";
 import "../ui/pf-dialog";
 
-export type ExportFormat = "png" | "webp" | "webp-animated" | "spritesheet";
+export type ExportFormat = "png" | "webp" | "webp-animated" | "spritesheet" | "aseprite" | "pixelforge";
 export type FrameSelection = "current" | "all" | "range";
 
 @customElement("pf-export-dialog")
@@ -140,7 +141,7 @@ export class PFExportDialog extends BaseComponent {
   @state() private frameEnd: number = 1;
   @state() private useBackground: boolean = false;
   @state() private backgroundColor: string = "#ffffff";
-  @state() private filename: string = "export";
+  @state() private filename: string = "";
   @state() private includeJson: boolean = true;
   @state() private spritesheetDirection: "horizontal" | "vertical" | "grid" =
     "horizontal";
@@ -149,6 +150,14 @@ export class PFExportDialog extends BaseComponent {
   connectedCallback() {
     super.connectedCallback();
     this.frameEnd = animationStore.frames.value.length;
+  }
+
+  willUpdate(changedProperties: Map<string, unknown>) {
+    // Set filename to project name when dialog opens
+    if (changedProperties.has("open") && this.open) {
+      this.filename = projectStore.name.value || "export";
+      this.frameEnd = animationStore.frames.value.length;
+    }
   }
 
   private get outputSize() {
@@ -255,9 +264,24 @@ export class PFExportDialog extends BaseComponent {
       case "spritesheet":
         this.exportAsSpritesheet(frameIds);
         break;
+      case "aseprite":
+        this.exportAsAseprite();
+        break;
+      case "pixelforge":
+        await this.exportAsPixelForge();
+        break;
     }
 
     this.close();
+  }
+
+  private exportAsAseprite() {
+    exportAseFile(`${this.filename}.ase`);
+  }
+
+  private async exportAsPixelForge() {
+    const project = await projectStore.saveProject();
+    FileService.saveCompressed(project, `${this.filename}.pf`);
   }
 
   private exportImages(frameIds: string[], format: "png" | "webp") {
@@ -378,10 +402,12 @@ export class PFExportDialog extends BaseComponent {
               (this.format = (e.target as HTMLSelectElement)
                 .value as ExportFormat)}
           >
+            <option value="pixelforge">PixelForge Project (.pf)</option>
             <option value="png">PNG Image</option>
             <option value="webp">WebP Image</option>
             <option value="webp-animated">Animated WebP</option>
             <option value="spritesheet">Sprite Sheet</option>
+            <option value="aseprite">Aseprite (.ase)</option>
           </select>
         </div>
 

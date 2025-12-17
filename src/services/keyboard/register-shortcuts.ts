@@ -18,10 +18,15 @@ import { panelStore } from "../../stores/panels";
 import { shapeStore } from "../../stores/shape";
 import { guidesStore } from "../../stores/guides";
 import { AddFrameCommand } from "../../commands/animation-commands";
+import {
+  GroupLayersCommand,
+  UngroupLayersCommand,
+} from "../../commands/layer-commands";
 import { toolRegistry } from "../../tools/tool-registry";
 import { canCaptureBrush, captureBrushAndAdd } from "../brush-capture";
 import { MOD_PRIMARY } from "../../utils/platform";
 import { getToolSize, setToolSize } from "../../stores/tool-settings";
+import { clipboardStore } from "../../stores/clipboard";
 
 export function registerShortcuts() {
   // ============================================
@@ -50,13 +55,34 @@ export function registerShortcuts() {
   // QUICK TOOLS (hold to temporarily switch)
   // ============================================
 
-  // Alt = Eyedropper (quick)
+  // Alt = Eyedropper (quick) - but NOT when using selection tools (they use Alt for subtract mode)
   keyboardService.register(
     "Alt",
     [],
-    () => toolStore.setQuickTool("eyedropper"),
+    () => {
+      // Don't activate quick eyedropper when using selection tools
+      // Selection tools use Alt for subtract mode
+      const currentTool = toolStore.activeTool.value;
+      const isSelectionTool = [
+        "marquee-rect",
+        "lasso",
+        "polygonal-lasso",
+        "magic-wand",
+      ].includes(currentTool);
+      if (!isSelectionTool) {
+        toolStore.setQuickTool("eyedropper");
+      }
+    },
     "Quick eyedropper",
-    { quick: true, releaseAction: () => toolStore.restorePreviousTool() }
+    {
+      quick: true,
+      releaseAction: () => {
+        // Only restore if we actually switched to eyedropper
+        if (toolStore.activeTool.value === "eyedropper") {
+          toolStore.restorePreviousTool();
+        }
+      },
+    }
   );
 
   // Space = Hand/Pan (quick) - handled by viewport, but register for consistency
@@ -552,6 +578,148 @@ export function registerShortcuts() {
   };
   keyboardService.register("a", [MOD_PRIMARY], selectAll, "Select all");
 
+  // Mod+Shift+D = Reselect (restore last selection)
+  const reselect = () => {
+    selectionStore.reselect();
+  };
+  keyboardService.register("d", [MOD_PRIMARY, "shift"], reselect, "Reselect");
+
+  // Ctrl+Shift+T = Select cel bounds (non-transparent content)
+  // Uses Ctrl (not Mod) to avoid Cmd+T conflict on Mac (new tab in browsers)
+  const selectCelBounds = () => {
+    const activeLayerId = layerStore.activeLayerId.value;
+    if (!activeLayerId) return;
+
+    const currentFrameId = animationStore.currentFrameId.value;
+    const canvas = animationStore.getCelCanvas(currentFrameId, activeLayerId);
+    if (!canvas) return;
+
+    // Use the selection store's selectLayerContent method
+    // Clear selection if no content found
+    if (!selectionStore.selectLayerContent(canvas)) {
+      selectionStore.clear();
+    }
+  };
+  keyboardService.register("t", ["ctrl", "shift"], selectCelBounds, "Select cel bounds");
+
+  // ============================================
+  // CLIPBOARD SHORTCUTS
+  // ============================================
+
+  // Mod+C = Copy selection
+  const copySelection = () => {
+    const state = selectionStore.state.value;
+    if (state.type !== "selected") return;
+
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (!layer?.canvas) return;
+
+    const ctx = layer.canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Get pixels from selection bounds
+    const { bounds, shape } = state;
+    const imageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+
+    // Apply mask if freeform selection
+    if (shape === "freeform" && "mask" in state) {
+      const mask = (state as { mask: Uint8Array }).mask;
+      const data = imageData.data;
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i] === 0) {
+          // Clear pixels outside mask
+          data[i * 4 + 3] = 0;
+        }
+      }
+    }
+
+    clipboardStore.setData({
+      imageData,
+      shape: shape as "rectangle" | "ellipse" | "freeform",
+      mask: shape === "freeform" ? (state as { mask: Uint8Array }).mask : undefined,
+      width: bounds.width,
+      height: bounds.height,
+    });
+  };
+  keyboardService.register("c", [MOD_PRIMARY], copySelection, "Copy");
+
+  // Mod+X = Cut selection
+  const cutSelection = () => {
+    const state = selectionStore.state.value;
+    if (state.type !== "selected") return;
+
+    // First copy
+    copySelection();
+
+    // Then delete
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (!layer?.canvas) return;
+
+    const command = new DeleteSelectionCommand(
+      layer.canvas,
+      state.bounds,
+      state.shape,
+      state.shape === "freeform" ? (state as { mask: Uint8Array }).mask : undefined
+    );
+    historyStore.execute(command);
+  };
+  keyboardService.register("x", [MOD_PRIMARY], cutSelection, "Cut");
+
+  // Mod+V = Paste
+  const pasteSelection = () => {
+    const data = clipboardStore.getData();
+    if (!data) return;
+
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (!layer?.canvas) return;
+
+    // Commit any existing floating selection first
+    const currentState = selectionStore.state.value;
+    if (currentState.type === "floating") {
+      const command = new CommitFloatCommand(
+        layer.canvas,
+        layer.id,
+        currentState.imageData,
+        currentState.originalBounds,
+        currentState.currentOffset,
+        currentState.shape,
+        currentState.mask
+      );
+      historyStore.execute(command);
+    }
+
+    // Paste at center of viewport or at origin
+    const canvasWidth = projectStore.width.value;
+    const canvasHeight = projectStore.height.value;
+    const pasteX = Math.floor((canvasWidth - data.width) / 2);
+    const pasteY = Math.floor((canvasHeight - data.height) / 2);
+
+    // Create floating selection with pasted data
+    selectionStore.state.value = {
+      type: "floating",
+      shape: data.shape,
+      imageData: data.imageData,
+      originalBounds: { x: pasteX, y: pasteY, width: data.width, height: data.height },
+      currentOffset: { x: 0, y: 0 },
+      mask: data.mask,
+    };
+  };
+  keyboardService.register("v", [MOD_PRIMARY], pasteSelection, "Paste");
+
+  // Ctrl+Shift+I = Invert selection (using Ctrl instead of Mod to avoid Mac Cmd+Shift+I conflict with Safari)
+  const invertSelection = () => {
+    const state = selectionStore.state.value;
+    if (state.type !== "selected") return;
+
+    const width = projectStore.width.value;
+    const height = projectStore.height.value;
+    selectionStore.invertSelection(width, height);
+  };
+  keyboardService.register("i", ["ctrl", "shift"], invertSelection, "Invert selection");
+
   // Mod+Shift+B = Toggle Pixel Perfect Mode
   keyboardService.register(
     "b",
@@ -575,6 +743,24 @@ export function registerShortcuts() {
   };
   keyboardService.register("n", ["ctrl"], openNewProjectDialog, "New project");
 
+  // Mod+O = Open file
+  const openFile = () => {
+    window.dispatchEvent(new CustomEvent("show-open-file-dialog"));
+  };
+  keyboardService.register("o", [MOD_PRIMARY], openFile, "Open project");
+
+  // Mod+E = Export
+  const showExport = () => {
+    window.dispatchEvent(new CustomEvent("show-export-dialog"));
+  };
+  keyboardService.register("e", [MOD_PRIMARY], showExport, "Export");
+
+  // C = Canvas Resize / Crop
+  const openResizeDialog = () => {
+    window.dispatchEvent(new CustomEvent("show-resize-dialog"));
+  };
+  keyboardService.register("c", [], openResizeDialog, "Canvas resize");
+
   // ============================================
   // BRUSH SHORTCUTS
   // ============================================
@@ -592,6 +778,65 @@ export function registerShortcuts() {
     [MOD_PRIMARY],
     captureBrush,
     "Capture brush from selection"
+  );
+
+  // ============================================
+  // LAYER SHORTCUTS
+  // ============================================
+
+  // Mod+G = Group layers
+  const groupLayers = () => {
+    const activeLayerId = layerStore.activeLayerId.value;
+    if (!activeLayerId) return;
+
+    const activeLayer = layerStore.layers.value.find(
+      (l) => l.id === activeLayerId
+    );
+    if (!activeLayer) return;
+
+    // Don't group if already a group or inside a group
+    if (activeLayer.type === "group") return;
+
+    // For now, group just the active layer
+    // TODO: Support multi-selection when layer multi-select is implemented
+    const command = new GroupLayersCommand([activeLayerId]);
+    historyStore.execute(command);
+  };
+  keyboardService.register("g", [MOD_PRIMARY], groupLayers, "Group layers");
+
+  // Mod+Shift+G = Ungroup layers
+  const ungroupLayers = () => {
+    const activeLayerId = layerStore.activeLayerId.value;
+    if (!activeLayerId) return;
+
+    const activeLayer = layerStore.layers.value.find(
+      (l) => l.id === activeLayerId
+    );
+    if (!activeLayer) return;
+
+    // If active layer is a group, ungroup it
+    if (activeLayer.type === "group") {
+      const command = new UngroupLayersCommand(activeLayerId);
+      historyStore.execute(command);
+      return;
+    }
+
+    // If active layer is inside a group, ungroup the parent
+    if (activeLayer.parentId) {
+      const parentGroup = layerStore.layers.value.find(
+        (l) => l.id === activeLayer.parentId
+      );
+      if (parentGroup && parentGroup.type === "group") {
+        const command = new UngroupLayersCommand(parentGroup.id);
+        historyStore.execute(command);
+      }
+    }
+  };
+  keyboardService.register(
+    "g",
+    [MOD_PRIMARY, "shift"],
+    ungroupLayers,
+    "Ungroup layers"
   );
 
   // ============================================

@@ -1,13 +1,18 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
-import { toolStore, type ToolType } from '../../stores/tools';
-import { toolGroups, getActiveToolForGroup, setLastSelectedTool, getToolGroup } from '../../stores/tool-groups';
-import { getToolShortcutKey } from '../../tools/tool-registry';
-import './pf-tool-button';
-import '../color/pf-color-selector-compact';
+import { html, css } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { BaseComponent } from "../../core/base-component";
+import { toolStore, type ToolType } from "../../stores/tools";
+import {
+  toolGroups,
+  getActiveToolForGroup,
+  setLastSelectedTool,
+  getToolGroup,
+} from "../../stores/tool-groups";
+import { getToolShortcutKey } from "../../tools/tool-registry";
+import "./pf-tool-button";
+import "../color/pf-color-selector-compact";
 
-@customElement('pf-toolbar')
+@customElement("pf-toolbar")
 export class PFToolbar extends BaseComponent {
   static styles = css`
     :host {
@@ -49,7 +54,7 @@ export class PFToolbar extends BaseComponent {
   connectedCallback() {
     super.connectedCallback();
     // Initialize display tools from groups
-    toolGroups.forEach(group => {
+    toolGroups.forEach((group) => {
       this.groupDisplayTools.set(group.id, getActiveToolForGroup(group));
     });
   }
@@ -74,11 +79,15 @@ export class PFToolbar extends BaseComponent {
     const group = getToolGroup(tool);
     if (group) {
       setLastSelectedTool(group.id, tool);
-      this.groupDisplayTools = new Map(this.groupDisplayTools.set(group.id, tool));
+      this.groupDisplayTools = new Map(
+        this.groupDisplayTools.set(group.id, tool)
+      );
     }
   }
 
-  private handleGroupToolChanged(e: CustomEvent<{ tool: ToolType; groupId: string }>) {
+  private handleGroupToolChanged(
+    e: CustomEvent<{ tool: ToolType; groupId: string }>
+  ) {
     const { tool, groupId } = e.detail;
     this.groupDisplayTools = new Map(this.groupDisplayTools.set(groupId, tool));
   }
@@ -87,31 +96,29 @@ export class PFToolbar extends BaseComponent {
     return html`
       <div class="tools-section">
         <!-- Drawing Tools -->
-        ${this.renderToolGroup('pencil')}
-        ${this.renderToolGroup('eraser')}
-        ${this.renderToolGroup('eyedropper')}
+        ${this.renderToolGroup("pencil")} ${this.renderToolGroup("eraser")}
+        ${this.renderToolGroup("eyedropper")}
 
         <div class="separator"></div>
 
         <!-- Selection Tools -->
-        ${this.renderToolGroup('selection')}
+        ${this.renderToolGroup("selection")}
 
         <div class="separator"></div>
 
         <!-- Shape Tools -->
-        ${this.renderToolGroup('shapes')}
-        ${this.renderToolGroup('fill')}
+        ${this.renderToolGroup("shapes")} ${this.renderToolGroup("fill")}
 
         <div class="separator"></div>
 
         <!-- Text Tools -->
-        ${this.renderToolGroup('text')}
+        ${this.renderToolGroup("text")}
 
         <div class="separator"></div>
 
         <!-- Utility Tools -->
-        ${this.renderToolGroup('transform')}
-        ${this.renderToolGroup('navigation')}
+        ${this.renderToolGroup("transform")}
+        ${this.renderToolGroup("navigation")}
       </div>
 
       <div class="spacer"></div>
@@ -123,8 +130,8 @@ export class PFToolbar extends BaseComponent {
   }
 
   private renderToolGroup(groupId: string) {
-    const group = toolGroups.find(g => g.id === groupId);
-    if (!group) return '';
+    const group = toolGroups.find((g) => g.id === groupId);
+    if (!group) return "";
 
     const activeTool = toolStore.activeTool.value;
     const isActive = group.tools.includes(activeTool);
@@ -132,7 +139,7 @@ export class PFToolbar extends BaseComponent {
     // If active tool is in this group, show it; otherwise use stored preference or default
     const displayTool = isActive
       ? activeTool
-      : (this.groupDisplayTools.get(groupId) || group.defaultTool);
+      : this.groupDisplayTools.get(groupId) || group.defaultTool;
 
     // Get shortcut from the displayed tool via registry
     const shortcut = getToolShortcutKey(displayTool);

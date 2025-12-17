@@ -6,40 +6,10 @@ import { selectionStore } from "../../stores/selection";
 import { getToolMeta } from "../../tools/tool-registry";
 import { formatShortcut } from "../../utils/platform";
 import type { ToolShortcut } from "../../types/tool-meta";
+import { contextShortcuts } from "../../services/keyboard/shortcut-definitions";
 
 const STORAGE_KEY = "pf-shortcuts-visible";
 const POSITION_STORAGE_KEY = "pf-shortcuts-position";
-
-/**
- * Context-aware shortcuts that appear based on application state
- */
-const contextShortcuts: Record<string, ToolShortcut[]> = {
-  // When there's an active selection
-  selectionActive: [
-    { key: "mod+d", action: "Deselect" },
-    { key: "mod+shift+i", action: "Invert" },
-    { key: "delete", action: "Clear" },
-    { key: "mod+x", action: "Cut" },
-    { key: "mod+c", action: "Copy" },
-  ],
-
-  // When there's a floating selection
-  floatingSelection: [
-    { key: "enter", action: "Commit" },
-    { key: "escape", action: "Cancel" },
-    { key: "up", action: "Nudge up" },
-    { key: "down", action: "Nudge down" },
-    { key: "left", action: "Nudge left" },
-    { key: "right", action: "Nudge right" },
-  ],
-
-  // Global shortcuts always available
-  global: [
-    { key: "mod+z", action: "Undo" },
-    { key: "mod+shift+z", action: "Redo" },
-    { key: "space", action: "Pan" },
-  ],
-};
 
 @customElement("pf-shortcuts-overlay")
 export class PfShortcutsOverlay extends BaseComponent {

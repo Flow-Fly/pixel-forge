@@ -260,6 +260,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "ctrl+drag", action: "Shrink to content" },
       { key: "mod+d", action: "Deselect" },
       { key: "ctrl+shift+i", action: "Invert selection" },
+      { key: "mod+c", action: "Copy selection" },
+      { key: "mod+x", action: "Cut selection" },
+      { key: "mod+v", action: "Paste" },
     ],
   },
 

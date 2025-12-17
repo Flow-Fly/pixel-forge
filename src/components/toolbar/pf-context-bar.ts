@@ -12,6 +12,7 @@ import {
   UnlinkCelsCommand,
 } from "../../commands/animation-commands";
 import { SetCelOpacityCommand } from "../../commands/cel-opacity-command";
+import { FlipSelectionCommand } from "../../commands/selection-commands";
 import type { ToolOption } from "../../types/tool-meta";
 import "./options/pf-option-slider";
 import "./options/pf-option-checkbox";
@@ -368,6 +369,19 @@ export class PFContextBar extends BaseComponent {
         </span>
         <div class="separator"></div>
         <pf-button
+          @click=${() => this._flipSelection("horizontal")}
+          title="Flip selection horizontally"
+        >
+          ↔ Flip H
+        </pf-button>
+        <pf-button
+          @click=${() => this._flipSelection("vertical")}
+          title="Flip selection vertically"
+        >
+          ↕ Flip V
+        </pf-button>
+        <div class="separator"></div>
+        <pf-button
           @click=${this._shrinkToContent}
           title="Shrink selection to fit content (Ctrl+release during draw)"
         >
@@ -378,6 +392,29 @@ export class PFContextBar extends BaseComponent {
         </pf-button>
       </div>
     `;
+  }
+
+  private _flipSelection(direction: "horizontal" | "vertical") {
+    const state = selectionStore.state.value;
+    if (state.type !== "selected") return;
+
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    if (!layer?.canvas) return;
+
+    const mask =
+      state.shape === "freeform"
+        ? (state as { mask: Uint8Array }).mask
+        : undefined;
+
+    const command = new FlipSelectionCommand(
+      layer.canvas,
+      state.bounds,
+      state.shape,
+      direction,
+      mask
+    );
+    historyStore.execute(command);
   }
 
   private _shrinkToContent() {

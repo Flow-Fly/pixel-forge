@@ -5,14 +5,16 @@ import { historyStore } from "../../stores/history";
 import { layerStore } from "../../stores/layers";
 import { projectStore } from "../../stores/project";
 import { gridStore } from "../../stores/grid";
+import { viewportStore } from "../../stores/viewport";
 import {
   FlipLayerCommand,
   RotateLayerCommand,
 } from "../../commands/layer-commands";
-import { FileService } from "../../services/file-service";
-import { openAseFile, exportAseFile } from "../../services/aseprite-service";
+import { importAseFile } from "../../services/aseprite-service";
 import { type ProjectFile } from "../../types/project";
+import pako from "pako";
 import { formatShortcut } from "../../utils/platform";
+import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 
 const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
 
@@ -198,32 +200,46 @@ export class PFMenuBar extends BaseComponent {
     }
   }
 
-  async saveProject() {
-    const project = await projectStore.saveProject();
-    const projectName = projectStore.name.value || "pixel-forge-project";
-    FileService.saveCompressed(project, `${projectName}.pf`);
-  }
+  /**
+   * Unified open handler that supports:
+   * - .pf (compressed PixelForge project)
+   * - .json (uncompressed PixelForge project)
+   * - .ase, .aseprite (Aseprite files)
+   */
+  async openFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pf,.json,.ase,.aseprite";
 
-  async openProject() {
-    try {
-      const project = await FileService.loadProject<ProjectFile>();
-      await projectStore.loadProject(project);
-    } catch (e) {
-      console.error("Failed to load project:", e);
-    }
-  }
+    input.onchange = async (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
 
-  async openAseprite() {
-    try {
-      await openAseFile();
-    } catch (e) {
-      console.error("Failed to import Aseprite file:", e);
-    }
-  }
+      const ext = file.name.split(".").pop()?.toLowerCase();
 
-  exportAseprite() {
-    const projectName = projectStore.name.value || "pixel-forge-project";
-    exportAseFile(`${projectName}.ase`);
+      try {
+        if (ext === "ase" || ext === "aseprite") {
+          // Aseprite format
+          const buffer = await file.arrayBuffer();
+          await importAseFile(buffer);
+        } else if (ext === "pf") {
+          // Compressed PixelForge format
+          const buffer = await file.arrayBuffer();
+          const decompressed = pako.inflate(new Uint8Array(buffer), { to: "string" });
+          const project = JSON.parse(decompressed) as ProjectFile;
+          await projectStore.loadProject(project);
+        } else {
+          // JSON format (uncompressed)
+          const text = await file.text();
+          const project = JSON.parse(text) as ProjectFile;
+          await projectStore.loadProject(project);
+        }
+      } catch (error) {
+        console.error("Failed to open file:", error);
+      }
+    };
+
+    input.click();
   }
 
   showExportDialog() {
@@ -247,6 +263,10 @@ export class PFMenuBar extends BaseComponent {
 
   showKeyboardShortcutsDialog() {
     window.dispatchEvent(new CustomEvent("show-keyboard-shortcuts-dialog"));
+  }
+
+  showGridSettingsDialog() {
+    window.dispatchEvent(new CustomEvent("show-grid-settings-dialog"));
   }
 
   private startEditingName() {
@@ -286,22 +306,13 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div id="menu-file" popover>
           <div class="menu-item" @click=${this.showNewProjectDialog}>
-            New... <span class="shortcut">Ctrl+N</span>
+            New... <span class="shortcut">${formatShortcut(menuShortcuts.newProject)}</span>
           </div>
-          <div class="menu-item" @click=${this.openProject}>
-            Open... <span class="shortcut">${formatShortcut("mod+o")}</span>
-          </div>
-          <div class="menu-item" @click=${this.saveProject}>
-            Save <span class="shortcut">${formatShortcut("mod+s")}</span>
-          </div>
-          <div class="menu-item" @click=${this.openAseprite}>
-            Import Aseprite...
+          <div class="menu-item" @click=${this.openFile}>
+            Open... <span class="shortcut">${formatShortcut(menuShortcuts.open)}</span>
           </div>
           <div class="menu-item" @click=${this.showExportDialog}>
-            Export... <span class="shortcut">${formatShortcut("mod+e")}</span>
-          </div>
-          <div class="menu-item" @click=${this.exportAseprite}>
-            Export Aseprite...
+            Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>
           </div>
         </div>
 
@@ -310,15 +321,15 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div id="menu-edit" popover>
           <div class="menu-item" @click=${() => historyStore.undo()}>
-            Undo <span class="shortcut">${formatShortcut("mod+z")}</span>
+            Undo <span class="shortcut">${formatShortcut(menuShortcuts.undo)}</span>
           </div>
           <div class="menu-item" @click=${() => historyStore.redo()}>
-            Redo <span class="shortcut">${formatShortcut("mod+y")}</span>
+            Redo <span class="shortcut">${formatShortcut(menuShortcuts.redo)}</span>
           </div>
-          <div class="menu-item">Cut <span class="shortcut">${formatShortcut("mod+x")}</span></div>
-          <div class="menu-item">Copy <span class="shortcut">${formatShortcut("mod+c")}</span></div>
+          <div class="menu-item">Cut <span class="shortcut">${formatShortcut(menuShortcuts.cut)}</span></div>
+          <div class="menu-item">Copy <span class="shortcut">${formatShortcut(menuShortcuts.copy)}</span></div>
           <div class="menu-item">
-            Paste <span class="shortcut">${formatShortcut("mod+v")}</span>
+            Paste <span class="shortcut">${formatShortcut(menuShortcuts.paste)}</span>
           </div>
         </div>
 
@@ -326,14 +337,17 @@ export class PFMenuBar extends BaseComponent {
           View
         </button>
         <div id="menu-view" popover>
-          <div class="menu-item">
-            Zoom In <span class="shortcut">+</span>
+          <div class="menu-item" @click=${() => viewportStore.zoomIn()}>
+            Zoom In <span class="shortcut">${formatShortcut(menuShortcuts.zoomIn)}</span>
           </div>
-          <div class="menu-item">
-            Zoom Out <span class="shortcut">-</span>
+          <div class="menu-item" @click=${() => viewportStore.zoomOut()}>
+            Zoom Out <span class="shortcut">${formatShortcut(menuShortcuts.zoomOut)}</span>
           </div>
-          <div class="menu-item">
-            Zoom 100% <span class="shortcut">1</span>
+          <div class="menu-item" @click=${() => viewportStore.zoomToLevel(1)}>
+            Zoom 100% <span class="shortcut">${formatShortcut(menuShortcuts.zoom100)}</span>
+          </div>
+          <div class="menu-item" @click=${() => viewportStore.resetView()}>
+            Fit to Viewport <span class="shortcut">0</span>
           </div>
           <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>
             ${gridStore.pixelGridEnabled.value ? "✓ " : "   "}Pixel Grid
@@ -343,12 +357,14 @@ export class PFMenuBar extends BaseComponent {
             ${gridStore.tileGridEnabled.value ? "✓ " : "   "}Tile Grid
             <span class="shortcut">${formatShortcut("mod+shift+g")}</span>
           </div>
-          <div class="menu-item">Grid Settings...</div>
+          <div class="menu-item" @click=${this.showGridSettingsDialog}>
+            Grid Settings...
+          </div>
           <div class="menu-item" @click=${this.toggleShortcutsOverlay}>
             ${this.shortcutsVisible ? "✓ " : "   "}Shortcuts Preview
           </div>
           <div class="menu-item" @click=${this.showKeyboardShortcutsDialog}>
-            Keyboard Shortcuts... <span class="shortcut">?</span>
+            Keyboard Shortcuts... <span class="shortcut">${formatShortcut(menuShortcuts.keyboardShortcuts)}</span>
           </div>
         </div>
 

@@ -16,12 +16,14 @@ import "../ui/pf-shortcuts-toggle";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
+import "../dialogs/pf-grid-settings-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-panel";
 import "../shape/pf-shape-options";
+import "../layers/pf-layers-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
@@ -168,7 +170,7 @@ export class PixelForgeApp extends BaseComponent {
     // Load saved project from IndexedDB
     this.loadSavedProject();
 
-    // Listen for keyboard shortcut to open new project dialog
+    // Listen for keyboard shortcuts
     window.addEventListener(
       "show-new-project-dialog",
       this.handleShowNewProjectDialog
@@ -176,6 +178,18 @@ export class PixelForgeApp extends BaseComponent {
     window.addEventListener(
       "show-keyboard-shortcuts-dialog",
       this.handleShowKeyboardShortcutsDialog
+    );
+    window.addEventListener(
+      "show-resize-dialog",
+      this.handleShowResizeDialog
+    );
+    window.addEventListener(
+      "show-open-file-dialog",
+      this.handleShowOpenFileDialog
+    );
+    window.addEventListener(
+      "show-export-dialog",
+      this.handleShowExportDialog
     );
   }
 
@@ -185,6 +199,20 @@ export class PixelForgeApp extends BaseComponent {
 
   private handleShowKeyboardShortcutsDialog = () => {
     this.showKeyboardShortcutsDialog = true;
+  };
+
+  private handleShowResizeDialog = () => {
+    this.showResizeDialog = true;
+  };
+
+  private handleShowOpenFileDialog = () => {
+    // Trigger the menu bar's open file method
+    const menuBar = this.shadowRoot?.querySelector("pf-menu-bar") as any;
+    menuBar?.openFile();
+  };
+
+  private handleShowExportDialog = () => {
+    this.showExportDialog = true;
   };
 
   private async loadSavedProject() {
@@ -212,6 +240,18 @@ export class PixelForgeApp extends BaseComponent {
     window.removeEventListener(
       "show-keyboard-shortcuts-dialog",
       this.handleShowKeyboardShortcutsDialog
+    );
+    window.removeEventListener(
+      "show-resize-dialog",
+      this.handleShowResizeDialog
+    );
+    window.removeEventListener(
+      "show-open-file-dialog",
+      this.handleShowOpenFileDialog
+    );
+    window.removeEventListener(
+      "show-export-dialog",
+      this.handleShowExportDialog
     );
   }
 
@@ -304,6 +344,13 @@ export class PixelForgeApp extends BaseComponent {
       </main>
 
       <aside class="panels">
+        ${isTimelineCollapsed
+          ? html`
+              <pf-panel header="Layers" collapsible panel-id="layers" bordered>
+                <pf-layers-panel></pf-layers-panel>
+              </pf-panel>
+            `
+          : ""}
         <pf-panel header="Brushes" collapsible panel-id="brush" bordered>
           <pf-brush-panel></pf-brush-panel>
         </pf-panel>
@@ -333,6 +380,13 @@ export class PixelForgeApp extends BaseComponent {
         ?open=${this.showKeyboardShortcutsDialog}
         @pf-close=${() => (this.showKeyboardShortcutsDialog = false)}
       ></pf-keyboard-shortcuts-dialog>
+
+      <pf-resize-dialog
+        ?open=${this.showResizeDialog}
+        @close=${() => (this.showResizeDialog = false)}
+      ></pf-resize-dialog>
+
+      <pf-grid-settings-dialog></pf-grid-settings-dialog>
     `;
   }
 }
