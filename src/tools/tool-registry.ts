@@ -63,8 +63,11 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     ],
     alternatives: ["eraser", "eyedropper"],
     shortcuts: [
-      { key: "shift", action: "Draw straight line", when: "drawing" },
-      { key: "ctrl+wheel", action: "Change size" },
+      { key: "shift+click", action: "Line from last point" },
+      { key: "shift+drag", action: "Constrained line from start", when: "drawing" },
+      { key: "ctrl+click", action: "Decrease lightness" },
+      { key: "ctrl+right-click", action: "Increase lightness" },
+      { key: "alt+wheel", action: "Change brush size" },
     ],
   },
 
@@ -88,8 +91,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     ],
     alternatives: ["pencil", "eyedropper"],
     shortcuts: [
-      { key: "shift", action: "Erase straight line", when: "drawing" },
-      { key: "ctrl+wheel", action: "Change size" },
+      { key: "shift+click", action: "Line from last point" },
+      { key: "shift+drag", action: "Constrained line from start", when: "drawing" },
+      { key: "alt+wheel", action: "Change brush size" },
       { key: "right-click", action: "Erase to background" },
     ],
   },
@@ -102,7 +106,10 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     group: "drawing",
     options: [],
     alternatives: ["pencil", "eraser"],
-    shortcuts: [],
+    shortcuts: [
+      { key: "click", action: "Pick color to foreground" },
+      { key: "right-click", action: "Pick color to background" },
+    ],
   },
 
   fill: {
@@ -168,7 +175,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     alternatives: ["rectangle", "ellipse"],
     shortcuts: [
       { key: "shift", action: "Constrain to 15\u00b0 angles", when: "drawing" },
-      { key: "ctrl+wheel", action: "Change thickness" },
+      { key: "alt+wheel", action: "Change thickness" },
     ],
   },
 
@@ -200,8 +207,8 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     alternatives: ["ellipse", "line"],
     shortcuts: [
       { key: "shift", action: "Constrain to square", when: "drawing" },
-      { key: "alt", action: "Draw from center", when: "drawing" },
-      { key: "ctrl+wheel", action: "Change thickness" },
+      { key: "ctrl", action: "Draw from center", when: "drawing" },
+      { key: "alt+wheel", action: "Change thickness" },
     ],
   },
 
@@ -233,8 +240,8 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     alternatives: ["rectangle", "line"],
     shortcuts: [
       { key: "shift", action: "Constrain to circle", when: "drawing" },
-      { key: "alt", action: "Draw from center", when: "drawing" },
-      { key: "ctrl+wheel", action: "Change thickness" },
+      { key: "ctrl", action: "Draw from center", when: "drawing" },
+      { key: "alt+wheel", action: "Change thickness" },
     ],
   },
 
@@ -250,8 +257,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "shift", action: "Add to selection" },
       { key: "alt", action: "Subtract from selection" },
       { key: "shift+alt", action: "Intersect selection" },
+      { key: "ctrl+drag", action: "Shrink to content" },
       { key: "mod+d", action: "Deselect" },
-      { key: "mod+shift+i", action: "Invert selection" },
+      { key: "ctrl+shift+i", action: "Invert selection" },
     ],
   },
 
@@ -266,6 +274,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcuts: [
       { key: "shift", action: "Add to selection" },
       { key: "alt", action: "Subtract from selection" },
+      { key: "ctrl+drag", action: "Shrink to content" },
       { key: "mod+d", action: "Deselect" },
     ],
   },
@@ -281,7 +290,8 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcuts: [
       { key: "shift", action: "Add to selection" },
       { key: "alt", action: "Subtract from selection" },
-      { key: "enter", action: "Close selection" },
+      { key: "dbl-click", action: "Close selection" },
+      { key: "click on start", action: "Close selection" },
       { key: "escape", action: "Cancel" },
     ],
   },
@@ -321,6 +331,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     shortcuts: [
       { key: "shift", action: "Add to selection" },
       { key: "alt", action: "Subtract from selection" },
+      { key: "ctrl+drag", action: "Shrink to content" },
       { key: "mod+d", action: "Deselect" },
     ],
   },
@@ -338,6 +349,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "enter", action: "Apply transform" },
       { key: "escape", action: "Cancel" },
     ],
+    hidden: true,
   },
 
   text: {
@@ -386,10 +398,9 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     options: [],
     alternatives: ["hand"],
     shortcuts: [
-      { key: "mod+plus", action: "Zoom in" },
-      { key: "mod+minus", action: "Zoom out" },
-      { key: "mod+0", action: "Fit to window" },
-      { key: "mod+1", action: "100% zoom" },
+      { key: "+", action: "Zoom in" },
+      { key: "-", action: "Zoom out" },
+      { key: "mod+1-6", action: "Zoom levels (100%-3200%)" },
     ],
   },
 };

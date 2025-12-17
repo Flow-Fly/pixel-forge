@@ -1,4 +1,4 @@
-import { signal } from '../core/signal';
+import { signal } from "../core/signal";
 
 class ShapeStore {
   // Whether shapes should be filled or just outlines
@@ -16,6 +16,7 @@ class ShapeStore {
   }
 
   toggleFilled() {
+    console.log("Toggling filled state");
     this.filled.value = !this.filled.value;
   }
 }

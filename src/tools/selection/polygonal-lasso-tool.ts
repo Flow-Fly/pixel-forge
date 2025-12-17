@@ -23,6 +23,13 @@ export class PolygonalLassoTool extends BaseTool {
   private lastDragX = 0;
   private lastDragY = 0;
 
+  // Store previous selection for add/subtract operations
+  private previousSelection: {
+    bounds: { x: number; y: number; width: number; height: number };
+    shape: string;
+    mask?: Uint8Array;
+  } | null = null;
+
   constructor(_context: CanvasRenderingContext2D) {
     super();
   }
@@ -34,7 +41,9 @@ export class PolygonalLassoTool extends BaseTool {
     const now = Date.now();
 
     // If not actively drawing a polygon, check if clicking inside selection (for dragging)
-    if (!this.isActive && selectionStore.isPointInSelection(canvasX, canvasY)) {
+    // Only drag if no add/subtract modifiers are pressed
+    const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
+    if (!this.isActive && !isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
       return;
     }
@@ -54,11 +63,6 @@ export class PolygonalLassoTool extends BaseTool {
         return;
       }
 
-      // Start new polygon
-      this.isActive = true;
-      this.mode = 'selecting';
-      this.vertices = [point];
-
       // Set selection mode based on modifiers
       if (modifiers?.shift) {
         selectionStore.setMode('add');
@@ -67,6 +71,25 @@ export class PolygonalLassoTool extends BaseTool {
       } else {
         selectionStore.setMode('replace');
       }
+
+      // Save previous selection for add/subtract operations
+      const currentState = selectionStore.state.value;
+      if (currentState.type === 'selected') {
+        this.previousSelection = {
+          bounds: { ...currentState.bounds },
+          shape: currentState.shape,
+          mask: currentState.shape === 'freeform'
+            ? (currentState as { mask: Uint8Array }).mask
+            : undefined,
+        };
+      } else {
+        this.previousSelection = null;
+      }
+
+      // Start new polygon
+      this.isActive = true;
+      this.mode = 'selecting';
+      this.vertices = [point];
 
       this.updateSelectingState();
     } else {
@@ -168,6 +191,7 @@ export class PolygonalLassoTool extends BaseTool {
     this.mode = 'idle';
     this.vertices = [];
     this.currentMousePos = null;
+    this.previousSelection = null;
     selectionStore.clear();
     selectionStore.resetMode();
   }
@@ -198,12 +222,11 @@ export class PolygonalLassoTool extends BaseTool {
     const canvas = layer?.canvas;
 
     // Handle selection modes
-    const currentState = selectionStore.state.value;
     const mode = selectionStore.mode.value;
 
-    // For add/subtract, we need to combine with existing selection
-    if (mode !== 'replace' && currentState.type === 'selected') {
-      const combined = this.combineMasks(currentState, bounds, mask, mode);
+    // For add/subtract, we need to combine with saved previous selection
+    if (mode !== 'replace' && this.previousSelection) {
+      const combined = this.combineMasks(this.previousSelection, bounds, mask, mode);
       if (combined) {
         selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
@@ -220,6 +243,7 @@ export class PolygonalLassoTool extends BaseTool {
     this.mode = 'idle';
     this.vertices = [];
     this.currentMousePos = null;
+    this.previousSelection = null;
   }
 
   private startDragging(x: number, y: number) {

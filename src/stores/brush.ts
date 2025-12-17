@@ -125,6 +125,14 @@ class BrushStore {
   }
 
   /**
+   * Set the opacity for the active brush (0-100 percent).
+   */
+  setOpacity(percent: number) {
+    const opacity = Math.max(0, Math.min(100, percent)) / 100;
+    this.activeBrush.value = { ...this.activeBrush.value, opacity };
+  }
+
+  /**
    * Add a new custom brush
    */
   async addCustomBrush(brush: Brush): Promise<void> {

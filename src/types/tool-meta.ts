@@ -78,4 +78,6 @@ export interface ToolMeta {
   alternatives: string[];
   /** Keyboard shortcuts for this tool */
   shortcuts: ToolShortcut[];
+  /** Whether to hide from toolbar (tool exists but not shown in UI) */
+  hidden?: boolean;
 }

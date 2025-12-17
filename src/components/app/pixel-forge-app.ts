@@ -16,6 +16,7 @@ import "../ui/pf-shortcuts-toggle";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
+import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
@@ -144,6 +145,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() showResizeDialog = false;
   @state() showExportDialog = false;
   @state() showNewProjectDialog = false;
+  @state() showKeyboardShortcutsDialog = false;
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
@@ -170,10 +172,18 @@ export class PixelForgeApp extends BaseComponent {
       "show-new-project-dialog",
       this.handleShowNewProjectDialog
     );
+    window.addEventListener(
+      "show-keyboard-shortcuts-dialog",
+      this.handleShowKeyboardShortcutsDialog
+    );
   }
 
   private handleShowNewProjectDialog = () => {
     this.showNewProjectDialog = true;
+  };
+
+  private handleShowKeyboardShortcutsDialog = () => {
+    this.showKeyboardShortcutsDialog = true;
   };
 
   private async loadSavedProject() {
@@ -197,6 +207,10 @@ export class PixelForgeApp extends BaseComponent {
     window.removeEventListener(
       "show-new-project-dialog",
       this.handleShowNewProjectDialog
+    );
+    window.removeEventListener(
+      "show-keyboard-shortcuts-dialog",
+      this.handleShowKeyboardShortcutsDialog
     );
   }
 
@@ -306,6 +320,11 @@ export class PixelForgeApp extends BaseComponent {
         ?open=${this.showNewProjectDialog}
         @close=${() => (this.showNewProjectDialog = false)}
       ></pf-new-project-dialog>
+
+      <pf-keyboard-shortcuts-dialog
+        ?open=${this.showKeyboardShortcutsDialog}
+        @pf-close=${() => (this.showKeyboardShortcutsDialog = false)}
+      ></pf-keyboard-shortcuts-dialog>
     `;
   }
 }

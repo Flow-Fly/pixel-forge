@@ -27,7 +27,9 @@ export class MagicWandTool extends BaseTool {
     const canvasY = Math.floor(y);
 
     // Check if clicking inside existing selection (for dragging)
-    if (selectionStore.isPointInSelection(canvasX, canvasY)) {
+    // Only drag if no add/subtract modifiers are pressed
+    const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
+    if (!isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
       return;
     }

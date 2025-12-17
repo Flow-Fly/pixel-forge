@@ -12,6 +12,7 @@ import {
 import { FileService } from "../../services/file-service";
 import { openAseFile, exportAseFile } from "../../services/aseprite-service";
 import { type ProjectFile } from "../../types/project";
+import { formatShortcut } from "../../utils/platform";
 
 const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
 
@@ -244,6 +245,10 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("toggle-shortcuts-overlay"));
   }
 
+  showKeyboardShortcutsDialog() {
+    window.dispatchEvent(new CustomEvent("show-keyboard-shortcuts-dialog"));
+  }
+
   private startEditingName() {
     this.isEditingName = true;
     // Focus the input after render
@@ -284,16 +289,16 @@ export class PFMenuBar extends BaseComponent {
             New... <span class="shortcut">Ctrl+N</span>
           </div>
           <div class="menu-item" @click=${this.openProject}>
-            Open... <span class="shortcut">Ctrl+O</span>
+            Open... <span class="shortcut">${formatShortcut("mod+o")}</span>
           </div>
           <div class="menu-item" @click=${this.saveProject}>
-            Save <span class="shortcut">Ctrl+S</span>
+            Save <span class="shortcut">${formatShortcut("mod+s")}</span>
           </div>
           <div class="menu-item" @click=${this.openAseprite}>
             Import Aseprite...
           </div>
           <div class="menu-item" @click=${this.showExportDialog}>
-            Export... <span class="shortcut">Ctrl+E</span>
+            Export... <span class="shortcut">${formatShortcut("mod+e")}</span>
           </div>
           <div class="menu-item" @click=${this.exportAseprite}>
             Export Aseprite...
@@ -305,15 +310,15 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div id="menu-edit" popover>
           <div class="menu-item" @click=${() => historyStore.undo()}>
-            Undo <span class="shortcut">Ctrl+Z</span>
+            Undo <span class="shortcut">${formatShortcut("mod+z")}</span>
           </div>
           <div class="menu-item" @click=${() => historyStore.redo()}>
-            Redo <span class="shortcut">Ctrl+Y</span>
+            Redo <span class="shortcut">${formatShortcut("mod+y")}</span>
           </div>
-          <div class="menu-item">Cut <span class="shortcut">Ctrl+X</span></div>
-          <div class="menu-item">Copy <span class="shortcut">Ctrl+C</span></div>
+          <div class="menu-item">Cut <span class="shortcut">${formatShortcut("mod+x")}</span></div>
+          <div class="menu-item">Copy <span class="shortcut">${formatShortcut("mod+c")}</span></div>
           <div class="menu-item">
-            Paste <span class="shortcut">Ctrl+V</span>
+            Paste <span class="shortcut">${formatShortcut("mod+v")}</span>
           </div>
         </div>
 
@@ -322,25 +327,28 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div id="menu-view" popover>
           <div class="menu-item">
-            Zoom In <span class="shortcut">Ctrl++</span>
+            Zoom In <span class="shortcut">+</span>
           </div>
           <div class="menu-item">
-            Zoom Out <span class="shortcut">Ctrl+-</span>
+            Zoom Out <span class="shortcut">-</span>
           </div>
           <div class="menu-item">
-            Fit on Screen <span class="shortcut">Ctrl+0</span>
+            Zoom 100% <span class="shortcut">1</span>
           </div>
           <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>
             ${gridStore.pixelGridEnabled.value ? "✓ " : "   "}Pixel Grid
-            <span class="shortcut">Ctrl+G</span>
+            <span class="shortcut">${formatShortcut("mod+g")}</span>
           </div>
           <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>
             ${gridStore.tileGridEnabled.value ? "✓ " : "   "}Tile Grid
-            <span class="shortcut">Ctrl+Shift+G</span>
+            <span class="shortcut">${formatShortcut("mod+shift+g")}</span>
           </div>
           <div class="menu-item">Grid Settings...</div>
           <div class="menu-item" @click=${this.toggleShortcutsOverlay}>
             ${this.shortcutsVisible ? "✓ " : "   "}Shortcuts Preview
+          </div>
+          <div class="menu-item" @click=${this.showKeyboardShortcutsDialog}>
+            Keyboard Shortcuts... <span class="shortcut">?</span>
           </div>
         </div>
 
