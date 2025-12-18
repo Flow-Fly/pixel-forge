@@ -587,7 +587,6 @@ export class PFContextBar extends BaseComponent {
     let totalOpacity = 0;
     let celCount = 0;
     let hasLinked = false;
-    let allLinked = true;
 
     for (const key of celKeys) {
       const cel = cels.get(key);
@@ -596,8 +595,6 @@ export class PFContextBar extends BaseComponent {
         celCount++;
         if (cel.linkedCelId) {
           hasLinked = true;
-        } else {
-          allLinked = false;
         }
       }
     }

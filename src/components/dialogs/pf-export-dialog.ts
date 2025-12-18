@@ -5,9 +5,10 @@ import { projectStore } from "../../stores/project";
 import { layerStore } from "../../stores/layers";
 import { animationStore } from "../../stores/animation";
 import { FileService } from "../../services/file-service";
+// Dynamic imports for export services - loaded on demand to reduce initial bundle
 // import { exportSpritesheet } from "../../services/spritesheet-export";
-import { exportAnimatedWebP } from "../../services/webp-animation";
-import { exportAseFile } from "../../services/aseprite-service";
+// import { exportAnimatedWebP } from "../../services/webp-animation";
+// import { exportAseFile } from "../../services/aseprite-service";
 import "../ui/pf-dialog";
 
 export type ExportFormat =
@@ -281,7 +282,8 @@ export class PFExportDialog extends BaseComponent {
     this.close();
   }
 
-  private exportAsAseprite() {
+  private async exportAsAseprite() {
+    const { exportAseFile } = await import("../../services/aseprite-service");
     exportAseFile(`${this.filename}.ase`);
   }
 
@@ -315,6 +317,7 @@ export class PFExportDialog extends BaseComponent {
       };
     });
 
+    const { exportAnimatedWebP } = await import("../../services/webp-animation");
     await exportAnimatedWebP(frameData, `${this.filename}.webp`);
   }
 

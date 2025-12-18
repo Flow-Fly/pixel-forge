@@ -25,9 +25,10 @@ export class TransformTool extends BaseTool {
     const activeLayerId = layerStore.activeLayerId.value;
     const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
 
-    if (activeLayer?.type === 'text') {
+    if (activeLayer?.type === 'text' && activeLayerId) {
       // Start dragging text layer
       const currentFrameId = animationStore.currentFrameId.value;
+      if (!currentFrameId) return;
       const textCelData = animationStore.getTextCelData(activeLayerId, currentFrameId);
 
       if (textCelData) {

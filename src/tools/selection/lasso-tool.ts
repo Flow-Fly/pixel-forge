@@ -5,6 +5,7 @@ import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
 import { polygonToMask, simplifyPath } from '../../utils/mask-utils';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
+import type { SelectionShape } from '../../types/selection';
 
 /**
  * Freeform Lasso Tool
@@ -23,7 +24,7 @@ export class LassoTool extends BaseTool {
   // Store previous selection for add/subtract operations
   private previousSelection: {
     bounds: { x: number; y: number; width: number; height: number };
-    shape: string;
+    shape: SelectionShape;
     mask?: Uint8Array;
   } | null = null;
 

@@ -10,9 +10,10 @@ import {
   FlipLayerCommand,
   RotateLayerCommand,
 } from "../../commands/layer-commands";
-import { importAseFile } from "../../services/aseprite-service";
+// Dynamic imports for file handling - loaded on demand to reduce initial bundle
+// import { importAseFile } from "../../services/aseprite-service";
+// import pako from "pako";
 import { type ProjectFile } from "../../types/project";
-import pako from "pako";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 
@@ -219,13 +220,15 @@ export class PFMenuBar extends BaseComponent {
 
       try {
         if (ext === "ase" || ext === "aseprite") {
-          // Aseprite format
+          // Aseprite format - lazy load parser
           const buffer = await file.arrayBuffer();
+          const { importAseFile } = await import("../../services/aseprite-service");
           await importAseFile(buffer);
         } else if (ext === "pf") {
-          // Compressed PixelForge format
+          // Compressed PixelForge format - lazy load pako
           const buffer = await file.arrayBuffer();
-          const decompressed = pako.inflate(new Uint8Array(buffer), { to: "string" });
+          const pako = await import("pako");
+          const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
           const project = JSON.parse(decompressed) as ProjectFile;
           await projectStore.loadProject(project);
         } else {

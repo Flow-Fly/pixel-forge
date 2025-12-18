@@ -1,8 +1,9 @@
-import { parseAseFile, celToImageData, type AseFile } from "./aseprite-parser";
+import { parseAseFile, celToImageData } from "./aseprite-parser";
 import { exportAseFile } from "./aseprite-writer";
 import { projectStore } from "../stores/project";
 import { layerStore } from "../stores/layers";
 import { animationStore } from "../stores/animation";
+import type { BlendMode } from "../types/layer";
 
 // Track linked cels to establish links after all frames are created
 interface LinkedCelRecord {
@@ -56,7 +57,7 @@ export async function importAseFile(buffer: ArrayBuffer): Promise<void> {
       "darken",
       "lighten",
     ];
-    layer.blendMode = blendModes[aseLayer.blendMode] || "normal";
+    layer.blendMode = (blendModes[aseLayer.blendMode] || "normal") as BlendMode;
 
     layerIdMap.set(originalIndex, layer.id);
   });

@@ -283,7 +283,7 @@ export class PfKeyboardShortcutsDialog extends BaseComponent {
         return html`
           <div class="group">
             <div class="group-title">${name}</div>
-            ${tools.map(([toolId, meta]) => html`
+            ${tools.map(([_toolId, meta]) => html`
               <div class="tool-section">
                 <div class="tool-header">
                   <span class="tool-name">${meta.name}</span>

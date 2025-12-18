@@ -9,7 +9,6 @@ import { animationStore } from '../stores/animation';
 import { layerStore } from '../stores/layers';
 import {
   bresenhamLine,
-  constrainTo45Degrees,
   isLShape,
 } from '../services/drawing/algorithms';
 import { setIndexBufferPixel } from '../utils/indexed-color';

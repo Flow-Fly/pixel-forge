@@ -1,4 +1,4 @@
-import { html, css, nothing } from 'lit';
+import { html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { type ToolType } from '../../stores/tools';

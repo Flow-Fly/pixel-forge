@@ -29,7 +29,7 @@ export async function pngBytesToCanvas(
   width: number,
   height: number
 ): Promise<HTMLCanvasElement> {
-  const blob = new Blob([bytes], { type: 'image/png' });
+  const blob = new Blob([bytes as BlobPart], { type: 'image/png' });
   const url = URL.createObjectURL(blob);
 
   try {
@@ -108,7 +108,7 @@ export async function loadImageDataToCanvas(
     // Binary format (v2.0.0+) - decode via Blob
     // Convert to Uint8Array if it's a serialized object from JSON
     const bytes = toUint8Array(data);
-    const blob = new Blob([bytes], { type: 'image/png' });
+    const blob = new Blob([bytes as BlobPart], { type: 'image/png' });
     const url = URL.createObjectURL(blob);
     try {
       const img = await loadImage(url);

@@ -194,45 +194,10 @@ export class PFUndoHistory extends BaseComponent {
     }
   }
 
-  private checkPixelsOverwritten(cmd: Command, index: number, type: 'undo' | 'redo') {
-    if (!isDrawableCommand(cmd)) {
-      this.allPixelsOverwritten = false;
-      return;
-    }
-
-    const undoStack = historyStore.undoStack.value;
-
-    if (type === 'redo') {
-      // Redo items can always be patched (they haven't been executed yet)
-      this.allPixelsOverwritten = false;
-      return;
-    }
-
-    // Get subsequent commands
-    const subsequentCommands = undoStack.slice(index + 1);
-
-    // Quick check: count overlapping drawable commands
-    const targetBounds = cmd.drawBounds;
-    let hasOverlap = false;
-
-    for (const subCmd of subsequentCommands) {
-      if (isDrawableCommand(subCmd)) {
-        const subBounds = subCmd.drawBounds;
-        // Check bounds overlap
-        if (
-          targetBounds.x < subBounds.x + subBounds.width &&
-          targetBounds.x + targetBounds.width > subBounds.x &&
-          targetBounds.y < subBounds.y + subBounds.height &&
-          targetBounds.y + targetBounds.height > subBounds.y
-        ) {
-          hasOverlap = true;
-          break;
-        }
-      }
-    }
-
-    // For now, assume not all pixels are overwritten if there's no overlap
+  private checkPixelsOverwritten(cmd: Command, _index: number, _type: 'undo' | 'redo') {
+    // For now, assume not all pixels are overwritten
     // The actual check happens during patch execution
+    void cmd; // cmd is kept for future implementation
     this.allPixelsOverwritten = false;
   }
 

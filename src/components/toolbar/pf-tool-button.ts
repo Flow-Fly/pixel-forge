@@ -76,7 +76,6 @@ export class PFToolButton extends BaseComponent {
   @property({ type: Boolean, reflect: true, attribute: "has-group" }) hasGroup =
     false;
 
-  @state() private showOptions = false;
   @state() private showGroupMenu = false;
   @state() private menuX = 0;
   @state() private menuY = 0;

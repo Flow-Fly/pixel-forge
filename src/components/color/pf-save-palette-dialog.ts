@@ -1,7 +1,6 @@
 import { html, css, nothing } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { paletteStore } from '../../stores/palette';
 
 /**
  * Dialog for saving a palette with a name.

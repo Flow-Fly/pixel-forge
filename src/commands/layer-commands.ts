@@ -209,7 +209,6 @@ export class FlipLayerCommand implements Command {
 
     const width = layer.canvas.width;
     const height = layer.canvas.height;
-    const imageData = ctx.getImageData(0, 0, width, height);
 
     // Create temp canvas to draw flipped
     const tempCanvas = document.createElement("canvas");

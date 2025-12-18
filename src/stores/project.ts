@@ -409,11 +409,8 @@ class ProjectStore {
       animationStore.deleteFrame(animationStore.frames.value[0].id);
     }
 
-    // 4. Clear the remaining frame's cels and resize
-    const remainingFrame = animationStore.frames.value[0];
-    if (remainingFrame) {
-      remainingFrame.cels = [];
-    }
+    // 4. Clear all cels from animation store
+    animationStore.cels.value = new Map();
 
     // 5. Create a fresh layer with new dimensions
     layerStore.addLayer("Layer 1", width, height);
@@ -435,8 +432,9 @@ class ProjectStore {
 
     // 9. Reset animation settings
     animationStore.fps.value = 12;
-    if (remainingFrame) {
-      animationStore.goToFrame(remainingFrame.id);
+    const firstFrame = animationStore.frames.value[0];
+    if (firstFrame) {
+      animationStore.goToFrame(firstFrame.id);
     }
 
     // 10. Save the fresh state immediately
