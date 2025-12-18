@@ -9,12 +9,22 @@ export class MoveTextCommand implements Command {
   id = crypto.randomUUID();
   name = 'Move Text';
 
+  private layerId: string;
+  private frameId: string;
+  private oldPosition: { x: number; y: number };
+  private newPosition: { x: number; y: number };
+
   constructor(
-    private layerId: string,
-    private frameId: string,
-    private oldPosition: { x: number; y: number },
-    private newPosition: { x: number; y: number }
-  ) {}
+    layerId: string,
+    frameId: string,
+    oldPosition: { x: number; y: number },
+    newPosition: { x: number; y: number }
+  ) {
+    this.layerId = layerId;
+    this.frameId = frameId;
+    this.oldPosition = oldPosition;
+    this.newPosition = newPosition;
+  }
 
   execute() {
     animationStore.updateTextCelData(this.layerId, this.frameId, {

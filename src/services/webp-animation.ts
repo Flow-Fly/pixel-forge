@@ -16,7 +16,7 @@ interface FrameData {
 /**
  * Convert canvas to WebP blob.
  */
-async function canvasToWebP(canvas: HTMLCanvasElement, quality = 0.9): Promise<Blob> {
+async function canvasToWebP(canvas: HTMLCanvasElement, quality = 1): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -147,8 +147,8 @@ export async function createAnimatedWebP(
   writeUint32LE(buffer, offset, 10); // Chunk size
   offset += 4;
 
-  // VP8X flags: bit 1 = animation
-  buffer[offset] = 0x02; // Animation flag
+  // VP8X flags: bit 4 = alpha, bit 1 = animation
+  buffer[offset] = 0x12; // Alpha + Animation flags
   offset += 4; // Flags (4 bytes, but only first byte used)
 
   // Canvas width - 1 (24-bit)

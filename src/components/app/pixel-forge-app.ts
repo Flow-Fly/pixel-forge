@@ -28,7 +28,7 @@ import "../layers/pf-layers-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
-import { type ToolType } from "../../stores/tools";
+import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 
 @customElement("pixel-forge-app")

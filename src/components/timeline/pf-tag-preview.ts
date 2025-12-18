@@ -30,7 +30,7 @@ export class PFTagPreview extends BaseComponent {
   @property({ type: Number }) posX: number = 0;
   @property({ type: Number }) posY: number = 0;
 
-  @state() private tagName: string = "";
+  @state() private displayTagName: string = "";
   @state() private computedX: number = 0;
   @state() private computedY: number = 0;
 
@@ -122,7 +122,7 @@ export class PFTagPreview extends BaseComponent {
   private loadTagInfo() {
     const tag = animationStore.tags.value.find((t) => t.id === this.tagId);
     if (tag) {
-      this.tagName = tag.name;
+      this.displayTagName = tag.name;
       this.frameIds = getFrameIdsForTag(this.tagId);
       this.currentFrameIndex = 0;
     }
@@ -215,7 +215,7 @@ export class PFTagPreview extends BaseComponent {
             color: var(--pf-color-text-muted, #888);
             white-space: nowrap;
           "
-          >${this.tagName} (${frameCount} frames)</span
+          >${this.displayTagName} (${frameCount} frames)</span
         >
       </div>
     `;

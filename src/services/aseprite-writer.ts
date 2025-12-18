@@ -26,10 +26,12 @@ const BLEND_MODES: Record<string, number> = {
 };
 
 class AseWriter {
-  private chunks: Uint8Array[] = [];
   private offset: number = 0;
+  private buffer: ArrayBuffer;
 
-  constructor(private buffer: ArrayBuffer) {}
+  constructor(buffer: ArrayBuffer) {
+    this.buffer = buffer;
+  }
 
   writeByte(value: number) {
     new DataView(this.buffer).setUint8(this.offset++, value);
@@ -86,61 +88,11 @@ class AseWriter {
 }
 
 /**
- * Calculate total file size needed.
- */
-function calculateFileSize(): number {
-  const layers = layerStore.layers.value;
-  const frames = animationStore.frames.value;
-  const width = projectStore.width.value;
-  const height = projectStore.height.value;
-
-  // Header: 128 bytes
-  let size = 128;
-
-  // For each frame
-  frames.forEach((frame, frameIndex) => {
-    // Frame header: 16 bytes
-    size += 16;
-
-    // Layer chunks only in first frame
-    if (frameIndex === 0) {
-      layers.forEach((layer) => {
-        // Layer chunk header: 6 bytes
-        // Layer data: 18 bytes fixed + name length + 2 for string length
-        const nameBytes = new TextEncoder().encode(layer.name).length;
-        size += 6 + 18 + 2 + nameBytes;
-      });
-    }
-
-    // Cel chunks for each layer in each frame
-    layers.forEach((layer) => {
-      const celCanvas = animationStore.getCelCanvas(frame.id, layer.id);
-      if (celCanvas) {
-        // Check if cel has content
-        const ctx = celCanvas.getContext('2d')!;
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const hasContent = imageData.data.some((v) => v !== 0);
-
-        if (hasContent) {
-          // Chunk header: 6 bytes
-          // Cel header: 16 bytes (layer + x + y + opacity + type + zIndex + reserved)
-          // Width + height: 4 bytes
-          // Compressed pixel data (estimate: use original size as upper bound)
-          size += 6 + 16 + 4 + width * height * 4;
-        }
-      }
-    });
-  });
-
-  return size;
-}
-
-/**
  * Create layer chunk data.
  */
 function createLayerChunk(
   layer: { name: string; visible: boolean; opacity: number; blendMode: string },
-  index: number
+  _index: number
 ): Uint8Array {
   const nameBytes = new TextEncoder().encode(layer.name);
   const chunkSize = 6 + 18 + 2 + nameBytes.length;
@@ -249,7 +201,9 @@ export function writeAseFile(): ArrayBuffer {
         // Check if cel has any non-transparent pixels
         const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0);
         if (hasContent) {
-          chunks.push(createCelChunk(layerIdx, 0, 0, width, height, imageData.data));
+          // Convert Uint8ClampedArray to Uint8Array for pako compression
+          const pixelData = new Uint8Array(imageData.data);
+          chunks.push(createCelChunk(layerIdx, 0, 0, width, height, pixelData));
         }
       }
     });

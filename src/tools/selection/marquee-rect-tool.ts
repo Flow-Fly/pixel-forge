@@ -3,6 +3,7 @@ import { selectionStore } from '../../stores/selection';
 import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
+import type { SelectionShape } from '../../types/selection';
 
 export class MarqueeRectTool extends BaseTool {
   name = 'marquee-rect';
@@ -15,7 +16,7 @@ export class MarqueeRectTool extends BaseTool {
   // Store previous selection for add/subtract operations
   private previousSelection: {
     bounds: { x: number; y: number; width: number; height: number };
-    shape: string;
+    shape: SelectionShape;
     mask?: Uint8Array;
   } | null = null;
 

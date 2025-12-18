@@ -151,11 +151,6 @@ export class PFAccentColorDialog extends BaseComponent {
     settingsStore.setAccentTheme(theme);
   }
 
-  private handleApply() {
-    settingsStore.setAccentTheme(this.selectedTheme);
-    this.close();
-  }
-
   render() {
     const themes = Object.entries(ACCENT_THEMES) as [AccentTheme, typeof ACCENT_THEMES[AccentTheme]][];
 

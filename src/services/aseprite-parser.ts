@@ -207,7 +207,7 @@ function readFrame(
   tags: AseTag[],
   isFirstFrame: boolean
 ): AseFrame {
-  const frameStart = reader.position();
+  void reader.position(); // frameStart - not used but documented in spec
 
   reader.readDword(); // Frame size
   const frameMagic = reader.readWord();
@@ -277,13 +277,13 @@ function readLayerChunk(reader: AseReader): AseLayer {
   return { flags, type, childLevel, name, opacity, blendMode };
 }
 
-function readCelChunk(reader: AseReader, header: AseHeader, dataSize: number): AseCel {
+function readCelChunk(reader: AseReader, _header: AseHeader, dataSize: number): AseCel {
   const layerIndex = reader.readWord();
   const x = reader.readShort();
   const y = reader.readShort();
   const opacity = reader.readByte();
   const celType = reader.readWord();
-  const zIndex = reader.readShort(); // z-index (we ignore for now)
+  void reader.readShort(); // z-index (we ignore for now)
   reader.skip(5); // Reserved
 
   const cel: AseCel = {
@@ -315,7 +315,7 @@ function readCelChunk(reader: AseReader, header: AseHeader, dataSize: number): A
 }
 
 function readPaletteChunk(reader: AseReader, palette: AsePaletteEntry[]) {
-  const numEntries = reader.readDword();
+  void reader.readDword(); // numEntries - we use firstIndex/lastIndex instead
   const firstIndex = reader.readDword();
   const lastIndex = reader.readDword();
   reader.skip(8); // Reserved

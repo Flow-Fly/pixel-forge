@@ -5,6 +5,7 @@ import { historyStore } from '../../stores/history';
 import { layerStore } from '../../stores/layers';
 import { polygonToMask } from '../../utils/mask-utils';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
+import type { SelectionShape } from '../../types/selection';
 
 /**
  * Polygonal Lasso Tool
@@ -26,7 +27,7 @@ export class PolygonalLassoTool extends BaseTool {
   // Store previous selection for add/subtract operations
   private previousSelection: {
     bounds: { x: number; y: number; width: number; height: number };
-    shape: string;
+    shape: SelectionShape;
     mask?: Uint8Array;
   } | null = null;
 
@@ -163,10 +164,10 @@ export class PolygonalLassoTool extends BaseTool {
   /**
    * Handle keyboard events (Enter to close, Escape to cancel)
    */
-  onKeyDown(key: string) {
-    if (key === 'Enter' && this.vertices.length >= 3) {
+  onKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && this.vertices.length >= 3) {
       this.closePolygon();
-    } else if (key === 'Escape') {
+    } else if (e.key === 'Escape') {
       this.cancel();
     }
   }

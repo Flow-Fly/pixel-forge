@@ -142,7 +142,7 @@ export class FileService {
     a.click();
   }
 
-  static exportToWebP(canvas: HTMLCanvasElement, filename: string, quality = 0.9) {
+  static exportToWebP(canvas: HTMLCanvasElement, filename: string, quality = 1) {
     canvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob);

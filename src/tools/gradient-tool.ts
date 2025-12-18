@@ -19,7 +19,7 @@ export class GradientTool extends BaseTool {
     }
   }
 
-  onMove(x: number, y: number) {}
+  onMove(_x: number, _y: number) {}
 
   onDrag(x: number, y: number) {
     if (!this.isDrawing || !this.ctx || !this.imageData) return;

@@ -270,7 +270,7 @@ export class PfTextInput extends BaseComponent {
 
   render() {
     // Access editing state to register with SignalWatcher
-    const _state = TextTool.editingState.value;
+    void TextTool.editingState.value;
 
     return html`
       <input

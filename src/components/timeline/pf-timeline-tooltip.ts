@@ -80,22 +80,19 @@ export class PFTimelineTooltip extends LitElement {
   // Min display size for preview (enhances visibility for tiny canvases)
   private readonly MIN_PREVIEW_SIZE = 64;
 
-  @state() private isVisible = false;
   @state() private posX = 0;
   @state() private posY = 0;
 
   @query('canvas') private canvas!: HTMLCanvasElement;
-  @query('[popover]') private popover!: HTMLElement;
+  @query('[popover]') private popoverEl!: HTMLElement;
 
   private ctx: CanvasRenderingContext2D | null = null;
   private anchorElement: HTMLElement | null = null;
   private hideTimeout: number | null = null;
   private longPressTimeout: number | null = null;
-  private isTouchDevice = false;
 
   connectedCallback() {
     super.connectedCallback();
-    this.isTouchDevice = 'ontouchstart' in window;
   }
 
   firstUpdated() {
@@ -124,13 +121,12 @@ export class PFTimelineTooltip extends LitElement {
     }
 
     this.anchorElement = anchor;
-    this.isVisible = true;
     this.updatePosition();
 
     // Use popover API if available
-    if (this.popover && 'showPopover' in this.popover) {
+    if (this.popoverEl && 'showPopover' in this.popoverEl) {
       try {
-        this.popover.showPopover();
+        this.popoverEl.showPopover();
       } catch {
         // Popover might already be shown
       }
@@ -146,10 +142,9 @@ export class PFTimelineTooltip extends LitElement {
     }
 
     this.hideTimeout = window.setTimeout(() => {
-      this.isVisible = false;
-      if (this.popover && 'hidePopover' in this.popover) {
+      if (this.popoverEl && 'hidePopover' in this.popoverEl) {
         try {
-          this.popover.hidePopover();
+          this.popoverEl.hidePopover();
         } catch {
           // Popover might already be hidden
         }

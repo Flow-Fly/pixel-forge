@@ -11,7 +11,6 @@ export class DrawingCommand implements Command {
   userId?: string;
   timestamp?: number;
 
-  private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private previousImageData: ImageData;
   private newImageData: ImageData;
@@ -26,7 +25,6 @@ export class DrawingCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.name = name;
-    this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.bounds = bounds;
     this.previousImageData = previousImageData;

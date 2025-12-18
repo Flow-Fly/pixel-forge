@@ -287,7 +287,7 @@ export function renderText(
  * @returns X position of the cursor in canvas pixels
  */
 export function getCursorX(
-  text: string,
+  _text: string,
   cursorIndex: number,
   font: PixelFont,
   textX: number
