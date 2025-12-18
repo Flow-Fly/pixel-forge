@@ -24,6 +24,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
           AWS_REGION: fr-par
         run: |
-          aws s3 sync dist/ s3://pixel-forge-app \
+          aws s3 sync dist/ s3://pixel-forge.app \
             --endpoint-url https://s3.fr-par.scw.cloud \
             --delete
