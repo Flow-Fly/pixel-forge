@@ -171,16 +171,14 @@ export class PFSelectionOverlay extends BaseComponent {
       this.drawFloatingState(ctx, state, zoom, panX, panY);
       this.hideDimensionTooltips(); // No tooltips when floating
     } else if (state.type === 'transforming') {
-      // Draw the preview pixels (rotated)
+      // Draw the preview pixels (scaled + rotated)
       this.drawTransformingPixels(ctx, state, zoom, panX, panY);
 
-      // Draw rotated marching ants around the original bounds + offset
-      this.drawRotatedMarchingAnts(ctx, state.originalBounds, state.currentOffset, state.rotation, zoom, panX, panY);
+      // Draw scaled and rotated marching ants
+      this.drawScaledRotatedMarchingAnts(ctx, state, zoom, panX, panY);
 
-      // Draw rotation angle indicator
-      if (state.rotation !== 0) {
-        this.drawRotationIndicator(ctx, state, zoom, panX, panY);
-      }
+      // Note: Rotation angle is shown as tooltip on the rotation handle
+      // Scale info is shown in the context bar
 
       this.hideDimensionTooltips(); // No tooltips when transforming
     }
@@ -223,81 +221,6 @@ export class PFSelectionOverlay extends BaseComponent {
       Math.round(screenWidth),
       Math.round(screenHeight)
     );
-  }
-
-  /**
-   * Draw rotation angle indicator showing the current rotation angle.
-   * Shows an arc from 0° to current angle and the angle value text.
-   */
-  private drawRotationIndicator(
-    ctx: CanvasRenderingContext2D,
-    state: SelectionState & { type: 'transforming' },
-    zoom: number,
-    panX: number,
-    panY: number
-  ) {
-    const { originalBounds, currentOffset, rotation } = state;
-
-    // Calculate center in screen coordinates
-    const centerX = (originalBounds.x + currentOffset.x + originalBounds.width / 2) * zoom + panX;
-    const centerY = (originalBounds.y + currentOffset.y + originalBounds.height / 2) * zoom + panY;
-
-    // Arc radius based on selection size (in screen space)
-    const selectionRadius = Math.max(originalBounds.width, originalBounds.height) * zoom * 0.5;
-    const radius = selectionRadius + 20; // Offset from selection edge
-
-    ctx.save();
-
-    // Draw arc from 0° (top) to current rotation
-    const startAngle = -Math.PI / 2; // 0° at top
-    const endAngle = startAngle + (rotation * Math.PI) / 180;
-    const counterClockwise = rotation < 0;
-
-    // Draw the arc
-    ctx.strokeStyle = '#4a9eff';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([]);
-
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, startAngle, endAngle, counterClockwise);
-    ctx.stroke();
-
-    // Draw a small line at the start (0°)
-    ctx.strokeStyle = 'rgba(74, 158, 255, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY - radius + 5);
-    ctx.lineTo(centerX, centerY - radius - 5);
-    ctx.stroke();
-
-    // Draw angle text near the arc endpoint
-    const textAngle = startAngle + ((rotation / 2) * Math.PI) / 180; // Position at midpoint of arc
-    const textRadius = radius + 15;
-    const textX = centerX + textRadius * Math.cos(textAngle);
-    const textY = centerY + textRadius * Math.sin(textAngle);
-
-    ctx.fillStyle = '#4a9eff';
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Background for better readability
-    const angleText = `${Math.round(rotation)}°`;
-    const textMetrics = ctx.measureText(angleText);
-    const padding = 4;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(
-      textX - textMetrics.width / 2 - padding,
-      textY - 7 - padding,
-      textMetrics.width + padding * 2,
-      14 + padding * 2
-    );
-
-    // Draw the angle text
-    ctx.fillStyle = '#4a9eff';
-    ctx.fillText(angleText, textX, textY);
-
-    ctx.restore();
   }
 
   private drawSelectedState(
@@ -450,22 +373,29 @@ export class PFSelectionOverlay extends BaseComponent {
     ctx.restore();
   }
 
-  private drawRotatedMarchingAnts(
+  /**
+   * Draw marching ants for a transforming selection (with scale and rotation).
+   */
+  private drawScaledRotatedMarchingAnts(
     ctx: CanvasRenderingContext2D,
-    bounds: { x: number; y: number; width: number; height: number },
-    offset: { x: number; y: number },
-    rotation: number,
+    state: SelectionState & { type: 'transforming' },
     zoom: number,
     panX: number,
     panY: number
   ) {
+    const { originalBounds, currentOffset, rotation, scale } = state;
+
     // Calculate center in screen coordinates (with offset applied)
-    const centerX = (bounds.x + offset.x + bounds.width / 2) * zoom + panX;
-    const centerY = (bounds.y + offset.y + bounds.height / 2) * zoom + panY;
+    const centerX = (originalBounds.x + currentOffset.x + originalBounds.width / 2) * zoom + panX;
+    const centerY = (originalBounds.y + currentOffset.y + originalBounds.height / 2) * zoom + panY;
+
+    // Apply scale to get the actual visual dimensions
+    const scaledWidth = originalBounds.width * scale.x;
+    const scaledHeight = originalBounds.height * scale.y;
 
     // Screen dimensions
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
+    const screenWidth = scaledWidth * zoom;
+    const screenHeight = scaledHeight * zoom;
 
     // Half dimensions for drawing from center
     const halfW = screenWidth / 2 - 0.5;

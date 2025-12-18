@@ -1,7 +1,7 @@
 /**
  * Transform handlers for the canvas viewport.
  *
- * Handles rotation start/end and transform commit operations.
+ * Handles rotation start/end, resize start/end, and transform commit operations.
  */
 
 import { selectionStore } from '../../../stores/selection';
@@ -10,9 +10,10 @@ import { layerStore } from '../../../stores/layers';
 import { CutToFloatCommand, TransformSelectionCommand } from '../../../commands/selection-commands';
 
 /**
- * Handle rotation start event from transform handles.
+ * Transition selection to transforming state if needed.
+ * Called when starting rotation or resize operations.
  */
-export function handleRotationStart(): void {
+function ensureTransformState(): void {
   const state = selectionStore.state.value;
 
   // If we're in floating state, we need to transition to transforming
@@ -30,7 +31,6 @@ export function handleRotationStart(): void {
     );
   } else if (state.type === 'selected') {
     // For selected state, we need to cut to floating first, then transform
-    // Use the active layer's canvas, not the composited drawing canvas
     const activeLayerId = layerStore.activeLayerId.value;
     const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
     if (!activeLayer?.canvas) return;
@@ -59,6 +59,20 @@ export function handleRotationStart(): void {
 }
 
 /**
+ * Handle rotation start event from transform handles.
+ */
+export function handleRotationStart(): void {
+  ensureTransformState();
+}
+
+/**
+ * Handle resize start event from transform handles.
+ */
+export function handleResizeStart(): void {
+  ensureTransformState();
+}
+
+/**
  * Handle rotation end event from transform handles.
  */
 export function handleRotationEnd(): void {
@@ -67,17 +81,21 @@ export function handleRotationEnd(): void {
 }
 
 /**
- * Commit the current transform (rotation) to the canvas.
+ * Commit the current transform (scale and/or rotation) to the canvas.
  * Called when user presses Enter or clicks Apply.
  */
 export function commitTransform(): void {
   const transformState = selectionStore.getTransformState();
   if (!transformState) return;
 
-  const { imageData, originalBounds, currentBounds, currentOffset, rotation, shape, mask } = transformState;
+  const { imageData, originalBounds, currentBounds, currentOffset, rotation, scale, shape, mask } = transformState;
 
-  // If rotation is 0 and no movement, just cancel (no change needed)
-  if (rotation === 0 && currentOffset.x === 0 && currentOffset.y === 0) {
+  // If no transform and no movement, just cancel (no change needed)
+  const hasRotation = rotation !== 0;
+  const hasScale = scale.x !== 1 || scale.y !== 1;
+  const hasMovement = currentOffset.x !== 0 || currentOffset.y !== 0;
+
+  if (!hasRotation && !hasScale && !hasMovement) {
     selectionStore.cancelTransform();
     return;
   }
@@ -91,9 +109,9 @@ export function commitTransform(): void {
     return;
   }
 
-  // Use already-computed preview data (same CleanEdge algorithm)
-  const rotatedImageData = selectionStore.getTransformPreview();
-  if (!rotatedImageData) {
+  // Use already-computed preview data (scaled + rotated)
+  const transformedImageData = selectionStore.getTransformPreview();
+  if (!transformedImageData) {
     selectionStore.cancelTransform();
     return;
   }
@@ -103,9 +121,10 @@ export function commitTransform(): void {
     activeLayer.canvas,
     imageData,
     originalBounds,
-    rotatedImageData,
+    transformedImageData,
     currentBounds,
     rotation,
+    scale,
     shape,
     mask,
     currentOffset

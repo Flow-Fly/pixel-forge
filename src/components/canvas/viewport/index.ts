@@ -45,5 +45,6 @@ export {
 export {
   handleRotationStart,
   handleRotationEnd,
+  handleResizeStart,
   commitTransform,
 } from './transform-handlers';

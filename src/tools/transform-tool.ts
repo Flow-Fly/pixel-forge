@@ -155,17 +155,21 @@ export class TransformTool extends BaseTool {
     const transformState = selectionStore.getTransformState();
     if (!transformState) return;
 
-    const { imageData, originalBounds, currentBounds, currentOffset, rotation, shape, mask } = transformState;
+    const { imageData, originalBounds, currentBounds, currentOffset, rotation, scale, shape, mask } = transformState;
 
-    // If no rotation and no movement, just cancel (no change)
-    if (rotation === 0 && currentOffset.x === 0 && currentOffset.y === 0) {
+    // If no transform and no movement, just cancel (no change)
+    const hasRotation = rotation !== 0;
+    const hasScale = scale.x !== 1 || scale.y !== 1;
+    const hasMovement = currentOffset.x !== 0 || currentOffset.y !== 0;
+
+    if (!hasRotation && !hasScale && !hasMovement) {
       selectionStore.cancelTransform();
       return;
     }
 
-    // Use already-computed preview data (same CleanEdge algorithm)
-    const rotatedImageData = selectionStore.getTransformPreview();
-    if (!rotatedImageData) {
+    // Use already-computed preview data (scaled + rotated)
+    const transformedImageData = selectionStore.getTransformPreview();
+    if (!transformedImageData) {
       selectionStore.cancelTransform();
       return;
     }
@@ -186,9 +190,10 @@ export class TransformTool extends BaseTool {
       canvas,
       imageData,
       originalBounds,
-      rotatedImageData,
+      transformedImageData,
       currentBounds,
       rotation,
+      scale,
       shape,
       mask,
       currentOffset

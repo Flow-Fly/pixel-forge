@@ -16,6 +16,11 @@ import {
   calculateRotatedBounds,
   normalizeAngle,
 } from '../../utils/rotation';
+import {
+  scaleNearestNeighbor,
+  scaleCleanEdge,
+  calculateScaledBounds,
+} from '../../utils/scaling';
 
 class SelectionStore {
   state = signal<SelectionState>({ type: 'none' });
@@ -42,6 +47,11 @@ class SelectionStore {
   private pendingRotation: number | null = null;
   private rotationRafId: number | null = null;
   private isRotationDragging = false;
+
+  // Scale performance optimization: rAF throttling
+  private pendingScale: { x: number; y: number } | null = null;
+  private scaleRafId: number | null = null;
+  private isScaleDragging = false;
 
   // ============================================
   // Convenience getters
@@ -86,6 +96,12 @@ class SelectionStore {
     const s = this.state.value;
     if (s.type === 'transforming') return s.rotation;
     return 0;
+  }
+
+  get scale(): { x: number; y: number } {
+    const s = this.state.value;
+    if (s.type === 'transforming') return s.scale;
+    return { x: 1, y: 1 };
   }
 
   // ============================================
@@ -321,7 +337,7 @@ class SelectionStore {
 
   /**
    * Enter transform mode from floating state.
-   * Called when user starts dragging a rotation handle.
+   * Called when user starts dragging a rotation or resize handle.
    */
   startTransform(
     imageData: ImageData,
@@ -336,6 +352,7 @@ class SelectionStore {
       currentBounds: { ...bounds },
       currentOffset: { x: 0, y: 0 },
       rotation: 0,
+      scale: { x: 1, y: 1 },
       previewData: null,
       shape,
       mask,
@@ -458,6 +475,138 @@ class SelectionStore {
     };
   }
 
+  // ============================================
+  // Scale operations
+  // ============================================
+
+  /**
+   * Start scale drag - enables rAF throttling.
+   * Called when user starts dragging a resize handle.
+   */
+  startScaleDrag() {
+    this.isScaleDragging = true;
+  }
+
+  /**
+   * End scale drag - regenerates preview at full quality.
+   * Called when user releases the resize handle.
+   */
+  endScaleDrag() {
+    this.isScaleDragging = false;
+
+    // Cancel any pending rAF
+    if (this.scaleRafId !== null) {
+      cancelAnimationFrame(this.scaleRafId);
+      this.scaleRafId = null;
+    }
+
+    // If there's a pending scale, apply it at full quality
+    if (this.pendingScale !== null) {
+      this._applyTransform(this.pendingScale.x, this.pendingScale.y, null, 'final');
+      this.pendingScale = null;
+    } else {
+      // Regenerate current scale at full quality
+      const s = this.state.value;
+      if (s.type === 'transforming' && (s.scale.x !== 1 || s.scale.y !== 1)) {
+        this._applyTransform(s.scale.x, s.scale.y, s.rotation, 'final');
+      }
+    }
+  }
+
+  /**
+   * Update scale factors and regenerate preview.
+   * Called during drag or when context bar input changes.
+   */
+  updateScale(scaleX: number, scaleY: number) {
+    const s = this.state.value;
+    if (s.type !== 'transforming') return;
+
+    // Clamp to reasonable values
+    scaleX = Math.max(0.1, scaleX);
+    scaleY = Math.max(0.1, scaleY);
+
+    // If dragging, use rAF throttling
+    if (this.isScaleDragging) {
+      this.pendingScale = { x: scaleX, y: scaleY };
+
+      if (this.scaleRafId === null) {
+        this.scaleRafId = requestAnimationFrame(() => {
+          this.scaleRafId = null;
+          if (this.pendingScale !== null) {
+            const currentState = this.state.value;
+            if (currentState.type === 'transforming') {
+              this._applyTransform(
+                this.pendingScale.x,
+                this.pendingScale.y,
+                currentState.rotation,
+                'draft'
+              );
+            }
+            this.pendingScale = null;
+          }
+        });
+      }
+    } else {
+      // Not dragging - apply immediately at full quality
+      this._applyTransform(scaleX, scaleY, s.rotation, 'final');
+    }
+  }
+
+  /**
+   * Internal method to apply combined scale and rotation transform.
+   * Scale is applied first, then rotation.
+   */
+  private _applyTransform(
+    scaleX: number,
+    scaleY: number,
+    rotationDegrees: number | null,
+    quality: 'draft' | 'final'
+  ) {
+    const s = this.state.value;
+    if (s.type !== 'transforming') return;
+
+    const rotation = rotationDegrees ?? s.rotation;
+    const normalizedAngle = normalizeAngle(rotation);
+
+    let previewData: ImageData;
+    let newBounds: Rect;
+
+    // Start with original image data
+    let transformedData = s.imageData;
+    newBounds = { ...s.originalBounds };
+
+    // Apply scale if not 1:1
+    if (scaleX !== 1 || scaleY !== 1) {
+      // Use nearest-neighbor for draft (fast dragging), CleanEdge for final quality
+      transformedData = quality === 'final'
+        ? scaleCleanEdge(transformedData, scaleX, scaleY)
+        : scaleNearestNeighbor(transformedData, scaleX, scaleY);
+      newBounds = calculateScaledBounds(s.originalBounds, scaleX, scaleY);
+    }
+
+    // Apply rotation if not 0
+    if (normalizedAngle !== 0) {
+      transformedData = rotateCleanEdge(transformedData, normalizedAngle, { quality });
+      // Recalculate bounds for rotated scaled image
+      const rotatedBounds = calculateRotatedBounds(newBounds, normalizedAngle);
+      newBounds = rotatedBounds;
+    }
+
+    // Update bounds to match actual preview dimensions
+    newBounds.width = transformedData.width;
+    newBounds.height = transformedData.height;
+
+    previewData = transformedData;
+
+    this.state.value = {
+      ...s,
+      scale: { x: scaleX, y: scaleY },
+      rotation: normalizedAngle,
+      previewData,
+      currentBounds: newBounds,
+    };
+  }
+
   /**
    * Get the original (unrotated) image data for committing.
    */
@@ -485,6 +634,7 @@ class SelectionStore {
     currentBounds: Rect;
     currentOffset: { x: number; y: number };
     rotation: number;
+    scale: { x: number; y: number };
     shape: SelectionShape;
     mask?: Uint8Array;
   } | null {
@@ -496,6 +646,7 @@ class SelectionStore {
       currentBounds: s.currentBounds,
       currentOffset: s.currentOffset,
       rotation: s.rotation,
+      scale: s.scale,
       shape: s.shape,
       mask: s.mask,
     };
