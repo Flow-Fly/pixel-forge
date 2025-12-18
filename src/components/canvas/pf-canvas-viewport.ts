@@ -33,6 +33,7 @@ import {
   handleWheel as wheelHandleWheel,
   handleGlobalWheel,
   handleRotationStart,
+  handleResizeStart,
   handleRotationEnd,
   commitTransform,
   type KeyboardState,
@@ -176,6 +177,8 @@ export class PFCanvasViewport extends BaseComponent {
       <pf-transform-handles
         @rotation-start=${this.onRotationStart}
         @rotation-end=${this.onRotationEnd}
+        @resize-start=${this.onResizeStart}
+        @resize-end=${this.onResizeEnd}
       ></pf-transform-handles>
       <pf-text-input></pf-text-input>
       <pf-guides-overlay></pf-guides-overlay>
@@ -282,6 +285,15 @@ export class PFCanvasViewport extends BaseComponent {
 
   private onRotationEnd = () => {
     handleRotationEnd();
+  };
+
+  private onResizeStart = () => {
+    handleResizeStart();
+  };
+
+  private onResizeEnd = () => {
+    // Resize drag ended - transform will be committed when user
+    // clicks outside or presses Enter
   };
 
   private onCommitTransform = () => {

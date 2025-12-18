@@ -661,17 +661,17 @@ export class FillSelectionCommand implements Command {
 }
 
 /**
- * Command for applying a rotation transform to a selection.
- * Execute: pastes rotated pixels at new bounds, clears original location
+ * Command for applying a transform (scale and/or rotation) to a selection.
+ * Execute: pastes transformed pixels at new bounds, clears original location
  * Undo: restores original pixels, returns to transforming state
  *
- * Note: This command receives the already-rotated image data from the
- * rotation service. The rotation calculation happens before the command
+ * Note: This command receives the already-transformed image data from the
+ * selection store. The transform calculation happens before the command
  * is created (to support async web worker processing).
  */
 export class TransformSelectionCommand implements Command {
   id: string;
-  name = 'Rotate Selection';
+  name: string;
   timestamp: number;
 
   private canvas: HTMLCanvasElement;
@@ -682,11 +682,12 @@ export class TransformSelectionCommand implements Command {
   private originalShape: SelectionShape;
   private originalMask?: Uint8Array;
 
-  // Final state (after rotation)
-  private rotatedImageData: ImageData;
+  // Final state (after transform)
+  private transformedImageData: ImageData;
   private rotation: number;
+  private scale: { x: number; y: number };
 
-  // Actual destination position (calculated from rotated image dimensions)
+  // Actual destination position (calculated from transformed image dimensions)
   private actualDestX: number;
   private actualDestY: number;
 
@@ -697,9 +698,10 @@ export class TransformSelectionCommand implements Command {
     canvas: HTMLCanvasElement,
     originalImageData: ImageData,
     originalBounds: Rect,
-    rotatedImageData: ImageData,
-    rotatedBounds: Rect,
+    transformedImageData: ImageData,
+    _transformedBounds: Rect,
     rotation: number,
+    scale: { x: number; y: number },
     shape: SelectionShape,
     originalMask?: Uint8Array,
     offset: { x: number; y: number } = { x: 0, y: 0 }
@@ -708,32 +710,46 @@ export class TransformSelectionCommand implements Command {
     this.timestamp = Date.now();
     this.canvas = canvas;
 
+    // Generate descriptive name based on what changed
+    const hasScale = scale.x !== 1 || scale.y !== 1;
+    const hasRotation = rotation !== 0;
+    if (hasScale && hasRotation) {
+      this.name = 'Transform Selection';
+    } else if (hasScale) {
+      this.name = 'Scale Selection';
+    } else if (hasRotation) {
+      this.name = 'Rotate Selection';
+    } else {
+      this.name = 'Move Selection';
+    }
+
     // Store original state
     this.originalImageData = originalImageData;
     this.originalBounds = { ...originalBounds };
     this.originalShape = shape;
     this.originalMask = originalMask;
 
-    // Store rotated state
-    this.rotatedImageData = rotatedImageData;
+    // Store transformed state
+    this.transformedImageData = transformedImageData;
     this.rotation = rotation;
+    this.scale = { ...scale };
 
     // Calculate actual destination position (including offset from movement during transform)
-    // IMPORTANT: Use originalBounds center + offset, not rotatedBounds (which has preview dimensions)
+    // IMPORTANT: Use originalBounds center + offset, not transformedBounds (which has preview dimensions)
     // Both preview (nearest-neighbor) and RotSprite may produce slightly different dimensions
     // due to rounding, but both should be centered on the same original center point.
     const originalCenterX = originalBounds.x + offset.x + originalBounds.width / 2;
     const originalCenterY = originalBounds.y + offset.y + originalBounds.height / 2;
-    this.actualDestX = Math.round(originalCenterX - rotatedImageData.width / 2);
-    this.actualDestY = Math.round(originalCenterY - rotatedImageData.height / 2);
+    this.actualDestX = Math.round(originalCenterX - transformedImageData.width / 2);
+    this.actualDestY = Math.round(originalCenterY - transformedImageData.height / 2);
 
     // Capture what's at the actual destination before we paste
     const ctx = canvas.getContext('2d')!;
     this.overwrittenAtDestination = ctx.getImageData(
       this.actualDestX,
       this.actualDestY,
-      rotatedImageData.width,
-      rotatedImageData.height
+      transformedImageData.width,
+      transformedImageData.height
     );
   }
 
@@ -741,10 +757,10 @@ export class TransformSelectionCommand implements Command {
     const ctx = this.canvas.getContext('2d')!;
 
     // Note: The original location was already cleared when we cut to floating state
-    // So we just need to paste the rotated pixels at the new location
+    // So we just need to paste the transformed pixels at the new location
 
-    // Paste rotated pixels (respecting alpha)
-    this.pasteWithAlpha(ctx, this.rotatedImageData);
+    // Paste transformed pixels (respecting alpha)
+    this.pasteWithAlpha(ctx, this.transformedImageData);
 
     // Clear selection state
     selectionStore.clearAfterTransform();
@@ -768,8 +784,13 @@ export class TransformSelectionCommand implements Command {
       this.originalMask
     );
 
-    // Re-apply the rotation for preview
-    selectionStore.updateRotation(this.rotation);
+    // Re-apply the transforms for preview
+    if (this.scale.x !== 1 || this.scale.y !== 1) {
+      selectionStore.updateScale(this.scale.x, this.scale.y);
+    }
+    if (this.rotation !== 0) {
+      selectionStore.updateRotation(this.rotation);
+    }
   }
 
   private pasteWithAlpha(ctx: CanvasRenderingContext2D, srcImageData: ImageData) {

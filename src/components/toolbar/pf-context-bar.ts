@@ -194,6 +194,7 @@ export class PFContextBar extends BaseComponent {
 
   @state() private isCommitting = false;
   @state() private isCelScrubbing = false;
+  @state() private lockAspectRatio = true;
   private celScrubStartX = 0;
   private celScrubStartOpacity = 0;
   private celScrubBeforeOpacities: Map<string, number> = new Map();
@@ -259,12 +260,63 @@ export class PFContextBar extends BaseComponent {
 
   private _renderTransformControls() {
     const rotation = selectionStore.rotation;
+    const scale = selectionStore.scale;
+    const transformState = selectionStore.getTransformState();
+
+    // Calculate current dimensions
+    const originalWidth = transformState?.originalBounds.width ?? 0;
+    const originalHeight = transformState?.originalBounds.height ?? 0;
+    const currentWidth = Math.round(originalWidth * scale.x);
+    const currentHeight = Math.round(originalHeight * scale.y);
 
     return html`
-      <span class="tool-name">Rotate Selection</span>
+      <span class="tool-name">Transform Selection</span>
       <div class="separator"></div>
 
       <div class="transform-section">
+        <!-- Scale controls -->
+        <div class="angle-control">
+          <label>W:</label>
+          <input
+            type="number"
+            min="1"
+            .value=${String(currentWidth)}
+            @input=${this._handleWidthInput}
+            @keydown=${this._handleTransformKeydown}
+            style="width: 45px;"
+          />
+          <span style="color: var(--pf-color-text-muted); font-size: 11px;">px</span>
+        </div>
+
+        <button
+          class="toggle-btn ${this.lockAspectRatio ? "active" : ""}"
+          @click=${this._toggleAspectRatioLock}
+          title="${this.lockAspectRatio ? "Unlock aspect ratio" : "Lock aspect ratio"}"
+          style="padding: 2px 6px; font-size: 10px;"
+        >
+          ${this.lockAspectRatio ? "🔗" : "🔓"}
+        </button>
+
+        <div class="angle-control">
+          <label>H:</label>
+          <input
+            type="number"
+            min="1"
+            .value=${String(currentHeight)}
+            @input=${this._handleHeightInput}
+            @keydown=${this._handleTransformKeydown}
+            style="width: 45px;"
+          />
+          <span style="color: var(--pf-color-text-muted); font-size: 11px;">px</span>
+        </div>
+
+        <span style="color: var(--pf-color-text-muted); font-size: 11px;">
+          (${Math.round(scale.x * 100)}%×${Math.round(scale.y * 100)}%)
+        </span>
+
+        <div class="separator"></div>
+
+        <!-- Rotation controls -->
         <div class="angle-control">
           <label>Angle:</label>
           <input
@@ -281,7 +333,7 @@ export class PFContextBar extends BaseComponent {
             max="360"
             .value=${String(Math.round(rotation))}
             @input=${this._handleAngleInput}
-            @keydown=${this._handleAngleKeydown}
+            @keydown=${this._handleTransformKeydown}
           />
           <span style="color: var(--pf-color-text-muted); font-size: 11px;"
             >°</span
@@ -294,19 +346,65 @@ export class PFContextBar extends BaseComponent {
           variant="primary"
           @click=${this._commitTransform}
           ?disabled=${this.isCommitting}
-          title="Apply rotation (Enter)"
+          title="Apply transform (Enter)"
         >
           ${this.isCommitting ? "Applying..." : "Apply"}
         </pf-button>
         <pf-button
           @click=${this._cancelTransform}
           ?disabled=${this.isCommitting}
-          title="Cancel rotation (Escape)"
+          title="Cancel transform (Escape)"
         >
           Cancel
         </pf-button>
       </div>
     `;
+  }
+
+  private _handleWidthInput(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const newWidth = parseInt(input.value) || 1;
+    const transformState = selectionStore.getTransformState();
+    if (!transformState) return;
+
+    const originalWidth = transformState.originalBounds.width;
+    const newScaleX = newWidth / originalWidth;
+
+    if (this.lockAspectRatio) {
+      selectionStore.updateScale(newScaleX, newScaleX);
+    } else {
+      selectionStore.updateScale(newScaleX, selectionStore.scale.y);
+    }
+  }
+
+  private _handleHeightInput(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const newHeight = parseInt(input.value) || 1;
+    const transformState = selectionStore.getTransformState();
+    if (!transformState) return;
+
+    const originalHeight = transformState.originalBounds.height;
+    const newScaleY = newHeight / originalHeight;
+
+    if (this.lockAspectRatio) {
+      selectionStore.updateScale(newScaleY, newScaleY);
+    } else {
+      selectionStore.updateScale(selectionStore.scale.x, newScaleY);
+    }
+  }
+
+  private _toggleAspectRatioLock() {
+    this.lockAspectRatio = !this.lockAspectRatio;
+  }
+
+  private _handleTransformKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      this._commitTransform();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      this._cancelTransform();
+    }
   }
 
   private _handleAngleSlider(e: Event) {
@@ -321,16 +419,6 @@ export class PFContextBar extends BaseComponent {
     // Clamp to valid range
     angle = Math.max(0, Math.min(360, angle));
     selectionStore.updateRotation(angle);
-  }
-
-  private _handleAngleKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      this._commitTransform();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      this._cancelTransform();
-    }
   }
 
   private _commitTransform() {

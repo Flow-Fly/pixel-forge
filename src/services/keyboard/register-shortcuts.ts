@@ -497,30 +497,39 @@ export function registerShortcuts() {
     "Cancel selection"
   );
 
+  // Helper function for delete operations
+  const deleteSelection = () => {
+    const state = selectionStore.state.value;
+
+    if (state.type === "selected") {
+      // Delete pixels from the layer within the selection bounds
+      const activeLayerId = layerStore.activeLayerId.value;
+      const layer = layerStore.layers.value.find(
+        (l) => l.id === activeLayerId
+      );
+      if (!layer?.canvas) return;
+
+      const command = new DeleteSelectionCommand(
+        layer.canvas,
+        state.bounds,
+        state.shape,
+        state.shape === "freeform"
+          ? (state as { mask: Uint8Array }).mask
+          : undefined
+      );
+      historyStore.execute(command);
+    } else if (state.type === "floating" || state.type === "transforming") {
+      // Discard the floating pixels without committing them
+      // The pixels were already cut from the layer, so just clear the selection
+      selectionStore.clear();
+    }
+  };
+
   // Delete = Delete selected pixels
   keyboardService.register(
     "Delete",
     [],
-    () => {
-      const state = selectionStore.state.value;
-      if (state.type === "selected") {
-        const activeLayerId = layerStore.activeLayerId.value;
-        const layer = layerStore.layers.value.find(
-          (l) => l.id === activeLayerId
-        );
-        if (!layer?.canvas) return;
-
-        const command = new DeleteSelectionCommand(
-          layer.canvas,
-          state.bounds,
-          state.shape,
-          state.shape === "freeform"
-            ? (state as { mask: Uint8Array }).mask
-            : undefined
-        );
-        historyStore.execute(command);
-      }
-    },
+    deleteSelection,
     "Delete selection"
   );
 
@@ -528,26 +537,7 @@ export function registerShortcuts() {
   keyboardService.register(
     "Backspace",
     [],
-    () => {
-      const state = selectionStore.state.value;
-      if (state.type === "selected") {
-        const activeLayerId = layerStore.activeLayerId.value;
-        const layer = layerStore.layers.value.find(
-          (l) => l.id === activeLayerId
-        );
-        if (!layer?.canvas) return;
-
-        const command = new DeleteSelectionCommand(
-          layer.canvas,
-          state.bounds,
-          state.shape,
-          state.shape === "freeform"
-            ? (state as { mask: Uint8Array }).mask
-            : undefined
-        );
-        historyStore.execute(command);
-      }
-    },
+    deleteSelection,
     "Delete selection"
   );
 

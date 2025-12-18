@@ -32,12 +32,13 @@ export type SelectionState =
     }
   | {
       type: 'transforming';
-      imageData: ImageData;           // Original pixels (unrotated)
+      imageData: ImageData;           // Original pixels (unrotated, unscaled)
       originalBounds: Rect;           // Where it was cut from
-      currentBounds: Rect;            // Expanded bounds after rotation
+      currentBounds: Rect;            // Expanded bounds after rotation/scale
       currentOffset: { x: number; y: number };  // Movement offset during transform
       rotation: number;               // Degrees (0-360)
-      previewData: ImageData | null;  // Nearest-neighbor preview (null until first rotation)
+      scale: { x: number; y: number }; // Scale factors (1.0 = original)
+      previewData: ImageData | null;  // Nearest-neighbor preview (null until first transform)
       shape: SelectionShape;
       mask?: Uint8Array;              // Original mask (for freeform)
     };
