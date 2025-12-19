@@ -171,7 +171,8 @@ class ProjectStore {
         paletteStore.rebuildColorMap();
       } else {
         // Clear any existing ephemeral colors when loading a project without them
-        paletteStore.clearEphemeralColors();
+        // Skip remap since we're loading fresh data
+        paletteStore.clearEphemeralColors(true);
       }
     }
 
@@ -425,7 +426,8 @@ class ProjectStore {
     animationStore.tags.value = [];
 
     // 8b. Clear ephemeral colors (fresh start - no preserved colors needed)
-    paletteStore.clearEphemeralColors();
+    // Skip remap since we're starting fresh
+    paletteStore.clearEphemeralColors(true);
 
     // 8c. Reset palette to default (DB32)
     paletteStore.loadPreset("db32");
