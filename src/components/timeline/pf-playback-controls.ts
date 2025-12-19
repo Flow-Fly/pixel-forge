@@ -109,19 +109,26 @@ export class PFPlaybackControls extends BaseComponent {
     return Math.round(1000 / avgDuration);
   }
 
-  private getAverageDuration(): number {
+  private getTotalDuration(): number {
     const frames = animationStore.frames.value;
-    if (frames.length === 0) return 100;
+    if (frames.length === 0) return 0;
 
-    const totalDuration = frames.reduce((sum, f) => sum + f.duration, 0);
-    return Math.round(totalDuration / frames.length);
+    return frames.reduce((sum, f) => sum + f.duration, 0);
+  }
+
+  private formatDuration(ms: number): string {
+    if (ms >= 1000) {
+      const seconds = ms / 1000;
+      return `${seconds.toFixed(2)}s`;
+    }
+    return `${ms}ms`;
   }
 
   render() {
     const isPlaying = animationStore.isPlaying.value;
     const frameCount = animationStore.frames.value.length;
     const effectiveFPS = this.getEffectiveFPS();
-    const avgDuration = this.getAverageDuration();
+    const totalDuration = this.getTotalDuration();
 
     return html`
       <button
@@ -162,11 +169,11 @@ export class PFPlaybackControls extends BaseComponent {
         <span
           class="unit-toggle"
           @click=${this.toggleUnit}
-          title="Click to toggle between ms and FPS"
+          title="Click to toggle between duration and FPS"
         >
           ${this.durationUnit === "fps"
             ? `${effectiveFPS} FPS`
-            : `${avgDuration} ms`}
+            : this.formatDuration(totalDuration)}
         </span>
       </span>
     `;
