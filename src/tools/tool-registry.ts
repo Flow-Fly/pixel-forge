@@ -64,7 +64,11 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     alternatives: ["eraser", "eyedropper"],
     shortcuts: [
       { key: "shift+click", action: "Line from last point" },
-      { key: "shift+drag", action: "Constrained line from start", when: "drawing" },
+      {
+        key: "shift+drag",
+        action: "Constrained line from start",
+        when: "drawing",
+      },
       { key: "ctrl+click", action: "Decrease lightness" },
       { key: "ctrl+right-click", action: "Increase lightness" },
       { key: "alt+wheel", action: "Change brush size" },
@@ -92,7 +96,11 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
     alternatives: ["pencil", "eyedropper"],
     shortcuts: [
       { key: "shift+click", action: "Line from last point" },
-      { key: "shift+drag", action: "Constrained line from start", when: "drawing" },
+      {
+        key: "shift+drag",
+        action: "Constrained line from start",
+        when: "drawing",
+      },
       { key: "alt+wheel", action: "Change brush size" },
       { key: "right-click", action: "Erase to background" },
     ],
@@ -341,7 +349,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   transform: {
     name: "Transform",
-    icon: "⤡",
+    icon: "/icons/tools/transform.webp",
     label: "V",
     shortcutKey: "V",
     group: "utility",
@@ -357,7 +365,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   text: {
     name: "Text",
-    icon: "/icons/tools/text.png",
+    icon: "/icons/tools/text.webp",
     label: "T",
     shortcutKey: "T",
     group: "utility",
@@ -394,7 +402,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   zoom: {
     name: "Zoom",
-    icon: "🔍",
+    icon: "/icons/tools/zoom.webp",
     label: "Z",
     shortcutKey: "Z",
     group: "navigation",

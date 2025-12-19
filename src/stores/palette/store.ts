@@ -133,8 +133,16 @@ class PaletteStore {
     const newColors = [...this.colors.value];
     newColors.splice(insertionIndex, 0, normalized);
     this.colors.value = newColors;
+    this.markDirty();
     this.rebuildColorMap();
     this.saveToStorage();
+
+    // Dispatch event to shift indices in index buffers
+    window.dispatchEvent(
+      new CustomEvent('palette-color-inserted', {
+        detail: { insertedIndex: insertionIndex + 1 },
+      })
+    );
 
     return insertionIndex + 1;
   }
@@ -180,6 +188,11 @@ class PaletteStore {
     if (mainIndex !== undefined) return mainIndex;
 
     const ephemeralIdx = this.ephemeralColors.value.indexOf(normalized);
+    // Calculate old ephemeral 1-based index before any changes
+    const oldEphemeralIndex = ephemeralIdx !== -1
+      ? this.mainColors.value.length + ephemeralIdx + 1
+      : -1;
+
     if (ephemeralIdx !== -1) {
       const newEphemeral = [...this.ephemeralColors.value];
       newEphemeral.splice(ephemeralIdx, 1);
@@ -190,21 +203,68 @@ class PaletteStore {
     const newColors = [...this.mainColors.value];
     newColors.splice(insertionIndex, 0, normalized);
     this.mainColors.value = newColors;
+    this.markDirty();
     this.rebuildColorMap();
     this.saveToStorage();
 
-    return insertionIndex + 1;
+    const newMainIndex = insertionIndex + 1;
+
+    // Dispatch event to remap index buffers
+    // This tells the handler: oldEphemeralIndex should become newMainIndex,
+    // and main indices >= newMainIndex need to shift up by 1
+    window.dispatchEvent(
+      new CustomEvent('palette-ephemeral-promoted', {
+        detail: {
+          oldEphemeralIndex,
+          newMainIndex,
+          oldMainLength: newColors.length - 1 // length before insertion
+        },
+      })
+    );
+
+    return newMainIndex;
   }
 
   promoteAllEphemeralColors() {
-    for (const color of this.ephemeralColors.value) {
-      this.promoteEphemeralColor(color);
-    }
+    if (this.ephemeralColors.value.length === 0) return;
+
+    // Capture old state for remapping
+    const oldMainColors = [...this.mainColors.value];
+    const oldEphemeralColors = [...this.ephemeralColors.value];
+
+    // Add all ephemeral colors to main palette (append at end for batch)
+    const newColors = [...this.mainColors.value, ...this.ephemeralColors.value];
+    this.mainColors.value = newColors;
+    this.ephemeralColors.value = [];
+    this.markDirty();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    // Single event to remap all index buffers
+    window.dispatchEvent(
+      new CustomEvent('palette-replaced', {
+        detail: { oldMainColors, oldEphemeralColors },
+      })
+    );
   }
 
-  clearEphemeralColors() {
+  clearEphemeralColors(skipRemap = false) {
+    if (this.ephemeralColors.value.length === 0) return;
+
+    const oldMainColors = [...this.mainColors.value];
+    const oldEphemeralColors = [...this.ephemeralColors.value];
+
     this.ephemeralColors.value = [];
     this.rebuildColorMap();
+
+    // Dispatch event to remap orphaned ephemeral indices to closest main color
+    if (!skipRemap) {
+      window.dispatchEvent(
+        new CustomEvent('palette-replaced', {
+          detail: { oldMainColors, oldEphemeralColors },
+        })
+      );
+    }
   }
 
   removeFromEphemeral(color: string): void {
@@ -213,10 +273,20 @@ class PaletteStore {
       c => normalizeHex(c) === normalized
     );
     if (index !== -1) {
+      // Calculate 1-based palette index (ephemeral indices start after main colors)
+      const paletteIndex = this.mainColors.value.length + index + 1;
+
       const newEphemeral = [...this.ephemeralColors.value];
       newEphemeral.splice(index, 1);
       this.ephemeralColors.value = newEphemeral;
       this.rebuildColorMap();
+
+      // Dispatch event to shift indices in index buffers
+      window.dispatchEvent(
+        new CustomEvent('palette-color-removed', {
+          detail: { removedIndex: paletteIndex },
+        })
+      );
     }
   }
 
@@ -302,8 +372,15 @@ class PaletteStore {
     const newColors = [...this.colors.value];
     newColors.splice(arrayIndex, 1);
     this.colors.value = newColors;
+    this.markDirty();
     this.rebuildColorMap();
     this.saveToStorage();
+
+    window.dispatchEvent(
+      new CustomEvent('palette-color-removed', {
+        detail: { removedIndex: index },
+      })
+    );
   }
 
   insertColorAt(index: number, color: string) {
@@ -314,8 +391,15 @@ class PaletteStore {
     const newColors = [...this.colors.value];
     newColors.splice(arrayIndex, 0, normalized);
     this.colors.value = newColors;
+    this.markDirty();
     this.rebuildColorMap();
     this.saveToStorage();
+
+    window.dispatchEvent(
+      new CustomEvent('palette-color-inserted', {
+        detail: { insertedIndex: index },
+      })
+    );
   }
 
   moveColor(fromIndex: number, toIndex: number) {
@@ -519,6 +603,8 @@ class PaletteStore {
   addExtractedColor(color: string) {
     if (!this.colors.value.includes(color)) {
       this.colors.value = [...this.colors.value, color];
+      this.markDirty();
+      this.rebuildColorMap();
       this.saveToStorage();
     }
     this.extractedColors.value = this.extractedColors.value.filter(c => c !== color);
@@ -530,6 +616,8 @@ class PaletteStore {
     );
     if (newColors.length > 0) {
       this.colors.value = [...this.colors.value, ...newColors];
+      this.markDirty();
+      this.rebuildColorMap();
       this.saveToStorage();
     }
     this.extractedColors.value = [];
@@ -537,9 +625,21 @@ class PaletteStore {
 
   replaceWithExtracted() {
     if (this.extractedColors.value.length > 0) {
+      const oldMainColors = [...this.mainColors.value];
+      const oldEphemeralColors = [...this.ephemeralColors.value];
+
       this.colors.value = [...this.extractedColors.value];
       this.extractedColors.value = [];
+      this.markDirty();
+      this.rebuildColorMap();
       this.saveToStorage();
+
+      // Dispatch event to remap index buffers by color
+      window.dispatchEvent(
+        new CustomEvent('palette-replaced', {
+          detail: { oldMainColors, oldEphemeralColors },
+        })
+      );
     }
   }
 
