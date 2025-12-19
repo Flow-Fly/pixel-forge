@@ -16,26 +16,6 @@ class BrushStore {
       pixelPerfect: true,
       spacing: 1,
     },
-    {
-      id: "square-3",
-      name: "3px Square",
-      type: "builtin",
-      size: 3,
-      shape: "square",
-      opacity: 1,
-      pixelPerfect: false,
-      spacing: 1,
-    },
-    {
-      id: "square-5",
-      name: "5px Square",
-      type: "builtin",
-      size: 5,
-      shape: "square",
-      opacity: 1,
-      pixelPerfect: false,
-      spacing: 1,
-    },
   ];
 
   // Custom brushes (user-created, persisted to IndexedDB)
@@ -75,7 +55,9 @@ class BrushStore {
     if (this.initialized) return;
 
     const storedBrushes = await brushPersistence.getAllBrushes();
-    this.customBrushes.value = storedBrushes.map((stored) => this.storedToRuntime(stored));
+    this.customBrushes.value = storedBrushes.map((stored) =>
+      this.storedToRuntime(stored)
+    );
     this.initialized = true;
   }
 
@@ -186,7 +168,9 @@ class BrushStore {
     if (!brush) return;
 
     // Remove from memory
-    this.customBrushes.value = this.customBrushes.value.filter((b) => b.id !== id);
+    this.customBrushes.value = this.customBrushes.value.filter(
+      (b) => b.id !== id
+    );
 
     // If the deleted brush was active, switch to first builtin
     if (this.activeBrush.value.id === id) {
@@ -230,7 +214,9 @@ class BrushStore {
     if (this.bigPixelMode.value) {
       // Exiting Big Pixel Mode - restore previous settings
       if (this.preBigPixelSettings) {
-        this.updateActiveBrushSettings({ spacing: this.preBigPixelSettings.spacing });
+        this.updateActiveBrushSettings({
+          spacing: this.preBigPixelSettings.spacing,
+        });
         gridStore.setTileSize(this.preBigPixelSettings.tileGridSize);
         if (!this.preBigPixelSettings.tileGridEnabled) {
           gridStore.tileGridEnabled.value = false;
