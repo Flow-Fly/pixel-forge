@@ -9,6 +9,7 @@
 
 import type { Cel } from '../../types/animation';
 import { cloneIndexBuffer, createIndexBuffer } from '../../utils/indexed-color';
+import { createLayerCanvas } from '../../utils/canvas-factory';
 import { EMPTY_CEL_LINK_ID, getCelKey } from './types';
 
 /**
@@ -66,17 +67,8 @@ export function unlinkCels(
     const cel = newCels.get(key);
     if (cel && cel.linkedCelId) {
       // Create a copy of the canvas
-      const newCanvas = document.createElement('canvas');
-      newCanvas.width = cel.canvas.width;
-      newCanvas.height = cel.canvas.height;
-      const ctx = newCanvas.getContext('2d', {
-        alpha: true,
-        willReadFrequently: true
-      });
-      if (ctx) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(cel.canvas, 0, 0);
-      }
+      const { canvas: newCanvas, ctx } = createLayerCanvas(cel.canvas.width, cel.canvas.height);
+      ctx.drawImage(cel.canvas, 0, 0);
 
       // Clone index buffer if present
       const newIndexBuffer = cel.indexBuffer ? cloneIndexBuffer(cel.indexBuffer) : undefined;
@@ -144,17 +136,7 @@ export function ensureUnlinkedForEdit(
   if (cel.linkedCelId === EMPTY_CEL_LINK_ID) {
     const newCels = new Map(cels);
 
-    const newCanvas = document.createElement('canvas');
-    newCanvas.width = cel.canvas.width;
-    newCanvas.height = cel.canvas.height;
-    const ctx = newCanvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true
-    });
-    if (ctx) {
-      ctx.imageSmoothingEnabled = false;
-    }
-
+    const { canvas: newCanvas } = createLayerCanvas(cel.canvas.width, cel.canvas.height);
     const newIndexBuffer = createIndexBuffer(newCanvas.width, newCanvas.height);
 
     newCels.set(key, {

@@ -10,6 +10,7 @@ import type { Frame, Cel, OnionSkinSettings, FrameTag } from '../../types/animat
 import type { TextCelData } from '../../types/text';
 import { layerStore } from '../layers';
 import { projectStore } from '../project';
+import { createLayerCanvas } from '../../utils/canvas-factory';
 
 // Import extracted modules
 import type { PlaybackMode } from './types';
@@ -109,16 +110,8 @@ class AnimationStore {
       this.sharedTransparentCanvas.width !== width ||
       this.sharedTransparentCanvas.height !== height
     ) {
-      this.sharedTransparentCanvas = document.createElement('canvas');
-      this.sharedTransparentCanvas.width = width;
-      this.sharedTransparentCanvas.height = height;
-      const ctx = this.sharedTransparentCanvas.getContext('2d', {
-        alpha: true,
-        willReadFrequently: true
-      });
-      if (ctx) {
-        ctx.imageSmoothingEnabled = false;
-      }
+      const { canvas } = createLayerCanvas(width, height);
+      this.sharedTransparentCanvas = canvas;
     }
     return this.sharedTransparentCanvas;
   }
@@ -177,15 +170,12 @@ class AnimationStore {
       let cel = cels.get(key);
 
       if (!cel) {
-        const canvas = document.createElement('canvas');
-        canvas.width = projectStore.width.value;
-        canvas.height = projectStore.height.value;
-        const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
-        if (ctx) {
-          ctx.imageSmoothingEnabled = false;
-          if (layer.canvas) {
-            ctx.drawImage(layer.canvas, 0, 0);
-          }
+        const { canvas, ctx } = createLayerCanvas(
+          projectStore.width.value,
+          projectStore.height.value
+        );
+        if (layer.canvas) {
+          ctx.drawImage(layer.canvas, 0, 0);
         }
 
         cel = {

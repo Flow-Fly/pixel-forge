@@ -4,6 +4,7 @@ import { animationStore } from "../stores/animation";
 import { projectStore } from "../stores/project";
 import { type Layer } from "../types/layer";
 import { type Cel } from "../types/animation";
+import { createCanvas, createLayerCanvas } from "../utils/canvas-factory";
 
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
@@ -61,17 +62,11 @@ export class DuplicateLayerCommand implements Command {
         const newKey = animationStore.getCelKey(newLayerId, frame.id);
 
         // Create new canvas and copy content
-        const newCanvas = document.createElement("canvas");
-        newCanvas.width = sourceCel.canvas.width;
-        newCanvas.height = sourceCel.canvas.height;
-        const ctx = newCanvas.getContext("2d", {
-          alpha: true,
-          willReadFrequently: true,
-        });
-        if (ctx) {
-          ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(sourceCel.canvas, 0, 0);
-        }
+        const { canvas: newCanvas, ctx } = createLayerCanvas(
+          sourceCel.canvas.width,
+          sourceCel.canvas.height
+        );
+        ctx.drawImage(sourceCel.canvas, 0, 0);
 
         // Map old linkedCelId to new one (preserve link groups within the duplicated layer)
         let newLinkedCelId: string | undefined;
@@ -211,10 +206,7 @@ export class FlipLayerCommand implements Command {
     const height = layer.canvas.height;
 
     // Create temp canvas to draw flipped
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d")!;
+    const { canvas: tempCanvas, ctx: tempCtx } = createCanvas(width, height);
 
     tempCtx.save();
     if (this.direction === "horizontal") {
@@ -266,10 +258,7 @@ export class RotateLayerCommand implements Command {
     const height = layer.canvas.height;
 
     // Create temp canvas
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d")!;
+    const { canvas: tempCanvas, ctx: tempCtx } = createCanvas(width, height);
 
     tempCtx.save();
     tempCtx.translate(width / 2, height / 2);

@@ -2,6 +2,35 @@ import { animationStore } from '../stores/animation';
 import { layerStore } from '../stores/layers';
 import { projectStore } from '../stores/project';
 
+// Re-export canvas factory utilities
+export {
+  createCanvas,
+  createLayerCanvas,
+  createCelCanvas,
+  type CanvasOptions,
+} from './canvas-factory';
+
+/**
+ * Create a temporary canvas for rendering operations.
+ * Uses project dimensions as defaults.
+ */
+export function createTempCanvas(
+  width?: number,
+  height?: number
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  const w = width ?? projectStore.width.value;
+  const h = height ?? projectStore.height.value;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+
+  const ctx = canvas.getContext('2d', { alpha: true })!;
+  ctx.imageSmoothingEnabled = false;
+
+  return { canvas, ctx };
+}
+
 /**
  * Composite all visible layers for a specific frame onto a target canvas.
  */
@@ -74,26 +103,6 @@ export function compositeLayer(
     targetCtx.drawImage(canvasToUse, 0, 0);
     targetCtx.globalAlpha = 1;
   }
-}
-
-/**
- * Create a temporary canvas for rendering operations.
- */
-export function createTempCanvas(
-  width?: number,
-  height?: number
-): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
-  const w = width ?? projectStore.width.value;
-  const h = height ?? projectStore.height.value;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-
-  const ctx = canvas.getContext('2d', { alpha: true })!;
-  ctx.imageSmoothingEnabled = false;
-
-  return { canvas, ctx };
 }
 
 /**
