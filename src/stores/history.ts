@@ -1,4 +1,4 @@
-import { signal } from '../core/signal';
+import { signal, computed } from '../core/signal';
 import { userStore } from './user';
 import { persistenceService } from '../services/persistence/indexed-db';
 import { projectStore } from './project';
@@ -29,9 +29,9 @@ class HistoryStore {
   undoStack = signal<Command[]>([]);
   redoStack = signal<Command[]>([]);
 
-  // Computed signals for UI
-  canUndo = signal<boolean>(false);
-  canRedo = signal<boolean>(false);
+  // Computed signals for UI - automatically derived from stack state
+  canUndo = computed(() => this.undoStack.value.length > 0);
+  canRedo = computed(() => this.redoStack.value.length > 0);
 
   // Version signal - increments on undo/redo to trigger canvas re-render
   version = signal<number>(0);
@@ -47,10 +47,6 @@ class HistoryStore {
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    // Update computed signals when stacks change
-    // Since we don't have true computed signals in our simple implementation yet,
-    // we'll update them manually in the methods.
-
     // Set up blur listener for immediate save
     if (typeof window !== 'undefined') {
       window.addEventListener('blur', () => this.saveOnBlur());
@@ -128,7 +124,7 @@ class HistoryStore {
 
     // Enforce limits
     this.enforceHistoryLimits();
-    this.updateComputed();
+    this.version.value++;
     this.scheduleAutoSave();
 
     // Update palette usage indicators
@@ -195,7 +191,7 @@ class HistoryStore {
     // Add to redo stack
     this.redoStack.value = [...this.redoStack.value, command];
 
-    this.updateComputed();
+    this.version.value++;
     this.scheduleAutoSave();
 
     // Update palette usage indicators
@@ -229,23 +225,17 @@ class HistoryStore {
     // Add back to undo stack
     this.undoStack.value = [...this.undoStack.value, command];
 
-    this.updateComputed();
+    this.version.value++;
     this.scheduleAutoSave();
 
     // Update palette usage indicators
     paletteStore.refreshUsedColors();
   }
 
-  private updateComputed() {
-    this.canUndo.value = this.undoStack.value.length > 0;
-    this.canRedo.value = this.redoStack.value.length > 0;
-    this.version.value++;
-  }
-  
   clear() {
     this.undoStack.value = [];
     this.redoStack.value = [];
-    this.updateComputed();
+    this.version.value++;
   }
 
   /**
@@ -264,7 +254,7 @@ class HistoryStore {
     this.undoStack.value = [];
     this.redoStack.value = [];
     this.memoryUsage = 0;
-    this.updateComputed();
+    this.version.value++;
   }
 
   /**
@@ -282,7 +272,7 @@ class HistoryStore {
     this.undoStack.value = context.undoStack;
     this.redoStack.value = context.redoStack;
     this.memoryUsage = context.memoryUsage;
-    this.updateComputed();
+    this.version.value++;
   }
 
   /**
