@@ -13,6 +13,7 @@ import { renderScheduler } from "../../services/render-scheduler";
 import { onionSkinCache } from "../../services/onion-skin-cache";
 import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
 import type { BaseTool, ModifierKeys } from "../../tools/base-tool";
+import { loadTool, isDrawingTool } from "../../tools/tool-loader";
 import { rectClamp, type Rect } from "../../types/geometry";
 import {
   getFont,
@@ -88,7 +89,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.ctx.imageSmoothingEnabled = false;
 
     // Initial tool load
-    this.loadTool(toolStore.activeTool.value);
+    this.loadToolByName(toolStore.activeTool.value);
 
     // Initial render
     this.renderCanvas();
@@ -102,7 +103,7 @@ export class PFDrawingCanvas extends BaseComponent {
     // Check if tool changed
     const currentTool = toolStore.activeTool.value;
     if (this.activeTool?.name !== currentTool) {
-      this.loadTool(currentTool);
+      this.loadToolByName(currentTool);
     }
 
     if (_changedProperties.has("width") || _changedProperties.has("height")) {
@@ -114,18 +115,9 @@ export class PFDrawingCanvas extends BaseComponent {
     this.renderCanvas();
   }
 
-  private async loadTool(toolName: ToolType) {
+  private async loadToolByName(toolName: ToolType) {
     // Auto-commit floating selection when switching to drawing tools
-    const drawingTools = [
-      "pencil",
-      "eraser",
-      "fill",
-      "gradient",
-      "line",
-      "rectangle",
-      "ellipse",
-    ];
-    if (drawingTools.includes(toolName)) {
+    if (isDrawingTool(toolName)) {
       const state = selectionStore.state.value;
       if (state.type === "floating") {
         const activeLayerId = layerStore.activeLayerId.value;
@@ -147,86 +139,9 @@ export class PFDrawingCanvas extends BaseComponent {
       }
     }
 
-    let ToolClass;
-
-    switch (toolName) {
-      case "pencil":
-        const { PencilTool } = await import("../../tools/pencil-tool");
-        ToolClass = PencilTool;
-        break;
-      case "eraser":
-        const { EraserTool } = await import("../../tools/eraser-tool");
-        ToolClass = EraserTool;
-        break;
-      case "eyedropper":
-        const { EyedropperTool } = await import("../../tools/eyedropper-tool");
-        ToolClass = EyedropperTool;
-        break;
-      case "marquee-rect":
-        const { MarqueeRectTool } = await import(
-          "../../tools/selection/marquee-rect-tool"
-        );
-        ToolClass = MarqueeRectTool;
-        break;
-      case "lasso":
-        const { LassoTool } = await import("../../tools/selection/lasso-tool");
-        ToolClass = LassoTool;
-        break;
-      case "polygonal-lasso":
-        const { PolygonalLassoTool } = await import(
-          "../../tools/selection/polygonal-lasso-tool"
-        );
-        ToolClass = PolygonalLassoTool;
-        break;
-      case "magic-wand":
-        const { MagicWandTool } = await import(
-          "../../tools/selection/magic-wand-tool"
-        );
-        ToolClass = MagicWandTool;
-        break;
-      case "line":
-        const { LineTool } = await import("../../tools/shape-tool");
-        ToolClass = LineTool;
-        break;
-      case "rectangle":
-        const { RectangleTool } = await import("../../tools/shape-tool");
-        ToolClass = RectangleTool;
-        break;
-      case "ellipse":
-        const { EllipseTool } = await import("../../tools/shape-tool");
-        ToolClass = EllipseTool;
-        break;
-      case "fill":
-        const { FillTool } = await import("../../tools/fill-tool");
-        ToolClass = FillTool;
-        break;
-      case "gradient":
-        const { GradientTool } = await import("../../tools/gradient-tool");
-        ToolClass = GradientTool;
-        break;
-      case "transform":
-        const { TransformTool } = await import("../../tools/transform-tool");
-        ToolClass = TransformTool;
-        break;
-      case "text":
-        const { TextTool } = await import("../../tools/text-tool");
-        ToolClass = TextTool;
-        break;
-      case "hand":
-        const { HandTool } = await import("../../tools/hand-tool");
-        ToolClass = HandTool;
-        break;
-      case "zoom":
-        const { ZoomTool } = await import("../../tools/zoom-tool");
-        ToolClass = ZoomTool;
-        break;
-      default:
-        console.warn(`Unknown tool: ${toolName}`);
-        return;
-    }
-
-    if (ToolClass) {
-      this.activeTool = new ToolClass(this.ctx);
+    const tool = await loadTool(toolName, this.ctx);
+    if (tool) {
+      this.activeTool = tool;
 
       // Set cursor based on tool (brush preview overlay shows alongside cursor)
       if (this.canvas && this.activeTool.cursor) {
