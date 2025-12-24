@@ -1,16 +1,26 @@
-import { BaseTool, type Point, type ModifierKeys } from './base-tool';
+/**
+ * EraserTool - Tool for erasing pixels from the canvas.
+ *
+ * Extends DrawingTool base class which provides:
+ * - Stroke tracking and axis locking
+ * - Shift+Click line erasing
+ * - Pixel-perfect L-shape detection
+ * - Grid-based spacing for brush stamps
+ * - Mirror position support
+ *
+ * Supports two modes:
+ * - transparent: Clears pixels to transparent
+ * - background: Fills pixels with secondary (background) color
+ */
+
+import { DrawingTool } from './drawing-tool';
+import { type Point, type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-settings';
 import { guidesStore } from '../stores/guides';
 import { projectStore } from '../stores/project';
 import { paletteStore } from '../stores/palette';
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
-import {
-  bresenhamLine,
-  isLShape,
-} from '../services/drawing/algorithms';
 import { setIndexBufferPixel } from '../utils/indexed-color';
 
 // Default spacing multiplier (0.25 = stamp every size/4 pixels)
@@ -19,41 +29,15 @@ const SPACING_MULTIPLIER = 0.25;
 // Re-export for backward compatibility
 export type { EraserMode };
 
-export class EraserTool extends BaseTool {
+export class EraserTool extends DrawingTool {
   name = 'eraser';
   cursor = 'crosshair';
 
-  private isDrawing = false;
-  private lastX = 0;
-  private lastY = 0;
-
-  // For pixel-perfect mode: track erased points for L-shape detection
-  private erasedPoints: Point[] = [];
-
-  // Track last stroke end for Shift+Click line feature
+  // Track last stroke end for Shift+Click line feature (per-tool static)
   private static lastStrokeEnd: Point | null = null;
 
-  // Track drag start for constrained angle drawing
-  private dragStartX = 0;
-  private dragStartY = 0;
-
-  // Locked axis for shift-drag (null = not yet determined, 'h' = horizontal, 'v' = vertical)
-  private lockedAxis: 'h' | 'v' | null = null;
-
-  // Track distance since last stamp for brush spacing
-  private distanceSinceLastStamp = 0;
-
-  // Snapshot of canvas before current stroke (for pixel-perfect restore)
-  private strokeStartSnapshot: ImageData | null = null;
-
-  // Cached index buffer and background palette index for current stroke
-  private currentIndexBuffer: Uint8Array | null = null;
+  // Cached background palette index for current stroke
   private backgroundPaletteIndex: number = 0;
-
-  constructor(context: CanvasRenderingContext2D) {
-    super();
-    this.setContext(context);
-  }
 
   static setMode(mode: EraserMode) {
     eraserSettings.mode.value = mode;
@@ -63,9 +47,24 @@ export class EraserTool extends BaseTool {
     return eraserSettings.mode.value;
   }
 
-  onDown(x: number, y: number, modifiers?: ModifierKeys) {
-    if (!this.context) return;
+  // ============= Abstract Method Implementations =============
 
+  protected applyPoint(x: number, y: number): void {
+    this.erasePoint(x, y);
+  }
+
+  protected getToolSize(): number {
+    return toolSizes.eraser.value;
+  }
+
+  protected getSpacing(): number {
+    const size = toolSizes.eraser.value;
+    // For size 1, always use spacing of 1 (pixel-by-pixel)
+    // For larger brushes, use spacing based on size
+    return Math.max(1, Math.floor(size * SPACING_MULTIPLIER));
+  }
+
+  protected initializeStrokeState(modifiers?: ModifierKeys): void {
     // Set eraser mode based on mouse button: left = transparent, right = background
     if (modifiers?.button === 2) {
       EraserTool.setMode('background');
@@ -73,191 +72,26 @@ export class EraserTool extends BaseTool {
       EraserTool.setMode('transparent');
     }
 
-    this.isDrawing = true;
-    const currentX = Math.floor(x);
-    const currentY = Math.floor(y);
-
-    // Capture canvas state before stroke for pixel-perfect restore
-    const canvas = this.context.canvas;
-    this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
-
-    // Initialize indexed color support for this stroke
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
-    if (layerId) {
-      this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
-      // For background mode, get the palette index of the secondary color
-      if (eraserSettings.mode.value === 'background') {
-        const bgColor = colorStore.secondaryColor.value;
-        this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
-      }
+    // For background mode, get the palette index of the secondary color
+    if (eraserSettings.mode.value === 'background') {
+      const bgColor = colorStore.secondaryColor.value;
+      this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
     }
-
-    // Shift+Click: erase line from last stroke end to current position
-    if (modifiers?.shift && EraserTool.lastStrokeEnd) {
-      const start = EraserTool.lastStrokeEnd;
-      this.erasedPoints = [{ x: start.x, y: start.y }];
-      this.eraseLineBetweenPoints(start.x, start.y, currentX, currentY);
-      this.lastX = currentX;
-      this.lastY = currentY;
-      // Update last stroke end immediately for chained shift-clicks
-      EraserTool.lastStrokeEnd = { x: currentX, y: currentY };
-      return;
-    }
-
-    this.lastX = currentX;
-    this.lastY = currentY;
-    this.dragStartX = currentX;
-    this.dragStartY = currentY;
-    this.lockedAxis = null; // Reset axis lock for new stroke
-    this.erasedPoints = [{ x: this.lastX, y: this.lastY }];
-    this.distanceSinceLastStamp = 0;
-    this.erasePoint(this.lastX, this.lastY);
   }
 
-  onDrag(x: number, y: number, modifiers?: ModifierKeys) {
-    if (!this.isDrawing || !this.context) return;
-
-    let currentX = Math.floor(x);
-    let currentY = Math.floor(y);
-
-    // Shift+Drag: constrain to locked axis (determined on first significant movement)
-    if (modifiers?.shift) {
-      const dx = Math.abs(currentX - this.dragStartX);
-      const dy = Math.abs(currentY - this.dragStartY);
-
-      // Lock axis on first significant movement (>= 1 pixel)
-      if (this.lockedAxis === null && (dx >= 1 || dy >= 1)) {
-        this.lockedAxis = dx >= dy ? 'h' : 'v';
-      }
-
-      // Apply constraint based on locked axis
-      if (this.lockedAxis === 'h') {
-        currentY = this.dragStartY;
-      } else if (this.lockedAxis === 'v') {
-        currentX = this.dragStartX;
-      }
-    }
-
-    if (this.lastX === currentX && this.lastY === currentY) return;
-
-    this.eraseLineBetweenPoints(this.lastX, this.lastY, currentX, currentY);
-
-    this.lastX = currentX;
-    this.lastY = currentY;
-  }
-
-  onUp(_x: number, _y: number, _modifiers?: ModifierKeys) {
-    // Store last stroke end for Shift+Click feature
-    if (this.isDrawing) {
-      EraserTool.lastStrokeEnd = { x: this.lastX, y: this.lastY };
-    }
-    this.isDrawing = false;
-    this.erasedPoints = [];
-    this.strokeStartSnapshot = null; // Free memory
-    this.currentIndexBuffer = null;
+  protected cleanupStrokeState(): void {
     this.backgroundPaletteIndex = 0;
   }
 
-  onMove(x: number, y: number, modifiers?: ModifierKeys) {
-    // Emit preview line when shift held + lastStrokeEnd exists (for shift-click preview)
-    if (modifiers?.shift && EraserTool.lastStrokeEnd) {
-      window.dispatchEvent(new CustomEvent('line-preview', {
-        detail: {
-          start: EraserTool.lastStrokeEnd,
-          end: { x: Math.floor(x), y: Math.floor(y) }
-        }
-      }));
-    } else {
-      window.dispatchEvent(new CustomEvent('line-preview-clear'));
-    }
+  protected getLastStrokeEnd(): Point | null {
+    return EraserTool.lastStrokeEnd;
   }
 
-  /**
-   * Calculate brush spacing based on size
-   */
-  private getSpacing(): number {
-    const size = toolSizes.eraser.value;
-    // For size 1, always use spacing of 1 (pixel-by-pixel)
-    // For larger brushes, use spacing based on size
-    return Math.max(1, Math.floor(size * SPACING_MULTIPLIER));
+  protected setLastStrokeEnd(point: Point | null): void {
+    EraserTool.lastStrokeEnd = point;
   }
 
-  /**
-   * Erase a line between two points, respecting brush settings and spacing
-   */
-  private eraseLineBetweenPoints(x1: number, y1: number, x2: number, y2: number) {
-    const size = toolSizes.eraser.value;
-    const spacing = this.getSpacing();
-
-    // For 1px brush, use pixel-by-pixel erasing (supports pixel-perfect mode)
-    if (size === 1) {
-      this.eraseLinePixelByPixel(x1, y1, x2, y2);
-      return;
-    }
-
-    // For larger brushes, use spacing-based stamping
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    if (distance === 0) return;
-
-    // Normalize direction
-    const dirX = dx / distance;
-    const dirY = dy / distance;
-
-    // Add to accumulated distance
-    this.distanceSinceLastStamp += distance;
-
-    // Calculate starting position along the line
-    let traveled = 0;
-
-    // Place stamps at spacing intervals
-    while (this.distanceSinceLastStamp >= spacing) {
-      // Calculate how far along the line to place this stamp
-      const stampDistance = spacing - (this.distanceSinceLastStamp - distance + traveled);
-
-      if (stampDistance > 0 && stampDistance <= distance) {
-        const stampX = Math.round(x1 + dirX * stampDistance);
-        const stampY = Math.round(y1 + dirY * stampDistance);
-        this.erasePoint(stampX, stampY);
-        traveled = stampDistance;
-      }
-
-      this.distanceSinceLastStamp -= spacing;
-    }
-  }
-
-  /**
-   * Erase line pixel-by-pixel (for 1px brushes, supports pixel-perfect mode)
-   */
-  private eraseLinePixelByPixel(x1: number, y1: number, x2: number, y2: number) {
-    const brush = brushStore.activeBrush.value;
-    const points = bresenhamLine(x1, y1, x2, y2);
-
-    // Skip first point as it was already erased in the previous call
-    const startIndex = this.erasedPoints.length > 0 ? 1 : 0;
-
-    for (let i = startIndex; i < points.length; i++) {
-      const point = points[i];
-
-      // Pixel-perfect mode: remove L-shaped corners
-      if (brush.pixelPerfect && this.erasedPoints.length >= 2) {
-        const p1 = this.erasedPoints[this.erasedPoints.length - 2];
-        const p2 = this.erasedPoints[this.erasedPoints.length - 1];
-
-        if (isLShape(p1, p2, point)) {
-          // Restore the corner pixel (p2) to its pre-stroke state
-          this.restorePoint(p2.x, p2.y);
-          this.erasedPoints.pop();
-        }
-      }
-
-      this.erasePoint(point.x, point.y);
-      this.erasedPoints.push(point);
-    }
-  }
+  // ============= Eraser-Specific Methods =============
 
   /**
    * Erase a single point/brush stamp
@@ -336,87 +170,6 @@ export class EraserTool extends BaseTool {
     const dirtyX = x - halfSize;
     const dirtyY = y - halfSize;
     this.markDirty(dirtyX, dirtyY, size);
-  }
-
-  /**
-   * Check if a point was erased earlier in the current stroke (path crosses itself)
-   */
-  private wasErasedEarlierInStroke(x: number, y: number): boolean {
-    // Check all points except the last one (which is the point we're about to restore)
-    for (let i = 0; i < this.erasedPoints.length - 1; i++) {
-      if (this.erasedPoints[i].x === x && this.erasedPoints[i].y === y) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Restore a single pixel to its pre-stroke state (for pixel-perfect L-shape removal)
-   */
-  private restorePoint(x: number, y: number) {
-    if (!this.context) return;
-
-    // Restore the original point
-    this.restoreSinglePixel(x, y);
-
-    // Also restore mirrored positions
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
-
-    for (const pos of mirrorPositions) {
-      this.restoreSinglePixel(pos.x, pos.y);
-    }
-  }
-
-  /**
-   * Restore a single pixel at the given position (helper for restorePoint)
-   */
-  private restoreSinglePixel(x: number, y: number) {
-    if (!this.context) return;
-
-    // If this point was erased earlier in the current stroke (path crosses itself),
-    // don't restore it - just leave it as is
-    if (this.wasErasedEarlierInStroke(x, y)) {
-      return;
-    }
-
-    // If no snapshot, we can't restore (shouldn't happen)
-    if (!this.strokeStartSnapshot) {
-      return;
-    }
-
-    const canvas = this.context.canvas;
-    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
-
-    // Get the original pixel color from the snapshot
-    const index = (y * this.strokeStartSnapshot.width + x) * 4;
-    const r = this.strokeStartSnapshot.data[index];
-    const g = this.strokeStartSnapshot.data[index + 1];
-    const b = this.strokeStartSnapshot.data[index + 2];
-    const a = this.strokeStartSnapshot.data[index + 3];
-
-    // Restore the pixel
-    if (a === 0) {
-      // Original was transparent, clear it
-      this.context.clearRect(x, y, 1, 1);
-      // Also clear index buffer
-      if (this.currentIndexBuffer) {
-        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, 0);
-      }
-    } else {
-      // Restore original color
-      this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-      this.context.globalAlpha = 1;
-      this.context.fillRect(x, y, 1, 1);
-      // Restore index buffer - get the original color's palette index
-      if (this.currentIndexBuffer) {
-        const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
-        const originalIndex = paletteStore.getColorIndex(hex);
-        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, originalIndex);
-      }
-    }
   }
 
   /**
