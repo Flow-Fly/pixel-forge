@@ -12,7 +12,7 @@ import { viewportStore } from "../../stores/viewport";
 import { renderScheduler } from "../../services/render-scheduler";
 import { onionSkinCache } from "../../services/onion-skin-cache";
 import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
-import type { ModifierKeys } from "../../tools/base-tool";
+import type { BaseTool, ModifierKeys } from "../../tools/base-tool";
 import { rectClamp, type Rect } from "../../types/geometry";
 import {
   getFont,
@@ -64,7 +64,7 @@ export class PFDrawingCanvas extends BaseComponent {
   `;
 
   private ctx!: CanvasRenderingContext2D;
-  private activeTool: any; // TODO: Type properly
+  private activeTool: BaseTool | null = null;
   private previousImageData: ImageData | null = null;
 
   // Document-level event handlers for out-of-canvas tracking
