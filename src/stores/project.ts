@@ -11,6 +11,7 @@ import {
   loadImageDataToCanvas,
 } from "../utils/canvas-binary";
 import { buildIndexBufferFromCanvas } from "../utils/indexed-color";
+import { createLayerCanvas } from "../utils/canvas-factory";
 import { PROJECT_VERSION, type ProjectFile } from "../types/project";
 
 /**
@@ -247,14 +248,7 @@ class ProjectStore {
           cel.linkedCelId === EMPTY_CEL_LINK_ID &&
           hasImageData(c.data)
         ) {
-          const newCanvas = document.createElement("canvas");
-          newCanvas.width = file.width;
-          newCanvas.height = file.height;
-          const ctx = newCanvas.getContext("2d", {
-            alpha: true,
-            willReadFrequently: true,
-          });
-          if (ctx) ctx.imageSmoothingEnabled = false;
+          const { canvas: newCanvas } = createLayerCanvas(file.width, file.height);
 
           // Update cel to use its own canvas and remove empty marker
           const cels = new Map(animationStore.cels.value);

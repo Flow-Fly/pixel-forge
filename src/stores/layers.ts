@@ -2,6 +2,7 @@ import { signal } from '../core/signal';
 import { type Layer } from '../types/layer';
 import type { TextLayerData } from '../types/text';
 import { v4 as uuidv4 } from 'uuid';
+import { createLayerCanvas } from '../utils/canvas-factory';
 
 class LayerStore {
   layers = signal<Layer[]>([]);
@@ -13,20 +14,8 @@ class LayerStore {
   }
 
   addLayer(name?: string, width = 64, height = 64) {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    // Get context with appropriate hints for layer canvases
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true // Layers are read frequently for compositing and history
-    });
-
-    if (ctx) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    const { canvas, ctx } = createLayerCanvas(width, height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const newLayer: Layer = {
       id: uuidv4(),
@@ -53,19 +42,11 @@ class LayerStore {
     if (!sourceLayer || !sourceLayer.canvas) return null;
 
     // Create new canvas and copy content
-    const canvas = document.createElement('canvas');
-    canvas.width = sourceLayer.canvas.width;
-    canvas.height = sourceLayer.canvas.height;
-
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true
-    });
-
-    if (ctx) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(sourceLayer.canvas, 0, 0);
-    }
+    const { canvas, ctx } = createLayerCanvas(
+      sourceLayer.canvas.width,
+      sourceLayer.canvas.height
+    );
+    ctx.drawImage(sourceLayer.canvas, 0, 0);
 
     const newLayer: Layer = {
       id: uuidv4(),
@@ -96,19 +77,8 @@ class LayerStore {
    */
   addTextLayer(textData: TextLayerData, name?: string, width = 64, height = 64): Layer {
     // Text layers still have a canvas for rendering, but content is generated from text data
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true
-    });
-
-    if (ctx) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    const { canvas, ctx } = createLayerCanvas(width, height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const newLayer: Layer = {
       id: uuidv4(),
