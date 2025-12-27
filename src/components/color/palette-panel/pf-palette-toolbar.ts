@@ -2,7 +2,7 @@ import { html, css } from "lit";
 import { customElement, state, query } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
 import { paletteStore } from "../../../stores/palette";
-import "../../ui/pf-popover";
+import "@pixel-forge/ui";
 
 @customElement("pf-palette-toolbar")
 export class PFPaletteToolbar extends BaseComponent {

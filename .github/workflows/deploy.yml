@@ -16,6 +16,7 @@ jobs:
           node-version: "20"
 
       - run: npm ci
+      - run: npm run build -w @pixel-forge/ui
       - run: npm run build
 
       - name: Deploy to Scaleway

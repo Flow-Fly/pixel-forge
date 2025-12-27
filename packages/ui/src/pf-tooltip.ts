@@ -1,6 +1,6 @@
 import { html, css, type PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
+import { BaseComponent } from "./base-component";
 
 /**
  * Reusable tooltip component that follows a position and displays text.
@@ -22,15 +22,15 @@ export class PFTooltip extends BaseComponent {
     }
 
     .tooltip {
-      background: var(--color-bg-tertiary, #2a2a2a);
-      color: var(--color-text-primary, #ffffff);
+      background: var(--pf-color-bg-tertiary, #2a2a2a);
+      color: var(--pf-color-text-primary, #ffffff);
       font-family: monospace;
       font-size: 11px;
       padding: 4px 8px;
       border-radius: 4px;
       white-space: nowrap;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--color-border, #444);
+      border: 1px solid var(--pf-color-border, #444);
     }
   `;
 
@@ -48,7 +48,6 @@ export class PFTooltip extends BaseComponent {
 
   /** Offset from cursor position */
   private readonly OFFSET = 12;
-
 
   protected updated(changedProperties: PropertyValues): void {
     super.updated(changedProperties);

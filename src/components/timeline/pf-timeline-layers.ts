@@ -13,8 +13,8 @@ import {
 } from "../../commands/layer-commands";
 import "./pf-timeline-tooltip";
 import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
-import "../ui/pf-context-menu";
-import type { PFContextMenu, ContextMenuItem } from "../ui/pf-context-menu";
+import "@pixel-forge/ui";
+import type { PFContextMenu, ContextMenuItem } from "@pixel-forge/ui";
 
 @customElement("pf-timeline-layers")
 export class PFTimelineLayers extends BaseComponent {

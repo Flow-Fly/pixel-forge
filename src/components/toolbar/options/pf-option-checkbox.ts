@@ -2,7 +2,7 @@ import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { SignalWatcher } from "@lit-labs/signals";
 import { getOptionValue, setOptionValue, type StoreType } from "./store-accessor";
-import "../../ui/pf-form-field";
+import "@pixel-forge/ui";
 
 @customElement("pf-option-checkbox")
 export class PfOptionCheckbox extends SignalWatcher(LitElement) {

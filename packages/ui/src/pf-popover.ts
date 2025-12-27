@@ -1,13 +1,13 @@
-import { html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
+import { html, css } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import { BaseComponent } from "./base-component";
 
-export type PopoverPosition = 'right' | 'bottom' | 'left' | 'top';
+export type PopoverPosition = "right" | "bottom" | "left" | "top";
 
-@customElement('pf-popover')
+@customElement("pf-popover")
 export class PFPopover extends BaseComponent {
   @property({ type: Boolean, reflect: true }) open = false;
-  @property({ type: String }) position: PopoverPosition = 'right';
+  @property({ type: String }) position: PopoverPosition = "right";
   @property({ type: Object }) anchorRect?: DOMRect;
 
   @state() private computedTop = 0;
@@ -78,21 +78,21 @@ export class PFPopover extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
-    this.addEventListener('click', this.handleSelfClick);
-    document.addEventListener('click', this.handleOutsideClick);
-    document.addEventListener('keydown', this.handleKeyDown);
+    this.addEventListener("click", this.handleSelfClick);
+    document.addEventListener("click", this.handleOutsideClick);
+    document.addEventListener("keydown", this.handleKeyDown);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener('click', this.handleSelfClick);
-    document.removeEventListener('click', this.handleOutsideClick);
-    document.removeEventListener('keydown', this.handleKeyDown);
+    this.removeEventListener("click", this.handleSelfClick);
+    document.removeEventListener("click", this.handleOutsideClick);
+    document.removeEventListener("keydown", this.handleKeyDown);
   }
 
   updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
-    if (changedProperties.has('open') || changedProperties.has('anchorRect')) {
+    if (changedProperties.has("open") || changedProperties.has("anchorRect")) {
       if (this.open && this.anchorRect) {
         // Initial position update
         this.updatePosition();
@@ -109,24 +109,24 @@ export class PFPopover extends BaseComponent {
     const gap = 8;
 
     // Get actual popover dimensions after render
-    const popover = this.shadowRoot?.querySelector('.popover') as HTMLElement;
+    const popover = this.shadowRoot?.querySelector(".popover") as HTMLElement;
     const popoverWidth = popover?.offsetWidth || 280;
     const popoverHeight = popover?.offsetHeight || 400;
 
     switch (this.position) {
-      case 'right':
+      case "right":
         this.computedTop = rect.top;
         this.computedLeft = rect.right + gap;
         break;
-      case 'left':
+      case "left":
         this.computedTop = rect.top;
         this.computedLeft = rect.left - gap - popoverWidth;
         break;
-      case 'bottom':
+      case "bottom":
         this.computedTop = rect.bottom + gap;
         this.computedLeft = rect.left;
         break;
-      case 'top':
+      case "top":
         this.computedTop = rect.top - gap - popoverHeight;
         this.computedLeft = rect.left;
         break;
@@ -154,14 +154,14 @@ export class PFPopover extends BaseComponent {
   };
 
   private handleKeyDown = (e: KeyboardEvent) => {
-    if (this.open && e.key === 'Escape') {
+    if (this.open && e.key === "Escape") {
       this.close();
     }
   };
 
   close() {
     this.open = false;
-    this.dispatchEvent(new CustomEvent('close'));
+    this.dispatchEvent(new CustomEvent("close"));
   }
 
   render() {
@@ -178,6 +178,6 @@ export class PFPopover extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-popover': PFPopover;
+    "pf-popover": PFPopover;
   }
 }

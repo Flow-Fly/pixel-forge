@@ -1,6 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
+import { BaseComponent } from "./base-component";
 
 /**
  * Reusable dialog/modal component with backdrop, close behaviors, and slot-based content.

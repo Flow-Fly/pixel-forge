@@ -4,7 +4,7 @@ import { BaseComponent } from '../../core/base-component';
 import { type ToolType } from '../../stores/tools';
 import { brushStore } from '../../stores/brush';
 import { EraserTool, type EraserMode } from '../../tools/eraser-tool';
-import '../ui/pf-popover';
+import "@pixel-forge/ui";
 
 @customElement('pf-tool-options-popover')
 export class PFToolOptionsPopover extends BaseComponent {
