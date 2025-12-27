@@ -7,7 +7,7 @@ import {
   type PresetPalette,
   type CustomPalette,
 } from "../../stores/palette";
-import "../ui/pf-popover";
+import "@pixel-forge/ui";
 
 @customElement("pf-palette-selector")
 export class PfPaletteSelector extends BaseComponent {

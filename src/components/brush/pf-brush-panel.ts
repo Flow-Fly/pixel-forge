@@ -9,7 +9,7 @@ import {
 } from "../../services/brush-capture";
 import "./pf-brush-editor-overlay";
 import "./pf-brush-create-overlay";
-import "../ui/pf-button";
+import "@pixel-forge/ui";
 
 @customElement("pf-brush-panel")
 export class PFBrushPanel extends BaseComponent {

@@ -1,6 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
+import { BaseComponent } from "./base-component";
 
 /**
  * Reusable button component with consistent styling.
@@ -36,17 +36,17 @@ export class PFButton extends BaseComponent {
       padding: 4px 10px;
       font-size: 11px;
       font-family: inherit;
-      border: 1px solid var(--pf-color-border);
+      border: 1px solid var(--pf-color-border, #333);
       border-radius: 3px;
-      background: var(--pf-color-bg-tertiary);
-      color: var(--pf-color-text-primary);
+      background: var(--pf-color-bg-tertiary, #282828);
+      color: var(--pf-color-text-primary, #e0e0e0);
       cursor: pointer;
       transition: all 0.1s ease;
       white-space: nowrap;
     }
 
     button:hover:not(:disabled) {
-      background: var(--pf-color-bg-hover);
+      background: var(--pf-color-bg-hover, #2a2a2a);
     }
 
     button:disabled {
@@ -79,7 +79,7 @@ export class PFButton extends BaseComponent {
     }
 
     :host([variant="ghost"]) button:hover:not(:disabled) {
-      background: var(--pf-color-bg-hover);
+      background: var(--pf-color-bg-hover, #2a2a2a);
     }
 
     /* Flex fill for action button rows */

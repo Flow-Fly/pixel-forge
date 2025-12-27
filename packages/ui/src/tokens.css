@@ -1,0 +1,49 @@
+/**
+ * @pixel-forge/ui Design Tokens
+ *
+ * Import this file to get the default PixelForge theme.
+ * You can also define these CSS custom properties yourself to customize the theme.
+ */
+:root {
+  /* Backgrounds */
+  --pf-color-bg-dark: #0a0a0a;
+  --pf-color-bg-panel: #141414;
+  --pf-color-bg-surface: #1e1e1e;
+  --pf-color-bg-tertiary: #282828;
+  --pf-color-bg-hover: #252525;
+
+  /* Text */
+  --pf-color-text-main: #e0e0e0;
+  --pf-color-text-muted: #808080;
+  --pf-color-text-primary: #e0e0e0;
+  --pf-color-text-secondary: #a0a0a0;
+
+  /* Accent colors */
+  --pf-color-accent: #f59e0b;
+  --pf-color-accent-hover: #fbbf24;
+  --pf-color-accent-active: #ea580c;
+
+  /* Primary (alias for accent) */
+  --pf-color-primary: #f59e0b;
+  --pf-color-primary-hover: #fbbf24;
+
+  /* Borders */
+  --pf-color-border: #333333;
+
+  /* Border radius */
+  --pf-radius-sm: 4px;
+  --pf-radius-md: 6px;
+
+  /* Typography */
+  --pf-font-mono: "JetBrains Mono", "IBM Plex Mono", monospace;
+  --pf-font-size-xs: 10px;
+  --pf-font-size-sm: 12px;
+  --pf-font-size-md: 14px;
+  --pf-font-size-lg: 16px;
+
+  /* Spacing */
+  --pf-spacing-1: 4px;
+  --pf-spacing-2: 8px;
+  --pf-spacing-3: 12px;
+  --pf-spacing-4: 16px;
+}

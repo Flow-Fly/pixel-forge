@@ -1,9 +1,9 @@
-import { html, css, nothing } from 'lit';
-import { customElement, property, state, query } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
+import { html, css, nothing } from "lit";
+import { customElement, property, state, query } from "lit/decorators.js";
+import { BaseComponent } from "./base-component";
 
 export interface ContextMenuItem {
-  type: 'item' | 'divider' | 'slider' | 'input' | 'color-picker';
+  type: "item" | "divider" | "slider" | "input" | "color-picker";
   label?: string;
   icon?: string;
   action?: () => void;
@@ -20,7 +20,7 @@ export interface ContextMenuItem {
   onSliderCommit?: (value: number) => void; // Called on release (for final commit)
   // For input type
   inputValue?: string;
-  inputType?: 'text' | 'number'; // defaults to 'text'
+  inputType?: "text" | "number"; // defaults to 'text'
   inputMin?: number;
   inputMax?: number;
   placeholder?: string;
@@ -33,7 +33,7 @@ export interface ContextMenuItem {
   onColorSelect?: (color: string) => void;
 }
 
-@customElement('pf-context-menu')
+@customElement("pf-context-menu")
 export class PFContextMenu extends BaseComponent {
   @property({ type: Boolean, reflect: true }) open = false;
   @property({ type: Number }) x = 0;
@@ -44,7 +44,7 @@ export class PFContextMenu extends BaseComponent {
   // Track slider values for display - reactive so label updates
   @state() private sliderDisplayValues: Map<number, number> = new Map();
 
-  @query('.menu') private menuElement!: HTMLElement;
+  @query(".menu") private menuElement!: HTMLElement;
   private anchorElement: HTMLElement | null = null;
   private openedAt: number = 0;
   // Track if we're interacting with a slider (to prevent close)
@@ -262,19 +262,19 @@ export class PFContextMenu extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
-    document.addEventListener('keydown', this.handleKeyDown);
-    document.addEventListener('mousedown', this.handleDocumentMouseDown);
+    document.addEventListener("keydown", this.handleKeyDown);
+    document.addEventListener("mousedown", this.handleDocumentMouseDown);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener('keydown', this.handleKeyDown);
-    document.removeEventListener('mousedown', this.handleDocumentMouseDown);
+    document.removeEventListener("keydown", this.handleKeyDown);
+    document.removeEventListener("mousedown", this.handleDocumentMouseDown);
   }
 
   updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
-    if (changedProperties.has('open')) {
+    if (changedProperties.has("open")) {
       if (this.open) {
         this.focusedIndex = -1;
         this.sliderDisplayValues = new Map();
@@ -302,7 +302,7 @@ export class PFContextMenu extends BaseComponent {
       this.menuElement.showPopover();
     } catch {
       // Fallback for browsers without popover support
-      this.menuElement.setAttribute('open', '');
+      this.menuElement.setAttribute("open", "");
     }
 
     // After showing, measure actual dimensions and re-position if needed
@@ -345,7 +345,7 @@ export class PFContextMenu extends BaseComponent {
       this.menuElement.hidePopover();
     } catch {
       // Fallback
-      this.menuElement.removeAttribute('open');
+      this.menuElement.removeAttribute("open");
     }
   }
 
@@ -402,10 +402,10 @@ export class PFContextMenu extends BaseComponent {
 
   private handlePopoverToggle = (e: Event) => {
     const event = e as ToggleEvent;
-    if (event.newState === 'closed' && this.open) {
+    if (event.newState === "closed" && this.open) {
       // Popover was dismissed (click outside, Escape, etc.)
       this.open = false;
-      this.dispatchEvent(new CustomEvent('close'));
+      this.dispatchEvent(new CustomEvent("close"));
     }
   };
 
@@ -425,34 +425,40 @@ export class PFContextMenu extends BaseComponent {
 
     const actionableItems = this.items
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.type === 'item' && !item.disabled);
+      .filter(({ item }) => item.type === "item" && !item.disabled);
 
     switch (e.key) {
-      case 'Escape':
+      case "Escape":
         e.preventDefault();
         this.close();
         break;
-      case 'ArrowDown':
+      case "ArrowDown":
         e.preventDefault();
         if (actionableItems.length > 0) {
-          const currentIdx = actionableItems.findIndex(({ index }) => index === this.focusedIndex);
-          const nextIdx = currentIdx < actionableItems.length - 1 ? currentIdx + 1 : 0;
+          const currentIdx = actionableItems.findIndex(
+            ({ index }) => index === this.focusedIndex
+          );
+          const nextIdx =
+            currentIdx < actionableItems.length - 1 ? currentIdx + 1 : 0;
           this.focusedIndex = actionableItems[nextIdx].index;
         }
         break;
-      case 'ArrowUp':
+      case "ArrowUp":
         e.preventDefault();
         if (actionableItems.length > 0) {
-          const currentIdx = actionableItems.findIndex(({ index }) => index === this.focusedIndex);
-          const prevIdx = currentIdx > 0 ? currentIdx - 1 : actionableItems.length - 1;
+          const currentIdx = actionableItems.findIndex(
+            ({ index }) => index === this.focusedIndex
+          );
+          const prevIdx =
+            currentIdx > 0 ? currentIdx - 1 : actionableItems.length - 1;
           this.focusedIndex = actionableItems[prevIdx].index;
         }
         break;
-      case 'Enter':
+      case "Enter":
         e.preventDefault();
         if (this.focusedIndex >= 0) {
           const item = this.items[this.focusedIndex];
-          if (item.type === 'item' && !item.disabled) {
+          if (item.type === "item" && !item.disabled) {
             this.handleItemClick(item, e);
           }
         }
@@ -465,19 +471,11 @@ export class PFContextMenu extends BaseComponent {
     e.preventDefault();
 
     if (item.disabled) {
-      console.log('Item disabled, skipping');
       return;
     }
 
-    console.log('Menu item clicked:', item.label, 'has action:', !!item.action);
-
     if (item.action) {
-      try {
-        item.action();
-        console.log('Action executed successfully');
-      } catch (err) {
-        console.error('Action failed:', err);
-      }
+      item.action();
     }
 
     if (!item.keepOpen) {
@@ -491,12 +489,16 @@ export class PFContextMenu extends BaseComponent {
     // Add global mouseup listener to clear interaction flag
     const handleMouseUp = () => {
       this.isInteractingWithSlider = false;
-      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener("mouseup", handleMouseUp);
     };
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener("mouseup", handleMouseUp);
   }
 
-  private handleSliderInput(item: ContextMenuItem, index: number, e: Event) {
+  private handleSliderInput(
+    item: ContextMenuItem,
+    index: number,
+    e: Event
+  ) {
     e.stopPropagation();
     const input = e.target as HTMLInputElement;
     const value = parseFloat(input.value);
@@ -510,7 +512,11 @@ export class PFContextMenu extends BaseComponent {
     item.onSliderChange?.(value);
   }
 
-  private handleSliderCommit(item: ContextMenuItem, index: number, e: Event) {
+  private handleSliderCommit(
+    item: ContextMenuItem,
+    index: number,
+    e: Event
+  ) {
     e.stopPropagation();
     const value = this.sliderDisplayValues.get(index);
     if (value !== undefined) {
@@ -535,11 +541,11 @@ export class PFContextMenu extends BaseComponent {
   private handleInputKeyDown(item: ContextMenuItem, e: KeyboardEvent) {
     const input = e.target as HTMLInputElement;
 
-    if (e.key === 'Enter' && item.onInputSubmit) {
+    if (e.key === "Enter" && item.onInputSubmit) {
       e.stopPropagation();
       item.onInputSubmit(input.value);
       this.close();
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       this.close();
     } else {
       e.stopPropagation(); // Don't let menu handle other keys while typing
@@ -555,7 +561,7 @@ export class PFContextMenu extends BaseComponent {
   close() {
     this.open = false;
     this.clearAnchor();
-    this.dispatchEvent(new CustomEvent('close'));
+    this.dispatchEvent(new CustomEvent("close"));
   }
 
   /**
@@ -571,11 +577,15 @@ export class PFContextMenu extends BaseComponent {
    * @param items - Menu items to display
    */
   show(x: number, y: number, items: ContextMenuItem[]): void;
-  show(anchorOrX: HTMLElement | number, itemsOrY: ContextMenuItem[] | number, maybeItems?: ContextMenuItem[]) {
+  show(
+    anchorOrX: HTMLElement | number,
+    itemsOrY: ContextMenuItem[] | number,
+    maybeItems?: ContextMenuItem[]
+  ) {
     // Clear previous anchor
     this.clearAnchor();
 
-    if (typeof anchorOrX === 'number') {
+    if (typeof anchorOrX === "number") {
       // Legacy: show(x, y, items)
       this.x = anchorOrX;
       this.y = itemsOrY as number;
@@ -596,16 +606,25 @@ export class PFContextMenu extends BaseComponent {
 
   private renderItem(item: ContextMenuItem, index: number) {
     switch (item.type) {
-      case 'divider':
+      case "divider":
         return html`<div class="divider"></div>`;
 
-      case 'slider': {
+      case "slider": {
         // Use displayed value if we have one, otherwise item.value
-        const displayValue = this.sliderDisplayValues.get(index) ?? item.value ?? 100;
+        const displayValue =
+          this.sliderDisplayValues.get(index) ?? item.value ?? 100;
         // Use explicit unit if provided, otherwise default based on label
-        const suffix = item.unit !== undefined ? item.unit : (item.label?.includes('FPS') ? '' : 'ms');
+        const suffix =
+          item.unit !== undefined
+            ? item.unit
+            : item.label?.includes("FPS")
+              ? ""
+              : "ms";
         return html`
-          <div class="slider-item" @mousedown="${(e: Event) => e.stopPropagation()}">
+          <div
+            class="slider-item"
+            @mousedown="${(e: Event) => e.stopPropagation()}"
+          >
             <div class="slider-label">
               <span>${item.label}</span>
               <span class="slider-value">${displayValue}${suffix}</span>
@@ -625,65 +644,96 @@ export class PFContextMenu extends BaseComponent {
         `;
       }
 
-      case 'input':
-        if (item.inputType === 'number') {
+      case "input":
+        if (item.inputType === "number") {
           return html`
-            <div class="input-item input-row" @mousedown="${(e: Event) => e.stopPropagation()}">
-              ${item.label ? html`<div class="input-label">${item.label}</div>` : nothing}
+            <div
+              class="input-item input-row"
+              @mousedown="${(e: Event) => e.stopPropagation()}"
+            >
+              ${item.label
+                ? html`<div class="input-label">${item.label}</div>`
+                : nothing}
               <input
                 type="number"
                 class="number-input"
                 min="${item.inputMin ?? 1}"
                 max="${item.inputMax ?? 999}"
-                value="${item.inputValue ?? ''}"
+                value="${item.inputValue ?? ""}"
                 @input="${(e: Event) => this.handleNumberInputChange(item, e)}"
-                @keydown="${(e: KeyboardEvent) => this.handleInputKeyDown(item, e)}"
+                @keydown="${(e: KeyboardEvent) =>
+                  this.handleInputKeyDown(item, e)}"
                 @click="${(e: Event) => e.stopPropagation()}"
               />
             </div>
           `;
         }
         return html`
-          <div class="input-item" @mousedown="${(e: Event) => e.stopPropagation()}">
-            ${item.label ? html`<div class="input-label">${item.label}</div>` : nothing}
+          <div
+            class="input-item"
+            @mousedown="${(e: Event) => e.stopPropagation()}"
+          >
+            ${item.label
+              ? html`<div class="input-label">${item.label}</div>`
+              : nothing}
             <input
               type="text"
               class="text-input"
-              placeholder="${item.placeholder ?? ''}"
-              value="${item.inputValue ?? ''}"
+              placeholder="${item.placeholder ?? ""}"
+              value="${item.inputValue ?? ""}"
               @input="${(e: Event) => this.handleInputChange(item, e)}"
-              @keydown="${(e: KeyboardEvent) => this.handleInputKeyDown(item, e)}"
+              @keydown="${(e: KeyboardEvent) =>
+                this.handleInputKeyDown(item, e)}"
               @click="${(e: Event) => e.stopPropagation()}"
             />
           </div>
         `;
 
-      case 'color-picker':
+      case "color-picker":
         return html`
-          <div class="color-picker-item" @mousedown="${(e: Event) => e.stopPropagation()}">
-            ${item.label ? html`<div class="color-label">${item.label}</div>` : nothing}
+          <div
+            class="color-picker-item"
+            @mousedown="${(e: Event) => e.stopPropagation()}"
+          >
+            ${item.label
+              ? html`<div class="color-label">${item.label}</div>`
+              : nothing}
             <div class="color-grid">
-              ${(item.colors ?? []).map(color => html`
-                <div
-                  class="color-swatch ${color === item.selectedColor ? 'selected' : ''}"
-                  style="background-color: ${color}"
-                  @click="${(e: Event) => { e.stopPropagation(); this.handleColorSelect(item, color); }}"
-                ></div>
-              `)}
+              ${(item.colors ?? []).map(
+                (color) => html`
+                  <div
+                    class="color-swatch ${color === item.selectedColor
+                      ? "selected"
+                      : ""}"
+                    style="background-color: ${color}"
+                    @click="${(e: Event) => {
+                      e.stopPropagation();
+                      this.handleColorSelect(item, color);
+                    }}"
+                  ></div>
+                `
+              )}
             </div>
           </div>
         `;
 
-      case 'item':
+      case "item":
       default:
         return html`
           <div
-            class="menu-item ${item.disabled ? 'disabled' : ''} ${index === this.focusedIndex ? 'focused' : ''}"
+            class="menu-item ${item.disabled ? "disabled" : ""} ${index ===
+            this.focusedIndex
+              ? "focused"
+              : ""}"
             @mousedown="${(e: Event) => e.stopPropagation()}"
             @click="${(e: Event) => this.handleItemClick(item, e)}"
-            @mouseenter="${() => { this.focusedIndex = index; }}"
+            @mouseenter="${() => {
+              this.focusedIndex = index;
+            }}"
           >
-            ${item.icon ? html`<span class="icon">${item.icon}</span>` : nothing}
+            ${item.icon
+              ? html`<span class="icon">${item.icon}</span>`
+              : nothing}
             <span class="label">${item.label}</span>
           </div>
         `;
@@ -705,6 +755,6 @@ export class PFContextMenu extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pf-context-menu': PFContextMenu;
+    "pf-context-menu": PFContextMenu;
   }
 }

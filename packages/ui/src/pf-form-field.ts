@@ -1,6 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
+import { BaseComponent } from "./base-component";
 
 /**
  * Reusable form field wrapper providing consistent label styling.
@@ -42,7 +42,7 @@ export class PFFormField extends BaseComponent {
     }
 
     .label {
-      color: var(--pf-color-text-muted);
+      color: var(--pf-color-text-muted, #808080);
       font-size: 10px;
       white-space: nowrap;
       user-select: none;
