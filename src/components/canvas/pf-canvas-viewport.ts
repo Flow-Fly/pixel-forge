@@ -12,6 +12,7 @@ import './pf-text-input';
 import './pf-ruler';
 import './pf-guides-overlay';
 import './pf-reference-below-overlay';
+import './pf-reference-above-overlay';
 
 import {
   viewportStyles,
@@ -173,6 +174,7 @@ export class PFCanvasViewport extends BaseComponent {
         <slot></slot>
       </div>
       <canvas id="grid-overlay"></canvas>
+      <pf-reference-above-overlay></pf-reference-above-overlay>
       <pf-selection-overlay></pf-selection-overlay>
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
       <pf-brush-cursor-overlay></pf-brush-cursor-overlay>
