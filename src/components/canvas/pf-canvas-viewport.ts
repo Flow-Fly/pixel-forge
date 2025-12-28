@@ -11,6 +11,7 @@ import './pf-transform-handles';
 import './pf-text-input';
 import './pf-ruler';
 import './pf-guides-overlay';
+import './pf-reference-below-overlay';
 
 import {
   viewportStyles,
@@ -168,6 +169,7 @@ export class PFCanvasViewport extends BaseComponent {
         @wheel=${this.onWheel}
         @contextmenu=${this.onContextMenu}
       >
+        <pf-reference-below-overlay></pf-reference-below-overlay>
         <slot></slot>
       </div>
       <canvas id="grid-overlay"></canvas>
