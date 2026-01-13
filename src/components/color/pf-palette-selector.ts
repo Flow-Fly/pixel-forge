@@ -7,7 +7,7 @@ import {
   type PresetPalette,
   type CustomPalette,
 } from "../../stores/palette";
-import "@pixel-forge/ui";
+import "../ui";
 
 @customElement("pf-palette-selector")
 export class PfPaletteSelector extends BaseComponent {

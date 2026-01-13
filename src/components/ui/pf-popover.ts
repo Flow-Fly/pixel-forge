@@ -1,6 +1,6 @@
 import { html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { BaseComponent } from "./base-component";
+import { BaseComponent } from "../../core/base-component";
 
 export type PopoverPosition = "right" | "bottom" | "left" | "top";
 

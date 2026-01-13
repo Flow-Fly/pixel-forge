@@ -7,7 +7,7 @@ import { isDrawableCommand } from '../../commands/index';
 import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
 import './pf-history-diff-tooltip';
-import "@pixel-forge/ui";
+import "./";
 
 @customElement('pf-undo-history')
 export class PFUndoHistory extends BaseComponent {

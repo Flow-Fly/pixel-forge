@@ -2,7 +2,7 @@ import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
 import { paletteStore } from "../../../stores/palette";
-import "@pixel-forge/ui";
+import "../../ui";
 
 @customElement("pf-extraction-section")
 export class PFExtractionSection extends BaseComponent {

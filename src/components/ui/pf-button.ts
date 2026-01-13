@@ -1,6 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "./base-component";
+import { BaseComponent } from "../../core/base-component";
 
 /**
  * Reusable button component with consistent styling.

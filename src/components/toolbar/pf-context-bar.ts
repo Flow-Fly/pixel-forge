@@ -19,7 +19,7 @@ import "./options/pf-option-checkbox";
 import "./options/pf-option-select";
 import "./pf-alternative-tools";
 import "../color/pf-lightness-bar";
-import "@pixel-forge/ui";
+import "../ui";
 
 @customElement("pf-context-bar")
 export class PFContextBar extends BaseComponent {

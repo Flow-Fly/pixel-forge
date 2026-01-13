@@ -1,6 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
-import { BaseComponent } from "./base-component";
+import { BaseComponent } from "../../core/base-component";
 
 export interface ContextMenuItem {
   type: "item" | "divider" | "slider" | "input" | "color-picker";

@@ -1,7 +1,4 @@
-// Base component
-export { BaseComponent } from "./base-component";
-
-// UI Components
+// UI Components - side-effect imports register custom elements
 export { PFButton } from "./pf-button";
 export { PFDialog } from "./pf-dialog";
 export { PFPopover, type PopoverPosition } from "./pf-popover";

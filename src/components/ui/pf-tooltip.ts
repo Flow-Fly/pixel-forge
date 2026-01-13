@@ -1,6 +1,6 @@
 import { html, css, type PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "./base-component";
+import { BaseComponent } from "../../core/base-component";
 
 /**
  * Reusable tooltip component that follows a position and displays text.

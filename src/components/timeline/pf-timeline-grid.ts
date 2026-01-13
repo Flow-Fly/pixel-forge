@@ -8,8 +8,8 @@ import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { SetCelOpacityCommand } from "../../commands/cel-opacity-command";
 import type { FrameTag } from "../../types/animation";
-import "@pixel-forge/ui";
-import type { PFContextMenu, ContextMenuItem } from "@pixel-forge/ui";
+import "../ui";
+import type { PFContextMenu, ContextMenuItem } from "../ui";
 import "./pf-timeline-tooltip";
 import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
 

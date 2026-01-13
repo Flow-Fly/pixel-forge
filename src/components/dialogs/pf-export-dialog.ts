@@ -9,7 +9,7 @@ import { FileService } from "../../services/file-service";
 // import { exportSpritesheet } from "../../services/spritesheet-export";
 // import { exportAnimatedWebP } from "../../services/webp-animation";
 // import { exportAseFile } from "../../services/aseprite-service";
-import "@pixel-forge/ui";
+import "../ui";
 
 export type ExportFormat =
   | "png"

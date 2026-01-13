@@ -4,7 +4,7 @@ import { BaseComponent } from "../../core/base-component";
 import { paletteStore } from "../../stores/palette";
 import { historyStore } from "../../stores/history";
 import { PaletteChangeCommand } from "../../commands/palette-command";
-import "@pixel-forge/ui";
+import "../ui";
 import "./pf-color-picker-popup";
 import "./pf-palette-selector";
 import "./pf-save-palette-dialog";

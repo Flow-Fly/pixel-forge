@@ -1,6 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "./base-component";
+import { BaseComponent } from "../../core/base-component";
 
 /**
  * Reusable dialog/modal component with backdrop, close behaviors, and slot-based content.
@@ -202,7 +202,7 @@ export class PFDialog extends BaseComponent {
               <slot name="title"></slot>
             </span>
             ${this.showCloseButton
-              ? html`<button class="close-btn" @click=${this.close}>✕</button>`
+              ? html`<button class="close-btn" @click=${this.close}>&#10005;</button>`
               : nothing}
           </div>
           <div class="content">
