@@ -2,7 +2,7 @@ import { html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { settingsStore, ACCENT_THEMES, type AccentTheme } from "../../stores/settings";
-import "@pixel-forge/ui";
+import "../ui";
 
 @customElement("pf-accent-color-dialog")
 export class PFAccentColorDialog extends BaseComponent {

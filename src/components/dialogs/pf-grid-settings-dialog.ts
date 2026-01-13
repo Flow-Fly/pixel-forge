@@ -3,7 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { gridStore } from "../../stores/grid";
 import { ZOOM_LEVELS } from "../../stores/viewport";
-import "@pixel-forge/ui";
+import "../ui";
 
 @customElement("pf-grid-settings-dialog")
 export class PFGridSettingsDialog extends BaseComponent {

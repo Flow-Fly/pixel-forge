@@ -5,7 +5,7 @@ import { selectionStore } from '../../stores/selection';
 import { viewportStore } from '../../stores/viewport';
 import { traceMaskOutline, connectSegments, type Point } from '../../utils/mask-utils';
 import { type SelectionState } from '../../types/selection';
-import "@pixel-forge/ui";
+import "../ui";
 
 /**
  * Transparent canvas overlay that renders:

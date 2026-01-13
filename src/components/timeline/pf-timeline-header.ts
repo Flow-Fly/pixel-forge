@@ -12,13 +12,13 @@ import {
 import { compositeFrame } from "../../utils/canvas-utils";
 import "./pf-timeline-tooltip";
 import "./pf-tag-preview";
-import "@pixel-forge/ui";
+import "../ui";
 import "./timeline-header/pf-timeline-tag-bars";
 import "./timeline-header/pf-timeline-frame-cells";
 import "./timeline-header/pf-timeline-resize-preview";
 import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
 import type { PFTagPreview } from "./pf-tag-preview";
-import type { PFContextMenu, ContextMenuItem } from "@pixel-forge/ui";
+import type { PFContextMenu, ContextMenuItem } from "../ui";
 import type { PFTimelineResizePreview } from "./timeline-header/pf-timeline-resize-preview";
 
 const DURATION_UNIT_KEY = "pf-timeline-duration-unit";

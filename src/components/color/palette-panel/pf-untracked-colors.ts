@@ -3,7 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
 import { colorStore } from "../../../stores/colors";
 import { paletteStore } from "../../../stores/palette";
-import "@pixel-forge/ui";
+import "../../ui";
 
 @customElement("pf-untracked-colors")
 export class PFUntrackedColors extends BaseComponent {

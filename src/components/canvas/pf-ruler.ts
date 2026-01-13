@@ -4,7 +4,7 @@ import { BaseComponent } from "../../core/base-component";
 import { viewportStore } from "../../stores/viewport";
 import { projectStore } from "../../stores/project";
 import { guidesStore } from "../../stores/guides";
-import "@pixel-forge/ui";
+import "../ui";
 
 type RulerOrientation = "horizontal" | "vertical";
 

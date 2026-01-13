@@ -2,7 +2,7 @@ import { html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { projectStore } from '../../stores/project';
-import "@pixel-forge/ui";
+import "../ui";
 
 const PRESETS = [
   { label: '16x16', width: 16, height: 16 },
