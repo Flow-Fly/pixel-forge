@@ -221,7 +221,12 @@ export class PFReferencesPanel extends BaseComponent {
   }
 
   private handleImageClick(id: string) {
-    referenceImageStore.setActiveImage(id);
+    // Toggle selection - if already selected, deselect
+    if (referenceImageStore.activeImageId.value === id) {
+      referenceImageStore.setActiveImage(null);
+    } else {
+      referenceImageStore.setActiveImage(id);
+    }
   }
 
   private handleVisibilityToggle(id: string, visible: boolean) {

@@ -40,7 +40,7 @@ class ReferenceImageStore {
     };
 
     this.images.value = [...this.images.value, refImage];
-    this.activeImageId.value = id;
+    // Don't auto-select - user can click to select if needed
     return id;
   }
 

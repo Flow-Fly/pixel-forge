@@ -6,6 +6,7 @@ import { paletteStore } from "./palette";
 import { viewportStore } from "./viewport";
 import { persistenceService } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
+import { referenceImageStore } from "./reference-image";
 import {
   canvasToPngBytes,
   loadImageDataToCanvas,
@@ -130,6 +131,8 @@ class ProjectStore {
         currentFrameIndex: currentFrameIndex === -1 ? 0 : currentFrameIndex,
       },
       tags: animationStore.tags.value,
+      // v3.3+: Serialize reference images
+      referenceImages: referenceImageStore.serialize(),
     };
   }
 
@@ -379,6 +382,13 @@ class ProjectStore {
     setTimeout(() => {
       viewportStore.resetView();
     }, 0);
+
+    // 11. Restore reference images (v3.3+)
+    if (file.referenceImages && Array.isArray(file.referenceImages)) {
+      await referenceImageStore.deserialize(file.referenceImages);
+    } else {
+      referenceImageStore.clear();
+    }
   }
 
   /**
@@ -433,7 +443,10 @@ class ProjectStore {
       animationStore.goToFrame(firstFrame.id);
     }
 
-    // 10. Save the fresh state immediately
+    // 10. Clear reference images
+    referenceImageStore.clear();
+
+    // 11. Save the fresh state immediately
     const projectData = await this.saveProject();
     await persistenceService.saveCurrentProject(projectData);
   }

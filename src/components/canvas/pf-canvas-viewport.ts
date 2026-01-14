@@ -57,6 +57,14 @@ export class PFCanvasViewport extends BaseComponent {
   // ResizeObserver to detect flex layout changes
   private resizeObserver: ResizeObserver | null = null;
 
+  // Reference image dragging state
+  private isDraggingReference = false;
+  private dragReferenceId: string | null = null;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private dragStartImageX = 0;
+  private dragStartImageY = 0;
+
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener('keydown', this.onKeyDown);
@@ -247,6 +255,9 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private onMouseDown = (e: MouseEvent) => {
+    // Check for reference image selection first
+    if (this.handleReferenceSelect(e)) return;
+
     panHandleMouseDown(e, this.panState, this.panCallbacks, (ev) => this.startDrag(ev));
   };
 
@@ -347,5 +358,111 @@ export class PFCanvasViewport extends BaseComponent {
 
     // Position it at drop location
     referenceImageStore.updateImage(id, { x: canvasX, y: canvasY });
+  };
+
+  // ============================================
+  // Reference image selection & drag handlers
+  // ============================================
+
+  private hitTestReference(screenX: number, screenY: number): string | null {
+    const zoom = viewportStore.zoom.value;
+    const panX = viewportStore.panX.value;
+    const panY = viewportStore.panY.value;
+
+    const images = referenceImageStore.images.value;
+
+    // Test in reverse order (top-most first)
+    for (let i = images.length - 1; i >= 0; i--) {
+      const img = images[i];
+      if (!img.visible || img.locked) continue;
+
+      // Convert screen coords to canvas coords
+      const canvasX = (screenX - panX) / zoom;
+      const canvasY = (screenY - panY) / zoom;
+
+      // Simple AABB test (doesn't account for rotation)
+      if (
+        canvasX >= img.x &&
+        canvasX <= img.x + img.canvas.width * img.scale &&
+        canvasY >= img.y &&
+        canvasY <= img.y + img.canvas.height * img.scale
+      ) {
+        return img.id;
+      }
+    }
+
+    return null;
+  }
+
+  private handleReferenceSelect = (e: MouseEvent): boolean => {
+    // Check for reference image selection (Ctrl+Shift+click or Cmd+Shift+click)
+    const isReferenceSelectModifier = (e.ctrlKey || e.metaKey) && e.shiftKey;
+
+    if (!isReferenceSelectModifier) return false;
+
+    const rect = this.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    const hitId = this.hitTestReference(screenX, screenY);
+
+    if (hitId) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Toggle selection if clicking already selected image
+      if (referenceImageStore.activeImageId.value === hitId) {
+        referenceImageStore.setActiveImage(null);
+        return true;
+      }
+
+      referenceImageStore.setActiveImage(hitId);
+
+      // Start dragging
+      const img = referenceImageStore.images.value.find(i => i.id === hitId);
+      if (img && !img.locked) {
+        this.startReferenceDrag(e, img);
+      }
+      return true;
+    } else {
+      // Clicked empty area with modifier - deselect
+      referenceImageStore.setActiveImage(null);
+      return true;
+    }
+  };
+
+  private startReferenceDrag(e: MouseEvent, img: { id: string; x: number; y: number }) {
+    this.isDraggingReference = true;
+    this.dragReferenceId = img.id;
+    this.dragStartX = e.clientX;
+    this.dragStartY = e.clientY;
+    this.dragStartImageX = img.x;
+    this.dragStartImageY = img.y;
+
+    // Add listeners only when drag starts
+    window.addEventListener('mousemove', this.handleReferenceDrag);
+    window.addEventListener('mouseup', this.handleReferenceMouseUp);
+  }
+
+  private handleReferenceDrag = (e: MouseEvent) => {
+    if (!this.isDraggingReference || !this.dragReferenceId) return;
+
+    const zoom = viewportStore.zoom.value;
+    const dx = (e.clientX - this.dragStartX) / zoom;
+    const dy = (e.clientY - this.dragStartY) / zoom;
+
+    referenceImageStore.updateImage(this.dragReferenceId, {
+      x: Math.round(this.dragStartImageX + dx),
+      y: Math.round(this.dragStartImageY + dy),
+    });
+  };
+
+  private handleReferenceMouseUp = () => {
+    this.isDraggingReference = false;
+    this.dragReferenceId = null;
+
+    // Remove listeners when drag ends
+    window.removeEventListener('mousemove', this.handleReferenceDrag);
+    window.removeEventListener('mouseup', this.handleReferenceMouseUp);
   };
 }
