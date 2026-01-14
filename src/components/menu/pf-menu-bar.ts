@@ -7,6 +7,8 @@ import { projectStore } from "../../stores/project";
 import { gridStore } from "../../stores/grid";
 import { viewportStore } from "../../stores/viewport";
 import { referenceImageStore } from "../../stores/reference-image";
+import { animationStore } from "../../stores/animation";
+import "../dialogs/pf-image-open-dialog";
 import {
   FlipLayerCommand,
   RotateLayerCommand,
@@ -24,6 +26,8 @@ const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
 export class PFMenuBar extends BaseComponent {
   @state() private shortcutsVisible = true;
   @state() private isEditingName = false;
+  @state() private pendingImageFile: File | null = null;
+  @state() private showImageOpenDialog = false;
 
   static styles = css`
     :host {
@@ -207,43 +211,109 @@ export class PFMenuBar extends BaseComponent {
    * - .pf (compressed PixelForge project)
    * - .json (uncompressed PixelForge project)
    * - .ase, .aseprite (Aseprite files)
+   * - .png, .jpg, .jpeg, .gif, .webp (with dialog for reference vs project)
    */
   async openFile() {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".pf,.json,.ase,.aseprite";
+    input.accept = ".pf,.json,.ase,.aseprite,.png,.jpg,.jpeg,.gif,.webp";
 
     input.onchange = async (e: Event) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
 
-      const ext = file.name.split(".").pop()?.toLowerCase();
+      const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+      const isImage = imageExtensions.some((ext) =>
+        file.name.toLowerCase().endsWith(ext)
+      );
 
-      try {
-        if (ext === "ase" || ext === "aseprite") {
-          // Aseprite format - lazy load parser
-          const buffer = await file.arrayBuffer();
-          const { importAseFile } = await import("../../services/aseprite-service");
-          await importAseFile(buffer);
-        } else if (ext === "pf") {
-          // Compressed PixelForge format - lazy load pako
-          const buffer = await file.arrayBuffer();
-          const pako = await import("pako");
-          const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
-          const project = JSON.parse(decompressed) as ProjectFile;
-          await projectStore.loadProject(project);
-        } else {
-          // JSON format (uncompressed)
-          const text = await file.text();
-          const project = JSON.parse(text) as ProjectFile;
-          await projectStore.loadProject(project);
-        }
-      } catch (error) {
-        console.error("Failed to open file:", error);
+      if (isImage) {
+        // Show dialog to ask user's intent
+        this.pendingImageFile = file;
+        this.showImageOpenDialog = true;
+      } else {
+        // Handle as project file (existing logic)
+        await this.handleOpenProjectFile(file);
       }
     };
 
     input.click();
+  }
+
+  private async handleOpenProjectFile(file: File) {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+
+    try {
+      if (ext === "ase" || ext === "aseprite") {
+        // Aseprite format - lazy load parser
+        const buffer = await file.arrayBuffer();
+        const { importAseFile } = await import("../../services/aseprite-service");
+        await importAseFile(buffer);
+      } else if (ext === "pf") {
+        // Compressed PixelForge format - lazy load pako
+        const buffer = await file.arrayBuffer();
+        const pako = await import("pako");
+        const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
+        const project = JSON.parse(decompressed) as ProjectFile;
+        await projectStore.loadProject(project);
+      } else {
+        // JSON format (uncompressed)
+        const text = await file.text();
+        const project = JSON.parse(text) as ProjectFile;
+        await projectStore.loadProject(project);
+      }
+    } catch (error) {
+      console.error("Failed to open file:", error);
+    }
+  }
+
+  private async handleImageOpenChoice(e: CustomEvent<{ type: string }>) {
+    if (!this.pendingImageFile) return;
+
+    if (e.detail.type === "reference") {
+      await referenceImageStore.addImage(this.pendingImageFile);
+    } else if (e.detail.type === "project") {
+      // Create new project from image
+      await this.createProjectFromImage(this.pendingImageFile);
+    }
+
+    this.pendingImageFile = null;
+    this.showImageOpenDialog = false;
+  }
+
+  private handleImageOpenCancel() {
+    this.pendingImageFile = null;
+    this.showImageOpenDialog = false;
+  }
+
+  private async createProjectFromImage(file: File) {
+    // Load image and create new project with its dimensions
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    await new Promise<void>((resolve) => {
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      img.src = url;
+    });
+
+    await projectStore.newProject(img.width, img.height);
+
+    // Draw image onto the current frame's cel canvas (not layer canvas)
+    const layers = layerStore.layers.value;
+    const currentFrameId = animationStore.currentFrameId.value;
+    if (layers[0] && currentFrameId) {
+      const celCanvas = animationStore.getCelCanvas(currentFrameId, layers[0].id);
+      if (celCanvas) {
+        const ctx = celCanvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+      }
+    }
+
+    // Reset view to fit the new canvas size and trigger re-render
+    viewportStore.resetView();
   }
 
   private importReferenceImage() {
@@ -452,6 +522,13 @@ export class PFMenuBar extends BaseComponent {
               </span>
             `}
       </div>
+
+      <pf-image-open-dialog
+        ?open=${this.showImageOpenDialog}
+        filename=${this.pendingImageFile?.name ?? ""}
+        @select=${this.handleImageOpenChoice}
+        @cancel=${this.handleImageOpenCancel}
+      ></pf-image-open-dialog>
     `;
   }
 }

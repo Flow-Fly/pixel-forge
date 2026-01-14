@@ -1,9 +1,10 @@
 import type { FrameTag } from './animation';
 import type { LayerType, BlendMode } from './layer';
 import type { TextLayerData, TextCelData } from './text';
+import type { SerializedReferenceImage } from './reference';
 
 /** Current project file format version */
-export const PROJECT_VERSION = '3.0.0';
+export const PROJECT_VERSION = '3.3.0';
 
 export interface ProjectFile {
   version: string;
@@ -40,4 +41,5 @@ export interface ProjectFile {
     currentFrameIndex: number;
   };
   tags?: FrameTag[]; // Frame tags (v2.0+, optional for backward compat)
+  referenceImages?: SerializedReferenceImage[]; // v3.3+: Reference images
 }
