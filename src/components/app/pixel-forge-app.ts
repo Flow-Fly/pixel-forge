@@ -25,6 +25,7 @@ import "../ui/pf-undo-history";
 import "../ui/pf-panel";
 import "../shape/pf-shape-options";
 import "../layers/pf-layers-panel";
+import "../reference/pf-references-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
@@ -429,6 +430,9 @@ export class PixelForgeApp extends BaseComponent {
               </pf-panel>
             `
           : ""}
+        <pf-panel header="References" collapsible panel-id="references" bordered>
+          <pf-references-panel></pf-references-panel>
+        </pf-panel>
         <pf-panel header="Brushes" collapsible panel-id="brush" bordered>
           <pf-brush-panel></pf-brush-panel>
         </pf-panel>
