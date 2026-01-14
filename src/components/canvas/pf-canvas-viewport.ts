@@ -4,6 +4,7 @@ import { BaseComponent } from '../../core/base-component';
 import { viewportStore } from '../../stores/viewport';
 import { gridStore } from '../../stores/grid';
 import { projectStore } from '../../stores/project';
+import { referenceImageStore } from '../../stores/reference-image';
 import './pf-selection-overlay';
 import './pf-marching-ants-overlay';
 import './pf-brush-cursor-overlay';
@@ -64,6 +65,8 @@ export class PFCanvasViewport extends BaseComponent {
     window.addEventListener('commit-transform', this.onCommitTransform);
     window.addEventListener('mousedown', this.onGlobalMouseDown);
     window.addEventListener('wheel', this.onGlobalWheel, { passive: false });
+    this.addEventListener('dragover', this.handleDragOver);
+    this.addEventListener('drop', this.handleDrop);
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions();
@@ -90,6 +93,8 @@ export class PFCanvasViewport extends BaseComponent {
     window.removeEventListener('commit-transform', this.onCommitTransform);
     window.removeEventListener('mousedown', this.onGlobalMouseDown);
     window.removeEventListener('wheel', this.onGlobalWheel);
+    this.removeEventListener('dragover', this.handleDragOver);
+    this.removeEventListener('drop', this.handleDrop);
 
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -302,5 +307,45 @@ export class PFCanvasViewport extends BaseComponent {
 
   private onCommitTransform = () => {
     commitTransform();
+  };
+
+  // ============================================
+  // Drag & drop handlers for reference images
+  // ============================================
+
+  private handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  private handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+
+    const file = e.dataTransfer?.files[0];
+    if (!file) return;
+
+    // Check if it's an image file
+    const imageTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+    if (!imageTypes.includes(file.type)) return;
+
+    // Get drop position in canvas coordinates
+    const rect = this.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    const zoom = viewportStore.zoom.value;
+    const panX = viewportStore.panX.value;
+    const panY = viewportStore.panY.value;
+
+    const canvasX = (screenX - panX) / zoom;
+    const canvasY = (screenY - panY) / zoom;
+
+    // Add the image
+    const id = await referenceImageStore.addImage(file);
+
+    // Position it at drop location
+    referenceImageStore.updateImage(id, { x: canvasX, y: canvasY });
   };
 }
