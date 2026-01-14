@@ -6,6 +6,7 @@ import { layerStore } from "../../stores/layers";
 import { projectStore } from "../../stores/project";
 import { gridStore } from "../../stores/grid";
 import { viewportStore } from "../../stores/viewport";
+import { referenceImageStore } from "../../stores/reference-image";
 import {
   FlipLayerCommand,
   RotateLayerCommand,
@@ -245,6 +246,21 @@ export class PFMenuBar extends BaseComponent {
     input.click();
   }
 
+  private importReferenceImage() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".png,.jpg,.jpeg,.gif,.webp";
+
+    input.onchange = async (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        await referenceImageStore.addImage(file);
+      }
+    };
+
+    input.click();
+  }
+
   showExportDialog() {
     this.dispatchEvent(
       new CustomEvent("show-export-dialog", { bubbles: true, composed: true })
@@ -317,6 +333,9 @@ export class PFMenuBar extends BaseComponent {
           </div>
           <div class="menu-item" @click=${this.openFile}>
             Open... <span class="shortcut">${formatShortcut(menuShortcuts.open)}</span>
+          </div>
+          <div class="menu-item" @click=${this.importReferenceImage}>
+            Import Reference Image...
           </div>
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>
