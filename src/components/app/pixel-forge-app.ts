@@ -2,6 +2,7 @@ import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import "../toolbar/pf-toolbar";
+import "../toolbar/pf-mode-toggle";
 import "../status/pf-status-bar";
 import "../menu/pf-menu-bar";
 import "../canvas/pf-drawing-canvas";
@@ -29,7 +30,6 @@ import "../reference/pf-references-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
-import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 
 @customElement("pixel-forge-app")
@@ -53,6 +53,25 @@ export class PixelForgeApp extends BaseComponent {
       display: flex;
       align-items: center;
       padding: 0 var(--pf-spacing-2);
+    }
+
+    .menu-bar-left {
+      flex: 1;
+      display: flex;
+      align-items: center;
+    }
+
+    .menu-bar-center {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .menu-bar-right {
+      flex: 1;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
     }
 
     .context-bar {
@@ -379,11 +398,19 @@ export class PixelForgeApp extends BaseComponent {
 
     return html`
       <header class="menu-bar">
-        <pf-menu-bar
-          @resize-canvas=${() => (this.showResizeDialog = true)}
-          @show-export-dialog=${() => (this.showExportDialog = true)}
-          @show-new-project-dialog=${() => (this.showNewProjectDialog = true)}
-        ></pf-menu-bar>
+        <div class="menu-bar-left">
+          <pf-menu-bar
+            @resize-canvas=${() => (this.showResizeDialog = true)}
+            @show-export-dialog=${() => (this.showExportDialog = true)}
+            @show-new-project-dialog=${() => (this.showNewProjectDialog = true)}
+          ></pf-menu-bar>
+        </div>
+        <div class="menu-bar-center">
+          <pf-mode-toggle></pf-mode-toggle>
+        </div>
+        <div class="menu-bar-right">
+          <!-- Reserved for future use -->
+        </div>
       </header>
 
       <div class="context-bar">
