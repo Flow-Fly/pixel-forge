@@ -8,6 +8,8 @@ import { gridStore } from "../../stores/grid";
 import { viewportStore } from "../../stores/viewport";
 import { referenceImageStore } from "../../stores/reference-image";
 import { animationStore } from "../../stores/animation";
+import { tilemapStore } from "../../stores/tilemap";
+import { modeStore } from "../../stores/mode";
 import "../dialogs/pf-image-open-dialog";
 import {
   FlipLayerCommand,
@@ -452,6 +454,14 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>
             ${gridStore.tileGridEnabled.value ? "✓ " : "   "}Tile Grid
             <span class="shortcut">${formatShortcut("mod+shift+g")}</span>
+          </div>
+          <div
+            class="menu-item"
+            @click=${() => tilemapStore.toggleGrid()}
+            style="opacity: ${modeStore.mode.value === 'map' ? '1' : '0.5'}"
+          >
+            ${tilemapStore.gridVisible.value ? "✓ " : "   "}Map Grid
+            <span class="shortcut">G</span>
           </div>
           <div class="menu-item" @click=${this.showGridSettingsDialog}>
             Grid Settings...

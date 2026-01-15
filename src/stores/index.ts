@@ -13,3 +13,6 @@ export const rootStore = new RootStore();
 
 // Mode store for art/map mode switching
 export { modeStore } from './mode';
+
+// Tilemap store for tilemap dimensions and tile size
+export { tilemapStore } from './tilemap';

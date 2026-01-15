@@ -6,6 +6,8 @@ import "../toolbar/pf-mode-toggle";
 import "../status/pf-status-bar";
 import "../menu/pf-menu-bar";
 import "../canvas/pf-drawing-canvas";
+import "../canvas/pf-tilemap-canvas";
+import "../canvas/pf-grid-overlay";
 import "../canvas/pf-canvas-viewport";
 import "../color/pf-color-selector";
 import "../color/pf-color-sliders";
@@ -31,6 +33,8 @@ import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
 import { panelStore } from "../../stores/panels";
+import { modeStore } from "../../stores/mode";
+import { tilemapStore } from "../../stores/tilemap";
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -103,6 +107,28 @@ export class PixelForgeApp extends BaseComponent {
       flex: 1;
       overflow: hidden;
       min-height: 0;
+    }
+
+    /* Canvas swap transition using @starting-style for entry animation */
+    pf-drawing-canvas,
+    pf-tilemap-canvas {
+      opacity: 1;
+      transition: opacity 200ms ease-out;
+    }
+
+    @starting-style {
+      pf-drawing-canvas,
+      pf-tilemap-canvas {
+        opacity: 0;
+      }
+    }
+
+    /* Respect reduced motion preference */
+    @media (prefers-reduced-motion: reduce) {
+      pf-drawing-canvas,
+      pf-tilemap-canvas {
+        transition: none;
+      }
     }
 
     .timeline-resize-handle {
@@ -396,6 +422,9 @@ export class PixelForgeApp extends BaseComponent {
     const isTimelineCollapsed =
       panelStore.panelStates.value.timeline?.collapsed ?? false;
 
+    // Access mode for conditional canvas rendering
+    const currentMode = modeStore.mode.value;
+
     return html`
       <header class="menu-bar">
         <div class="menu-bar-left">
@@ -423,10 +452,17 @@ export class PixelForgeApp extends BaseComponent {
 
       <main class="workspace">
         <pf-canvas-viewport @canvas-cursor=${this.handleCanvasCursor}>
-          <pf-drawing-canvas
-            .width=${projectStore.width.value}
-            .height=${projectStore.height.value}
-          ></pf-drawing-canvas>
+          ${currentMode === 'art'
+            ? html`<pf-drawing-canvas
+                .width=${projectStore.width.value}
+                .height=${projectStore.height.value}
+              ></pf-drawing-canvas>`
+            : html`<pf-tilemap-canvas></pf-tilemap-canvas>
+                ${tilemapStore.gridVisible.value
+                  ? html`<pf-grid-overlay></pf-grid-overlay>`
+                  : null
+                }`
+          }
         </pf-canvas-viewport>
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
