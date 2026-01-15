@@ -12,14 +12,18 @@ dist
 dist-ssr
 *.local
 
+.agent
+.claude
+.opencode
 # Documentation and notes
-/docs/
-/ux/
 CLAUDE.md
-feature.md
-research.md
-tasks.md
 /analysis/
+/_bmad*
+/docs
+feature.md
+/docs/rotsprite-shaders/
+/ux/
+tasks.md
 *.ase
 *.pf
 *.aseprite
