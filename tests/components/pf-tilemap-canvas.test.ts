@@ -42,7 +42,7 @@ describe('pf-tilemap-canvas', () => {
     // Reset stores to default state before each test
     modeStore.setMode('art');
     modeStore.setHeroEditActive(false);
-    tilemapStore.setDimensions(20, 15);
+    tilemapStore.resizeTilemap(20, 15);
     tilemapStore.setTileSize(16, 16);
 
     element = await createTilemapCanvas();
@@ -86,7 +86,7 @@ describe('pf-tilemap-canvas', () => {
       const canvas = shadowRoot?.querySelector('canvas') as HTMLCanvasElement;
 
       // Change dimensions
-      tilemapStore.setDimensions(10, 10);
+      tilemapStore.resizeTilemap(10, 10);
       await (element as any).updateComplete;
 
       // 10 tiles * 16 pixels = 160
@@ -183,7 +183,7 @@ describe('pf-tilemap-canvas', () => {
     });
 
     it('AC #1: Canvas updates when dimensions change', async () => {
-      tilemapStore.setDimensions(30, 20);
+      tilemapStore.resizeTilemap(30, 20);
       tilemapStore.setTileSize(8, 8);
       await (element as any).updateComplete;
 
@@ -213,7 +213,7 @@ describe('pf-tilemap-canvas', () => {
 
     it('should maintain component state across mode switches', async () => {
       // Set custom dimensions
-      tilemapStore.setDimensions(50, 40);
+      tilemapStore.resizeTilemap(50, 40);
       await (element as any).updateComplete;
 
       // Switch to art mode and back

@@ -35,7 +35,7 @@ describe('PfGridOverlay', () => {
 
   beforeEach(async () => {
     // Reset store state before each test
-    tilemapStore.setDimensions(20, 15);
+    tilemapStore.resizeTilemap(20, 15);
     tilemapStore.setTileSize(16, 16);
     tilemapStore.setGridVisible(true);
 
@@ -67,7 +67,7 @@ describe('PfGridOverlay', () => {
     });
 
     it('should update canvas dimensions when tilemap dimensions change', async () => {
-      tilemapStore.setDimensions(10, 10);
+      tilemapStore.resizeTilemap(10, 10);
       await (element as any).updateComplete;
 
       const canvas = element.shadowRoot?.querySelector('canvas') as HTMLCanvasElement;

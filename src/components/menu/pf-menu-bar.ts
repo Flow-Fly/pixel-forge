@@ -122,8 +122,14 @@ export class PFMenuBar extends BaseComponent {
       font-size: var(--pf-font-size-sm);
     }
 
-    .menu-item:hover {
+    .menu-item:hover:not(.disabled) {
       background-color: var(--pf-color-bg-surface);
+    }
+
+    .menu-item.disabled {
+      opacity: 0.5;
+      cursor: default;
+      pointer-events: none;
     }
 
     .shortcut {
@@ -364,6 +370,10 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("show-accent-color-dialog"));
   }
 
+  openMapConfigDialog() {
+    window.dispatchEvent(new CustomEvent("show-map-config-dialog"));
+  }
+
   private startEditingName() {
     this.isEditingName = true;
     // Focus the input after render
@@ -428,6 +438,12 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item">Copy <span class="shortcut">${formatShortcut(menuShortcuts.copy)}</span></div>
           <div class="menu-item">
             Paste <span class="shortcut">${formatShortcut(menuShortcuts.paste)}</span>
+          </div>
+          <div
+            class="menu-item ${modeStore.mode.value !== 'map' ? 'disabled' : ''}"
+            @click=${() => modeStore.mode.value === 'map' && this.openMapConfigDialog()}
+          >
+            Map Settings... <span class="shortcut">${formatShortcut("mod+shift+m")}</span>
           </div>
         </div>
 

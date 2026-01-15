@@ -8,10 +8,11 @@ import { signal } from '../core/signal';
  * - Tile size in pixels (tileWidth x tileHeight)
  * - Computed pixel dimensions for canvas sizing
  * - Grid visibility state (Story 1-4)
+ * - Map configuration dialog integration (Story 1-5)
  *
  * Additional tilemap features (layers, tile data) will be added in Epic 3.
  */
-class TilemapStore {
+class TilemapStore extends EventTarget {
   /**
    * Map width in tiles (default 20)
    */
@@ -53,29 +54,38 @@ class TilemapStore {
   }
 
   /**
-   * Set the tilemap dimensions in tiles
-   * @param width - Number of tiles wide (1-10000)
-   * @param height - Number of tiles tall (1-10000)
+   * Resize the tilemap to new dimensions
+   * @param width - Number of tiles wide (1-500)
+   * @param height - Number of tiles tall (1-500)
    * @throws Error if dimensions are invalid
    */
-  setDimensions(width: number, height: number) {
+  resizeTilemap(width: number, height: number) {
     if (!Number.isInteger(width) || !Number.isInteger(height)) {
       throw new Error('Tilemap dimensions must be integers');
     }
     if (width < 1 || height < 1) {
       throw new Error('Tilemap dimensions must be at least 1');
     }
-    if (width > 10000 || height > 10000) {
-      throw new Error('Tilemap dimensions cannot exceed 10000');
+    if (width > 500 || height > 500) {
+      throw new Error('Tilemap dimensions cannot exceed 500');
     }
+    const oldWidth = this.width.value;
+    const oldHeight = this.height.value;
     this.width.value = width;
     this.height.value = height;
+
+    // Fire resize event (Story 1-5 Task 4.4)
+    if (width !== oldWidth || height !== oldHeight) {
+      this.dispatchEvent(new CustomEvent('tilemap-resized', {
+        detail: { width, height, oldWidth, oldHeight }
+      }));
+    }
   }
 
   /**
    * Set the tile size in pixels
-   * @param tileWidth - Width of each tile in pixels (1-512)
-   * @param tileHeight - Height of each tile in pixels (1-512)
+   * @param tileWidth - Width of each tile in pixels (1-256)
+   * @param tileHeight - Height of each tile in pixels (1-256)
    * @throws Error if tile size is invalid
    */
   setTileSize(tileWidth: number, tileHeight: number) {
@@ -85,11 +95,20 @@ class TilemapStore {
     if (tileWidth < 1 || tileHeight < 1) {
       throw new Error('Tile size must be at least 1 pixel');
     }
-    if (tileWidth > 512 || tileHeight > 512) {
-      throw new Error('Tile size cannot exceed 512 pixels');
+    if (tileWidth > 256 || tileHeight > 256) {
+      throw new Error('Tile size cannot exceed 256 pixels');
     }
+    const oldTileWidth = this.tileWidth.value;
+    const oldTileHeight = this.tileHeight.value;
     this.tileWidth.value = tileWidth;
     this.tileHeight.value = tileHeight;
+
+    // Fire tile size changed event (Story 1-5 Task 4.3)
+    if (tileWidth !== oldTileWidth || tileHeight !== oldTileHeight) {
+      this.dispatchEvent(new CustomEvent('tile-size-changed', {
+        detail: { tileWidth, tileHeight, oldTileWidth, oldTileHeight }
+      }));
+    }
   }
 
   /**

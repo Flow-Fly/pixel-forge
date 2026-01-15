@@ -15,7 +15,7 @@ import { tilemapStore } from '../../src/stores/tilemap';
 describe('TilemapStore', () => {
   // Reset store state before each test since it's a singleton
   beforeEach(() => {
-    tilemapStore.setDimensions(20, 15);
+    tilemapStore.resizeTilemap(20, 15);
     tilemapStore.setTileSize(16, 16);
   });
 
@@ -47,12 +47,12 @@ describe('TilemapStore', () => {
     });
 
     it('should update pixelWidth when width changes', () => {
-      tilemapStore.setDimensions(10, 15);
+      tilemapStore.resizeTilemap(10, 15);
       expect(tilemapStore.pixelWidth).toBe(160); // 10 * 16
     });
 
     it('should update pixelHeight when height changes', () => {
-      tilemapStore.setDimensions(20, 10);
+      tilemapStore.resizeTilemap(20, 10);
       expect(tilemapStore.pixelHeight).toBe(160); // 10 * 16
     });
 
@@ -67,15 +67,15 @@ describe('TilemapStore', () => {
     });
   });
 
-  describe('setDimensions() method', () => {
+  describe('resizeTilemap() method', () => {
     it('should update width and height', () => {
-      tilemapStore.setDimensions(30, 25);
+      tilemapStore.resizeTilemap(30, 25);
       expect(tilemapStore.width.value).toBe(30);
       expect(tilemapStore.height.value).toBe(25);
     });
 
     it('should reflect in pixel calculations', () => {
-      tilemapStore.setDimensions(50, 40);
+      tilemapStore.resizeTilemap(50, 40);
       expect(tilemapStore.pixelWidth).toBe(800); // 50 * 16
       expect(tilemapStore.pixelHeight).toBe(640); // 40 * 16
     });
@@ -100,7 +100,7 @@ describe('TilemapStore', () => {
       const initialWidth = tilemapStore.width.value;
       expect(initialWidth).toBe(20);
 
-      tilemapStore.setDimensions(100, 15);
+      tilemapStore.resizeTilemap(100, 15);
       expect(tilemapStore.width.value).toBe(100);
     });
 
@@ -108,7 +108,7 @@ describe('TilemapStore', () => {
       const initialHeight = tilemapStore.height.value;
       expect(initialHeight).toBe(15);
 
-      tilemapStore.setDimensions(20, 100);
+      tilemapStore.resizeTilemap(20, 100);
       expect(tilemapStore.height.value).toBe(100);
     });
   });
@@ -117,7 +117,7 @@ describe('TilemapStore', () => {
     it('should be the same instance when imported', () => {
       // This test validates that the singleton pattern is working
       const store1 = tilemapStore;
-      store1.setDimensions(99, 88);
+      store1.resizeTilemap(99, 88);
 
       // Same reference should have the updated values
       expect(tilemapStore.width.value).toBe(99);
@@ -126,34 +126,34 @@ describe('TilemapStore', () => {
   });
 
   describe('Input Validation (Code Review Fix)', () => {
-    describe('setDimensions() validation', () => {
+    describe('resizeTilemap() validation', () => {
       it('should throw error for non-integer width', () => {
-        expect(() => tilemapStore.setDimensions(10.5, 15)).toThrow('Tilemap dimensions must be integers');
+        expect(() => tilemapStore.resizeTilemap(10.5, 15)).toThrow('Tilemap dimensions must be integers');
       });
 
       it('should throw error for non-integer height', () => {
-        expect(() => tilemapStore.setDimensions(10, 15.5)).toThrow('Tilemap dimensions must be integers');
+        expect(() => tilemapStore.resizeTilemap(10, 15.5)).toThrow('Tilemap dimensions must be integers');
       });
 
       it('should throw error for zero width', () => {
-        expect(() => tilemapStore.setDimensions(0, 15)).toThrow('Tilemap dimensions must be at least 1');
+        expect(() => tilemapStore.resizeTilemap(0, 15)).toThrow('Tilemap dimensions must be at least 1');
       });
 
       it('should throw error for negative height', () => {
-        expect(() => tilemapStore.setDimensions(10, -5)).toThrow('Tilemap dimensions must be at least 1');
+        expect(() => tilemapStore.resizeTilemap(10, -5)).toThrow('Tilemap dimensions must be at least 1');
       });
 
-      it('should throw error for width exceeding 10000', () => {
-        expect(() => tilemapStore.setDimensions(10001, 15)).toThrow('Tilemap dimensions cannot exceed 10000');
+      it('should throw error for width exceeding 500', () => {
+        expect(() => tilemapStore.resizeTilemap(501, 15)).toThrow('Tilemap dimensions cannot exceed 500');
       });
 
-      it('should throw error for height exceeding 10000', () => {
-        expect(() => tilemapStore.setDimensions(10, 10001)).toThrow('Tilemap dimensions cannot exceed 10000');
+      it('should throw error for height exceeding 500', () => {
+        expect(() => tilemapStore.resizeTilemap(10, 501)).toThrow('Tilemap dimensions cannot exceed 500');
       });
 
-      it('should accept valid boundary values (1 and 10000)', () => {
-        expect(() => tilemapStore.setDimensions(1, 1)).not.toThrow();
-        expect(() => tilemapStore.setDimensions(10000, 10000)).not.toThrow();
+      it('should accept valid boundary values (1 and 500)', () => {
+        expect(() => tilemapStore.resizeTilemap(1, 1)).not.toThrow();
+        expect(() => tilemapStore.resizeTilemap(500, 500)).not.toThrow();
       });
     });
 
@@ -174,17 +174,17 @@ describe('TilemapStore', () => {
         expect(() => tilemapStore.setTileSize(16, -8)).toThrow('Tile size must be at least 1 pixel');
       });
 
-      it('should throw error for tileWidth exceeding 512', () => {
-        expect(() => tilemapStore.setTileSize(513, 16)).toThrow('Tile size cannot exceed 512 pixels');
+      it('should throw error for tileWidth exceeding 256', () => {
+        expect(() => tilemapStore.setTileSize(257, 16)).toThrow('Tile size cannot exceed 256 pixels');
       });
 
-      it('should throw error for tileHeight exceeding 512', () => {
-        expect(() => tilemapStore.setTileSize(16, 513)).toThrow('Tile size cannot exceed 512 pixels');
+      it('should throw error for tileHeight exceeding 256', () => {
+        expect(() => tilemapStore.setTileSize(16, 257)).toThrow('Tile size cannot exceed 256 pixels');
       });
 
-      it('should accept valid boundary values (1 and 512)', () => {
+      it('should accept valid boundary values (1 and 256)', () => {
         expect(() => tilemapStore.setTileSize(1, 1)).not.toThrow();
-        expect(() => tilemapStore.setTileSize(512, 512)).not.toThrow();
+        expect(() => tilemapStore.setTileSize(256, 256)).not.toThrow();
       });
     });
   });

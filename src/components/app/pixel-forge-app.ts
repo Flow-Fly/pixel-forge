@@ -21,6 +21,7 @@ import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
 import "../dialogs/pf-grid-settings-dialog";
 import "../dialogs/pf-accent-color-dialog";
+import "../dialogs/pf-map-config-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
@@ -235,6 +236,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() showExportDialog = false;
   @state() showNewProjectDialog = false;
   @state() showKeyboardShortcutsDialog = false;
+  @state() showMapConfigDialog = false;
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
@@ -282,6 +284,15 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+
+    // Listen for map config dialog (Story 1-5)
+    window.addEventListener(
+      "show-map-config-dialog",
+      this.handleShowMapConfigDialog
+    );
+
+    // Listen for keyboard shortcuts (Story 1-5)
+    window.addEventListener("keydown", this.handleKeyDown);
   }
 
   private handleShowWarningToast = (e: CustomEvent<{ message: string }>) => {
@@ -319,6 +330,32 @@ export class PixelForgeApp extends BaseComponent {
 
   private handleShowExportDialog = () => {
     this.showExportDialog = true;
+  };
+
+  private handleShowMapConfigDialog = () => {
+    if (modeStore.mode.value === "map") {
+      this.showMapConfigDialog = true;
+    }
+  };
+
+  /**
+   * Handle keyboard shortcuts for map config dialog (Cmd/Ctrl+Shift+M)
+   * Story 1-5 Task 5.2
+   */
+  private handleKeyDown = (e: KeyboardEvent) => {
+    // Cmd/Ctrl + Shift + M to open map config (only in Map mode)
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "m") {
+      const activeEl = document.activeElement;
+      const tagName = activeEl?.tagName;
+      const isEditable = (activeEl as HTMLElement)?.isContentEditable;
+
+      if (tagName !== "INPUT" && tagName !== "TEXTAREA" && !isEditable) {
+        if (modeStore.mode.value === "map") {
+          e.preventDefault();
+          this.showMapConfigDialog = true;
+        }
+      }
+    }
   };
 
   private handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -376,6 +413,11 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+    window.removeEventListener(
+      "show-map-config-dialog",
+      this.handleShowMapConfigDialog
+    );
+    window.removeEventListener("keydown", this.handleKeyDown);
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -533,6 +575,10 @@ export class PixelForgeApp extends BaseComponent {
 
       <pf-grid-settings-dialog></pf-grid-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
+      <pf-map-config-dialog
+        ?open=${this.showMapConfigDialog}
+        @close=${() => (this.showMapConfigDialog = false)}
+      ></pf-map-config-dialog>
 
       ${this.warningMessage
         ? html`<div class="warning-toast">${this.warningMessage}</div>`
