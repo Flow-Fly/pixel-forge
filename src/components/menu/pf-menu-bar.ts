@@ -457,10 +457,10 @@ export class PFMenuBar extends BaseComponent {
           </div>
           <div
             class="menu-item"
-            @click=${() => tilemapStore.toggleGrid()}
-            style="opacity: ${modeStore.mode.value === 'map' ? '1' : '0.5'}"
+            @click=${() => modeStore.mode.value === 'map' && tilemapStore.toggleGrid()}
+            style="opacity: ${modeStore.mode.value === 'map' ? '1' : '0.5'}; cursor: ${modeStore.mode.value === 'map' ? 'pointer' : 'default'}"
           >
-            ${tilemapStore.gridVisible.value ? "✓ " : "   "}Map Grid
+            ${tilemapStore.gridVisible.value ? "✓ " : "   "}Show Grid
             <span class="shortcut">G</span>
           </div>
           <div class="menu-item" @click=${this.showGridSettingsDialog}>

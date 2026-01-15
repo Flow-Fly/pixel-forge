@@ -171,7 +171,7 @@ export class PfGridOverlay extends BaseComponent {
     void tilemapStore.tileWidth.value;
     void tilemapStore.tileHeight.value;
 
-    return html`<canvas></canvas>`;
+    return html`<canvas aria-hidden="true"></canvas>`;
   }
 }
 
