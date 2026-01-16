@@ -48,6 +48,8 @@ class ColorStore {
     this.secondaryColor.value = temp;
     // Update ephemeral status based on new primary color
     this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(this.primaryColor.value);
+    // Update lightness variations for the new primary color
+    this.updateLightnessVariations(this.primaryColor.value);
   }
 
   /**

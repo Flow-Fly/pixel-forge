@@ -81,6 +81,36 @@ export class PFPaletteGrid extends BaseComponent {
       pointer-events: none;
     }
 
+    /* Foreground color indicator - corner triangle top-left */
+    .indicator-fg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 10px 10px 0 0;
+      border-color: var(--pf-color-accent, #4a9eff) transparent transparent transparent;
+      filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.7));
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* Background color indicator - corner triangle bottom-right */
+    .indicator-bg {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 0 0 10px 10px;
+      border-color: transparent transparent var(--pf-color-accent, #4a9eff) transparent;
+      filter: drop-shadow(-1px -1px 0 rgba(0, 0, 0, 0.7));
+      pointer-events: none;
+      z-index: 5;
+    }
+
     /* Drag-drop styles */
     .palette-grid.drag-active {
       outline: 2px dashed var(--pf-color-accent, #4a9eff);
@@ -162,8 +192,15 @@ export class PFPaletteGrid extends BaseComponent {
     }
   }
 
-  private handleSwatchRightClick(e: MouseEvent, color: string, index: number) {
+  private handleSwatchRightClick(e: MouseEvent, color: string) {
     e.preventDefault();
+    // Right-click selects as background color (standard pixel editor pattern)
+    colorStore.setSecondaryColor(color);
+  }
+
+  private handleSwatchDoubleClick(e: MouseEvent, color: string, index: number) {
+    e.preventDefault();
+    // Double-click opens color editor
     this.dispatchEvent(new CustomEvent("swatch-edit", {
       detail: { color, index, anchor: e.currentTarget },
       bubbles: true,
@@ -257,9 +294,15 @@ export class PFPaletteGrid extends BaseComponent {
     this.dragOverIndex = null;
   }
 
+  private normalizeColor(color: string): string {
+    return color.toLowerCase();
+  }
+
   render() {
     const colors = paletteStore.mainColors.value;
     const usedColors = paletteStore.usedColors.value;
+    const fgColor = this.normalizeColor(colorStore.primaryColor.value);
+    const bgColor = this.normalizeColor(colorStore.secondaryColor.value);
 
     return html`
       <div
@@ -268,7 +311,10 @@ export class PFPaletteGrid extends BaseComponent {
         @drop=${this.handleGridDrop}
       >
         ${colors.map((color, index) => {
-          const isUsed = usedColors.has(color.toLowerCase());
+          const normalizedColor = this.normalizeColor(color);
+          const isUsed = usedColors.has(normalizedColor);
+          const isFg = normalizedColor === fgColor;
+          const isBg = normalizedColor === bgColor;
           return html`
             <div
               class="swatch-container ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
@@ -279,13 +325,17 @@ export class PFPaletteGrid extends BaseComponent {
               <div
                 class="swatch ${isUsed ? "swatch-used" : ""}"
                 style="background-color: ${color}"
-                title="${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${isUsed ? " (in use)" : ""}"
+                title="${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${isUsed ? " (in use)" : ""}${isFg ? " (FG)" : ""}${isBg ? " (BG)" : ""}"
                 draggable="${!this.replaceMode}"
                 @click=${(e: Event) => this.handleSwatchClick(color, index, e)}
-                @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color, index)}
+                @dblclick=${(e: MouseEvent) => this.handleSwatchDoubleClick(e, color, index)}
+                @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color)}
                 @dragstart=${(e: DragEvent) => this.handleDragStart(index, color, e)}
                 @dragend=${this.handleDragEnd}
-              ></div>
+              >
+                ${isFg ? html`<span class="indicator-fg"></span>` : ""}
+                ${isBg ? html`<span class="indicator-bg"></span>` : ""}
+              </div>
               <button
                 class="swatch-delete"
                 @click=${(e: Event) => this.handleDeleteColor(e, index)}
