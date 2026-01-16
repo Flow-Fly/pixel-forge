@@ -37,8 +37,8 @@ export class PFTilesetGrid extends BaseComponent {
       position: relative;
       background-color: var(--pf-color-bg-panel, #141414);
       transition: transform 0.1s ease;
-      min-width: 32px;
-      min-height: 32px;
+      min-width: 44px;
+      min-height: 44px;
     }
 
     .tile-cell:hover {
@@ -189,7 +189,10 @@ export class PFTilesetGrid extends BaseComponent {
     if (!rect) return;
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.warn(`[pf-tileset-grid] Failed to get 2d context for tile ${tileIndex}`);
+      return;
+    }
 
     // Set canvas size to tile size
     canvas.width = rect.width;

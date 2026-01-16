@@ -268,6 +268,37 @@ describe('pf-tileset-panel', () => {
       expect(element.showImportDialog).toBe(false);
     });
 
+    it('should not open dialog on file exceeding size limit (10MB)', async () => {
+      const emptyState = element.shadowRoot?.querySelector('.empty-state') as HTMLElement;
+
+      // Create mock file with size exceeding 10MB
+      const mockFile = new MockFile(['test'], 'huge-tileset.png', { type: 'image/png' });
+      // Override size to exceed limit (10MB = 10 * 1024 * 1024 bytes)
+      Object.defineProperty(mockFile, 'size', { value: 11 * 1024 * 1024 });
+
+      const dropEvent = createMockDragEvent('drop', [mockFile as any]);
+
+      emptyState?.dispatchEvent(dropEvent);
+      await (element as any).updateComplete;
+
+      expect(element.showImportDialog).toBe(false);
+    });
+
+    it('should open dialog for files within size limit', async () => {
+      const emptyState = element.shadowRoot?.querySelector('.empty-state') as HTMLElement;
+
+      // Create mock file with valid size (5MB)
+      const mockFile = new MockFile(['test'], 'valid-tileset.png', { type: 'image/png' });
+      Object.defineProperty(mockFile, 'size', { value: 5 * 1024 * 1024 });
+
+      const dropEvent = createMockDragEvent('drop', [mockFile as any]);
+
+      emptyState?.dispatchEvent(dropEvent);
+      await (element as any).updateComplete;
+
+      expect(element.showImportDialog).toBe(true);
+    });
+
     it('should support PNG, JPG, and WebP file types', async () => {
       const validTypes = ['image/png', 'image/jpeg', 'image/webp'];
 

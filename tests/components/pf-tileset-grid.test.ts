@@ -430,22 +430,40 @@ describe('pf-tileset-grid', () => {
       await (element as any).updateComplete;
     });
 
-    it('should have aspect-ratio: 1 on tile cells', async () => {
-      const tile = element.shadowRoot?.querySelector('.tile-cell') as HTMLElement;
-      // Verify the class exists (CSS applied via shadow DOM)
-      expect(tile).not.toBeNull();
+    it('should have aspect-ratio: 1 in tile-cell CSS rule', async () => {
+      // Verify CSS static styles contain aspect-ratio rule
+      const { PFTilesetGrid } = await import('../../src/components/panels/pf-tileset-grid');
+      const cssText = PFTilesetGrid.styles?.toString() ?? '';
+      expect(cssText).toContain('aspect-ratio: 1');
     });
 
-    it('should have image-rendering: pixelated on canvases', async () => {
-      const canvas = element.shadowRoot?.querySelector('.tile-cell canvas');
-      // Canvas should exist
-      expect(canvas).not.toBeNull();
+    it('should have image-rendering: pixelated in canvas CSS rule', async () => {
+      // Verify CSS static styles contain pixelated rendering
+      const { PFTilesetGrid } = await import('../../src/components/panels/pf-tileset-grid');
+      const cssText = PFTilesetGrid.styles?.toString() ?? '';
+      expect(cssText).toContain('image-rendering: pixelated');
     });
 
-    it('should have minimum touch target size', async () => {
-      const tile = element.shadowRoot?.querySelector('.tile-cell') as HTMLElement;
-      // min-width and min-height should be set via CSS
-      expect(tile).not.toBeNull();
+    it('should have 44px minimum touch target size (UX-11)', async () => {
+      // Verify CSS static styles contain 44px min dimensions
+      const { PFTilesetGrid } = await import('../../src/components/panels/pf-tileset-grid');
+      const cssText = PFTilesetGrid.styles?.toString() ?? '';
+      expect(cssText).toContain('min-width: 44px');
+      expect(cssText).toContain('min-height: 44px');
+    });
+
+    it('should use responsive auto-fill grid layout (AC #8)', async () => {
+      // Verify CSS static styles contain auto-fill responsive grid
+      const { PFTilesetGrid } = await import('../../src/components/panels/pf-tileset-grid');
+      const cssText = PFTilesetGrid.styles?.toString() ?? '';
+      expect(cssText).toContain('repeat(auto-fill');
+      expect(cssText).toContain('minmax(');
+    });
+
+    it('should render grid element with correct class', async () => {
+      const grid = element.shadowRoot?.querySelector('.grid');
+      expect(grid).not.toBeNull();
+      expect(grid?.getAttribute('role')).toBe('grid');
     });
   });
 

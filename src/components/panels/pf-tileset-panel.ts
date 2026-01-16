@@ -4,7 +4,11 @@ import { BaseComponent } from '../../core/base-component';
 import { tilesetStore } from '../../stores/tileset';
 import type { Tileset } from '../../types/tilemap';
 import '../dialogs/pf-import-tileset-dialog';
+import type { PFImportTilesetDialog } from '../dialogs/pf-import-tileset-dialog';
 import './pf-tileset-grid';
+
+/** Maximum file size for tileset images (10MB) */
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 /**
  * PFTilesetPanel - Container panel for tileset display and management
@@ -184,6 +188,13 @@ export class PFTilesetPanel extends BaseComponent {
     const validTypes = ['image/png', 'image/jpeg', 'image/webp'];
     if (!validTypes.includes(file.type)) {
       // Invalid file type - could show toast/error
+      console.warn(`[pf-tileset-panel] Invalid file type: ${file.type}`);
+      return;
+    }
+
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      console.warn(`[pf-tileset-panel] File too large: ${file.size} bytes (max ${MAX_FILE_SIZE_BYTES})`);
       return;
     }
 
@@ -271,10 +282,10 @@ export class PFTilesetPanel extends BaseComponent {
     super.updated(changedProperties);
 
     if (changedProperties.has('showImportDialog') && this.showImportDialog && this.preloadedFile) {
-      // Pass pre-loaded file to dialog
-      const dialog = this.shadowRoot?.querySelector('pf-import-tileset-dialog');
+      // Pass pre-loaded file to dialog with proper typing
+      const dialog = this.shadowRoot?.querySelector<PFImportTilesetDialog>('pf-import-tileset-dialog');
       if (dialog) {
-        (dialog as any).handleFileSelect(this.preloadedFile);
+        dialog.handleFileSelect(this.preloadedFile);
       }
     }
   }
