@@ -67,8 +67,8 @@ export class PFPaletteGrid extends BaseComponent {
       transform: scale(1.1);
     }
 
-    /* Usage indicator */
-    .swatch-used::after {
+    /* Usage indicator - solid dot for current frame */
+    .swatch-used-current::after {
       content: "";
       position: absolute;
       bottom: 2px;
@@ -79,6 +79,22 @@ export class PFPaletteGrid extends BaseComponent {
       border-radius: 50%;
       box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
       pointer-events: none;
+    }
+
+    /* Usage indicator - hollow dot for other frames only */
+    .swatch-used-other::after {
+      content: "";
+      position: absolute;
+      bottom: 1px;
+      right: 1px;
+      width: 7px;
+      height: 7px;
+      background: transparent;
+      border: 1px solid white;
+      border-radius: 50%;
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+      pointer-events: none;
+      box-sizing: border-box;
     }
 
     /* Foreground color indicator - corner triangle top-left */
@@ -298,9 +314,34 @@ export class PFPaletteGrid extends BaseComponent {
     return color.toLowerCase();
   }
 
+  private getUsageClass(normalizedColor: string): string {
+    const usedInCurrent = paletteStore.usedColorsInCurrentFrame.value.has(normalizedColor);
+    const usedInOther = paletteStore.usedColorsInOtherFrames.value.has(normalizedColor);
+
+    if (usedInCurrent) {
+      return "swatch-used-current";
+    } else if (usedInOther) {
+      return "swatch-used-other";
+    }
+    return "";
+  }
+
+  private getUsageTitle(normalizedColor: string): string {
+    const usedInCurrent = paletteStore.usedColorsInCurrentFrame.value.has(normalizedColor);
+    const usedInOther = paletteStore.usedColorsInOtherFrames.value.has(normalizedColor);
+
+    if (usedInCurrent && usedInOther) {
+      return " (used in current + other frames)";
+    } else if (usedInCurrent) {
+      return " (used in current frame)";
+    } else if (usedInOther) {
+      return " (used in other frames)";
+    }
+    return "";
+  }
+
   render() {
     const colors = paletteStore.mainColors.value;
-    const usedColors = paletteStore.usedColors.value;
     const fgColor = this.normalizeColor(colorStore.primaryColor.value);
     const bgColor = this.normalizeColor(colorStore.secondaryColor.value);
 
@@ -312,7 +353,8 @@ export class PFPaletteGrid extends BaseComponent {
       >
         ${colors.map((color, index) => {
           const normalizedColor = this.normalizeColor(color);
-          const isUsed = usedColors.has(normalizedColor);
+          const usageClass = this.getUsageClass(normalizedColor);
+          const usageTitle = this.getUsageTitle(normalizedColor);
           const isFg = normalizedColor === fgColor;
           const isBg = normalizedColor === bgColor;
           return html`
@@ -323,9 +365,9 @@ export class PFPaletteGrid extends BaseComponent {
               @drop=${(e: DragEvent) => this.handleDrop(index, e)}
             >
               <div
-                class="swatch ${isUsed ? "swatch-used" : ""}"
+                class="swatch ${usageClass}"
                 style="background-color: ${color}"
-                title="${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${isUsed ? " (in use)" : ""}${isFg ? " (FG)" : ""}${isBg ? " (BG)" : ""}"
+                title="${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${usageTitle}${isFg ? " (FG)" : ""}${isBg ? " (BG)" : ""}"
                 draggable="${!this.replaceMode}"
                 @click=${(e: Event) => this.handleSwatchClick(color, index, e)}
                 @dblclick=${(e: MouseEvent) => this.handleSwatchDoubleClick(e, color, index)}

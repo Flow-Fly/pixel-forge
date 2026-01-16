@@ -167,6 +167,86 @@ export function scanUsedColors(cels: Map<string, Cel>): Set<string> {
 }
 
 /**
+ * Scan colors used in a specific frame only.
+ */
+export function scanUsedColorsInFrame(
+  cels: Map<string, Cel>,
+  frameId: string
+): Set<string> {
+  const usedColors = new Set<string>();
+
+  for (const [_key, cel] of cels) {
+    if (cel.frameId !== frameId) continue;
+    if (!cel.canvas) continue;
+    if (cel.textCelData) continue;
+
+    const ctx = cel.canvas.getContext('2d');
+    if (!ctx) continue;
+
+    const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a === 0) continue;
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const hex = '#' +
+        r.toString(16).padStart(2, '0') +
+        g.toString(16).padStart(2, '0') +
+        b.toString(16).padStart(2, '0');
+
+      usedColors.add(hex.toLowerCase());
+    }
+  }
+
+  return usedColors;
+}
+
+/**
+ * Scan colors used in all frames except the specified one.
+ */
+export function scanUsedColorsExcludingFrame(
+  cels: Map<string, Cel>,
+  excludeFrameId: string
+): Set<string> {
+  const usedColors = new Set<string>();
+
+  for (const [_key, cel] of cels) {
+    if (cel.frameId === excludeFrameId) continue;
+    if (!cel.canvas) continue;
+    if (cel.textCelData) continue;
+
+    const ctx = cel.canvas.getContext('2d');
+    if (!ctx) continue;
+
+    const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a === 0) continue;
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const hex = '#' +
+        r.toString(16).padStart(2, '0') +
+        g.toString(16).padStart(2, '0') +
+        b.toString(16).padStart(2, '0');
+
+      usedColors.add(hex.toLowerCase());
+    }
+  }
+
+  return usedColors;
+}
+
+/**
  * Scan actual canvas pixels to get colors used.
  * Works correctly even when palette has changed since drawing was made.
  */

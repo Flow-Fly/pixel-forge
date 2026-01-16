@@ -47,6 +47,12 @@ class PaletteStore {
   /** Colors currently in use in the drawing (for usage indicators) */
   usedColors = signal<Set<string>>(new Set());
 
+  /** Colors used in the current frame */
+  usedColorsInCurrentFrame = signal<Set<string>>(new Set());
+
+  /** Colors used in other frames (not the current one) */
+  usedColorsInOtherFrames = signal<Set<string>>(new Set());
+
   // ==========================================
   // Private State
   // ==========================================
@@ -54,6 +60,12 @@ class PaletteStore {
   private colorToIndex = new Map<string, number>();
   private ephemeralColorToIndex = new Map<string, number>();
   private cachedPaletteName: string | null = null;
+  private frameChangeHandler: (() => void) | null = null;
+
+  // Frame-aware usage tracking optimization
+  private previousFrameId: string | null = null;
+  private initialScanComplete = false;
+  private initialScanInProgress = false;
 
   // ==========================================
   // Deprecated Aliases
@@ -77,6 +89,19 @@ class PaletteStore {
     this.loadFromStorage();
     this.rebuildColorMap();
     this.loadCustomPalettes();
+    this.setupFrameChangeListener();
+  }
+
+  private setupFrameChangeListener(): void {
+    this.frameChangeHandler = () => this.refreshFrameUsedColors();
+    window.addEventListener('frame-changed', this.frameChangeHandler);
+  }
+
+  dispose(): void {
+    if (this.frameChangeHandler) {
+      window.removeEventListener('frame-changed', this.frameChangeHandler);
+      this.frameChangeHandler = null;
+    }
   }
 
   // ==========================================
@@ -840,6 +865,117 @@ class PaletteStore {
       normalized.add(normalizeHex(color));
     }
     this.usedColors.value = normalized;
+  }
+
+  /**
+   * Refresh frame-aware color usage.
+   * Called on frame switch (but skipped during playback for performance).
+   *
+   * Optimization: Uses incremental scanning after initial background scan.
+   * - First call: Scans current frame immediately, triggers background scan for others
+   * - Subsequent calls: Only scans previous + current frame, updates incrementally
+   */
+  refreshFrameUsedColors(): void {
+    // Skip if animation is playing to avoid performance issues
+    if (animationStore.isPlaying.value) return;
+
+    const currentFrameId = animationStore.currentFrameId.value;
+    if (!currentFrameId) return;
+
+    // Always scan current frame immediately
+    const currentFrameColors = animationStore.scanUsedColorsInFrame(currentFrameId);
+    const normalizedCurrent = new Set<string>();
+    for (const color of currentFrameColors) {
+      normalizedCurrent.add(normalizeHex(color));
+    }
+    this.usedColorsInCurrentFrame.value = normalizedCurrent;
+
+    if (!this.initialScanComplete) {
+      // First time: trigger background scan for all other frames
+      if (!this.initialScanInProgress) {
+        this.performInitialBackgroundScan(currentFrameId);
+      }
+      this.previousFrameId = currentFrameId;
+      return;
+    }
+
+    // Incremental update: compare previous and current frame
+    this.incrementalUpdateOtherFrames(currentFrameId, normalizedCurrent);
+    this.previousFrameId = currentFrameId;
+
+    // Update aggregate usedColors
+    this.updateAggregateUsedColors();
+  }
+
+  /**
+   * Perform initial background scan of all frames using requestIdleCallback.
+   */
+  private performInitialBackgroundScan(excludeFrameId: string): void {
+    this.initialScanInProgress = true;
+
+    const doScan = () => {
+      const otherFrameColors = animationStore.scanUsedColorsExcludingFrame(excludeFrameId);
+      const normalizedOther = new Set<string>();
+      for (const color of otherFrameColors) {
+        normalizedOther.add(normalizeHex(color));
+      }
+      this.usedColorsInOtherFrames.value = normalizedOther;
+      this.initialScanComplete = true;
+      this.initialScanInProgress = false;
+      this.updateAggregateUsedColors();
+    };
+
+    // Use requestIdleCallback if available, otherwise setTimeout
+    if ('requestIdleCallback' in window) {
+      (window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(doScan);
+    } else {
+      setTimeout(doScan, 0);
+    }
+  }
+
+  /**
+   * Incrementally update usedColorsInOtherFrames based on frame transition.
+   * Only scans previous frame (if different) instead of all other frames.
+   */
+  private incrementalUpdateOtherFrames(
+    currentFrameId: string,
+    currentFrameColors: Set<string>
+  ): void {
+    const otherFrames = new Set(this.usedColorsInOtherFrames.value);
+
+    // If we have a previous frame and it's different, scan it and add its colors to "other"
+    if (this.previousFrameId && this.previousFrameId !== currentFrameId) {
+      const prevFrameColors = animationStore.scanUsedColorsInFrame(this.previousFrameId);
+      for (const color of prevFrameColors) {
+        const normalized = normalizeHex(color);
+        // Colors from previous frame are now in "other frames"
+        if (!currentFrameColors.has(normalized)) {
+          otherFrames.add(normalized);
+        }
+      }
+    }
+
+    // Remove current frame colors from "other frames" display
+    // (they're shown with solid dot, not hollow)
+    for (const color of currentFrameColors) {
+      otherFrames.delete(color);
+    }
+
+    this.usedColorsInOtherFrames.value = otherFrames;
+  }
+
+  /**
+   * Update the aggregate usedColors from current + other frame sets.
+   */
+  private updateAggregateUsedColors(): void {
+    const allColors = new Set<string>();
+    for (const color of this.usedColorsInCurrentFrame.value) {
+      allColors.add(color);
+    }
+    for (const color of this.usedColorsInOtherFrames.value) {
+      allColors.add(color);
+    }
+    this.usedColors.value = allColors;
   }
 
   isColorUsed(color: string): boolean {

@@ -157,6 +157,12 @@ class AnimationStore {
   goToFrame(frameId: string) {
     this.currentFrameId.value = frameId;
     this.syncLayerCanvases();
+
+    // Dispatch event for palette usage refresh (listened by paletteStore)
+    // Skip during playback - handled by isPlaying check in paletteStore
+    window.dispatchEvent(new CustomEvent('frame-changed', {
+      detail: { frameId }
+    }));
   }
 
   syncLayerCanvases() {
@@ -347,6 +353,14 @@ class AnimationStore {
 
   scanUsedColorsFromCanvas(): Set<string> {
     return indexBuffer.scanUsedColorsFromCanvas(this.cels.value);
+  }
+
+  scanUsedColorsInFrame(frameId: string): Set<string> {
+    return indexBuffer.scanUsedColorsInFrame(this.cels.value, frameId);
+  }
+
+  scanUsedColorsExcludingFrame(excludeFrameId: string): Set<string> {
+    return indexBuffer.scanUsedColorsExcludingFrame(this.cels.value, excludeFrameId);
   }
 
   // ===== Frame Navigation =====
