@@ -1,4 +1,5 @@
-import { html, css, PropertyValues } from 'lit';
+import { html, css } from 'lit';
+import type { PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { tilesetStore } from '../../stores/tileset';

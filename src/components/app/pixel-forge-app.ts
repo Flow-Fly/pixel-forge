@@ -30,6 +30,7 @@ import "../ui/pf-panel";
 import "../shape/pf-shape-options";
 import "../layers/pf-layers-panel";
 import "../reference/pf-references-panel";
+import "../panels/pf-tileset-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
@@ -532,6 +533,13 @@ export class PixelForgeApp extends BaseComponent {
           ? html`
               <pf-panel header="Layers" collapsible panel-id="layers" bordered>
                 <pf-layers-panel></pf-layers-panel>
+              </pf-panel>
+            `
+          : ""}
+        ${currentMode === 'map'
+          ? html`
+              <pf-panel header="Tileset" collapsible panel-id="tileset" bordered>
+                <pf-tileset-panel></pf-tileset-panel>
               </pf-panel>
             `
           : ""}
