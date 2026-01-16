@@ -110,6 +110,35 @@ export function handlePaletteColorMovedToEphemeral(
 }
 
 /**
+ * Handle palette color swap - exchange two indices.
+ */
+export function handlePaletteSwap(
+  cels: Map<string, Cel>,
+  indexA: number,
+  indexB: number
+): Map<string, Cel> {
+  for (const [_key, cel] of cels) {
+    if (!cel.indexBuffer) continue;
+
+    const buffer = cel.indexBuffer;
+    for (let i = 0; i < buffer.length; i++) {
+      const oldIndex = buffer[i];
+      if (oldIndex === 0) continue;
+
+      if (oldIndex === indexA) {
+        buffer[i] = indexB;
+      } else if (oldIndex === indexB) {
+        buffer[i] = indexA;
+      }
+    }
+  }
+
+  const newCels = new Map(cels);
+  rebuildAllCelCanvases(newCels);
+  return newCels;
+}
+
+/**
  * Handle palette color insertion - shift indices up.
  */
 export function handlePaletteColorInserted(
@@ -262,6 +291,12 @@ export function setupPaletteListeners(
     'palette-colors-reordered': (event: Event) => {
       const { fromIndex, toIndex } = (event as CustomEvent).detail;
       const newCels = handlePaletteReorder(getCels(), fromIndex, toIndex);
+      setCels(newCels);
+    },
+
+    'palette-colors-swapped': (event: Event) => {
+      const { indexA, indexB } = (event as CustomEvent).detail;
+      const newCels = handlePaletteSwap(getCels(), indexA, indexB);
       setCels(newCels);
     },
 

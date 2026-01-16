@@ -161,6 +161,19 @@ export class PFPaletteGrid extends BaseComponent {
       opacity: 0.4;
     }
 
+    /* Drag modifier mode indicators */
+    .palette-grid.drag-copy .swatch-container.drag-before::before {
+      background: var(--pf-color-ember-white, #fef3c7); /* Copy indicator */
+    }
+
+    .palette-grid.drag-swap .swatch-container.drag-before::before {
+      background: var(--pf-color-ember-hot, #f97316); /* Swap indicator */
+      width: 100%;
+      left: 0;
+      border-radius: 0;
+      opacity: 0.4;
+    }
+
     /* Replace mode */
     @keyframes wiggle {
       0%, 100% { transform: rotate(-2deg); }
@@ -189,6 +202,7 @@ export class PFPaletteGrid extends BaseComponent {
   @state() private dragOverIndex: number | null = null;
   @state() private isDragging = false;
   @state() private draggedIndex: number | null = null;
+  @state() private dragModifier: 'move' | 'copy' | 'swap' = 'move';
 
   private selectColor(color: string) {
     colorStore.setPrimaryColor(color);
@@ -230,29 +244,46 @@ export class PFPaletteGrid extends BaseComponent {
   }
 
   // Drag-drop handlers
+  private getModifierFromEvent(e: DragEvent | MouseEvent): 'move' | 'copy' | 'swap' {
+    // Ctrl (or Cmd on Mac) = copy, Shift = swap, neither = move
+    if (e.ctrlKey || e.metaKey) return 'copy';
+    if (e.shiftKey) return 'swap';
+    return 'move';
+  }
+
   private handleDragStart(index: number, color: string, e: DragEvent) {
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.effectAllowed = "copyMove";
       e.dataTransfer.setData("application/x-palette-index", String(index));
       e.dataTransfer.setData("application/x-palette-color", color);
     }
     this.isDragging = true;
     this.draggedIndex = index;
+    this.dragModifier = this.getModifierFromEvent(e);
   }
 
-  private handleDragEnd() {
+  private resetDragState() {
     this.isDragging = false;
     this.draggedIndex = null;
     this.dragOverIndex = null;
+    this.dragModifier = 'move';
+  }
+
+  private handleDragEnd() {
+    this.resetDragState();
   }
 
   private handleDragOver(index: number, e: DragEvent) {
     e.preventDefault();
+    const modifier = this.getModifierFromEvent(e);
     if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect = modifier === 'copy' ? 'copy' : 'move';
     }
     if (this.dragOverIndex !== index) {
       this.dragOverIndex = index;
+    }
+    if (this.dragModifier !== modifier) {
+      this.dragModifier = modifier;
     }
   }
 
@@ -267,12 +298,25 @@ export class PFPaletteGrid extends BaseComponent {
     const paletteIndexStr = e.dataTransfer?.getData("application/x-palette-index");
     const color = e.dataTransfer?.getData("application/x-palette-color");
     const isEphemeral = e.dataTransfer?.getData("application/x-ephemeral-color") === "true";
+    const modifier = this.getModifierFromEvent(e);
 
     if (paletteIndexStr !== undefined && paletteIndexStr !== "") {
       const fromIndex = parseInt(paletteIndexStr, 10);
-      if (fromIndex !== targetIndex && fromIndex !== targetIndex - 1) {
-        const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
-        paletteStore.moveColor(fromIndex, adjustedTarget);
+
+      if (modifier === 'swap') {
+        // Shift+drop: Swap positions directly
+        if (fromIndex !== targetIndex) {
+          paletteStore.swapColors(fromIndex, targetIndex);
+        }
+      } else if (modifier === 'copy') {
+        // Ctrl+drop: Duplicate color at target position
+        paletteStore.duplicateColor(fromIndex, targetIndex);
+      } else {
+        // Normal drop: Move color
+        if (fromIndex !== targetIndex && fromIndex !== targetIndex - 1) {
+          const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+          paletteStore.moveColor(fromIndex, adjustedTarget);
+        }
       }
     } else if (color && isEphemeral) {
       paletteStore.removeFromEphemeral(color);
@@ -282,9 +326,7 @@ export class PFPaletteGrid extends BaseComponent {
       }));
     }
 
-    this.isDragging = false;
-    this.draggedIndex = null;
-    this.dragOverIndex = null;
+    this.resetDragState();
   }
 
   private handleGridDragOver(e: DragEvent) {
@@ -305,9 +347,7 @@ export class PFPaletteGrid extends BaseComponent {
       paletteStore.addColor(color);
     }
 
-    this.isDragging = false;
-    this.draggedIndex = null;
-    this.dragOverIndex = null;
+    this.resetDragState();
   }
 
   private normalizeColor(color: string): string {
@@ -345,9 +385,11 @@ export class PFPaletteGrid extends BaseComponent {
     const fgColor = this.normalizeColor(colorStore.primaryColor.value);
     const bgColor = this.normalizeColor(colorStore.secondaryColor.value);
 
+    const dragModeClass = this.isDragging && this.dragModifier !== 'move' ? `drag-${this.dragModifier}` : '';
+
     return html`
       <div
-        class="palette-grid ${this.isDragging || this.dragOverIndex !== null ? "drag-active" : ""} ${this.replaceMode ? "replace-mode" : ""}"
+        class="palette-grid ${this.isDragging || this.dragOverIndex !== null ? "drag-active" : ""} ${this.replaceMode ? "replace-mode" : ""} ${dragModeClass}"
         @dragover=${this.handleGridDragOver}
         @drop=${this.handleGridDrop}
       >

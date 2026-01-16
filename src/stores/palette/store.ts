@@ -447,6 +447,44 @@ class PaletteStore {
     );
   }
 
+  swapColors(indexA: number, indexB: number) {
+    if (indexA === indexB) return;
+    if (indexA < 0 || indexA >= this.colors.value.length) return;
+    if (indexB < 0 || indexB >= this.colors.value.length) return;
+
+    const colors = [...this.colors.value];
+    [colors[indexA], colors[indexB]] = [colors[indexB], colors[indexA]];
+    this.colors.value = colors;
+    this.markDirty();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    window.dispatchEvent(
+      new CustomEvent('palette-colors-swapped', {
+        detail: { indexA: indexA + 1, indexB: indexB + 1 },
+      })
+    );
+  }
+
+  duplicateColor(index: number, targetIndex: number) {
+    if (index < 0 || index >= this.colors.value.length) return;
+    if (targetIndex < 0 || targetIndex > this.colors.value.length) return;
+
+    const color = this.colors.value[index];
+    const newColors = [...this.colors.value];
+    newColors.splice(targetIndex, 0, color);
+    this.colors.value = newColors;
+    this.markDirty();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    window.dispatchEvent(
+      new CustomEvent('palette-color-inserted', {
+        detail: { insertedIndex: targetIndex + 1 },
+      })
+    );
+  }
+
   removeColorToEphemeral(arrayIndex: number): void {
     if (arrayIndex < 0 || arrayIndex >= this.mainColors.value.length) return;
 

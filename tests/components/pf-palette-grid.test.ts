@@ -326,5 +326,413 @@ describe('PfPaletteGrid', () => {
       const grid = element.shadowRoot?.querySelector('.palette-grid');
       expect(grid?.classList.contains('drag-active')).toBe(true);
     });
+
+    it('should set correct data in dataTransfer on drag start', () => {
+      const swatch = getSwatchAt(element, 1) as HTMLElement; // Green at index 1
+
+      // Create a mock dataTransfer that captures setData calls
+      const setDataCalls: Array<[string, string]> = [];
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: (type: string, data: string) => { setDataCalls.push([type, data]); },
+        getData: () => '',
+      };
+
+      const dragStartEvent = new DragEvent('dragstart', { bubbles: true });
+      Object.defineProperty(dragStartEvent, 'dataTransfer', { value: mockDataTransfer });
+      swatch.dispatchEvent(dragStartEvent);
+
+      expect(setDataCalls).toContainEqual(['application/x-palette-index', '1']);
+      expect(setDataCalls).toContainEqual(['application/x-palette-color', '#00ff00']);
+    });
+
+    it('should track dragged index in component state', async () => {
+      const swatch = getSwatchAt(element, 2) as HTMLElement;
+      const dragStartEvent = new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      });
+      swatch.dispatchEvent(dragStartEvent);
+
+      expect((element as any).draggedIndex).toBe(2);
+      expect((element as any).isDragging).toBe(true);
+    });
+
+    it('should add dragging class to source swatch container', async () => {
+      const swatch = getSwatchAt(element, 1) as HTMLElement;
+      const dragStartEvent = new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      });
+      swatch.dispatchEvent(dragStartEvent);
+      await (element as any).updateComplete;
+
+      const containers = element.shadowRoot?.querySelectorAll('.swatch-container');
+      expect(containers?.[1]?.classList.contains('dragging')).toBe(true);
+    });
+
+    it('should show drag-before indicator on dragover', async () => {
+      // Start drag from index 0
+      const sourceSwatch = getSwatchAt(element, 0) as HTMLElement;
+      sourceSwatch.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      }));
+
+      // Drag over index 2
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[2] as HTMLElement;
+      targetContainer.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      }));
+      await (element as any).updateComplete;
+
+      expect(targetContainer.classList.contains('drag-before')).toBe(true);
+    });
+
+    it('should clear drag-before on dragleave', async () => {
+      // Start drag and hover over target
+      const sourceSwatch = getSwatchAt(element, 0) as HTMLElement;
+      sourceSwatch.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      }));
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[2] as HTMLElement;
+      targetContainer.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      }));
+      await (element as any).updateComplete;
+      expect((element as any).dragOverIndex).toBe(2);
+
+      // Leave the target
+      targetContainer.dispatchEvent(new DragEvent('dragleave', { bubbles: true }));
+      await (element as any).updateComplete;
+
+      expect((element as any).dragOverIndex).toBe(null);
+    });
+
+    it('should reorder colors on drop', async () => {
+      const spy = vi.spyOn(paletteStore, 'moveColor');
+
+      // Create mock dataTransfer that returns data
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '0'],
+        ['application/x-palette-color', '#ff0000'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[3] as HTMLElement;
+      const dropEvent = new DragEvent('drop', { bubbles: true });
+      Object.defineProperty(dropEvent, 'dataTransfer', { value: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      // Should move from 0 to adjusted index (3-1=2 since source < target)
+      expect(spy).toHaveBeenCalledWith(0, 2);
+    });
+
+    it('should not move when dropping on same position', async () => {
+      const spy = vi.spyOn(paletteStore, 'moveColor');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '2'],
+        ['application/x-palette-color', '#0000ff'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[2] as HTMLElement;
+      const dropEvent = new DragEvent('drop', { bubbles: true });
+      Object.defineProperty(dropEvent, 'dataTransfer', { value: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('should not move when dropping on adjacent position', async () => {
+      const spy = vi.spyOn(paletteStore, 'moveColor');
+
+      // Dropping index 2 onto index 3 (adjacent) shouldn't move
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '2'],
+        ['application/x-palette-color', '#0000ff'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[3] as HTMLElement;
+      const dropEvent = new DragEvent('drop', { bubbles: true });
+      Object.defineProperty(dropEvent, 'dataTransfer', { value: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      // fromIndex (2) !== targetIndex - 1 (2), so this should not call moveColor
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('should clean up state on drag end', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      // Start drag
+      swatch.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      }));
+      expect((element as any).isDragging).toBe(true);
+
+      // End drag
+      swatch.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+
+      expect((element as any).isDragging).toBe(false);
+      expect((element as any).draggedIndex).toBe(null);
+      expect((element as any).dragOverIndex).toBe(null);
+    });
+
+    it('should remove drag-active class after drag end', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      swatch.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      }));
+      await (element as any).updateComplete;
+
+      const grid = element.shadowRoot?.querySelector('.palette-grid');
+      expect(grid?.classList.contains('drag-active')).toBe(true);
+
+      swatch.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+      await (element as any).updateComplete;
+
+      expect(grid?.classList.contains('drag-active')).toBe(false);
+    });
+
+    it('should handle ephemeral color drop from untracked section', async () => {
+      const removeFromEphemeralSpy = vi.spyOn(paletteStore, 'removeFromEphemeral');
+      const insertColorAtSpy = vi.spyOn(paletteStore, 'insertColorAt');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-color', '#ffff00'],
+        ['application/x-ephemeral-color', 'true'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[2] as HTMLElement;
+      const dropEvent = new DragEvent('drop', { bubbles: true });
+      Object.defineProperty(dropEvent, 'dataTransfer', { value: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      expect(removeFromEphemeralSpy).toHaveBeenCalledWith('#ffff00');
+      expect(insertColorAtSpy).toHaveBeenCalledWith(3, '#ffff00'); // targetIndex + 1
+    });
+
+    it('should handle drop on grid (append ephemeral)', async () => {
+      const removeFromEphemeralSpy = vi.spyOn(paletteStore, 'removeFromEphemeral');
+      const addColorSpy = vi.spyOn(paletteStore, 'addColor');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-color', '#ff00ff'],
+        ['application/x-ephemeral-color', 'true'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const grid = element.shadowRoot?.querySelector('.palette-grid') as HTMLElement;
+      const dropEvent = new DragEvent('drop', { bubbles: true });
+      Object.defineProperty(dropEvent, 'dataTransfer', { value: mockDataTransfer });
+      grid.dispatchEvent(dropEvent);
+
+      expect(removeFromEphemeralSpy).toHaveBeenCalledWith('#ff00ff');
+      expect(addColorSpy).toHaveBeenCalledWith('#ff00ff');
+    });
+  });
+
+  describe('Drag Modifier Keys', () => {
+    // Helper to create a DragEvent with proper modifier keys
+    function createDragEvent(
+      type: string,
+      options: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; dataTransfer?: object } = {}
+    ): DragEvent {
+      const event = new DragEvent(type, { bubbles: true });
+      if (options.shiftKey) Object.defineProperty(event, 'shiftKey', { value: true });
+      if (options.ctrlKey) Object.defineProperty(event, 'ctrlKey', { value: true });
+      if (options.metaKey) Object.defineProperty(event, 'metaKey', { value: true });
+      if (options.dataTransfer) Object.defineProperty(event, 'dataTransfer', { value: options.dataTransfer });
+      return event;
+    }
+
+    it('should swap colors when Shift is held during drop', async () => {
+      const swapSpy = vi.spyOn(paletteStore, 'swapColors');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '0'],
+        ['application/x-palette-color', '#ff0000'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[3] as HTMLElement;
+      const dropEvent = createDragEvent('drop', { shiftKey: true, dataTransfer: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      expect(swapSpy).toHaveBeenCalledWith(0, 3);
+    });
+
+    it('should duplicate color when Ctrl is held during drop', async () => {
+      const duplicateSpy = vi.spyOn(paletteStore, 'duplicateColor');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '1'],
+        ['application/x-palette-color', '#00ff00'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'copy',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[4] as HTMLElement;
+      const dropEvent = createDragEvent('drop', { ctrlKey: true, dataTransfer: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      expect(duplicateSpy).toHaveBeenCalledWith(1, 4);
+    });
+
+    it('should duplicate color when Meta (Cmd) is held during drop', async () => {
+      const duplicateSpy = vi.spyOn(paletteStore, 'duplicateColor');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '2'],
+        ['application/x-palette-color', '#0000ff'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'copy',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[0] as HTMLElement;
+      const dropEvent = createDragEvent('drop', { metaKey: true, dataTransfer: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      expect(duplicateSpy).toHaveBeenCalledWith(2, 0);
+    });
+
+    it('should track modifier state during drag', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: () => {},
+        getData: () => '',
+      };
+      const dragStartEvent = createDragEvent('dragstart', { shiftKey: true, dataTransfer: mockDataTransfer });
+      swatch.dispatchEvent(dragStartEvent);
+
+      expect((element as any).dragModifier).toBe('swap');
+    });
+
+    it('should update modifier state on dragover when modifier changes', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      const mockDataTransfer = {
+        effectAllowed: '',
+        dropEffect: '',
+        setData: () => {},
+        getData: () => '',
+      };
+
+      // Start drag without modifier
+      const dragStartEvent = createDragEvent('dragstart', { dataTransfer: mockDataTransfer });
+      swatch.dispatchEvent(dragStartEvent);
+      expect((element as any).dragModifier).toBe('move');
+
+      // Drag over with Ctrl held
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[2] as HTMLElement;
+      const dragOverEvent = createDragEvent('dragover', { ctrlKey: true, dataTransfer: mockDataTransfer });
+      targetContainer.dispatchEvent(dragOverEvent);
+
+      expect((element as any).dragModifier).toBe('copy');
+    });
+
+    it('should add drag-copy class when Ctrl is held', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: () => {},
+        getData: () => '',
+      };
+      const dragStartEvent = createDragEvent('dragstart', { ctrlKey: true, dataTransfer: mockDataTransfer });
+      swatch.dispatchEvent(dragStartEvent);
+      await (element as any).updateComplete;
+
+      const grid = element.shadowRoot?.querySelector('.palette-grid');
+      expect(grid?.classList.contains('drag-copy')).toBe(true);
+    });
+
+    it('should add drag-swap class when Shift is held', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: () => {},
+        getData: () => '',
+      };
+      const dragStartEvent = createDragEvent('dragstart', { shiftKey: true, dataTransfer: mockDataTransfer });
+      swatch.dispatchEvent(dragStartEvent);
+      await (element as any).updateComplete;
+
+      const grid = element.shadowRoot?.querySelector('.palette-grid');
+      expect(grid?.classList.contains('drag-swap')).toBe(true);
+    });
+
+    it('should not swap when dropping on same index', async () => {
+      const swapSpy = vi.spyOn(paletteStore, 'swapColors');
+
+      const dataStore = new Map<string, string>([
+        ['application/x-palette-index', '2'],
+        ['application/x-palette-color', '#0000ff'],
+      ]);
+      const mockDataTransfer = {
+        dropEffect: 'move',
+        getData: (type: string) => dataStore.get(type) ?? '',
+      };
+
+      const targetContainer = element.shadowRoot?.querySelectorAll('.swatch-container')[2] as HTMLElement;
+      const dropEvent = createDragEvent('drop', { shiftKey: true, dataTransfer: mockDataTransfer });
+      targetContainer.dispatchEvent(dropEvent);
+
+      expect(swapSpy).not.toHaveBeenCalled();
+    });
+
+    it('should reset modifier state after drag end', async () => {
+      const swatch = getSwatchAt(element, 0) as HTMLElement;
+
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: () => {},
+        getData: () => '',
+      };
+      const dragStartEvent = createDragEvent('dragstart', { shiftKey: true, dataTransfer: mockDataTransfer });
+      swatch.dispatchEvent(dragStartEvent);
+      expect((element as any).dragModifier).toBe('swap');
+
+      // End drag
+      swatch.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+
+      expect((element as any).dragModifier).toBe('move');
+    });
   });
 });
