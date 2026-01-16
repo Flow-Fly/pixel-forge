@@ -497,6 +497,8 @@ export class PFImportTilesetDialog extends BaseComponent {
   close(): void {
     this.open = false;
     this.imageFile = null;
+    // Release GPU/memory resources before nulling reference (NFR6)
+    this.imageBitmap?.close();
     this.imageBitmap = null;
     this.errorMessage = '';
     this.tileWidth = 16;
@@ -509,7 +511,11 @@ export class PFImportTilesetDialog extends BaseComponent {
     if (e.key === 'Escape') {
       this.close();
     } else if (e.key === 'Enter' && this.validateConfiguration()) {
-      this.handleImport();
+      // Only trigger import from buttons, not from input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName !== 'INPUT') {
+        this.handleImport();
+      }
     }
   }
 
@@ -584,6 +590,15 @@ export class PFImportTilesetDialog extends BaseComponent {
 
   protected updated(changedProperties: PropertyValues): void {
     super.updated(changedProperties);
+
+    // Set initial focus when dialog opens (Task 9.4)
+    if (changedProperties.has('open') && this.open) {
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        const tileWidthInput = this.shadowRoot?.querySelector<HTMLInputElement>('#tile-width');
+        tileWidthInput?.focus();
+      });
+    }
 
     if (changedProperties.has('tileWidth') ||
         changedProperties.has('tileHeight') ||
