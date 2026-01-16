@@ -735,4 +735,215 @@ describe('PfPaletteGrid', () => {
       expect((element as any).dragModifier).toBe('move');
     });
   });
+
+  describe('Inline Ephemeral Colors', () => {
+    beforeEach(async () => {
+      // Add ephemeral colors
+      paletteStore.ephemeralColors.value = ['#ffff00', '#ff00ff'];
+      await (element as any).updateComplete;
+    });
+
+    it('should render ephemeral colors with dashed border', async () => {
+      const swatches = getSwatches(element);
+      // 5 main + 2 ephemeral = 7 swatches
+      expect(swatches.length).toBe(7);
+
+      // Last two should be ephemeral (have swatch-uncommitted class)
+      expect(swatches[5]?.classList.contains('swatch-uncommitted')).toBe(true);
+      expect(swatches[6]?.classList.contains('swatch-uncommitted')).toBe(true);
+    });
+
+    it('should show commit button on ephemeral swatches', async () => {
+      const containers = element.shadowRoot?.querySelectorAll('.swatch-container');
+      // Ephemeral containers should have commit button
+      const commitButtons = containers?.[5]?.querySelectorAll('.swatch-commit');
+      expect(commitButtons?.length).toBe(1);
+    });
+
+    it('should show discard button on ephemeral swatches', async () => {
+      const containers = element.shadowRoot?.querySelectorAll('.swatch-container');
+      // Ephemeral containers should have discard button
+      const discardButtons = containers?.[5]?.querySelectorAll('.swatch-discard');
+      expect(discardButtons?.length).toBe(1);
+    });
+
+    it('should call promoteEphemeralColor on commit click', async () => {
+      const spy = vi.spyOn(paletteStore, 'promoteEphemeralColor');
+
+      const commitButton = element.shadowRoot?.querySelectorAll('.swatch-commit')[0];
+      commitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(spy).toHaveBeenCalledWith('#ffff00');
+    });
+
+    it('should call removeFromEphemeral on discard click', async () => {
+      const spy = vi.spyOn(paletteStore, 'removeFromEphemeral');
+
+      const discardButton = element.shadowRoot?.querySelectorAll('.swatch-discard')[0];
+      discardButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(spy).toHaveBeenCalledWith('#ffff00');
+    });
+
+    it('should promote ephemeral color on right-click', async () => {
+      const spy = vi.spyOn(paletteStore, 'promoteEphemeralColor');
+
+      const ephemeralSwatch = getSwatchAt(element, 5); // First ephemeral
+      ephemeralSwatch?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+
+      expect(spy).toHaveBeenCalledWith('#ffff00');
+    });
+
+    it('should show "(uncommitted)" in tooltip for ephemeral colors', async () => {
+      const ephemeralSwatch = getSwatchAt(element, 5);
+      const title = ephemeralSwatch?.getAttribute('title');
+      expect(title).toContain('uncommitted');
+    });
+
+    it('should not show delete button on ephemeral swatches', async () => {
+      const containers = element.shadowRoot?.querySelectorAll('.swatch-container');
+      // Ephemeral containers should NOT have delete button (only commit/discard)
+      const deleteButtons = containers?.[5]?.querySelectorAll('.swatch-delete');
+      expect(deleteButtons?.length).toBe(0);
+    });
+  });
+
+  describe('Keyboard Accessibility', () => {
+    beforeEach(async () => {
+      paletteStore.ephemeralColors.value = ['#ffff00'];
+      await (element as any).updateComplete;
+    });
+
+    it('should commit color when Enter pressed on commit button', async () => {
+      const spy = vi.spyOn(paletteStore, 'promoteEphemeralColor');
+
+      const commitButton = element.shadowRoot?.querySelector('.swatch-commit') as HTMLElement;
+      commitButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+      expect(spy).toHaveBeenCalledWith('#ffff00');
+    });
+
+    it('should commit color when Space pressed on commit button', async () => {
+      const spy = vi.spyOn(paletteStore, 'promoteEphemeralColor');
+
+      const commitButton = element.shadowRoot?.querySelector('.swatch-commit') as HTMLElement;
+      commitButton?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+
+      expect(spy).toHaveBeenCalledWith('#ffff00');
+    });
+
+    it('should discard color when Enter pressed on discard button', async () => {
+      const spy = vi.spyOn(paletteStore, 'removeFromEphemeral');
+
+      const discardButton = element.shadowRoot?.querySelector('.swatch-discard') as HTMLElement;
+      discardButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+      expect(spy).toHaveBeenCalledWith('#ffff00');
+    });
+
+    it('should have tabindex on commit and discard buttons', async () => {
+      const commitButton = element.shadowRoot?.querySelector('.swatch-commit');
+      const discardButton = element.shadowRoot?.querySelector('.swatch-discard');
+
+      expect(commitButton?.getAttribute('tabindex')).toBe('0');
+      expect(discardButton?.getAttribute('tabindex')).toBe('0');
+    });
+  });
+
+  describe('Hue Group Display', () => {
+    it('should show group dividers when autoSort is enabled', async () => {
+      paletteStore.mainColors.value = ['#ff0000', '#00ff00', '#0000ff'];
+      paletteStore.setAutoSortByHue(true);
+      await (element as any).updateComplete;
+
+      const groupStarts = element.shadowRoot?.querySelectorAll('.hue-group-start');
+      expect(groupStarts?.length).toBeGreaterThanOrEqual(1);
+
+      // Cleanup
+      paletteStore.setAutoSortByHue(false);
+    });
+
+    it('should not mark first group with hue-group-start', async () => {
+      paletteStore.mainColors.value = ['#ff0000', '#00ff00', '#0000ff'];
+      paletteStore.setAutoSortByHue(true);
+      await (element as any).updateComplete;
+
+      // First container should NOT have hue-group-start (it's the first group)
+      const containers = element.shadowRoot?.querySelectorAll('.swatch-container');
+      expect(containers?.[0]?.classList.contains('hue-group-start')).toBe(false);
+
+      // Cleanup
+      paletteStore.setAutoSortByHue(false);
+    });
+
+    it('should not show dividers when autoSort is disabled', async () => {
+      paletteStore.mainColors.value = ['#ff0000', '#00ff00', '#0000ff'];
+      paletteStore.setAutoSortByHue(false);
+      await (element as any).updateComplete;
+
+      const groupStarts = element.shadowRoot?.querySelectorAll('.hue-group-start');
+      expect(groupStarts?.length).toBe(0);
+    });
+
+    it('should preserve ephemeral state when toggling autoSort', async () => {
+      paletteStore.mainColors.value = ['#ff0000'];
+      paletteStore.ephemeralColors.value = ['#00ff00'];
+
+      paletteStore.setAutoSortByHue(true);
+      await (element as any).updateComplete;
+
+      // Find ephemeral swatch
+      const uncommittedSwatches = element.shadowRoot?.querySelectorAll('.swatch-uncommitted');
+      expect(uncommittedSwatches?.length).toBe(1);
+
+      paletteStore.setAutoSortByHue(false);
+      await (element as any).updateComplete;
+
+      const uncommittedAfter = element.shadowRoot?.querySelectorAll('.swatch-uncommitted');
+      expect(uncommittedAfter?.length).toBe(1);
+
+      // Cleanup
+      paletteStore.setAutoSortByHue(false);
+    });
+  });
+
+  describe('Ephemeral Drag-Drop', () => {
+    beforeEach(async () => {
+      paletteStore.ephemeralColors.value = ['#ffff00'];
+      await (element as any).updateComplete;
+    });
+
+    it('should allow dragging ephemeral colors', async () => {
+      const ephemeralSwatch = getSwatchAt(element, 5) as HTMLElement; // First ephemeral
+
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: vi.fn(),
+        getData: () => '',
+      };
+      const dragStartEvent = new DragEvent('dragstart', { bubbles: true });
+      Object.defineProperty(dragStartEvent, 'dataTransfer', { value: mockDataTransfer });
+      ephemeralSwatch.dispatchEvent(dragStartEvent);
+
+      expect(mockDataTransfer.setData).toHaveBeenCalledWith('application/x-palette-color', '#ffff00');
+      expect(mockDataTransfer.setData).toHaveBeenCalledWith('application/x-ephemeral-color', 'true');
+    });
+
+    it('should set isEphemeral data when dragging ephemeral color', async () => {
+      const ephemeralSwatch = getSwatchAt(element, 5) as HTMLElement;
+
+      const setDataCalls: Array<[string, string]> = [];
+      const mockDataTransfer = {
+        effectAllowed: '',
+        setData: (type: string, data: string) => { setDataCalls.push([type, data]); },
+        getData: () => '',
+      };
+
+      const dragStartEvent = new DragEvent('dragstart', { bubbles: true });
+      Object.defineProperty(dragStartEvent, 'dataTransfer', { value: mockDataTransfer });
+      ephemeralSwatch.dispatchEvent(dragStartEvent);
+
+      expect(setDataCalls).toContainEqual(['application/x-ephemeral-color', 'true']);
+    });
+  });
 });

@@ -14,6 +14,18 @@ export interface HSL {
   l: number;
 }
 
+export interface XYZ {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface Lab {
+  l: number; // Lightness (0-100)
+  a: number; // Green-Red axis (-128 to +128)
+  b: number; // Blue-Yellow axis (-128 to +128)
+}
+
 /**
  * Normalize hex color to lowercase 6-digit format.
  */
@@ -127,4 +139,91 @@ export function hslDistance(a: HSL, b: HSL): number {
   return Math.sqrt(
     hueDiff * hueDiff * 2 + satDiff * satDiff + lightDiff * lightDiff
   );
+}
+
+// D65 illuminant reference values
+const REF_X = 95.047;
+const REF_Y = 100.0;
+const REF_Z = 108.883;
+
+/**
+ * Convert RGB (0-255) to XYZ color space.
+ */
+export function rgbToXyz(r: number, g: number, b: number): XYZ {
+  // Normalize to 0-1 and apply sRGB companding
+  let rLinear = r / 255;
+  let gLinear = g / 255;
+  let bLinear = b / 255;
+
+  // Apply gamma correction (sRGB)
+  rLinear = rLinear > 0.04045
+    ? Math.pow((rLinear + 0.055) / 1.055, 2.4)
+    : rLinear / 12.92;
+  gLinear = gLinear > 0.04045
+    ? Math.pow((gLinear + 0.055) / 1.055, 2.4)
+    : gLinear / 12.92;
+  bLinear = bLinear > 0.04045
+    ? Math.pow((bLinear + 0.055) / 1.055, 2.4)
+    : bLinear / 12.92;
+
+  // Scale to 0-100
+  rLinear *= 100;
+  gLinear *= 100;
+  bLinear *= 100;
+
+  // Convert to XYZ using sRGB matrix
+  const x = rLinear * 0.4124564 + gLinear * 0.3575761 + bLinear * 0.1804375;
+  const y = rLinear * 0.2126729 + gLinear * 0.7151522 + bLinear * 0.0721750;
+  const z = rLinear * 0.0193339 + gLinear * 0.1191920 + bLinear * 0.9503041;
+
+  return { x, y, z };
+}
+
+/**
+ * Convert XYZ to CIE Lab color space.
+ */
+export function xyzToLab(x: number, y: number, z: number): Lab {
+  // Normalize by reference white (D65)
+  let xNorm = x / REF_X;
+  let yNorm = y / REF_Y;
+  let zNorm = z / REF_Z;
+
+  // Apply Lab transform function
+  const epsilon = 0.008856; // (6/29)^3
+  const kappa = 903.3; // (29/3)^3
+
+  xNorm = xNorm > epsilon ? Math.cbrt(xNorm) : (kappa * xNorm + 16) / 116;
+  yNorm = yNorm > epsilon ? Math.cbrt(yNorm) : (kappa * yNorm + 16) / 116;
+  zNorm = zNorm > epsilon ? Math.cbrt(zNorm) : (kappa * zNorm + 16) / 116;
+
+  const l = 116 * yNorm - 16;
+  const a = 500 * (xNorm - yNorm);
+  const b = 200 * (yNorm - zNorm);
+
+  return { l, a, b };
+}
+
+/**
+ * Convert RGB (0-255) directly to CIE Lab.
+ */
+export function rgbToLab(r: number, g: number, b: number): Lab {
+  const xyz = rgbToXyz(r, g, b);
+  return xyzToLab(xyz.x, xyz.y, xyz.z);
+}
+
+/**
+ * Get Lab hue angle in degrees (0-360).
+ * This is the angle in the a*b* plane.
+ */
+export function labHue(lab: Lab): number {
+  const hue = Math.atan2(lab.b, lab.a) * (180 / Math.PI);
+  return hue < 0 ? hue + 360 : hue;
+}
+
+/**
+ * Get Lab chroma (saturation equivalent).
+ * This is the distance from the neutral axis in the a*b* plane.
+ */
+export function labChroma(lab: Lab): number {
+  return Math.sqrt(lab.a * lab.a + lab.b * lab.b);
 }

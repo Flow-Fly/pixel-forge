@@ -24,8 +24,13 @@ export {
   rgbToHsl,
   hslToRgb,
   hslDistance,
+  rgbToXyz,
+  xyzToLab,
+  rgbToLab,
+  labHue,
+  labChroma,
 } from './color-utils';
-export type { RGB, HSL } from './color-utils';
+export type { RGB, HSL, XYZ, Lab } from './color-utils';
 
 // Indexed color operations
 export {
@@ -61,9 +66,22 @@ export {
   getPaletteName,
 } from './persistence';
 
+// Hue grouping
+export {
+  HueFamily,
+  SortMode,
+  getHueFamily,
+  getHueFamilyColor,
+  groupColorsByHue,
+  sortWithinGroup,
+  getMergedDisplayColors,
+} from './hue-grouping';
+export type { DisplayColor } from './hue-grouping';
+
 // Module re-exports for direct access
 export * as colorUtils from './color-utils';
 export * as indexedColor from './indexed-color';
 export * as extraction from './extraction';
 export * as variations from './variations';
 export * as persistence from './persistence';
+export * as hueGrouping from './hue-grouping';

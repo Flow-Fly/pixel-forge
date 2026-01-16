@@ -1,7 +1,7 @@
 import { html, css } from "lit";
 import { customElement, state, query } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
-import { paletteStore } from "../../../stores/palette";
+import { paletteStore, SortMode } from "../../../stores/palette";
 import "../../ui";
 
 @customElement("pf-palette-toolbar")
@@ -58,6 +58,21 @@ export class PFPaletteToolbar extends BaseComponent {
 
     .add-btn {
       font-size: 18px;
+    }
+
+    .toolbar-btn.active {
+      background: var(--pf-color-accent, #4a9eff);
+      color: white;
+      border-color: var(--pf-color-accent, #4a9eff);
+    }
+
+    .toolbar-btn.active:hover {
+      background: var(--pf-color-accent, #4a9eff);
+      opacity: 0.9;
+    }
+
+    .hue-sort-btn {
+      font-size: 12px;
     }
 
     /* Menu popover content */
@@ -263,12 +278,35 @@ export class PFPaletteToolbar extends BaseComponent {
     paletteStore.addColor(color);
   }
 
+  private handleSortModeClick() {
+    paletteStore.cycleSortMode();
+  }
+
+  private getSortModeLabel(mode: SortMode): string {
+    switch (mode) {
+      case SortMode.HSL: return 'HSL';
+      case SortMode.Lab: return 'Lab';
+      default: return '';
+    }
+  }
+
+  private getSortModeTitle(mode: SortMode): string {
+    switch (mode) {
+      case SortMode.None: return 'Sort by hue (click to enable HSL)';
+      case SortMode.HSL: return 'HSL hue sorting (click for Lab)';
+      case SortMode.Lab: return 'CIE Lab sorting (click to disable)';
+      default: return 'Sort by hue';
+    }
+  }
+
   render() {
     const isDirty = paletteStore.isDirty.value;
     const isCustomPalette = paletteStore.isCustomPalette();
     const isPresetPalette = paletteStore.isPresetPalette();
     const canRename = isCustomPalette;
     const canReset = isPresetPalette && isDirty;
+    const sortMode = paletteStore.sortMode.value;
+    const sortActive = sortMode !== SortMode.None;
 
     return html`
       <slot></slot>
@@ -287,6 +325,14 @@ export class PFPaletteToolbar extends BaseComponent {
         title="Palette options"
       >
         &#8942;
+      </button>
+
+      <button
+        class="toolbar-btn hue-sort-btn ${sortActive ? "active" : ""}"
+        @click=${this.handleSortModeClick}
+        title="${this.getSortModeTitle(sortMode)}"
+      >
+        ${sortActive ? this.getSortModeLabel(sortMode) : html`&#127912;`}
       </button>
 
       <button

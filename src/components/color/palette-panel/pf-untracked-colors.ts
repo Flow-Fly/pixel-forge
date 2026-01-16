@@ -1,3 +1,15 @@
+/**
+ * @deprecated Use inline ephemeral colors in pf-palette-grid instead.
+ * This component is no longer used and will be removed in the next major version.
+ *
+ * Ephemeral colors are now rendered inline within the main palette grid with:
+ * - Dashed borders to indicate uncommitted status
+ * - Commit (+) and discard (x) buttons on hover
+ * - Right-click to promote to main palette
+ *
+ * See pf-palette-grid.ts for the new implementation.
+ */
+
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";

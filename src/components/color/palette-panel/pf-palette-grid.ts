@@ -3,6 +3,7 @@ import { customElement, state, property } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
 import { colorStore } from "../../../stores/colors";
 import { paletteStore } from "../../../stores/palette";
+import type { DisplayColor } from "../../../stores/palette";
 
 @customElement("pf-palette-grid")
 export class PFPaletteGrid extends BaseComponent {
@@ -194,6 +195,101 @@ export class PFPaletteGrid extends BaseComponent {
     .palette-grid.replace-mode .swatch-delete {
       display: none;
     }
+
+    /* Uncommitted (ephemeral) swatch styles */
+    .swatch-uncommitted {
+      border: 1px dashed var(--pf-color-border, #444);
+      box-sizing: border-box;
+    }
+
+    .swatch-uncommitted:hover {
+      border-color: var(--pf-color-accent, #4a9eff);
+    }
+
+    /* Commit button (+) for uncommitted swatches */
+    .swatch-commit {
+      position: absolute;
+      top: -4px;
+      right: 10px;
+      width: 14px;
+      height: 14px;
+      background: rgba(72, 187, 120, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.3);
+      border-radius: 50%;
+      color: white;
+      font-size: 12px;
+      line-height: 12px;
+      text-align: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.1s ease;
+      z-index: 10;
+      padding: 0;
+    }
+
+    .swatch-container:hover .swatch-commit {
+      opacity: 1;
+    }
+
+    .swatch-commit:hover {
+      background: #48bb78;
+      transform: scale(1.1);
+    }
+
+    .swatch-commit:focus,
+    .swatch-discard:focus {
+      outline: 2px solid var(--pf-color-accent, #4a9eff);
+      outline-offset: 1px;
+      opacity: 1;
+    }
+
+    /* Discard button (x) for uncommitted swatches - reuses swatch-delete styling */
+    .swatch-discard {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 14px;
+      height: 14px;
+      background: rgba(197, 48, 48, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.3);
+      border-radius: 50%;
+      color: white;
+      font-size: 10px;
+      line-height: 12px;
+      text-align: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.1s ease;
+      z-index: 10;
+      padding: 0;
+    }
+
+    .swatch-container:hover .swatch-discard {
+      opacity: 1;
+    }
+
+    .swatch-discard:hover {
+      background: #c53030;
+      transform: scale(1.1);
+    }
+
+    /* Hue group visual separation - left border on first item of each group */
+    .swatch-container.hue-group-start {
+      position: relative;
+    }
+
+    .swatch-container.hue-group-start::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: 2px;
+      bottom: 2px;
+      width: 2px;
+      background: var(--pf-color-accent, #4a9eff);
+      border-radius: 1px;
+      z-index: 5;
+    }
+
   `;
 
   @property({ type: Boolean }) replaceMode = false;
@@ -241,6 +337,29 @@ export class PFPaletteGrid extends BaseComponent {
   private handleDeleteColor(e: Event, index: number) {
     e.stopPropagation();
     paletteStore.removeColorToEphemeral(index);
+  }
+
+  private handleCommitColor(e: Event, color: string) {
+    e.stopPropagation();
+    paletteStore.promoteEphemeralColor(color);
+  }
+
+  private handleDiscardColor(e: Event, color: string) {
+    e.stopPropagation();
+    paletteStore.removeFromEphemeral(color);
+  }
+
+  private handleEphemeralRightClick(e: MouseEvent, color: string) {
+    e.preventDefault();
+    // Right-click on ephemeral = promote to main palette
+    paletteStore.promoteEphemeralColor(color);
+  }
+
+  private handleButtonKeydown(e: KeyboardEvent, action: () => void) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      action();
+    }
   }
 
   // Drag-drop handlers
@@ -380,11 +499,112 @@ export class PFPaletteGrid extends BaseComponent {
     return "";
   }
 
-  render() {
-    const colors = paletteStore.mainColors.value;
+  private renderSwatch(displayColor: DisplayColor, visualIndex: number) {
+    const { color, isEphemeral, originalIndex, groupStart, hueFamily } = displayColor;
+    const normalizedColor = this.normalizeColor(color);
+    const usageClass = this.getUsageClass(normalizedColor);
+    const usageTitle = this.getUsageTitle(normalizedColor);
     const fgColor = this.normalizeColor(colorStore.primaryColor.value);
     const bgColor = this.normalizeColor(colorStore.secondaryColor.value);
+    const isFg = normalizedColor === fgColor;
+    const isBg = normalizedColor === bgColor;
 
+    // Build container classes
+    const containerClasses = [
+      "swatch-container",
+      this.dragOverIndex === visualIndex ? "drag-before" : "",
+      this.draggedIndex === visualIndex ? "dragging" : "",
+      groupStart ? "hue-group-start" : "",
+    ].filter(Boolean).join(" ");
+
+    // Build swatch classes
+    const swatchClasses = [
+      "swatch",
+      usageClass,
+      isEphemeral ? "swatch-uncommitted" : "",
+    ].filter(Boolean).join(" ");
+
+    // Build title
+    const title = isEphemeral
+      ? `${color} (uncommitted) - Click + to add to palette${usageTitle}`
+      : `${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${usageTitle}${isFg ? " (FG)" : ""}${isBg ? " (BG)" : ""}`;
+
+    return html`
+      <div
+        class="${containerClasses}"
+        @dragover=${(e: DragEvent) => this.handleDragOver(visualIndex, e)}
+        @dragleave=${this.handleDragLeave}
+        @drop=${(e: DragEvent) => this.handleDrop(visualIndex, e)}
+      >
+        <div
+          class="${swatchClasses}"
+          style="background-color: ${color}"
+          title="${title}"
+          draggable="${!this.replaceMode}"
+          @click=${(e: Event) => isEphemeral
+            ? this.selectColor(color)
+            : this.handleSwatchClick(color, originalIndex, e)}
+          @dblclick=${(e: MouseEvent) => isEphemeral
+            ? null
+            : this.handleSwatchDoubleClick(e, color, originalIndex)}
+          @contextmenu=${(e: MouseEvent) => isEphemeral
+            ? this.handleEphemeralRightClick(e, color)
+            : this.handleSwatchRightClick(e, color)}
+          @dragstart=${(e: DragEvent) => this.handleSwatchDragStart(displayColor, visualIndex, e)}
+          @dragend=${this.handleDragEnd}
+        >
+          ${isFg ? html`<span class="indicator-fg"></span>` : ""}
+          ${isBg ? html`<span class="indicator-bg"></span>` : ""}
+        </div>
+        ${isEphemeral ? html`
+          <button
+            class="swatch-commit"
+            tabindex="0"
+            @click=${(e: Event) => this.handleCommitColor(e, color)}
+            @keydown=${(e: KeyboardEvent) => this.handleButtonKeydown(e, () => paletteStore.promoteEphemeralColor(color))}
+            title="Add to palette"
+          >
+            +
+          </button>
+          <button
+            class="swatch-discard"
+            tabindex="0"
+            @click=${(e: Event) => this.handleDiscardColor(e, color)}
+            @keydown=${(e: KeyboardEvent) => this.handleButtonKeydown(e, () => paletteStore.removeFromEphemeral(color))}
+            title="Discard"
+          >
+            ×
+          </button>
+        ` : html`
+          <button
+            class="swatch-delete"
+            @click=${(e: Event) => this.handleDeleteColor(e, originalIndex)}
+            title="Remove from palette (move to untracked)"
+          >
+            ×
+          </button>
+        `}
+      </div>
+    `;
+  }
+
+  private handleSwatchDragStart(displayColor: DisplayColor, visualIndex: number, e: DragEvent) {
+    const { color, isEphemeral, originalIndex } = displayColor;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "copyMove";
+      if (!isEphemeral) {
+        e.dataTransfer.setData("application/x-palette-index", String(originalIndex));
+      }
+      e.dataTransfer.setData("application/x-palette-color", color);
+      e.dataTransfer.setData("application/x-ephemeral-color", String(isEphemeral));
+    }
+    this.isDragging = true;
+    this.draggedIndex = visualIndex;
+    this.dragModifier = this.getModifierFromEvent(e);
+  }
+
+  render() {
+    const displayColors = paletteStore.displayColors.value;
     const dragModeClass = this.isDragging && this.dragModifier !== 'move' ? `drag-${this.dragModifier}` : '';
 
     return html`
@@ -393,43 +613,9 @@ export class PFPaletteGrid extends BaseComponent {
         @dragover=${this.handleGridDragOver}
         @drop=${this.handleGridDrop}
       >
-        ${colors.map((color, index) => {
-          const normalizedColor = this.normalizeColor(color);
-          const usageClass = this.getUsageClass(normalizedColor);
-          const usageTitle = this.getUsageTitle(normalizedColor);
-          const isFg = normalizedColor === fgColor;
-          const isBg = normalizedColor === bgColor;
-          return html`
-            <div
-              class="swatch-container ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
-              @dragover=${(e: DragEvent) => this.handleDragOver(index, e)}
-              @dragleave=${this.handleDragLeave}
-              @drop=${(e: DragEvent) => this.handleDrop(index, e)}
-            >
-              <div
-                class="swatch ${usageClass}"
-                style="background-color: ${color}"
-                title="${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${usageTitle}${isFg ? " (FG)" : ""}${isBg ? " (BG)" : ""}"
-                draggable="${!this.replaceMode}"
-                @click=${(e: Event) => this.handleSwatchClick(color, index, e)}
-                @dblclick=${(e: MouseEvent) => this.handleSwatchDoubleClick(e, color, index)}
-                @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color)}
-                @dragstart=${(e: DragEvent) => this.handleDragStart(index, color, e)}
-                @dragend=${this.handleDragEnd}
-              >
-                ${isFg ? html`<span class="indicator-fg"></span>` : ""}
-                ${isBg ? html`<span class="indicator-bg"></span>` : ""}
-              </div>
-              <button
-                class="swatch-delete"
-                @click=${(e: Event) => this.handleDeleteColor(e, index)}
-                title="Remove from palette (move to untracked)"
-              >
-                ×
-              </button>
-            </div>
-          `;
-        })}
+        ${displayColors.map((displayColor, visualIndex) =>
+          this.renderSwatch(displayColor, visualIndex)
+        )}
       </div>
     `;
   }

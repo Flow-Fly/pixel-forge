@@ -1,5 +1,5 @@
 import { html, css } from "lit";
-import { customElement, state, query } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { paletteStore } from "../../stores/palette";
 import { historyStore } from "../../stores/history";
@@ -11,7 +11,6 @@ import "./pf-save-palette-dialog";
 import "./pf-unsaved-changes-dialog";
 import "./palette-panel/pf-palette-toolbar";
 import "./palette-panel/pf-palette-grid";
-import "./palette-panel/pf-untracked-colors";
 import "./palette-panel/pf-extraction-section";
 
 @customElement("pf-palette-panel")
@@ -43,12 +42,6 @@ export class PFPalettePanel extends BaseComponent {
   // Unsaved changes dialog state
   @state() private showUnsavedDialog = false;
   @state() private pendingSwitchAction: (() => void) | null = null;
-
-  // Replace mode coordination
-  @state() private isReplaceMode = false;
-  @state() private replaceColor: string | null = null;
-
-  @query("pf-untracked-colors") private untrackedColors!: any;
 
   // ==========================================
   // Toolbar event handlers
@@ -190,26 +183,6 @@ export class PFPalettePanel extends BaseComponent {
     this.showColorPicker = false;
   }
 
-  // ==========================================
-  // Replace mode coordination
-  // ==========================================
-
-  private handleReplaceModeChange(e: CustomEvent) {
-    const { active, color } = e.detail;
-    this.isReplaceMode = active;
-    this.replaceColor = color;
-  }
-
-  private handleReplaceTarget(e: CustomEvent) {
-    const { index } = e.detail;
-    if (this.isReplaceMode && this.replaceColor) {
-      paletteStore.swapMainWithEphemeral(index, this.replaceColor);
-      this.isReplaceMode = false;
-      this.replaceColor = null;
-      this.untrackedColors?.handleReplaceComplete();
-    }
-  }
-
   render() {
     return html`
       <pf-palette-toolbar
@@ -225,15 +198,8 @@ export class PFPalettePanel extends BaseComponent {
       </pf-palette-toolbar>
 
       <pf-palette-grid
-        .replaceMode=${this.isReplaceMode}
-        .replaceColor=${this.replaceColor}
         @swatch-edit=${this.handleSwatchEdit}
-        @replace-target=${this.handleReplaceTarget}
       ></pf-palette-grid>
-
-      <pf-untracked-colors
-        @replace-mode-change=${this.handleReplaceModeChange}
-      ></pf-untracked-colors>
 
       <pf-extraction-section></pf-extraction-section>
 

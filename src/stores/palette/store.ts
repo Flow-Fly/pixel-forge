@@ -5,7 +5,7 @@
  * Delegates specialized operations to extracted modules.
  */
 
-import { signal } from '../../core/signal';
+import { signal, computed } from '../../core/signal';
 import { layerStore } from '../layers';
 import { animationStore } from '../animation';
 import type { CustomPalette } from '../../types/palette';
@@ -16,6 +16,7 @@ import * as indexedColor from './indexed-color';
 import * as extraction from './extraction';
 import * as variations from './variations';
 import * as persistence from './persistence';
+import { getMergedDisplayColors, SortMode, type DisplayColor } from './hue-grouping';
 
 class PaletteStore {
   // ==========================================
@@ -52,6 +53,38 @@ class PaletteStore {
 
   /** Colors used in other frames (not the current one) */
   usedColorsInOtherFrames = signal<Set<string>>(new Set());
+
+  /** Color sorting mode (none, hsl, or lab) */
+  sortMode = signal<SortMode>(SortMode.None);
+
+  /** Computed display colors for grid rendering (merges main + ephemeral with grouping) */
+  private _displayColors = computed<DisplayColor[]>(() => {
+    return getMergedDisplayColors(
+      this.mainColors.value,
+      this.ephemeralColors.value,
+      this.sortMode.value
+    );
+  });
+
+  /** Accessor for displayColors with .value interface */
+  get displayColors(): { value: DisplayColor[] } {
+    const computedSignal = this._displayColors;
+    return {
+      get value() {
+        return computedSignal.get();
+      }
+    };
+  }
+
+  /** Legacy getter for backward compatibility */
+  get autoSortByHue(): { value: boolean } {
+    const self = this;
+    return {
+      get value() {
+        return self.sortMode.value !== SortMode.None;
+      }
+    };
+  }
 
   // ==========================================
   // Private State
@@ -90,6 +123,65 @@ class PaletteStore {
     this.rebuildColorMap();
     this.loadCustomPalettes();
     this.setupFrameChangeListener();
+    this.loadAutoSortSetting();
+  }
+
+  private loadAutoSortSetting(): void {
+    const stored = localStorage.getItem('pf-palette-sort-mode');
+    if (stored !== null) {
+      // Validate it's a valid SortMode
+      if (Object.values(SortMode).includes(stored as SortMode)) {
+        this.sortMode.value = stored as SortMode;
+      }
+    } else {
+      // Legacy: check old boolean key
+      const legacyStored = localStorage.getItem('pf-palette-auto-sort');
+      if (legacyStored === 'true') {
+        this.sortMode.value = SortMode.HSL;
+      }
+    }
+  }
+
+  /**
+   * Set the color sorting mode.
+   * Persisted to localStorage.
+   */
+  setSortMode(mode: SortMode): void {
+    this.sortMode.value = mode;
+    localStorage.setItem('pf-palette-sort-mode', mode);
+  }
+
+  /**
+   * Cycle through sort modes: None -> HSL -> Lab -> None
+   */
+  cycleSortMode(): SortMode {
+    const currentMode = this.sortMode.value;
+    let newMode: SortMode;
+
+    switch (currentMode) {
+      case SortMode.None:
+        newMode = SortMode.HSL;
+        break;
+      case SortMode.HSL:
+        newMode = SortMode.Lab;
+        break;
+      case SortMode.Lab:
+        newMode = SortMode.None;
+        break;
+      default:
+        newMode = SortMode.None;
+    }
+
+    this.setSortMode(newMode);
+    return newMode;
+  }
+
+  /**
+   * Legacy: Toggle or set auto-sort by hue setting.
+   * @deprecated Use setSortMode() instead
+   */
+  setAutoSortByHue(enabled: boolean): void {
+    this.setSortMode(enabled ? SortMode.HSL : SortMode.None);
   }
 
   private setupFrameChangeListener(): void {
