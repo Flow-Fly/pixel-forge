@@ -33,6 +33,10 @@ export interface Tileset {
   rows: number;
   /** Total number of tiles in the tileset */
   tileCount: number;
+  /** Pixels between tiles (default 0) */
+  spacing: number;
+  /** Offset from image edge in pixels (default 0) */
+  margin: number;
 }
 
 /**
