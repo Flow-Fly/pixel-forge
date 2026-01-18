@@ -308,27 +308,10 @@ export class PFSendToTilesetDialog extends BaseComponent {
 
   /**
    * Opens the dialog and captures current artwork
+   * Note: Actual initialization happens in updated() when open becomes true
    */
   openDialog(): void {
     this.open = true;
-    this.capturedImageData = this.captureArtwork();
-    this.errorMessage = '';
-    this.sizeWarning = null;
-    this.selectedAction = 'add';
-    this.replaceTileIndex = null;
-    this.switchToMapMode = false;
-
-    // Auto-select active tileset or first available
-    const tilesets = tilesetStore.tilesets.value;
-    if (tilesetStore.activeTilesetId.value) {
-      this.selectedTilesetId = tilesetStore.activeTilesetId.value;
-    } else if (tilesets.length > 0) {
-      this.selectedTilesetId = tilesets[0].id;
-    } else {
-      this.selectedTilesetId = null; // Will create new
-    }
-
-    this.validateAndWarn();
   }
 
   /**
@@ -615,8 +598,11 @@ export class PFSendToTilesetDialog extends BaseComponent {
     );
   }
 
-  protected updated(changedProperties: PropertyValues): void {
-    super.updated(changedProperties);
+  /**
+   * Called before update - initialize state here to avoid cascading updates
+   */
+  protected willUpdate(changedProperties: PropertyValues): void {
+    super.willUpdate(changedProperties);
 
     if (changedProperties.has('open') && this.open) {
       // Capture artwork when dialog opens
@@ -638,20 +624,26 @@ export class PFSendToTilesetDialog extends BaseComponent {
       }
 
       this.validateAndWarn();
+    }
+  }
 
-      // Focus the tileset selector after dialog opens
+  protected updated(changedProperties: PropertyValues): void {
+    super.updated(changedProperties);
+
+    // Focus the tileset selector after dialog opens (requires DOM to be rendered)
+    if (changedProperties.has('open') && this.open) {
       requestAnimationFrame(() => {
         const selector = this.shadowRoot?.querySelector('.tileset-selector') as HTMLSelectElement;
         selector?.focus();
       });
     }
 
-    // Update preview canvas
+    // Update preview canvas (requires DOM canvas element)
     if (this.open && this.capturedImageData) {
       this.updatePreview();
     }
 
-    // Draw tile picker cells
+    // Draw tile picker cells (requires DOM canvas elements)
     if (this.open && this.selectedAction === 'replace' && this.selectedTilesetId) {
       const tileset = tilesetStore.getTileset(this.selectedTilesetId);
       if (tileset) {
