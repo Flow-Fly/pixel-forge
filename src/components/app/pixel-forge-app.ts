@@ -22,6 +22,7 @@ import "../dialogs/pf-new-project-dialog";
 import "../dialogs/pf-grid-settings-dialog";
 import "../dialogs/pf-accent-color-dialog";
 import "../dialogs/pf-map-config-dialog";
+import "../dialogs/pf-send-to-tileset-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../brush/pf-brush-panel";
@@ -193,8 +194,9 @@ export class PixelForgeApp extends BaseComponent {
       font-size: var(--pf-font-size-xs);
     }
 
-    /* Warning toast - rendered at app level to avoid viewport transform issues */
-    .warning-toast {
+    /* Toast styles - rendered at app level to avoid viewport transform issues */
+    .warning-toast,
+    .success-toast {
       position: fixed;
       top: 50%;
       left: 50%;
@@ -231,6 +233,11 @@ export class PixelForgeApp extends BaseComponent {
         transform: translate(-50%, -50%) translateY(-10px);
       }
     }
+
+    .success-toast {
+      border-color: rgba(80, 200, 120, 0.8);
+      color: #50c878;
+    }
   `;
 
   @state() showResizeDialog = false;
@@ -238,6 +245,8 @@ export class PixelForgeApp extends BaseComponent {
   @state() showNewProjectDialog = false;
   @state() showKeyboardShortcutsDialog = false;
   @state() showMapConfigDialog = false;
+  @state() showSendToTilesetDialog = false;
+  @state() private successMessage: string | null = null;
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
@@ -246,6 +255,7 @@ export class PixelForgeApp extends BaseComponent {
   private resizeStartY = 0;
   private resizeStartHeight = 0;
   private warningTimer: number | null = null;
+  private successTimer: number | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -290,6 +300,18 @@ export class PixelForgeApp extends BaseComponent {
     window.addEventListener(
       "show-map-config-dialog",
       this.handleShowMapConfigDialog
+    );
+
+    // Listen for send to tileset dialog (Story 2-4)
+    window.addEventListener(
+      "show-send-to-tileset-dialog",
+      this.handleShowSendToTilesetDialog
+    );
+
+    // Listen for success toast events
+    window.addEventListener(
+      "show-success-toast",
+      this.handleShowSuccessToast as EventListener
     );
 
     // Listen for keyboard shortcuts (Story 1-5)
@@ -339,22 +361,55 @@ export class PixelForgeApp extends BaseComponent {
     }
   };
 
+  private handleShowSendToTilesetDialog = () => {
+    if (modeStore.mode.value === "art") {
+      this.showSendToTilesetDialog = true;
+    }
+  };
+
+  private handleShowSuccessToast = (e: CustomEvent<{ message: string }>) => {
+    // Clear any existing timer
+    if (this.successTimer !== null) {
+      clearTimeout(this.successTimer);
+    }
+
+    this.successMessage = e.detail.message;
+
+    // Auto-hide after animation completes
+    this.successTimer = window.setTimeout(() => {
+      this.successMessage = null;
+      this.successTimer = null;
+    }, 2000);
+  };
+
   /**
-   * Handle keyboard shortcuts for map config dialog (Cmd/Ctrl+Shift+M)
-   * Story 1-5 Task 5.2
+   * Handle keyboard shortcuts
+   * Story 1-5: Cmd/Ctrl+Shift+M for map config dialog
+   * Story 2-4: Cmd/Ctrl+Shift+T for send to tileset dialog
    */
   private handleKeyDown = (e: KeyboardEvent) => {
+    const activeEl = document.activeElement;
+    const tagName = activeEl?.tagName;
+    const isEditable = (activeEl as HTMLElement)?.isContentEditable;
+
+    // Skip if in editable field
+    if (tagName === "INPUT" || tagName === "TEXTAREA" || isEditable) {
+      return;
+    }
+
     // Cmd/Ctrl + Shift + M to open map config (only in Map mode)
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "m") {
-      const activeEl = document.activeElement;
-      const tagName = activeEl?.tagName;
-      const isEditable = (activeEl as HTMLElement)?.isContentEditable;
+      if (modeStore.mode.value === "map") {
+        e.preventDefault();
+        this.showMapConfigDialog = true;
+      }
+    }
 
-      if (tagName !== "INPUT" && tagName !== "TEXTAREA" && !isEditable) {
-        if (modeStore.mode.value === "map") {
-          e.preventDefault();
-          this.showMapConfigDialog = true;
-        }
+    // Cmd/Ctrl + Shift + T to open send to tileset (only in Art mode)
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "t") {
+      if (modeStore.mode.value === "art") {
+        e.preventDefault();
+        this.showSendToTilesetDialog = true;
       }
     }
   };
@@ -417,6 +472,14 @@ export class PixelForgeApp extends BaseComponent {
     window.removeEventListener(
       "show-map-config-dialog",
       this.handleShowMapConfigDialog
+    );
+    window.removeEventListener(
+      "show-send-to-tileset-dialog",
+      this.handleShowSendToTilesetDialog
+    );
+    window.removeEventListener(
+      "show-success-toast",
+      this.handleShowSuccessToast as EventListener
     );
     window.removeEventListener("keydown", this.handleKeyDown);
   }
@@ -588,8 +651,16 @@ export class PixelForgeApp extends BaseComponent {
         @close=${() => (this.showMapConfigDialog = false)}
       ></pf-map-config-dialog>
 
+      <pf-send-to-tileset-dialog
+        ?open=${this.showSendToTilesetDialog}
+        @close=${() => (this.showSendToTilesetDialog = false)}
+      ></pf-send-to-tileset-dialog>
+
       ${this.warningMessage
         ? html`<div class="warning-toast">${this.warningMessage}</div>`
+        : ""}
+      ${this.successMessage
+        ? html`<div class="success-toast">${this.successMessage}</div>`
         : ""}
     `;
   }

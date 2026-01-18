@@ -1,6 +1,6 @@
 import { signal } from '../core/signal';
 import type { Tileset, LoadStatus } from '../types/tilemap';
-import { InvalidTilesetError } from '../errors/tilemap-errors';
+import { InvalidTilesetError, TileOutOfBoundsError } from '../errors/tilemap-errors';
 
 /**
  * Tileset Store - Manages tileset data with reactive signals
@@ -254,6 +254,198 @@ class TilesetStore extends EventTarget {
     if (hadTilesets) {
       this.dispatchEvent(new CustomEvent('tilesets-cleared'));
     }
+  }
+
+  /**
+   * Create a new tileset from ImageData (single tile)
+   * Used by "Send to Tileset" feature to create tileset from pixel art
+   * @param imageData - The image data for the first tile
+   * @param name - Optional name for the tileset
+   * @returns The ID of the newly created tileset
+   */
+  async createTilesetFromImageData(
+    imageData: ImageData,
+    name: string = 'New Tileset'
+  ): Promise<string> {
+    if (!imageData || imageData.width < 1 || imageData.height < 1) {
+      throw new InvalidTilesetError('Invalid image data provided');
+    }
+
+    const tileWidth = imageData.width;
+    const tileHeight = imageData.height;
+
+    // Create a canvas with the single tile
+    const canvas = new OffscreenCanvas(tileWidth, tileHeight);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new InvalidTilesetError('Failed to create canvas context');
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+
+    // Create ImageBitmap from canvas
+    const imageBitmap = await createImageBitmap(canvas);
+
+    const tileset: Tileset = {
+      id: crypto.randomUUID(),
+      name,
+      image: imageBitmap,
+      imagePath: '', // Created from art, no file path
+      tileWidth,
+      tileHeight,
+      columns: 1,
+      rows: 1,
+      tileCount: 1,
+      spacing: 0,
+      margin: 0,
+    };
+
+    this.addTileset(tileset);
+
+    this.dispatchEvent(new CustomEvent('tileset-created', {
+      detail: { tileset }
+    }));
+
+    return tileset.id;
+  }
+
+  /**
+   * Add a tile to an existing tileset
+   * Used by "Send to Tileset" feature to append tiles
+   * @param tilesetId - The tileset ID to add to
+   * @param imageData - The image data for the new tile
+   * @returns The index of the newly added tile (0-based)
+   */
+  async addTileToTileset(
+    tilesetId: string,
+    imageData: ImageData
+  ): Promise<number> {
+    const tileset = this.getTileset(tilesetId);
+    if (!tileset) {
+      throw new InvalidTilesetError(`Tileset ${tilesetId} not found`);
+    }
+
+    // Validate tile size matches tileset
+    if (imageData.width !== tileset.tileWidth || imageData.height !== tileset.tileHeight) {
+      throw new InvalidTilesetError(
+        `Tile size ${imageData.width}×${imageData.height} doesn't match tileset ${tileset.tileWidth}×${tileset.tileHeight}`
+      );
+    }
+
+    // Calculate new tileset dimensions (keep roughly square)
+    const newTileCount = tileset.tileCount + 1;
+    const newColumns = Math.ceil(Math.sqrt(newTileCount));
+    const newRows = Math.ceil(newTileCount / newColumns);
+
+    // Create new canvas with space for all tiles
+    const newCanvas = new OffscreenCanvas(
+      newColumns * tileset.tileWidth,
+      newRows * tileset.tileHeight
+    );
+    const ctx = newCanvas.getContext('2d');
+    if (!ctx) {
+      throw new InvalidTilesetError('Failed to create canvas context');
+    }
+
+    // Copy existing tiles
+    ctx.drawImage(tileset.image, 0, 0);
+
+    // Add new tile at next position
+    const newTileIndex = tileset.tileCount;
+    const tileX = (newTileIndex % newColumns) * tileset.tileWidth;
+    const tileY = Math.floor(newTileIndex / newColumns) * tileset.tileHeight;
+    ctx.putImageData(imageData, tileX, tileY);
+
+    // Create new ImageBitmap
+    const newImageBitmap = await createImageBitmap(newCanvas);
+
+    // Release old ImageBitmap
+    tileset.image.close();
+
+    // Update tileset
+    tileset.image = newImageBitmap;
+    tileset.columns = newColumns;
+    tileset.rows = newRows;
+    tileset.tileCount = newTileCount;
+
+    // Trigger signal update
+    this.tilesets.value = [...this.tilesets.value];
+
+    this.dispatchEvent(new CustomEvent('tile-added', {
+      detail: { tilesetId, tileIndex: newTileIndex }
+    }));
+
+    return newTileIndex;
+  }
+
+  /**
+   * Replace an existing tile in a tileset
+   * Used by "Send to Tileset" feature for tile replacement
+   * @param tilesetId - The tileset ID
+   * @param tileIndex - The 0-based tile index to replace
+   * @param imageData - The new image data for the tile
+   */
+  async replaceTile(
+    tilesetId: string,
+    tileIndex: number,
+    imageData: ImageData
+  ): Promise<void> {
+    const tileset = this.getTileset(tilesetId);
+    if (!tileset) {
+      throw new InvalidTilesetError(`Tileset ${tilesetId} not found`);
+    }
+
+    if (tileIndex < 0 || tileIndex >= tileset.tileCount) {
+      throw new TileOutOfBoundsError(
+        `Tile index ${tileIndex} out of bounds (0-${tileset.tileCount - 1})`
+      );
+    }
+
+    // Validate tile size matches tileset
+    if (imageData.width !== tileset.tileWidth || imageData.height !== tileset.tileHeight) {
+      throw new InvalidTilesetError(
+        `Tile size ${imageData.width}×${imageData.height} doesn't match tileset ${tileset.tileWidth}×${tileset.tileHeight}`
+      );
+    }
+
+    // Create new canvas from existing tileset
+    const canvas = new OffscreenCanvas(
+      tileset.columns * tileset.tileWidth,
+      tileset.rows * tileset.tileHeight
+    );
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new InvalidTilesetError('Failed to create canvas context');
+    }
+
+    // Copy existing tileset
+    ctx.drawImage(tileset.image, 0, 0);
+
+    // Replace the specific tile
+    const tileX = (tileIndex % tileset.columns) * tileset.tileWidth;
+    const tileY = Math.floor(tileIndex / tileset.columns) * tileset.tileHeight;
+
+    // Clear the tile area first
+    ctx.clearRect(tileX, tileY, tileset.tileWidth, tileset.tileHeight);
+
+    // Draw new tile data
+    ctx.putImageData(imageData, tileX, tileY);
+
+    // Create new ImageBitmap
+    const newImageBitmap = await createImageBitmap(canvas);
+
+    // Release old ImageBitmap
+    tileset.image.close();
+
+    // Update tileset
+    tileset.image = newImageBitmap;
+
+    // Trigger signal update - this will re-render all tile instances
+    this.tilesets.value = [...this.tilesets.value];
+
+    this.dispatchEvent(new CustomEvent('tile-replaced', {
+      detail: { tilesetId, tileIndex }
+    }));
   }
 }
 

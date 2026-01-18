@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { tilesetStore } from '../../src/stores/tileset';
 import type { Tileset } from '../../src/types/tilemap';
-import { InvalidTilesetError } from '../../src/errors/tilemap-errors';
+import { InvalidTilesetError, TileOutOfBoundsError } from '../../src/errors/tilemap-errors';
 
 /**
  * Helper to create a valid test tileset with an ImageBitmap
@@ -709,6 +709,269 @@ describe('TilesetStore', () => {
       // Verify data arrays exist and have correct size (16x16x4 = 1024 bytes)
       expect(tile0!.data).toBeInstanceOf(Uint8ClampedArray);
       expect(tile0!.data.length).toBe(16 * 16 * 4);
+    });
+  });
+
+  describe('createTilesetFromImageData() (Story 2-4)', () => {
+    it('should create a new tileset from ImageData', async () => {
+      // Create test ImageData
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(0, 0, 16, 16);
+      const imageData = ctx.getImageData(0, 0, 16, 16);
+
+      const tilesetId = await tilesetStore.createTilesetFromImageData(imageData, 'Test Tileset');
+
+      expect(tilesetId).toBeDefined();
+      expect(typeof tilesetId).toBe('string');
+
+      const tileset = tilesetStore.getTileset(tilesetId);
+      expect(tileset).not.toBeNull();
+      expect(tileset!.name).toBe('Test Tileset');
+      expect(tileset!.tileWidth).toBe(16);
+      expect(tileset!.tileHeight).toBe(16);
+      expect(tileset!.tileCount).toBe(1);
+      expect(tileset!.columns).toBe(1);
+      expect(tileset!.rows).toBe(1);
+    });
+
+    it('should fire tileset-created event', async () => {
+      const canvas = new OffscreenCanvas(32, 32);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#00ff00';
+      ctx.fillRect(0, 0, 32, 32);
+      const imageData = ctx.getImageData(0, 0, 32, 32);
+
+      const eventHandler = vi.fn();
+      tilesetStore.addEventListener('tileset-created', eventHandler);
+
+      await tilesetStore.createTilesetFromImageData(imageData, 'Event Test');
+
+      expect(eventHandler).toHaveBeenCalledTimes(1);
+      expect(eventHandler.mock.calls[0][0].detail.tileset).toBeDefined();
+    });
+
+    it('should throw InvalidTilesetError for invalid image data', async () => {
+      await expect(
+        tilesetStore.createTilesetFromImageData(null as unknown as ImageData)
+      ).rejects.toThrow(InvalidTilesetError);
+    });
+
+    it('should use default name if not provided', async () => {
+      const canvas = new OffscreenCanvas(8, 8);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 8, 8);
+      const imageData = ctx.getImageData(0, 0, 8, 8);
+
+      const tilesetId = await tilesetStore.createTilesetFromImageData(imageData);
+
+      const tileset = tilesetStore.getTileset(tilesetId);
+      expect(tileset!.name).toBe('New Tileset');
+    });
+  });
+
+  describe('addTileToTileset() (Story 2-4)', () => {
+    it('should add a tile to an existing tileset', async () => {
+      // Create initial tileset
+      const canvas1 = new OffscreenCanvas(16, 16);
+      const ctx1 = canvas1.getContext('2d')!;
+      ctx1.fillStyle = '#ff0000';
+      ctx1.fillRect(0, 0, 16, 16);
+      const imageData1 = ctx1.getImageData(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(imageData1, 'Test');
+
+      // Create new tile
+      const canvas2 = new OffscreenCanvas(16, 16);
+      const ctx2 = canvas2.getContext('2d')!;
+      ctx2.fillStyle = '#00ff00';
+      ctx2.fillRect(0, 0, 16, 16);
+      const imageData2 = ctx2.getImageData(0, 0, 16, 16);
+
+      const newTileIndex = await tilesetStore.addTileToTileset(tilesetId, imageData2);
+
+      expect(newTileIndex).toBe(1);
+
+      const tileset = tilesetStore.getTileset(tilesetId);
+      expect(tileset!.tileCount).toBe(2);
+    });
+
+    it('should fire tile-added event', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+      const imageData = ctx.getImageData(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(imageData);
+
+      const eventHandler = vi.fn();
+      tilesetStore.addEventListener('tile-added', eventHandler);
+
+      const newImageData = ctx.getImageData(0, 0, 16, 16);
+      await tilesetStore.addTileToTileset(tilesetId, newImageData);
+
+      expect(eventHandler).toHaveBeenCalledTimes(1);
+      expect(eventHandler.mock.calls[0][0].detail.tilesetId).toBe(tilesetId);
+      expect(eventHandler.mock.calls[0][0].detail.tileIndex).toBe(1);
+    });
+
+    it('should throw InvalidTilesetError for non-existent tileset', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+      const imageData = ctx.getImageData(0, 0, 16, 16);
+
+      await expect(
+        tilesetStore.addTileToTileset('non-existent', imageData)
+      ).rejects.toThrow(InvalidTilesetError);
+    });
+
+    it('should throw InvalidTilesetError for mismatched tile size', async () => {
+      // Create tileset with 16x16 tiles
+      const canvas1 = new OffscreenCanvas(16, 16);
+      const ctx1 = canvas1.getContext('2d')!;
+      ctx1.fillRect(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(
+        ctx1.getImageData(0, 0, 16, 16)
+      );
+
+      // Try to add 32x32 tile
+      const canvas2 = new OffscreenCanvas(32, 32);
+      const ctx2 = canvas2.getContext('2d')!;
+      ctx2.fillRect(0, 0, 32, 32);
+      const largeImageData = ctx2.getImageData(0, 0, 32, 32);
+
+      await expect(
+        tilesetStore.addTileToTileset(tilesetId, largeImageData)
+      ).rejects.toThrow(InvalidTilesetError);
+    });
+
+    it('should properly reorganize grid when adding multiple tiles', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+      const imageData = ctx.getImageData(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(imageData);
+
+      // Add 3 more tiles (total 4)
+      await tilesetStore.addTileToTileset(tilesetId, imageData);
+      await tilesetStore.addTileToTileset(tilesetId, imageData);
+      await tilesetStore.addTileToTileset(tilesetId, imageData);
+
+      const tileset = tilesetStore.getTileset(tilesetId);
+      expect(tileset!.tileCount).toBe(4);
+      expect(tileset!.columns).toBe(2); // sqrt(4) = 2
+      expect(tileset!.rows).toBe(2);
+    });
+  });
+
+  describe('replaceTile() (Story 2-4)', () => {
+    it('should replace an existing tile and update tileset image', async () => {
+      // Create initial tileset via helper
+      const tileset = await createTestTileset('ts-replace', 'Test Replace', {
+        tileWidth: 16,
+        tileHeight: 16,
+        columns: 1,
+        rows: 1
+      });
+      tilesetStore.addTileset(tileset);
+
+      // Store reference to original ImageBitmap
+      const originalImageBitmap = tileset.image;
+
+      // Create new ImageData for replacement using OffscreenCanvas
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      const imageData = ctx.createImageData(16, 16);
+      // Fill with opaque pixels
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        imageData.data[i + 3] = 255; // A = 255
+      }
+
+      await tilesetStore.replaceTile('ts-replace', 0, imageData);
+
+      // Verify tile count unchanged
+      const updatedTileset = tilesetStore.getTileset('ts-replace');
+      expect(updatedTileset!.tileCount).toBe(1);
+
+      // Verify ImageBitmap was replaced (different reference)
+      expect(updatedTileset!.image).not.toBe(originalImageBitmap);
+
+      // Verify we can still get tile image
+      const tileImage = tilesetStore.getTileImage('ts-replace', 0);
+      expect(tileImage).not.toBeNull();
+      expect(tileImage!.width).toBe(16);
+      expect(tileImage!.height).toBe(16);
+    });
+
+    it('should fire tile-replaced event', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(
+        ctx.getImageData(0, 0, 16, 16)
+      );
+
+      const eventHandler = vi.fn();
+      tilesetStore.addEventListener('tile-replaced', eventHandler);
+
+      await tilesetStore.replaceTile(tilesetId, 0, ctx.getImageData(0, 0, 16, 16));
+
+      expect(eventHandler).toHaveBeenCalledTimes(1);
+      expect(eventHandler.mock.calls[0][0].detail.tilesetId).toBe(tilesetId);
+      expect(eventHandler.mock.calls[0][0].detail.tileIndex).toBe(0);
+    });
+
+    it('should throw InvalidTilesetError for non-existent tileset', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+
+      await expect(
+        tilesetStore.replaceTile('non-existent', 0, ctx.getImageData(0, 0, 16, 16))
+      ).rejects.toThrow(InvalidTilesetError);
+    });
+
+    it('should throw TileOutOfBoundsError for invalid tile index', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(
+        ctx.getImageData(0, 0, 16, 16)
+      );
+
+      await expect(
+        tilesetStore.replaceTile(tilesetId, 5, ctx.getImageData(0, 0, 16, 16))
+      ).rejects.toThrow(TileOutOfBoundsError);
+    });
+
+    it('should throw TileOutOfBoundsError for negative index', async () => {
+      const canvas = new OffscreenCanvas(16, 16);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillRect(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(
+        ctx.getImageData(0, 0, 16, 16)
+      );
+
+      await expect(
+        tilesetStore.replaceTile(tilesetId, -1, ctx.getImageData(0, 0, 16, 16))
+      ).rejects.toThrow(TileOutOfBoundsError);
+    });
+
+    it('should throw InvalidTilesetError for mismatched tile size', async () => {
+      const canvas1 = new OffscreenCanvas(16, 16);
+      const ctx1 = canvas1.getContext('2d')!;
+      ctx1.fillRect(0, 0, 16, 16);
+      const tilesetId = await tilesetStore.createTilesetFromImageData(
+        ctx1.getImageData(0, 0, 16, 16)
+      );
+
+      const canvas2 = new OffscreenCanvas(32, 32);
+      const ctx2 = canvas2.getContext('2d')!;
+      ctx2.fillRect(0, 0, 32, 32);
+
+      await expect(
+        tilesetStore.replaceTile(tilesetId, 0, ctx2.getImageData(0, 0, 32, 32))
+      ).rejects.toThrow(InvalidTilesetError);
     });
   });
 });

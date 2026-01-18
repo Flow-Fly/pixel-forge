@@ -374,6 +374,10 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("show-map-config-dialog"));
   }
 
+  openSendToTilesetDialog() {
+    window.dispatchEvent(new CustomEvent("show-send-to-tileset-dialog"));
+  }
+
   private startEditingName() {
     this.isEditingName = true;
     // Focus the input after render
@@ -444,6 +448,12 @@ export class PFMenuBar extends BaseComponent {
             @click=${() => modeStore.mode.value === 'map' && this.openMapConfigDialog()}
           >
             Map Settings... <span class="shortcut">${formatShortcut("mod+shift+m")}</span>
+          </div>
+          <div
+            class="menu-item ${modeStore.mode.value !== 'art' ? 'disabled' : ''}"
+            @click=${() => modeStore.mode.value === 'art' && this.openSendToTilesetDialog()}
+          >
+            Send to Tileset... <span class="shortcut">${formatShortcut("mod+shift+t")}</span>
           </div>
         </div>
 
