@@ -1,4 +1,5 @@
 import { signal } from '../core/signal';
+import { tilemapStore } from './tilemap';
 
 /**
  * Mode Store - Manages application mode state
@@ -30,6 +31,9 @@ class ModeStore {
    */
   setMode(newMode: 'art' | 'map') {
     this.mode.value = newMode;
+    if (newMode === 'map') {
+      tilemapStore.initializeDefaultLayer();
+    }
   }
 
   /**
@@ -37,7 +41,12 @@ class ModeStore {
    * Note: Automatically disables hero edit when switching modes
    */
   toggleMode() {
-    this.mode.value = this.mode.value === 'art' ? 'map' : 'art';
+    const newMode = this.mode.value === 'art' ? 'map' : 'art';
+    this.mode.value = newMode;
+    // Initialize default layer on first Map mode entry
+    if (newMode === 'map') {
+      tilemapStore.initializeDefaultLayer();
+    }
     // Hero edit is only valid in map mode - disable when switching
     if (this.heroEditActive.value) {
       this.heroEditActive.value = false;
