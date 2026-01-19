@@ -37,6 +37,7 @@ const TOOL_LOADERS: Record<ToolType, () => Promise<ToolConstructor>> = {
   text: async () => (await import("./text-tool")).TextTool,
   hand: async () => (await import("./hand-tool")).HandTool,
   zoom: async () => (await import("./zoom-tool")).ZoomTool,
+  "tile-brush": async () => (await import("./tile-brush-tool")).TileBrushTool,
 };
 
 /**
@@ -85,6 +86,13 @@ export const SELECTION_TOOLS: readonly ToolType[] = [
 ] as const;
 
 /**
+ * Tilemap tools (Map mode only).
+ */
+export const TILEMAP_TOOLS: readonly ToolType[] = [
+  "tile-brush",
+] as const;
+
+/**
  * Check if a tool is a drawing tool.
  */
 export function isDrawingTool(toolName: ToolType): boolean {
@@ -96,4 +104,11 @@ export function isDrawingTool(toolName: ToolType): boolean {
  */
 export function isSelectionTool(toolName: ToolType): boolean {
   return SELECTION_TOOLS.includes(toolName);
+}
+
+/**
+ * Check if a tool is a tilemap tool (Map mode only).
+ */
+export function isTilemapTool(toolName: ToolType): boolean {
+  return TILEMAP_TOOLS.includes(toolName);
 }

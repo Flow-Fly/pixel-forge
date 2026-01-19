@@ -4,11 +4,13 @@ import { BaseComponent } from "../../core/base-component";
 import { toolStore, type ToolType } from "../../stores/tools";
 import {
   toolGroups,
+  tilemapToolGroups,
   getActiveToolForGroup,
   setLastSelectedTool,
   getToolGroup,
 } from "../../stores/tool-groups";
 import { getToolShortcutKey } from "../../tools/tool-registry";
+import { modeStore } from "../../stores/mode";
 import "./pf-tool-button";
 import "../color/pf-color-selector-compact";
 
@@ -53,8 +55,12 @@ export class PFToolbar extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
-    // Initialize display tools from groups
+    // Initialize display tools from art mode groups
     toolGroups.forEach((group) => {
+      this.groupDisplayTools.set(group.id, getActiveToolForGroup(group));
+    });
+    // Initialize display tools from tilemap mode groups
+    tilemapToolGroups.forEach((group) => {
       this.groupDisplayTools.set(group.id, getActiveToolForGroup(group));
     });
   }
@@ -93,6 +99,17 @@ export class PFToolbar extends BaseComponent {
   }
 
   render() {
+    // Access mode signal to trigger re-render on mode change
+    const currentMode = modeStore.mode.value;
+
+    if (currentMode === 'map') {
+      return this.renderMapModeToolbar();
+    }
+
+    return this.renderArtModeToolbar();
+  }
+
+  private renderArtModeToolbar() {
     return html`
       <div class="tools-section">
         <!-- Drawing Tools -->
@@ -129,8 +146,24 @@ export class PFToolbar extends BaseComponent {
     `;
   }
 
-  private renderToolGroup(groupId: string) {
-    const group = toolGroups.find((g) => g.id === groupId);
+  private renderMapModeToolbar() {
+    return html`
+      <div class="tools-section">
+        <!-- Tilemap Tools -->
+        ${this.renderToolGroup("tile-brush", tilemapToolGroups)}
+
+        <div class="separator"></div>
+
+        <!-- Navigation Tools (shared) -->
+        ${this.renderToolGroup("navigation", tilemapToolGroups)}
+      </div>
+
+      <div class="spacer"></div>
+    `;
+  }
+
+  private renderToolGroup(groupId: string, groups = toolGroups) {
+    const group = groups.find((g) => g.id === groupId);
     if (!group) return "";
 
     const activeTool = toolStore.activeTool.value;

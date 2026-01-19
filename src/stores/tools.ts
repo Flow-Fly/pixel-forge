@@ -19,7 +19,8 @@ export type ToolType =
   | 'transform'
   | 'text'
   | 'hand'
-  | 'zoom';
+  | 'zoom'
+  | 'tile-brush';
 
 export interface CanvasTransform {
   screenX: number;      // Top-left position on screen

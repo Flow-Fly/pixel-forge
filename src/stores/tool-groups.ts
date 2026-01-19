@@ -13,7 +13,7 @@ export interface ToolGroup {
 }
 
 /**
- * Toolbar groups - each group appears as one button
+ * Toolbar groups for Art mode - each group appears as one button
  */
 export const toolGroups: ToolGroup[] = [
   {
@@ -64,10 +64,32 @@ export const toolGroups: ToolGroup[] = [
 ];
 
 /**
+ * Toolbar groups for Map mode (tilemap editing)
+ */
+export const tilemapToolGroups: ToolGroup[] = [
+  {
+    id: "tile-brush",
+    tools: ["tile-brush"],
+    defaultTool: "tile-brush",
+  },
+  {
+    id: "navigation",
+    tools: ["hand", "zoom"],
+    defaultTool: "hand",
+  },
+];
+
+/**
  * Map from tool to its group for quick lookup
  */
 export const toolToGroup: Map<ToolType, ToolGroup> = new Map();
 toolGroups.forEach((group) => {
+  group.tools.forEach((tool) => {
+    toolToGroup.set(tool, group);
+  });
+});
+// Also add tilemap tools
+tilemapToolGroups.forEach((group) => {
   group.tools.forEach((tool) => {
     toolToGroup.set(tool, group);
   });

@@ -414,6 +414,22 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "mod+1-6", action: "Zoom levels (100%-3200%)" },
     ],
   },
+
+  "tile-brush": {
+    name: "Tile Brush",
+    icon: "/icons/tools/bucket.png", // Reuse bucket icon initially
+    label: "TB",
+    shortcutKey: "B",
+    group: "tilemap",
+    mode: "map",
+    options: [],
+    alternatives: ["tile-eraser", "tile-fill"],
+    shortcuts: [
+      { key: "click", action: "Place tile" },
+      { key: "drag", action: "Paint tiles" },
+      { key: "shift+click", action: "Line from last position" },
+    ],
+  },
 };
 
 /**

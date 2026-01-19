@@ -2,8 +2,11 @@ import { html, css, type PropertyValueMap } from "lit";
 import { customElement, query } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { tilemapStore } from "../../stores/tilemap";
+import { tilesetStore } from "../../stores/tileset";
 import { modeStore } from "../../stores/mode";
 import { dirtyRectStore } from "../../stores/dirty-rect";
+import { toolStore } from "../../stores/tools";
+import { TileBrushTool } from "../../tools/tile-brush-tool";
 
 /**
  * pf-tilemap-canvas - Canvas component for tilemap rendering
@@ -86,6 +89,92 @@ export class PFTilemapCanvas extends BaseComponent {
     // Initial canvas setup
     this.resizeCanvas();
     this.renderCanvas();
+
+    // Set up tool event handlers
+    this.setupToolEventHandlers();
+  }
+
+  /**
+   * Set up mouse event handlers for tool interactions
+   */
+  private setupToolEventHandlers(): void {
+    // Create bound handlers for cleanup
+    this.boundHandleMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+    this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
+    this.boundHandleMouseUp = (e: MouseEvent) => this.handleMouseUp(e);
+    this.boundHandleMouseLeave = () => this.handleMouseLeave();
+
+    this.canvas.addEventListener('mousemove', this.boundHandleMouseMove);
+    this.canvas.addEventListener('mousedown', this.boundHandleMouseDown);
+    this.canvas.addEventListener('mouseup', this.boundHandleMouseUp);
+    this.canvas.addEventListener('mouseleave', this.boundHandleMouseLeave);
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    // Clean up event listeners
+    if (this.boundHandleMouseMove) {
+      this.canvas?.removeEventListener('mousemove', this.boundHandleMouseMove);
+    }
+    if (this.boundHandleMouseDown) {
+      this.canvas?.removeEventListener('mousedown', this.boundHandleMouseDown);
+    }
+    if (this.boundHandleMouseUp) {
+      this.canvas?.removeEventListener('mouseup', this.boundHandleMouseUp);
+    }
+    if (this.boundHandleMouseLeave) {
+      this.canvas?.removeEventListener('mouseleave', this.boundHandleMouseLeave);
+    }
+  }
+
+  /**
+   * Convert mouse event coordinates to canvas pixel coordinates
+   */
+  private getCanvasCoords(e: MouseEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }
+
+  /**
+   * Get modifier keys from mouse event
+   */
+  private getModifiers(e: MouseEvent) {
+    return {
+      shift: e.shiftKey,
+      ctrl: e.ctrlKey,
+      alt: e.altKey,
+      button: e.button,
+    };
+  }
+
+  private handleMouseMove(e: MouseEvent): void {
+    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const { x, y } = this.getCanvasCoords(e);
+    this.tileBrushTool.onMove(x, y, this.getModifiers(e));
+  }
+
+  private handleMouseDown(e: MouseEvent): void {
+    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const { x, y } = this.getCanvasCoords(e);
+    this.tileBrushTool.onDown(x, y, this.getModifiers(e));
+  }
+
+  private handleMouseUp(e: MouseEvent): void {
+    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const { x, y } = this.getCanvasCoords(e);
+    this.tileBrushTool.onUp(x, y, this.getModifiers(e));
+  }
+
+  private handleMouseLeave(): void {
+    // Clear preview when mouse leaves canvas
+    if (toolStore.activeTool.value === 'tile-brush') {
+      this.tileBrushTool.onMove(-1, -1); // Out of bounds clears preview
+    }
   }
 
   protected updated(
@@ -131,11 +220,20 @@ export class PFTilemapCanvas extends BaseComponent {
     }
   }
 
+  // Tool instance for tile operations and preview
+  private tileBrushTool: TileBrushTool = new TileBrushTool();
+
+  // Bound event handlers for cleanup
+  private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseUp: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseLeave: (() => void) | null = null;
+
   /**
    * Render the tilemap canvas
    *
-   * For now, this just clears the canvas (empty tilemap).
-   * Tile data rendering will be added in Story 3.1.
+   * Renders all visible layers with their tiles, then renders
+   * the ghost preview if tile-brush tool is active.
    */
   renderCanvas(): void {
     if (!this.ctx) return;
@@ -146,11 +244,108 @@ export class PFTilemapCanvas extends BaseComponent {
       // Full redraw - clear entire canvas
       this.ctx.clearRect(0, 0, this.pixelWidth, this.pixelHeight);
 
-      // Render tilemap content
-      // For now, render an empty canvas with a subtle background
-      // to distinguish from the drawing canvas
-      // (Tile data rendering will be added in Story 3.1)
+      // Render all visible layers
+      this.renderLayers();
+
+      // Render ghost preview if tile-brush is active
+      this.renderPreview();
     }
+  }
+
+  /**
+   * Render all visible tile layers
+   */
+  private renderLayers(): void {
+    const layers = tilemapStore.layers.value;
+    const tilesetId = tilemapStore.activeTilesetId.value;
+    if (!tilesetId) return;
+
+    const tileset = tilesetStore.getTileset(tilesetId);
+    if (!tileset) return;
+
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const mapWidth = tilemapStore.width.value;
+    const mapHeight = tilemapStore.height.value;
+
+    // Render layers from bottom to top (first in array = bottom)
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+
+      // Apply layer opacity
+      const previousAlpha = this.ctx.globalAlpha;
+      this.ctx.globalAlpha = layer.opacity;
+
+      // Render each tile in the layer
+      for (let y = 0; y < mapHeight; y++) {
+        for (let x = 0; x < mapWidth; x++) {
+          const index = y * layer.width + x;
+          const tileId = layer.data[index];
+
+          // Skip empty tiles (0 = empty)
+          if (tileId === 0) continue;
+
+          // Convert 1-based storage ID to 0-based tileset index
+          const tileIndex = tileId - 1;
+
+          // Get tile source rectangle
+          const rect = tilesetStore.getTileRect(tilesetId, tileIndex);
+          if (!rect) continue;
+
+          // Draw tile
+          this.ctx.drawImage(
+            tileset.image,
+            rect.x, rect.y, rect.width, rect.height,
+            x * tileWidth, y * tileHeight, tileWidth, tileHeight
+          );
+        }
+      }
+
+      // Restore opacity
+      this.ctx.globalAlpha = previousAlpha;
+    }
+  }
+
+  /**
+   * Render a ghost preview tile at the current hover position
+   * Only renders when tile-brush tool is active
+   */
+  private renderPreview(): void {
+    // Check if tile-brush is the active tool
+    if (toolStore.activeTool.value !== 'tile-brush') return;
+
+    // Get preview from tool
+    const preview = this.tileBrushTool.getPreviewTile();
+    if (!preview) return;
+
+    this.renderTilePreview(preview.tileIndex, preview.x, preview.y);
+  }
+
+  /**
+   * Render a ghost preview tile at the given position
+   * @param tileIndex - 0-based tile index from tileset
+   * @param tileX - Tile X coordinate
+   * @param tileY - Tile Y coordinate
+   */
+  renderTilePreview(tileIndex: number, tileX: number, tileY: number): void {
+    const tilesetId = tilemapStore.activeTilesetId.value;
+    if (!tilesetId) return;
+
+    const tileset = tilesetStore.getTileset(tilesetId);
+    const rect = tilesetStore.getTileRect(tilesetId, tileIndex);
+    if (!tileset || !rect) return;
+
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+
+    // Draw at 50% opacity for ghost effect
+    this.ctx.globalAlpha = 0.5;
+    this.ctx.drawImage(
+      tileset.image,
+      rect.x, rect.y, rect.width, rect.height,
+      tileX * tileWidth, tileY * tileHeight, tileWidth, tileHeight
+    );
+    this.ctx.globalAlpha = 1.0;
   }
 
   render() {
@@ -160,6 +355,10 @@ export class PFTilemapCanvas extends BaseComponent {
     void tilemapStore.height.value;
     void tilemapStore.tileWidth.value;
     void tilemapStore.tileHeight.value;
+    void tilemapStore.layers.value; // Re-render when tiles change
+    void tilemapStore.activeTilesetId.value; // Re-render when tileset changes
+    void toolStore.activeTool.value; // Re-render when tool changes (for preview)
+    void tilesetStore.selectedTileIndex.value; // Re-render when selected tile changes (for preview)
 
     return html`<canvas></canvas>`;
   }

@@ -27,27 +27,57 @@ import { canCaptureBrush, captureBrushAndAdd } from "../brush-capture";
 import { MOD_PRIMARY } from "../../utils/platform";
 import { getToolSize, setToolSize } from "../../stores/tool-settings";
 import { clipboardStore } from "../../stores/clipboard";
+import { modeStore } from "../../stores/mode";
 
 export function registerShortcuts() {
   // ============================================
   // TOOL SHORTCUTS (from tool registry)
   // ============================================
 
-  // Register shortcuts dynamically from tool registry
+  // Group tools by shortcut key to handle mode-specific conflicts
+  const shortcutToTools: Map<string, { toolName: string; mode?: 'art' | 'map' }[]> = new Map();
+
   for (const [toolName, meta] of Object.entries(toolRegistry)) {
     const shortcutKey = meta.shortcutKey;
     if (!shortcutKey) continue;
 
     // Parse shortcut key (e.g., "shift+G" -> key: "g", modifiers: ["shift"])
     const parts = shortcutKey.toLowerCase().split("+");
+    const normalizedKey = parts.join('+');
+
+    if (!shortcutToTools.has(normalizedKey)) {
+      shortcutToTools.set(normalizedKey, []);
+    }
+    shortcutToTools.get(normalizedKey)!.push({ toolName, mode: meta.mode });
+  }
+
+  // Register shortcuts with mode-aware handling
+  for (const [shortcut, tools] of shortcutToTools) {
+    const parts = shortcut.split("+");
     const key = parts.pop() || "";
-    const modifiers = parts; // Any remaining parts are modifiers
+    const modifiers = parts;
 
     keyboardService.register(
       key,
       modifiers,
-      () => toolStore.setActiveTool(toolName as ToolType),
-      `${meta.name} tool`
+      () => {
+        const currentMode = modeStore.mode.value;
+
+        // Find the tool that matches the current mode
+        // Priority: exact mode match > no mode specified (defaults to art)
+        const modeMatchingTool = tools.find(t => t.mode === currentMode);
+        const defaultTool = tools.find(t => !t.mode); // No mode = art mode default
+
+        if (modeMatchingTool) {
+          toolStore.setActiveTool(modeMatchingTool.toolName as ToolType);
+        } else if (defaultTool && currentMode === 'art') {
+          toolStore.setActiveTool(defaultTool.toolName as ToolType);
+        } else if (tools.length > 0) {
+          // Fallback to first tool if no mode match
+          toolStore.setActiveTool(tools[0].toolName as ToolType);
+        }
+      },
+      `${tools.map(t => toolRegistry[t.toolName as ToolType]?.name || t.toolName).join(' / ')} tool`
     );
   }
 

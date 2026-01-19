@@ -71,7 +71,9 @@ export interface ToolMeta {
   /** Primary keyboard shortcut key (e.g., "B" for pencil) */
   shortcutKey: string;
   /** Tool group for categorization */
-  group: "drawing" | "selection" | "shape" | "fill" | "navigation" | "utility";
+  group: "drawing" | "selection" | "shape" | "fill" | "navigation" | "utility" | "tilemap";
+  /** Mode filter - undefined or 'art' = art mode only, 'map' = map mode only */
+  mode?: "art" | "map";
   /** Tool options to display in context bar */
   options: ToolOption[];
   /** Alternative tools for quick-switching */
