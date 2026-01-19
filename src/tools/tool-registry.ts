@@ -447,6 +447,20 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "shift+click", action: "Erase line from last position" },
     ],
   },
+
+  "tile-fill": {
+    name: "Tile Fill",
+    icon: "/icons/tools/bucket.png",
+    label: "TF",
+    shortcutKey: "G",
+    group: "tilemap",
+    mode: "map",
+    options: [],
+    alternatives: ["tile-brush", "tile-eraser"],
+    shortcuts: [
+      { key: "click", action: "Fill contiguous region" },
+    ],
+  },
 };
 
 /**

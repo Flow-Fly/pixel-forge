@@ -21,7 +21,8 @@ export type ToolType =
   | 'hand'
   | 'zoom'
   | 'tile-brush'
-  | 'tile-eraser';
+  | 'tile-eraser'
+  | 'tile-fill';
 
 export interface CanvasTransform {
   screenX: number;      // Top-left position on screen

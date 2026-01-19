@@ -3,6 +3,7 @@ import type { PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { tilesetStore } from '../../stores/tileset';
+import { tilemapStore } from '../../stores/tilemap';
 import type { Tileset } from '../../types/tilemap';
 
 /**
@@ -481,6 +482,8 @@ export class PFImportTilesetDialog extends BaseComponent {
     try {
       tilesetStore.addTileset(tileset);
       tilesetStore.setActiveTileset(tileset.id);
+      // Sync tilemap store so canvas knows which tileset to use for rendering
+      tilemapStore.setActiveTileset(tileset.id);
 
       this.dispatchEvent(new CustomEvent('tileset-imported', {
         detail: { tileset }

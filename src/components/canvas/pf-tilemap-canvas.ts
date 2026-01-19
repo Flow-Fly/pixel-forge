@@ -8,6 +8,7 @@ import { dirtyRectStore } from "../../stores/dirty-rect";
 import { toolStore } from "../../stores/tools";
 import { TileBrushTool } from "../../tools/tile-brush-tool";
 import { TileEraserTool } from "../../tools/tile-eraser-tool";
+import { TileFillTool } from "../../tools/tile-fill-tool";
 
 /**
  * pf-tilemap-canvas - Canvas component for tilemap rendering
@@ -168,6 +169,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileBrushTool.onMove(x, y, modifiers);
     } else if (activeTool === 'tile-eraser') {
       this.tileEraserTool.onMove(x, y, modifiers);
+    } else if (activeTool === 'tile-fill') {
+      this.tileFillTool.onMove(x, y, modifiers);
     }
   }
 
@@ -180,6 +183,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileBrushTool.onDown(x, y, modifiers);
     } else if (activeTool === 'tile-eraser') {
       this.tileEraserTool.onDown(x, y, modifiers);
+    } else if (activeTool === 'tile-fill') {
+      this.tileFillTool.onDown(x, y, modifiers);
     }
   }
 
@@ -192,6 +197,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileBrushTool.onUp(x, y, modifiers);
     } else if (activeTool === 'tile-eraser') {
       this.tileEraserTool.onUp(x, y, modifiers);
+    } else if (activeTool === 'tile-fill') {
+      this.tileFillTool.onUp(x, y, modifiers);
     }
   }
 
@@ -203,6 +210,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileBrushTool.onMove(-1, -1); // Out of bounds clears preview
     } else if (activeTool === 'tile-eraser') {
       this.tileEraserTool.onMove(-1, -1); // Out of bounds clears preview
+    } else if (activeTool === 'tile-fill') {
+      this.tileFillTool.onMove(-1, -1); // Out of bounds clears preview
     }
   }
 
@@ -252,6 +261,7 @@ export class PFTilemapCanvas extends BaseComponent {
   // Tool instances for tile operations and preview
   private tileBrushTool: TileBrushTool = new TileBrushTool();
   private tileEraserTool: TileEraserTool = new TileEraserTool();
+  private tileFillTool: TileFillTool = new TileFillTool();
 
   // Bound event handlers for cleanup
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
@@ -339,7 +349,7 @@ export class PFTilemapCanvas extends BaseComponent {
 
   /**
    * Render preview at the current hover position
-   * Renders ghost tile for brush or eraser indicator for eraser
+   * Renders ghost tile for brush, eraser indicator for eraser, or fill indicator for fill
    */
   private renderPreview(): void {
     const activeTool = toolStore.activeTool.value;
@@ -354,6 +364,11 @@ export class PFTilemapCanvas extends BaseComponent {
       const eraserPos = this.tileEraserTool.getEraserPosition();
       if (!eraserPos) return;
       this.renderEraserPreview(eraserPos.x, eraserPos.y);
+    } else if (activeTool === 'tile-fill') {
+      // Get fill position
+      const fillPos = this.tileFillTool.getFillPreviewPosition();
+      if (!fillPos) return;
+      this.renderFillPreview(fillPos.x, fillPos.y);
     }
   }
 
@@ -387,6 +402,30 @@ export class PFTilemapCanvas extends BaseComponent {
     this.ctx.moveTo(x + tileWidth - padding, y + padding);
     this.ctx.lineTo(x + padding, y + tileHeight - padding);
     this.ctx.stroke();
+    this.ctx.lineWidth = 1;
+  }
+
+  /**
+   * Render fill preview indicator at the given tile position
+   * Shows the selected tile with a highlight border
+   */
+  private renderFillPreview(tileX: number, tileY: number): void {
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const selectedTile = tilesetStore.selectedTileIndex.value;
+
+    const x = tileX * tileWidth;
+    const y = tileY * tileHeight;
+
+    // Draw the selected tile as ghost preview if a tile is selected
+    if (selectedTile !== null) {
+      this.renderTilePreview(selectedTile, tileX, tileY);
+    }
+
+    // Draw a cyan/blue highlight border to indicate fill target
+    this.ctx.strokeStyle = 'rgba(0, 200, 255, 0.8)';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(x + 1, y + 1, tileWidth - 2, tileHeight - 2);
     this.ctx.lineWidth = 1;
   }
 
