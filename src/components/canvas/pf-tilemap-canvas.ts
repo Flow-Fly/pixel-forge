@@ -7,6 +7,7 @@ import { modeStore } from "../../stores/mode";
 import { dirtyRectStore } from "../../stores/dirty-rect";
 import { toolStore } from "../../stores/tools";
 import { TileBrushTool } from "../../tools/tile-brush-tool";
+import { TileEraserTool } from "../../tools/tile-eraser-tool";
 
 /**
  * pf-tilemap-canvas - Canvas component for tilemap rendering
@@ -103,11 +104,14 @@ export class PFTilemapCanvas extends BaseComponent {
     this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
     this.boundHandleMouseUp = (e: MouseEvent) => this.handleMouseUp(e);
     this.boundHandleMouseLeave = () => this.handleMouseLeave();
+    this.boundHandleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     this.canvas.addEventListener('mousemove', this.boundHandleMouseMove);
     this.canvas.addEventListener('mousedown', this.boundHandleMouseDown);
     this.canvas.addEventListener('mouseup', this.boundHandleMouseUp);
     this.canvas.addEventListener('mouseleave', this.boundHandleMouseLeave);
+    // Prevent context menu on right-click (enables right-click quick erase)
+    this.canvas.addEventListener('contextmenu', this.boundHandleContextMenu);
   }
 
   disconnectedCallback(): void {
@@ -124,6 +128,9 @@ export class PFTilemapCanvas extends BaseComponent {
     }
     if (this.boundHandleMouseLeave) {
       this.canvas?.removeEventListener('mouseleave', this.boundHandleMouseLeave);
+    }
+    if (this.boundHandleContextMenu) {
+      this.canvas?.removeEventListener('contextmenu', this.boundHandleContextMenu);
     }
   }
 
@@ -153,27 +160,49 @@ export class PFTilemapCanvas extends BaseComponent {
   }
 
   private handleMouseMove(e: MouseEvent): void {
-    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const activeTool = toolStore.activeTool.value;
     const { x, y } = this.getCanvasCoords(e);
-    this.tileBrushTool.onMove(x, y, this.getModifiers(e));
+    const modifiers = this.getModifiers(e);
+
+    if (activeTool === 'tile-brush') {
+      this.tileBrushTool.onMove(x, y, modifiers);
+    } else if (activeTool === 'tile-eraser') {
+      this.tileEraserTool.onMove(x, y, modifiers);
+    }
   }
 
   private handleMouseDown(e: MouseEvent): void {
-    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const activeTool = toolStore.activeTool.value;
     const { x, y } = this.getCanvasCoords(e);
-    this.tileBrushTool.onDown(x, y, this.getModifiers(e));
+    const modifiers = this.getModifiers(e);
+
+    if (activeTool === 'tile-brush') {
+      this.tileBrushTool.onDown(x, y, modifiers);
+    } else if (activeTool === 'tile-eraser') {
+      this.tileEraserTool.onDown(x, y, modifiers);
+    }
   }
 
   private handleMouseUp(e: MouseEvent): void {
-    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const activeTool = toolStore.activeTool.value;
     const { x, y } = this.getCanvasCoords(e);
-    this.tileBrushTool.onUp(x, y, this.getModifiers(e));
+    const modifiers = this.getModifiers(e);
+
+    if (activeTool === 'tile-brush') {
+      this.tileBrushTool.onUp(x, y, modifiers);
+    } else if (activeTool === 'tile-eraser') {
+      this.tileEraserTool.onUp(x, y, modifiers);
+    }
   }
 
   private handleMouseLeave(): void {
+    const activeTool = toolStore.activeTool.value;
+
     // Clear preview when mouse leaves canvas
-    if (toolStore.activeTool.value === 'tile-brush') {
+    if (activeTool === 'tile-brush') {
       this.tileBrushTool.onMove(-1, -1); // Out of bounds clears preview
+    } else if (activeTool === 'tile-eraser') {
+      this.tileEraserTool.onMove(-1, -1); // Out of bounds clears preview
     }
   }
 
@@ -220,14 +249,16 @@ export class PFTilemapCanvas extends BaseComponent {
     }
   }
 
-  // Tool instance for tile operations and preview
+  // Tool instances for tile operations and preview
   private tileBrushTool: TileBrushTool = new TileBrushTool();
+  private tileEraserTool: TileEraserTool = new TileEraserTool();
 
   // Bound event handlers for cleanup
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseLeave: (() => void) | null = null;
+  private boundHandleContextMenu: ((e: MouseEvent) => void) | null = null;
 
   /**
    * Render the tilemap canvas
@@ -307,18 +338,56 @@ export class PFTilemapCanvas extends BaseComponent {
   }
 
   /**
-   * Render a ghost preview tile at the current hover position
-   * Only renders when tile-brush tool is active
+   * Render preview at the current hover position
+   * Renders ghost tile for brush or eraser indicator for eraser
    */
   private renderPreview(): void {
-    // Check if tile-brush is the active tool
-    if (toolStore.activeTool.value !== 'tile-brush') return;
+    const activeTool = toolStore.activeTool.value;
 
-    // Get preview from tool
-    const preview = this.tileBrushTool.getPreviewTile();
-    if (!preview) return;
+    if (activeTool === 'tile-brush') {
+      // Get preview from brush tool
+      const preview = this.tileBrushTool.getPreviewTile();
+      if (!preview) return;
+      this.renderTilePreview(preview.tileIndex, preview.x, preview.y);
+    } else if (activeTool === 'tile-eraser') {
+      // Get eraser position
+      const eraserPos = this.tileEraserTool.getEraserPosition();
+      if (!eraserPos) return;
+      this.renderEraserPreview(eraserPos.x, eraserPos.y);
+    }
+  }
 
-    this.renderTilePreview(preview.tileIndex, preview.x, preview.y);
+  /**
+   * Render eraser preview indicator at the given tile position
+   * Shows a red-tinted overlay on the tile to be erased
+   */
+  private renderEraserPreview(tileX: number, tileY: number): void {
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+
+    // Draw a red-tinted semi-transparent overlay
+    this.ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+    this.ctx.fillRect(
+      tileX * tileWidth,
+      tileY * tileHeight,
+      tileWidth,
+      tileHeight
+    );
+
+    // Draw an X indicator
+    this.ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    // Draw X from corners
+    const x = tileX * tileWidth;
+    const y = tileY * tileHeight;
+    const padding = 2;
+    this.ctx.moveTo(x + padding, y + padding);
+    this.ctx.lineTo(x + tileWidth - padding, y + tileHeight - padding);
+    this.ctx.moveTo(x + tileWidth - padding, y + padding);
+    this.ctx.lineTo(x + padding, y + tileHeight - padding);
+    this.ctx.stroke();
+    this.ctx.lineWidth = 1;
   }
 
   /**

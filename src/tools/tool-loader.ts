@@ -38,6 +38,7 @@ const TOOL_LOADERS: Record<ToolType, () => Promise<ToolConstructor>> = {
   hand: async () => (await import("./hand-tool")).HandTool,
   zoom: async () => (await import("./zoom-tool")).ZoomTool,
   "tile-brush": async () => (await import("./tile-brush-tool")).TileBrushTool,
+  "tile-eraser": async () => (await import("./tile-eraser-tool")).TileEraserTool,
 };
 
 /**
@@ -90,6 +91,7 @@ export const SELECTION_TOOLS: readonly ToolType[] = [
  */
 export const TILEMAP_TOOLS: readonly ToolType[] = [
   "tile-brush",
+  "tile-eraser",
 ] as const;
 
 /**

@@ -428,6 +428,23 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "click", action: "Place tile" },
       { key: "drag", action: "Paint tiles" },
       { key: "shift+click", action: "Line from last position" },
+      { key: "right-click", action: "Quick erase" },
+    ],
+  },
+
+  "tile-eraser": {
+    name: "Tile Eraser",
+    icon: "/icons/tools/eraser.webp",
+    label: "TE",
+    shortcutKey: "E",
+    group: "tilemap",
+    mode: "map",
+    options: [],
+    alternatives: ["tile-brush", "tile-fill"],
+    shortcuts: [
+      { key: "click", action: "Erase tile" },
+      { key: "drag", action: "Erase tiles continuously" },
+      { key: "shift+click", action: "Erase line from last position" },
     ],
   },
 };

@@ -25,6 +25,7 @@ export class TileBrushTool extends BaseTool {
 
   // Drawing state
   private isDrawing = false;
+  private isRightClickErasing = false; // Track right-click erase mode (button only valid in mousedown)
   private lastTileX: number | null = null;
   private lastTileY: number | null = null;
 
@@ -57,6 +58,29 @@ export class TileBrushTool extends BaseTool {
     const width = tilemapStore.width.value;
     const height = tilemapStore.height.value;
     return tileX >= 0 && tileX < width && tileY >= 0 && tileY < height;
+  }
+
+  /**
+   * Erase tile at the given tile coordinates (set to 0)
+   * Used for right-click quick erase functionality
+   */
+  private eraseTile(tileX: number, tileY: number): void {
+    const activeLayerId = tilemapStore.activeLayerId.value;
+    if (!activeLayerId) return; // No active layer
+
+    const layer = tilemapStore.getLayerById(activeLayerId);
+    if (!layer || layer.locked) return; // Layer locked or doesn't exist
+
+    // Bounds check
+    if (!this.isInBounds(tileX, tileY)) return;
+
+    try {
+      // 0 = empty tile (erase)
+      tilemapStore.setTile(activeLayerId, tileX, tileY, 0);
+    } catch (e) {
+      // Log but don't crash - validation should have caught this
+      console.warn('Tile erase failed:', e);
+    }
   }
 
   /**
@@ -125,11 +149,21 @@ export class TileBrushTool extends BaseTool {
   /**
    * Handle mouse/pen down
    * Places tile and initiates drawing state
+   * Right-click = quick erase (AC: #4 from Story 3-3)
    */
   onDown(x: number, y: number, modifiers?: ModifierKeys): void {
     const { tileX, tileY } = this.pixelToTile(x, y);
 
     this.isDrawing = true;
+
+    // Right-click = quick erase (capture button state here - it's only valid in mousedown)
+    this.isRightClickErasing = modifiers?.button === 2;
+    if (this.isRightClickErasing) {
+      this.eraseTile(tileX, tileY);
+      this.lastTileX = tileX;
+      this.lastTileY = tileY;
+      return;
+    }
 
     // Check for Shift+click line drawing
     if (modifiers?.shift && this.lastPlacedX !== null && this.lastPlacedY !== null) {
@@ -151,6 +185,7 @@ export class TileBrushTool extends BaseTool {
   /**
    * Handle mouse/pen drag
    * Paints tiles continuously along the drag path
+   * Right-click drag = continuous erase (AC: #4 from Story 3-3)
    */
   onDrag(x: number, y: number, _modifiers?: ModifierKeys): void {
     if (!this.isDrawing) return;
@@ -160,15 +195,20 @@ export class TileBrushTool extends BaseTool {
     // Skip if same tile as last (avoid duplicate placements)
     if (tileX === this.lastTileX && tileY === this.lastTileY) return;
 
+    // Use tracked state from onDown (event.button is always 0 in mousemove events)
+    const action = this.isRightClickErasing
+      ? (tx: number, ty: number) => this.eraseTile(tx, ty)
+      : (tx: number, ty: number) => this.placeTile(tx, ty);
+
     // Get line from last tile to current tile (handles fast movement)
     if (this.lastTileX !== null && this.lastTileY !== null) {
       const positions = this.getLinePositions(this.lastTileX, this.lastTileY, tileX, tileY);
-      // Skip first position (already placed in previous call)
+      // Skip first position (already placed/erased in previous call)
       for (let i = 1; i < positions.length; i++) {
-        this.placeTile(positions[i].x, positions[i].y);
+        action(positions[i].x, positions[i].y);
       }
     } else {
-      this.placeTile(tileX, tileY);
+      action(tileX, tileY);
     }
 
     this.lastTileX = tileX;
@@ -183,6 +223,7 @@ export class TileBrushTool extends BaseTool {
     const { tileX, tileY } = this.pixelToTile(x, y);
 
     this.isDrawing = false;
+    this.isRightClickErasing = false; // Reset right-click erase state
 
     // Record last placed position for Shift+click line
     this.lastPlacedX = tileX;
@@ -203,12 +244,17 @@ export class TileBrushTool extends BaseTool {
     const prevX = this.previewX;
     const prevY = this.previewY;
 
-    // Update preview position
-    if (this.isInBounds(tileX, tileY)) {
+    // Check if layer is available and unlocked before showing preview
+    const activeLayerId = tilemapStore.activeLayerId.value;
+    const layer = activeLayerId ? tilemapStore.getLayerById(activeLayerId) : null;
+    const canPlace = layer && !layer.locked;
+
+    // Update preview position (only show if in bounds AND can place)
+    if (this.isInBounds(tileX, tileY) && canPlace) {
       this.previewX = tileX;
       this.previewY = tileY;
     } else {
-      // Clear preview when outside bounds
+      // Clear preview when outside bounds or layer is locked
       this.previewX = null;
       this.previewY = null;
     }
