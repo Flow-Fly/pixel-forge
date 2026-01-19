@@ -1,22 +1,26 @@
 import { signal } from '../core/signal';
 import type { TileSelection, TileClipboard } from '../types/tilemap';
 import { tilemapStore } from './tilemap';
+import { historyStore } from './history';
+import { TileBatchCommand, type TileChange } from '../commands/tile-batch-command';
 
 /**
  * Tile Selection Store - Manages tile selection and clipboard operations for Map mode
  *
  * Story 3-5: Tile Selection & Clipboard
+ * Story 3-6: Tilemap Undo/Redo Integration (Task 5)
  *
  * This store handles:
  * - Rectangular tile selection in tile coordinates
  * - Clipboard operations (copy, cut, paste)
  * - Paste preview mode for visual feedback
  * - Delete/erase operations on selections
+ * - Undo/redo integration via TileBatchCommand
  *
  * Key conventions:
  * - Selection coordinates are in tile units, not pixels
  * - Tile IDs in clipboard use same convention as tilemapStore (0 = empty, 1+ = tile)
- * - Events fired for undo/redo integration (Story 3-6)
+ * - Events fired for UI feedback
  */
 class TileSelectionStore extends EventTarget {
   /**
@@ -184,8 +188,8 @@ class TileSelectionStore extends EventTarget {
   }
 
   /**
-   * Cut selected tiles (copy then erase)
-   * Story 3-5 Task 4.2
+   * Cut selected tiles (copy then erase) with undo support
+   * Story 3-5 Task 4.2, Story 3-6 Task 5.1
    *
    * @param layerId - The layer to cut tiles from
    */
@@ -196,16 +200,30 @@ class TileSelectionStore extends EventTarget {
     // Copy first
     this.copySelection(layerId);
 
-    // Then delete (but preserve selection for the event)
     const { x, y, width, height } = sel;
+    const changes: TileChange[] = [];
+
+    // Collect changes for undo/redo (Story 3-6)
     for (let ty = 0; ty < height; ty++) {
       for (let tx = 0; tx < width; tx++) {
+        const tileX = x + tx;
+        const tileY = y + ty;
         try {
-          tilemapStore.setTile(layerId, x + tx, y + ty, 0);
+          const previousTileId = tilemapStore.getTile(layerId, tileX, tileY);
+          if (previousTileId !== 0) {
+            changes.push({ x: tileX, y: tileY, previousTileId, newTileId: 0 });
+            tilemapStore.setTile(layerId, tileX, tileY, 0);
+          }
         } catch {
           // Ignore out of bounds
         }
       }
+    }
+
+    // Create command for undo/redo if changes were made
+    if (changes.length > 0) {
+      const command = new TileBatchCommand(layerId, changes, 'Cut Tiles');
+      historyStore.addWithoutExecuting(command);
     }
 
     this.dispatchEvent(
@@ -218,8 +236,8 @@ class TileSelectionStore extends EventTarget {
   }
 
   /**
-   * Delete (erase) selected tiles
-   * Story 3-5 Task 5.1, 5.2, 5.3
+   * Delete (erase) selected tiles with undo support
+   * Story 3-5 Task 5.1, 5.2, 5.3, Story 3-6 Task 5.2
    *
    * @param layerId - The layer to delete tiles from
    */
@@ -228,15 +246,29 @@ class TileSelectionStore extends EventTarget {
     if (!sel) return;
 
     const { x, y, width, height } = sel;
+    const changes: TileChange[] = [];
 
+    // Collect changes for undo/redo (Story 3-6)
     for (let ty = 0; ty < height; ty++) {
       for (let tx = 0; tx < width; tx++) {
+        const tileX = x + tx;
+        const tileY = y + ty;
         try {
-          tilemapStore.setTile(layerId, x + tx, y + ty, 0);
+          const previousTileId = tilemapStore.getTile(layerId, tileX, tileY);
+          if (previousTileId !== 0) {
+            changes.push({ x: tileX, y: tileY, previousTileId, newTileId: 0 });
+            tilemapStore.setTile(layerId, tileX, tileY, 0);
+          }
         } catch {
           // Ignore out of bounds
         }
       }
+    }
+
+    // Create command for undo/redo if changes were made
+    if (changes.length > 0) {
+      const command = new TileBatchCommand(layerId, changes, 'Delete Tiles');
+      historyStore.addWithoutExecuting(command);
     }
 
     this.dispatchEvent(
@@ -269,8 +301,8 @@ class TileSelectionStore extends EventTarget {
   }
 
   /**
-   * Confirm paste at current preview position
-   * Story 3-5 Task 4.3
+   * Confirm paste at current preview position with undo support
+   * Story 3-5 Task 4.3, Story 3-6 Task 5.3
    *
    * @param layerId - The layer to paste tiles to
    */
@@ -281,7 +313,9 @@ class TileSelectionStore extends EventTarget {
 
     const { x, y } = pos;
     const { width, height, data } = clip;
+    const changes: TileChange[] = [];
 
+    // Collect changes for undo/redo (Story 3-6)
     for (let ty = 0; ty < height; ty++) {
       for (let tx = 0; tx < width; tx++) {
         const tileId = data[ty * width + tx];
@@ -293,11 +327,21 @@ class TileSelectionStore extends EventTarget {
         if (targetY < 0 || targetY >= tilemapStore.height.value) continue;
 
         try {
-          tilemapStore.setTile(layerId, targetX, targetY, tileId);
+          const previousTileId = tilemapStore.getTile(layerId, targetX, targetY);
+          if (previousTileId !== tileId) {
+            changes.push({ x: targetX, y: targetY, previousTileId, newTileId: tileId });
+            tilemapStore.setTile(layerId, targetX, targetY, tileId);
+          }
         } catch {
           // Ignore errors (locked layer, etc.)
         }
       }
+    }
+
+    // Create command for undo/redo if changes were made
+    if (changes.length > 0) {
+      const command = new TileBatchCommand(layerId, changes, 'Paste Tiles');
+      historyStore.addWithoutExecuting(command);
     }
 
     this.pastePreview.value = null;

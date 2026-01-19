@@ -3,6 +3,7 @@ import { userStore } from './user';
 import { persistenceService } from '../services/persistence/indexed-db';
 import { projectStore } from './project';
 import { paletteStore } from './palette';
+import { modeStore } from './mode';
 
 // Configuration constants for history limits
 const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
@@ -25,18 +26,50 @@ interface HistoryContext {
   memoryUsage: number;
 }
 
+/**
+ * HistoryStore - Manages undo/redo with mode-specific history stacks
+ *
+ * Story 3-6: Tilemap Undo/Redo Integration (Task 3)
+ *
+ * Key architecture:
+ * - Separate history stacks for Art and Map modes (ARCH-9)
+ * - Cmd+Z only undoes operations from the current mode
+ * - Prevents UX disaster of undoing invisible operations
+ * - Backward compatible: existing undoStack/redoStack are aliases for art stacks
+ */
 class HistoryStore {
-  undoStack = signal<Command[]>([]);
-  redoStack = signal<Command[]>([]);
+  // Art mode history stacks (Story 3-6 Task 3.1)
+  artUndoStack = signal<Command[]>([]);
+  artRedoStack = signal<Command[]>([]);
 
-  // Computed signals for UI - automatically derived from stack state
-  canUndo = computed(() => this.undoStack.value.length > 0);
-  canRedo = computed(() => this.redoStack.value.length > 0);
+  // Map mode history stacks (Story 3-6 Task 3.2)
+  mapUndoStack = signal<Command[]>([]);
+  mapRedoStack = signal<Command[]>([]);
+
+  // Backward compatibility aliases (Story 3-6 Task 3.8)
+  // Point to art stacks for existing code that uses these directly
+  get undoStack() {
+    return this.artUndoStack;
+  }
+  get redoStack() {
+    return this.artRedoStack;
+  }
+
+  // Computed signals for UI - mode-aware (Story 3-6 Task 3.7)
+  canUndo = computed(() => {
+    const { undoStack } = this.getActiveStacks();
+    return undoStack.value.length > 0;
+  });
+
+  canRedo = computed(() => {
+    const { redoStack } = this.getActiveStacks();
+    return redoStack.value.length > 0;
+  });
 
   // Version signal - increments on undo/redo to trigger canvas re-render
   version = signal<number>(0);
 
-  // Track total memory usage
+  // Track total memory usage across both mode stacks (Story 3-6 Task 3.9)
   private memoryUsage = 0;
 
   // Context stack for isolated editing modes (e.g., brush editing)
@@ -56,6 +89,23 @@ class HistoryStore {
         }
       });
     }
+  }
+
+  /**
+   * Get the active undo/redo stacks based on current mode (Story 3-6 Task 3.3)
+   */
+  private getActiveStacks() {
+    const mode = modeStore.mode.value;
+    if (mode === 'map') {
+      return {
+        undoStack: this.mapUndoStack,
+        redoStack: this.mapRedoStack,
+      };
+    }
+    return {
+      undoStack: this.artUndoStack,
+      redoStack: this.artRedoStack,
+    };
   }
 
   /**
@@ -103,6 +153,9 @@ class HistoryStore {
     }
   }
 
+  /**
+   * Execute a command and add to the appropriate mode stack (Story 3-6 Task 3.4)
+   */
   async execute(command: Command) {
     // Auto-stamp with userId if not provided
     if (!command.userId) {
@@ -114,8 +167,10 @@ class HistoryStore {
 
     await command.execute();
 
-    this.undoStack.value = [...this.undoStack.value, command];
-    this.redoStack.value = []; // Clear redo stack on new action
+    // Get mode-appropriate stack and push command
+    const { undoStack, redoStack } = this.getActiveStacks();
+    undoStack.value = [...undoStack.value, command];
+    redoStack.value = []; // Clear redo stack on new action
 
     // Update memory tracking
     if (command.memorySize) {
@@ -132,45 +187,96 @@ class HistoryStore {
   }
 
   /**
+   * Add a command to history WITHOUT executing it (Story 3-6)
+   * Used by tools that apply changes visually during stroke and create command on mouseUp.
+   * The command has already been "executed" visually, so we just add it to history.
+   */
+  addWithoutExecuting(command: Command) {
+    // Auto-stamp with userId if not provided
+    if (!command.userId) {
+      command.userId = userStore.getCurrentUserId();
+    }
+    if (!command.timestamp) {
+      command.timestamp = Date.now();
+    }
+
+    // Get mode-appropriate stack and push command
+    const { undoStack, redoStack } = this.getActiveStacks();
+    undoStack.value = [...undoStack.value, command];
+    redoStack.value = []; // Clear redo stack on new action
+
+    // Update memory tracking
+    if (command.memorySize) {
+      this.memoryUsage += command.memorySize;
+    }
+
+    // Enforce limits
+    this.enforceHistoryLimits();
+    this.version.value++;
+    this.scheduleAutoSave();
+  }
+
+  /**
    * Enforce history limits by removing oldest commands when necessary.
+   * Applied to the current mode's stacks (both undo and redo).
+   *
+   * Strategy:
+   * 1. If over memory limit, first clear redo stack (expendable)
+   * 2. Then prune oldest from undo stack if still over limits
    */
   private enforceHistoryLimits() {
-    let stack = [...this.undoStack.value];
+    const { undoStack, redoStack } = this.getActiveStacks();
+    let undoStackCopy = [...undoStack.value];
+    let redoStackCopy = [...redoStack.value];
 
-    // Remove oldest commands if over count limit
-    while (stack.length > MAX_HISTORY_COUNT) {
-      const removed = stack.shift();
+    // Count limit applies to undo stack only (redo is temporary)
+    while (undoStackCopy.length > MAX_HISTORY_COUNT) {
+      const removed = undoStackCopy.shift();
       if (removed?.memorySize) {
         this.memoryUsage -= removed.memorySize;
       }
     }
 
-    // Remove oldest commands if over memory limit
-    while (this.memoryUsage > MAX_HISTORY_SIZE_BYTES && stack.length > 1) {
-      const removed = stack.shift();
+    // Memory limit: first prune redo stack (expendable), then undo stack
+    while (this.memoryUsage > MAX_HISTORY_SIZE_BYTES && redoStackCopy.length > 0) {
+      const removed = redoStackCopy.shift(); // Remove oldest redo (furthest from current state)
       if (removed?.memorySize) {
         this.memoryUsage -= removed.memorySize;
       }
     }
 
-    this.undoStack.value = stack;
+    // If still over memory limit, prune undo stack
+    while (this.memoryUsage > MAX_HISTORY_SIZE_BYTES && undoStackCopy.length > 1) {
+      const removed = undoStackCopy.shift();
+      if (removed?.memorySize) {
+        this.memoryUsage -= removed.memorySize;
+      }
+    }
+
+    undoStack.value = undoStackCopy;
+    redoStack.value = redoStackCopy;
   }
 
   /**
    * Get current memory usage for debugging/UI.
+   * Tracks memory from both mode stacks (Story 3-6 Task 3.9)
    */
   getMemoryUsage(): number {
     return this.memoryUsage;
   }
 
+  /**
+   * Undo the last command in the current mode's stack (Story 3-6 Task 3.5)
+   */
   async undo() {
     const targetUserId = userStore.getCurrentUserId();
-    const undoStack = this.undoStack.value;
+    const { undoStack, redoStack } = this.getActiveStacks();
+    const undoStackValue = undoStack.value;
 
     // Find last command for this user
     let commandIndex = -1;
-    for (let i = undoStack.length - 1; i >= 0; i--) {
-      const cmd = undoStack[i];
+    for (let i = undoStackValue.length - 1; i >= 0; i--) {
+      const cmd = undoStackValue[i];
       // Commands without userId are treated as belonging to any user (backward compat)
       if (!cmd.userId || cmd.userId === targetUserId) {
         commandIndex = i;
@@ -180,16 +286,16 @@ class HistoryStore {
 
     if (commandIndex === -1) return;
 
-    const command = undoStack[commandIndex];
+    const command = undoStackValue[commandIndex];
     await command.undo();
 
     // Remove from undo stack
-    const newUndoStack = [...undoStack];
+    const newUndoStack = [...undoStackValue];
     newUndoStack.splice(commandIndex, 1);
-    this.undoStack.value = newUndoStack;
+    undoStack.value = newUndoStack;
 
     // Add to redo stack
-    this.redoStack.value = [...this.redoStack.value, command];
+    redoStack.value = [...redoStack.value, command];
 
     this.version.value++;
     this.scheduleAutoSave();
@@ -198,14 +304,18 @@ class HistoryStore {
     paletteStore.refreshUsedColors();
   }
 
+  /**
+   * Redo the last undone command in the current mode's stack (Story 3-6 Task 3.6)
+   */
   async redo() {
     const targetUserId = userStore.getCurrentUserId();
-    const redoStack = this.redoStack.value;
+    const { undoStack, redoStack } = this.getActiveStacks();
+    const redoStackValue = redoStack.value;
 
     // Find last undone command for this user
     let commandIndex = -1;
-    for (let i = redoStack.length - 1; i >= 0; i--) {
-      const cmd = redoStack[i];
+    for (let i = redoStackValue.length - 1; i >= 0; i--) {
+      const cmd = redoStackValue[i];
       if (!cmd.userId || cmd.userId === targetUserId) {
         commandIndex = i;
         break;
@@ -214,16 +324,16 @@ class HistoryStore {
 
     if (commandIndex === -1) return;
 
-    const command = redoStack[commandIndex];
+    const command = redoStackValue[commandIndex];
     await command.execute();
 
     // Remove from redo stack
-    const newRedoStack = [...redoStack];
+    const newRedoStack = [...redoStackValue];
     newRedoStack.splice(commandIndex, 1);
-    this.redoStack.value = newRedoStack;
+    redoStack.value = newRedoStack;
 
     // Add back to undo stack
-    this.undoStack.value = [...this.undoStack.value, command];
+    undoStack.value = [...undoStack.value, command];
 
     this.version.value++;
     this.scheduleAutoSave();
@@ -232,27 +342,36 @@ class HistoryStore {
     paletteStore.refreshUsedColors();
   }
 
+  /**
+   * Clear all history stacks (both modes)
+   */
   clear() {
-    this.undoStack.value = [];
-    this.redoStack.value = [];
+    this.artUndoStack.value = [];
+    this.artRedoStack.value = [];
+    this.mapUndoStack.value = [];
+    this.mapRedoStack.value = [];
+    this.memoryUsage = 0;
     this.version.value++;
   }
 
   /**
    * Push current history context onto the stack and start fresh.
    * Used for isolated editing modes like brush editing.
+   * Note: This operates on the current mode's stacks.
    */
   pushContext() {
+    const { undoStack, redoStack } = this.getActiveStacks();
+
     // Save current state
     this.contextStack.push({
-      undoStack: [...this.undoStack.value],
-      redoStack: [...this.redoStack.value],
+      undoStack: [...undoStack.value],
+      redoStack: [...redoStack.value],
       memoryUsage: this.memoryUsage,
     });
 
-    // Start fresh
-    this.undoStack.value = [];
-    this.redoStack.value = [];
+    // Start fresh for current mode
+    undoStack.value = [];
+    redoStack.value = [];
     this.memoryUsage = 0;
     this.version.value++;
   }
@@ -268,9 +387,11 @@ class HistoryStore {
       return;
     }
 
+    const { undoStack, redoStack } = this.getActiveStacks();
+
     // Restore previous state
-    this.undoStack.value = context.undoStack;
-    this.redoStack.value = context.redoStack;
+    undoStack.value = context.undoStack;
+    redoStack.value = context.redoStack;
     this.memoryUsage = context.memoryUsage;
     this.version.value++;
   }

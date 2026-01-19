@@ -1,6 +1,8 @@
 export * from '../stores/history';
 export * from './palette-command';
 export * from './optimized-drawing-command';
+export * from './tile-place-command';
+export * from './tile-batch-command';
 
 import type { Command } from '../stores/history';
 import type { Rect } from '../types/geometry';

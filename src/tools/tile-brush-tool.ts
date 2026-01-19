@@ -7,17 +7,21 @@
  * - Continuous painting during drag
  * - Shift+click line drawing from last position
  * - Ghost preview rendering
+ * - Undo/redo via TileBatchCommand (Story 3-6)
  *
  * This is the first tile painting tool and establishes patterns
  * for subsequent tile tools (eraser, fill).
  *
- * Story: 3-2-tile-brush-tool
+ * Story: 3-2-tile-brush-tool, 3-6-tilemap-undo-redo-integration
  */
 
 import { BaseTool, type ModifierKeys } from './base-tool';
 import { tilemapStore } from '../stores/tilemap';
 import { tilesetStore } from '../stores/tileset';
+import { historyStore } from '../stores/history';
 import { dirtyRectStore } from '../stores/dirty-rect';
+import { TilePlaceCommand } from '../commands/tile-place-command';
+import { TileBatchCommand, type TileChange } from '../commands/tile-batch-command';
 
 export class TileBrushTool extends BaseTool {
   name = 'tile-brush';
@@ -36,6 +40,10 @@ export class TileBrushTool extends BaseTool {
   // For ghost preview
   private previewX: number | null = null;
   private previewY: number | null = null;
+
+  // Story 3-6: Accumulate changes during stroke for undo/redo
+  private pendingChanges: TileChange[] = [];
+  private strokeLayerId: string | null = null;
 
   /**
    * Convert pixel coordinates to tile coordinates
@@ -61,52 +69,68 @@ export class TileBrushTool extends BaseTool {
   }
 
   /**
-   * Erase tile at the given tile coordinates (set to 0)
+   * Erase tile at the given tile coordinates with change tracking (Story 3-6)
    * Used for right-click quick erase functionality
    */
-  private eraseTile(tileX: number, tileY: number): void {
+  private eraseTileWithTracking(tileX: number, tileY: number): void {
     const activeLayerId = tilemapStore.activeLayerId.value;
-    if (!activeLayerId) return; // No active layer
+    if (!activeLayerId) return;
 
     const layer = tilemapStore.getLayerById(activeLayerId);
-    if (!layer || layer.locked) return; // Layer locked or doesn't exist
+    if (!layer || layer.locked) return;
 
-    // Bounds check
     if (!this.isInBounds(tileX, tileY)) return;
 
+    // Check if already changed this tile in current stroke
+    const existingChange = this.pendingChanges.find(c => c.x === tileX && c.y === tileY);
+    if (existingChange) return;
+
+    const previousTileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
+    const newTileId = 0; // Erase = set to empty
+
+    if (previousTileId === newTileId) return; // No change needed
+
+    // Apply visually (immediate feedback) - only record change if successful
     try {
-      // 0 = empty tile (erase)
-      tilemapStore.setTile(activeLayerId, tileX, tileY, 0);
+      tilemapStore.setTile(activeLayerId, tileX, tileY, newTileId);
+      // Record the change only after successful setTile (fixes phantom history entries)
+      this.pendingChanges.push({ x: tileX, y: tileY, previousTileId, newTileId });
     } catch (e) {
-      // Log but don't crash - validation should have caught this
       console.warn('Tile erase failed:', e);
     }
   }
 
   /**
-   * Place a tile at the given tile coordinates
+   * Place a tile at the given tile coordinates with change tracking (Story 3-6)
    * Validates selection, layer lock, and bounds before placing
    */
-  private placeTile(tileX: number, tileY: number): void {
+  private placeTileWithTracking(tileX: number, tileY: number): void {
     const selectedTile = tilesetStore.selectedTileIndex.value;
-    if (selectedTile === null) return; // No tile selected
+    if (selectedTile === null) return;
 
     const activeLayerId = tilemapStore.activeLayerId.value;
-    if (!activeLayerId) return; // No active layer
+    if (!activeLayerId) return;
 
     const layer = tilemapStore.getLayerById(activeLayerId);
-    if (!layer || layer.locked) return; // Layer locked or doesn't exist
+    if (!layer || layer.locked) return;
 
-    // Bounds check
     if (!this.isInBounds(tileX, tileY)) return;
 
-    // tileId is 1-based in storage (0 = empty), selectedTileIndex is 0-based
-    const tileId = selectedTile + 1;
+    // Check if already changed this tile in current stroke
+    const existingChange = this.pendingChanges.find(c => c.x === tileX && c.y === tileY);
+    if (existingChange) return;
 
+    const newTileId = selectedTile + 1; // 0-based to 1-based
+    const previousTileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
+
+    if (previousTileId === newTileId) return; // No change needed
+
+    // Apply visually (immediate feedback) - only record change if successful
     try {
-      tilemapStore.setTile(activeLayerId, tileX, tileY, tileId);
+      tilemapStore.setTile(activeLayerId, tileX, tileY, newTileId);
+      // Record the change only after successful setTile (fixes phantom history entries)
+      this.pendingChanges.push({ x: tileX, y: tileY, previousTileId, newTileId });
     } catch (e) {
-      // Log but don't crash - validation should have caught this
       console.warn('Tile placement failed:', e);
     }
   }
@@ -148,18 +172,20 @@ export class TileBrushTool extends BaseTool {
 
   /**
    * Handle mouse/pen down
-   * Places tile and initiates drawing state
+   * Starts stroke, records changes for undo/redo (Story 3-6)
    * Right-click = quick erase (AC: #4 from Story 3-3)
    */
   onDown(x: number, y: number, modifiers?: ModifierKeys): void {
     const { tileX, tileY } = this.pixelToTile(x, y);
 
     this.isDrawing = true;
+    this.pendingChanges = [];
+    this.strokeLayerId = tilemapStore.activeLayerId.value;
 
-    // Right-click = quick erase (capture button state here - it's only valid in mousedown)
+    // Right-click = quick erase
     this.isRightClickErasing = modifiers?.button === 2;
     if (this.isRightClickErasing) {
-      this.eraseTile(tileX, tileY);
+      this.eraseTileWithTracking(tileX, tileY);
       this.lastTileX = tileX;
       this.lastTileY = tileY;
       return;
@@ -167,24 +193,21 @@ export class TileBrushTool extends BaseTool {
 
     // Check for Shift+click line drawing
     if (modifiers?.shift && this.lastPlacedX !== null && this.lastPlacedY !== null) {
-      // Draw line from last placed position to current
       const positions = this.getLinePositions(this.lastPlacedX, this.lastPlacedY, tileX, tileY);
       for (const pos of positions) {
-        this.placeTile(pos.x, pos.y);
+        this.placeTileWithTracking(pos.x, pos.y);
       }
     } else {
-      // Single tile placement
-      this.placeTile(tileX, tileY);
+      this.placeTileWithTracking(tileX, tileY);
     }
 
-    // Update tracking state
     this.lastTileX = tileX;
     this.lastTileY = tileY;
   }
 
   /**
    * Handle mouse/pen drag
-   * Paints tiles continuously along the drag path
+   * Continues stroke with change tracking (Story 3-6)
    * Right-click drag = continuous erase (AC: #4 from Story 3-3)
    */
   onDrag(x: number, y: number, _modifiers?: ModifierKeys): void {
@@ -192,13 +215,12 @@ export class TileBrushTool extends BaseTool {
 
     const { tileX, tileY } = this.pixelToTile(x, y);
 
-    // Skip if same tile as last (avoid duplicate placements)
+    // Skip if same tile as last
     if (tileX === this.lastTileX && tileY === this.lastTileY) return;
 
-    // Use tracked state from onDown (event.button is always 0 in mousemove events)
     const action = this.isRightClickErasing
-      ? (tx: number, ty: number) => this.eraseTile(tx, ty)
-      : (tx: number, ty: number) => this.placeTile(tx, ty);
+      ? (tx: number, ty: number) => this.eraseTileWithTracking(tx, ty)
+      : (tx: number, ty: number) => this.placeTileWithTracking(tx, ty);
 
     // Get line from last tile to current tile (handles fast movement)
     if (this.lastTileX !== null && this.lastTileY !== null) {
@@ -217,13 +239,39 @@ export class TileBrushTool extends BaseTool {
 
   /**
    * Handle mouse/pen up
-   * Ends drawing and records position for Shift+click
+   * Ends stroke and creates undo command (Story 3-6)
    */
   onUp(x: number, y: number, _modifiers?: ModifierKeys): void {
     const { tileX, tileY } = this.pixelToTile(x, y);
 
+    // Create command for undo/redo (Story 3-6 Task 4.1, 4.2)
+    if (this.pendingChanges.length > 0 && this.strokeLayerId) {
+      const commandName = this.isRightClickErasing ? 'Brush Erase' : 'Brush Stroke';
+
+      if (this.pendingChanges.length === 1) {
+        // Single tile - use TilePlaceCommand
+        const change = this.pendingChanges[0];
+        const command = new TilePlaceCommand(
+          this.strokeLayerId,
+          change.x,
+          change.y,
+          change.previousTileId,
+          change.newTileId
+        );
+        // Already executed visually, add to history without re-executing
+        historyStore.addWithoutExecuting(command);
+      } else {
+        // Multiple tiles - use TileBatchCommand
+        const command = new TileBatchCommand(this.strokeLayerId, [...this.pendingChanges], commandName);
+        // Already executed visually, add to history without re-executing
+        historyStore.addWithoutExecuting(command);
+      }
+    }
+
     this.isDrawing = false;
-    this.isRightClickErasing = false; // Reset right-click erase state
+    this.isRightClickErasing = false;
+    this.pendingChanges = [];
+    this.strokeLayerId = null;
 
     // Record last placed position for Shift+click line
     this.lastPlacedX = tileX;

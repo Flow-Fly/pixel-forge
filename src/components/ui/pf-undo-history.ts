@@ -6,8 +6,8 @@ import { historyHighlightStore } from '../../stores/history-highlight';
 import { isDrawableCommand } from '../../commands/index';
 import { layerStore } from '../../stores/layers';
 import { projectStore } from '../../stores/project';
+import { modeStore } from '../../stores/mode';
 import './pf-history-diff-tooltip';
-import "./";
 
 @customElement('pf-undo-history')
 export class PFUndoHistory extends BaseComponent {
@@ -203,7 +203,9 @@ export class PFUndoHistory extends BaseComponent {
 
   private async revertToHere(index: number, type: 'undo' | 'redo') {
     if (type === 'undo') {
-      const undoStack = historyStore.undoStack.value;
+      // Use mode-appropriate stack (Story 3-6)
+      const mode = modeStore.mode.value;
+      const undoStack = mode === 'map' ? historyStore.mapUndoStack.value : historyStore.artUndoStack.value;
       const stepsToUndo = undoStack.length - 1 - index;
 
       for (let i = 0; i < stepsToUndo; i++) {
@@ -227,7 +229,9 @@ export class PFUndoHistory extends BaseComponent {
     const { computeSafePixels, applyPatch } = await import('../../services/patch-service');
     const { PatchCommand } = await import('../../commands/patch-command');
 
-    const undoStack = historyStore.undoStack.value;
+    // Use mode-appropriate stack (Story 3-6)
+    const mode = modeStore.mode.value;
+    const undoStack = mode === 'map' ? historyStore.mapUndoStack.value : historyStore.artUndoStack.value;
     const subsequentCommands = undoStack.slice(index + 1);
     const canvasWidth = projectStore.width.value;
 
@@ -365,8 +369,10 @@ export class PFUndoHistory extends BaseComponent {
   }
 
   render() {
-    const undoStack = historyStore.undoStack.value;
-    const redoStack = historyStore.redoStack.value;
+    // Use mode-appropriate stacks (Story 3-6: mode-specific history)
+    const mode = modeStore.mode.value;
+    const undoStack = mode === 'map' ? historyStore.mapUndoStack.value : historyStore.artUndoStack.value;
+    const redoStack = mode === 'map' ? historyStore.mapRedoStack.value : historyStore.artRedoStack.value;
     const highlightedId = historyHighlightStore.highlightedCommandId.value;
     const expandedId = historyHighlightStore.expandedCommandId.value;
     const highlightedCmd = historyHighlightStore.highlightedCommand.value;

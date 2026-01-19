@@ -264,7 +264,7 @@ export class PixelForgeApp extends BaseComponent {
     if (savedHeight) {
       this.timelineHeight = Math.max(
         100,
-        Math.min(500, parseInt(savedHeight, 10))
+        Math.min(500, parseInt(savedHeight, 10)),
       );
     }
 
@@ -274,16 +274,16 @@ export class PixelForgeApp extends BaseComponent {
     // Listen for keyboard shortcuts
     window.addEventListener(
       "show-new-project-dialog",
-      this.handleShowNewProjectDialog
+      this.handleShowNewProjectDialog,
     );
     window.addEventListener(
       "show-keyboard-shortcuts-dialog",
-      this.handleShowKeyboardShortcutsDialog
+      this.handleShowKeyboardShortcutsDialog,
     );
     window.addEventListener("show-resize-dialog", this.handleShowResizeDialog);
     window.addEventListener(
       "show-open-file-dialog",
-      this.handleShowOpenFileDialog
+      this.handleShowOpenFileDialog,
     );
     window.addEventListener("show-export-dialog", this.handleShowExportDialog);
 
@@ -293,25 +293,25 @@ export class PixelForgeApp extends BaseComponent {
     // Listen for warning toast events from canvas
     window.addEventListener(
       "show-warning-toast",
-      this.handleShowWarningToast as EventListener
+      this.handleShowWarningToast as EventListener,
     );
 
     // Listen for map config dialog (Story 1-5)
     window.addEventListener(
       "show-map-config-dialog",
-      this.handleShowMapConfigDialog
+      this.handleShowMapConfigDialog,
     );
 
     // Listen for send to tileset dialog (Story 2-4)
     window.addEventListener(
       "show-send-to-tileset-dialog",
-      this.handleShowSendToTilesetDialog
+      this.handleShowSendToTilesetDialog,
     );
 
     // Listen for success toast events
     window.addEventListener(
       "show-success-toast",
-      this.handleShowSuccessToast as EventListener
+      this.handleShowSuccessToast as EventListener,
     );
 
     // Listen for keyboard shortcuts (Story 1-5)
@@ -402,6 +402,7 @@ export class PixelForgeApp extends BaseComponent {
       if (modeStore.mode.value === "map") {
         e.preventDefault();
         this.showMapConfigDialog = true;
+        e.stopPropagation();
       }
     }
 
@@ -410,6 +411,7 @@ export class PixelForgeApp extends BaseComponent {
       if (modeStore.mode.value === "art") {
         e.preventDefault();
         this.showSendToTilesetDialog = true;
+        e.stopPropagation();
       }
     }
   };
@@ -446,40 +448,40 @@ export class PixelForgeApp extends BaseComponent {
     document.removeEventListener("mouseup", this.handleTimelineResizeEnd);
     window.removeEventListener(
       "show-new-project-dialog",
-      this.handleShowNewProjectDialog
+      this.handleShowNewProjectDialog,
     );
     window.removeEventListener(
       "show-keyboard-shortcuts-dialog",
-      this.handleShowKeyboardShortcutsDialog
+      this.handleShowKeyboardShortcutsDialog,
     );
     window.removeEventListener(
       "show-resize-dialog",
-      this.handleShowResizeDialog
+      this.handleShowResizeDialog,
     );
     window.removeEventListener(
       "show-open-file-dialog",
-      this.handleShowOpenFileDialog
+      this.handleShowOpenFileDialog,
     );
     window.removeEventListener(
       "show-export-dialog",
-      this.handleShowExportDialog
+      this.handleShowExportDialog,
     );
     window.removeEventListener("beforeunload", this.handleBeforeUnload);
     window.removeEventListener(
       "show-warning-toast",
-      this.handleShowWarningToast as EventListener
+      this.handleShowWarningToast as EventListener,
     );
     window.removeEventListener(
       "show-map-config-dialog",
-      this.handleShowMapConfigDialog
+      this.handleShowMapConfigDialog,
     );
     window.removeEventListener(
       "show-send-to-tileset-dialog",
-      this.handleShowSendToTilesetDialog
+      this.handleShowSendToTilesetDialog,
     );
     window.removeEventListener(
       "show-success-toast",
-      this.handleShowSuccessToast as EventListener
+      this.handleShowSuccessToast as EventListener,
     );
     window.removeEventListener("keydown", this.handleKeyDown);
   }
@@ -507,7 +509,7 @@ export class PixelForgeApp extends BaseComponent {
     const deltaY = this.resizeStartY - e.clientY;
     const newHeight = Math.max(
       100,
-      Math.min(500, this.resizeStartHeight + deltaY)
+      Math.min(500, this.resizeStartHeight + deltaY),
     );
     this.timelineHeight = newHeight;
   };
@@ -558,17 +560,15 @@ export class PixelForgeApp extends BaseComponent {
 
       <main class="workspace">
         <pf-canvas-viewport @canvas-cursor=${this.handleCanvasCursor}>
-          ${currentMode === 'art'
+          ${currentMode === "art"
             ? html`<pf-drawing-canvas
                 .width=${projectStore.width.value}
                 .height=${projectStore.height.value}
               ></pf-drawing-canvas>`
-            : html`<pf-tilemap-canvas></pf-tilemap-canvas>
-                ${tilemapStore.gridVisible.value
+            : html`<pf-tilemap-canvas></pf-tilemap-canvas> ${tilemapStore
+                  .gridVisible.value
                   ? html`<pf-grid-overlay></pf-grid-overlay>`
-                  : null
-                }`
-          }
+                  : null}`}
         </pf-canvas-viewport>
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
@@ -599,14 +599,24 @@ export class PixelForgeApp extends BaseComponent {
               </pf-panel>
             `
           : ""}
-        ${currentMode === 'map'
+        ${currentMode === "map"
           ? html`
-              <pf-panel header="Tileset" collapsible panel-id="tileset" bordered>
+              <pf-panel
+                header="Tileset"
+                collapsible
+                panel-id="tileset"
+                bordered
+              >
                 <pf-tileset-panel></pf-tileset-panel>
               </pf-panel>
             `
           : ""}
-        <pf-panel header="References" collapsible panel-id="references" bordered>
+        <pf-panel
+          header="References"
+          collapsible
+          panel-id="references"
+          bordered
+        >
           <pf-references-panel></pf-references-panel>
         </pf-panel>
         <pf-panel header="Brushes" collapsible panel-id="brush" bordered>

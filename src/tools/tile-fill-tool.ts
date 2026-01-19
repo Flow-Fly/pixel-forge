@@ -6,17 +6,20 @@
  * - Single click fill on empty regions
  * - Single click fill on regions with matching tile ID
  * - Early exit when fill tile matches target tile
+ * - Undo/redo via TileBatchCommand (Story 3-6)
  *
  * Uses 4-way connectivity (cardinal directions only).
  * Iterative BFS approach prevents stack overflow on large maps.
  *
- * Story: 3-4-tile-fill-tool
+ * Story: 3-4-tile-fill-tool, 3-6-tilemap-undo-redo-integration
  */
 
 import { BaseTool, type ModifierKeys } from './base-tool';
 import { tilemapStore } from '../stores/tilemap';
 import { tilesetStore } from '../stores/tileset';
+import { historyStore } from '../stores/history';
 import { dirtyRectStore } from '../stores/dirty-rect';
+import { TileBatchCommand, type TileChange } from '../commands/tile-batch-command';
 
 export class TileFillTool extends BaseTool {
   name = 'tile-fill';
@@ -50,33 +53,41 @@ export class TileFillTool extends BaseTool {
   }
 
   /**
-   * Flood fill algorithm using 4-way connectivity
-   * Uses iterative BFS to avoid stack overflow on large regions
+   * Flood fill algorithm with change tracking (Story 3-6)
+   * Uses 4-way connectivity and iterative BFS to avoid stack overflow
    *
    * @param startX - Starting X tile coordinate
    * @param startY - Starting Y tile coordinate
    * @param targetTileId - The tile ID to replace (0 for empty)
    * @param fillTileId - The tile ID to fill with
+   * @returns Array of changes made for undo/redo
    */
-  private floodFill(startX: number, startY: number, targetTileId: number, fillTileId: number): void {
+  private floodFillWithTracking(
+    startX: number,
+    startY: number,
+    targetTileId: number,
+    fillTileId: number
+  ): TileChange[] {
     const activeLayerId = tilemapStore.activeLayerId.value;
-    if (!activeLayerId) return;
+    if (!activeLayerId) return [];
 
     const layer = tilemapStore.getLayerById(activeLayerId);
-    if (!layer || layer.locked) return;
+    if (!layer || layer.locked) return [];
 
     // Early exit: same tile, no work needed (AC #5)
-    if (targetTileId === fillTileId) return;
+    if (targetTileId === fillTileId) return [];
 
     const width = tilemapStore.width.value;
     const height = tilemapStore.height.value;
+    const changes: TileChange[] = [];
 
     // Queue for BFS traversal
     const queue: { x: number; y: number }[] = [{ x: startX, y: startY }];
 
-    // Set to track visited tiles (use string key "x,y")
-    const visited = new Set<string>();
-    visited.add(`${startX},${startY}`);
+    // Set to track visited tiles (use integer key for performance: y * width + x)
+    // Avoids string allocation overhead for large fills
+    const visited = new Set<number>();
+    visited.add(startY * width + startX);
 
     // 4-way directions: up, down, left, right
     const directions = [
@@ -98,9 +109,11 @@ export class TileFillTool extends BaseTool {
       // Skip if not the target tile
       if (currentTileId !== targetTileId) continue;
 
-      // Fill this tile
+      // Fill this tile (immediate visual feedback) - only record change if successful
       try {
         tilemapStore.setTile(activeLayerId, x, y, fillTileId);
+        // Record the change only after successful setTile (fixes phantom history entries)
+        changes.push({ x, y, previousTileId: currentTileId, newTileId: fillTileId });
       } catch (e) {
         console.warn('Tile fill failed at', x, y, e);
         continue;
@@ -110,7 +123,7 @@ export class TileFillTool extends BaseTool {
       for (const { dx, dy } of directions) {
         const nx = x + dx;
         const ny = y + dy;
-        const key = `${nx},${ny}`;
+        const key = ny * width + nx; // Integer key for performance
 
         if (!visited.has(key)) {
           visited.add(key);
@@ -118,10 +131,12 @@ export class TileFillTool extends BaseTool {
         }
       }
     }
+
+    return changes;
   }
 
   /**
-   * Handle mouse/pen down - trigger flood fill
+   * Handle mouse/pen down - trigger flood fill with undo support (Story 3-6)
    */
   onDown(x: number, y: number, _modifiers?: ModifierKeys): void {
     const { tileX, tileY } = this.pixelToTile(x, y);
@@ -146,8 +161,15 @@ export class TileFillTool extends BaseTool {
     // Fill tile is 1-based in storage (selectedTileIndex is 0-based)
     const fillTileId = selectedTile + 1;
 
-    // Flood fill
-    this.floodFill(tileX, tileY, targetTileId, fillTileId);
+    // Flood fill with change tracking (Story 3-6 Task 4.4)
+    const changes = this.floodFillWithTracking(tileX, tileY, targetTileId, fillTileId);
+
+    // Create command for undo/redo if changes were made
+    if (changes.length > 0) {
+      const command = new TileBatchCommand(activeLayerId, changes, 'Fill');
+      // Already executed visually, add to history without re-executing
+      historyStore.addWithoutExecuting(command);
+    }
   }
 
   /**
