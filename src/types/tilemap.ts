@@ -107,3 +107,31 @@ export interface HeroEditState {
  * LoadStatus - Status of async loading operations
  */
 export type LoadStatus = 'idle' | 'loading' | 'error' | 'success';
+
+/**
+ * TileSelection - A rectangular selection of tiles
+ * Story 3-5 Task 1.8
+ */
+export interface TileSelection {
+  /** Left tile coordinate (0-based) */
+  x: number;
+  /** Top tile coordinate (0-based) */
+  y: number;
+  /** Width in tiles */
+  width: number;
+  /** Height in tiles */
+  height: number;
+}
+
+/**
+ * TileClipboard - Copied tile data for paste operations
+ * Story 3-5 Task 1.8
+ */
+export interface TileClipboard {
+  /** Width in tiles */
+  width: number;
+  /** Height in tiles */
+  height: number;
+  /** Tile IDs in row-major order (index = y * width + x) */
+  data: Uint32Array;
+}

@@ -149,8 +149,15 @@ export class PFToolbar extends BaseComponent {
   private renderMapModeToolbar() {
     return html`
       <div class="tools-section">
-        <!-- Tilemap Tools -->
+        <!-- Tilemap Drawing Tools -->
         ${this.renderToolGroup("tile-brush", tilemapToolGroups)}
+        ${this.renderToolGroup("tile-eraser", tilemapToolGroups)}
+        ${this.renderToolGroup("tile-fill", tilemapToolGroups)}
+
+        <div class="separator"></div>
+
+        <!-- Tilemap Selection -->
+        ${this.renderToolGroup("tile-select", tilemapToolGroups)}
 
         <div class="separator"></div>
 

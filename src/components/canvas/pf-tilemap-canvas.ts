@@ -3,12 +3,14 @@ import { customElement, query } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { tilemapStore } from "../../stores/tilemap";
 import { tilesetStore } from "../../stores/tileset";
+import { tileSelectionStore } from "../../stores/tile-selection";
 import { modeStore } from "../../stores/mode";
 import { dirtyRectStore } from "../../stores/dirty-rect";
 import { toolStore } from "../../stores/tools";
 import { TileBrushTool } from "../../tools/tile-brush-tool";
 import { TileEraserTool } from "../../tools/tile-eraser-tool";
 import { TileFillTool } from "../../tools/tile-fill-tool";
+import { TileSelectTool } from "../../tools/tile-select-tool";
 
 /**
  * pf-tilemap-canvas - Canvas component for tilemap rendering
@@ -171,6 +173,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileEraserTool.onMove(x, y, modifiers);
     } else if (activeTool === 'tile-fill') {
       this.tileFillTool.onMove(x, y, modifiers);
+    } else if (activeTool === 'tile-select') {
+      this.tileSelectTool.onMove(x, y, modifiers);
     }
   }
 
@@ -179,12 +183,23 @@ export class PFTilemapCanvas extends BaseComponent {
     const { x, y } = this.getCanvasCoords(e);
     const modifiers = this.getModifiers(e);
 
+    // If in paste preview mode, click confirms paste at current position
+    if (tileSelectionStore.isPasteMode) {
+      const activeLayerId = tilemapStore.activeLayerId.value;
+      if (activeLayerId) {
+        tileSelectionStore.confirmPaste(activeLayerId);
+      }
+      return;
+    }
+
     if (activeTool === 'tile-brush') {
       this.tileBrushTool.onDown(x, y, modifiers);
     } else if (activeTool === 'tile-eraser') {
       this.tileEraserTool.onDown(x, y, modifiers);
     } else if (activeTool === 'tile-fill') {
       this.tileFillTool.onDown(x, y, modifiers);
+    } else if (activeTool === 'tile-select') {
+      this.tileSelectTool.onDown(x, y, modifiers);
     }
   }
 
@@ -199,6 +214,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileEraserTool.onUp(x, y, modifiers);
     } else if (activeTool === 'tile-fill') {
       this.tileFillTool.onUp(x, y, modifiers);
+    } else if (activeTool === 'tile-select') {
+      this.tileSelectTool.onUp(x, y, modifiers);
     }
   }
 
@@ -212,6 +229,8 @@ export class PFTilemapCanvas extends BaseComponent {
       this.tileEraserTool.onMove(-1, -1); // Out of bounds clears preview
     } else if (activeTool === 'tile-fill') {
       this.tileFillTool.onMove(-1, -1); // Out of bounds clears preview
+    } else if (activeTool === 'tile-select') {
+      this.tileSelectTool.onMove(-1, -1); // Out of bounds clears preview
     }
   }
 
@@ -262,6 +281,7 @@ export class PFTilemapCanvas extends BaseComponent {
   private tileBrushTool: TileBrushTool = new TileBrushTool();
   private tileEraserTool: TileEraserTool = new TileEraserTool();
   private tileFillTool: TileFillTool = new TileFillTool();
+  private tileSelectTool: TileSelectTool = new TileSelectTool();
 
   // Bound event handlers for cleanup
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
@@ -274,7 +294,7 @@ export class PFTilemapCanvas extends BaseComponent {
    * Render the tilemap canvas
    *
    * Renders all visible layers with their tiles, then renders
-   * the ghost preview if tile-brush tool is active.
+   * selection overlay, paste preview, and ghost preview.
    */
   renderCanvas(): void {
     if (!this.ctx) return;
@@ -287,6 +307,12 @@ export class PFTilemapCanvas extends BaseComponent {
 
       // Render all visible layers
       this.renderLayers();
+
+      // Render selection (both active and preview during drag)
+      this.renderSelection();
+
+      // Render paste preview if in paste mode
+      this.renderPastePreview();
 
       // Render ghost preview if tile-brush is active
       this.renderPreview();
@@ -456,6 +482,138 @@ export class PFTilemapCanvas extends BaseComponent {
     this.ctx.globalAlpha = 1.0;
   }
 
+  /**
+   * Render tile selection overlay
+   * Story 3-5 Task 3.2, 3.3, 3.4, 3.5
+   *
+   * Renders both:
+   * - Active selection from tileSelectionStore (marching ants / highlight)
+   * - Drag preview from tileSelectTool during active drag
+   */
+  private renderSelection(): void {
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+
+    // Render drag preview during selection (takes priority)
+    const preview = this.tileSelectTool.getSelectionPreview();
+    if (preview) {
+      this.renderSelectionRect(
+        preview.x * tileWidth,
+        preview.y * tileHeight,
+        preview.width * tileWidth,
+        preview.height * tileHeight,
+        true // isPreview
+      );
+      return; // Don't render final selection while dragging
+    }
+
+    // Render active selection from store
+    const sel = tileSelectionStore.selection.value;
+    if (sel) {
+      this.renderSelectionRect(
+        sel.x * tileWidth,
+        sel.y * tileHeight,
+        sel.width * tileWidth,
+        sel.height * tileHeight,
+        false // not preview
+      );
+    }
+  }
+
+  /**
+   * Render a selection rectangle with highlight border
+   * Story 3-5 Task 3.2, 3.3
+   *
+   * @param pixelX - Left pixel coordinate
+   * @param pixelY - Top pixel coordinate
+   * @param pixelW - Width in pixels
+   * @param pixelH - Height in pixels
+   * @param isPreview - True if this is a drag preview (different styling)
+   */
+  private renderSelectionRect(
+    pixelX: number,
+    pixelY: number,
+    pixelW: number,
+    pixelH: number,
+    isPreview: boolean
+  ): void {
+    // Draw selection highlight fill (semi-transparent)
+    this.ctx.fillStyle = isPreview
+      ? 'rgba(0, 150, 255, 0.15)'  // Lighter for preview
+      : 'rgba(0, 150, 255, 0.2)';  // --color-selection equivalent
+    this.ctx.fillRect(pixelX, pixelY, pixelW, pixelH);
+
+    // Draw selection border (marching ants effect via dashed line)
+    this.ctx.strokeStyle = isPreview
+      ? 'rgba(0, 150, 255, 0.6)'  // Lighter for preview
+      : '#0096FF';                // --color-selection
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([4, 4]); // Dashed line for marching ants effect
+    this.ctx.strokeRect(pixelX + 0.5, pixelY + 0.5, pixelW - 1, pixelH - 1);
+    this.ctx.setLineDash([]); // Reset to solid
+    this.ctx.lineWidth = 1;
+  }
+
+  /**
+   * Render paste preview at cursor position
+   * Story 3-5 Task 8.1, 8.2, 8.3
+   *
+   * Renders clipboard tiles as semi-transparent preview following cursor
+   */
+  private renderPastePreview(): void {
+    const clip = tileSelectionStore.clipboard.value;
+    const pos = tileSelectionStore.pastePreview.value;
+    if (!clip || !pos) return;
+
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const tilesetId = tilemapStore.activeTilesetId.value;
+    if (!tilesetId) return;
+
+    const tileset = tilesetStore.getTileset(tilesetId);
+    if (!tileset) return;
+
+    // Draw each tile from clipboard at preview position (semi-transparent)
+    this.ctx.globalAlpha = 0.6;
+
+    for (let ty = 0; ty < clip.height; ty++) {
+      for (let tx = 0; tx < clip.width; tx++) {
+        const tileId = clip.data[ty * clip.width + tx];
+        if (tileId === 0) continue; // Skip empty tiles
+
+        const targetX = (pos.x + tx) * tileWidth;
+        const targetY = (pos.y + ty) * tileHeight;
+
+        // Get tile from tileset (tileId is 1-based, tileset index is 0-based)
+        const rect = tilesetStore.getTileRect(tilesetId, tileId - 1);
+        if (rect) {
+          this.ctx.drawImage(
+            tileset.image,
+            rect.x, rect.y, rect.width, rect.height,
+            targetX, targetY, tileWidth, tileHeight
+          );
+        }
+      }
+    }
+
+    this.ctx.globalAlpha = 1.0;
+
+    // Draw preview border (green to indicate paste target)
+    const previewW = clip.width * tileWidth;
+    const previewH = clip.height * tileHeight;
+    this.ctx.strokeStyle = '#00FF00'; // Green for paste preview
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([4, 4]);
+    this.ctx.strokeRect(
+      pos.x * tileWidth + 0.5,
+      pos.y * tileHeight + 0.5,
+      previewW - 1,
+      previewH - 1
+    );
+    this.ctx.setLineDash([]);
+    this.ctx.lineWidth = 1;
+  }
+
   render() {
     // Access signals to register them with SignalWatcher for reactive updates
     void modeStore.mode.value;
@@ -467,6 +625,8 @@ export class PFTilemapCanvas extends BaseComponent {
     void tilemapStore.activeTilesetId.value; // Re-render when tileset changes
     void toolStore.activeTool.value; // Re-render when tool changes (for preview)
     void tilesetStore.selectedTileIndex.value; // Re-render when selected tile changes (for preview)
+    void tileSelectionStore.selection.value; // Re-render when selection changes
+    void tileSelectionStore.pastePreview.value; // Re-render when paste preview changes
 
     return html`<canvas></canvas>`;
   }

@@ -28,6 +28,8 @@ import { MOD_PRIMARY } from "../../utils/platform";
 import { getToolSize, setToolSize } from "../../stores/tool-settings";
 import { clipboardStore } from "../../stores/clipboard";
 import { modeStore } from "../../stores/mode";
+import { tileSelectionStore } from "../../stores/tile-selection";
+import { tilemapStore } from "../../stores/tilemap";
 
 export function registerShortcuts() {
   // ============================================
@@ -512,11 +514,22 @@ export function registerShortcuts() {
     "Commit selection"
   );
 
-  // Escape = Cancel floating selection (undo cut) or clear selection
+  // Escape = Cancel floating selection (undo cut) or clear selection (mode-aware)
   keyboardService.register(
     "Escape",
     [],
     () => {
+      // Map mode: Cancel paste preview or clear tile selection
+      if (modeStore.mode.value === 'map') {
+        if (tileSelectionStore.isPasteMode) {
+          tileSelectionStore.cancelPaste();
+        } else if (tileSelectionStore.hasSelection) {
+          tileSelectionStore.clearSelection();
+        }
+        return;
+      }
+
+      // Art mode: Cancel pixel selection
       const state = selectionStore.state.value;
       if (state.type === "floating") {
         historyStore.undo();
@@ -527,8 +540,18 @@ export function registerShortcuts() {
     "Cancel selection"
   );
 
-  // Helper function for delete operations
+  // Helper function for delete operations (mode-aware)
   const deleteSelection = () => {
+    // Map mode: Delete tile selection
+    if (modeStore.mode.value === 'map') {
+      const activeLayerId = tilemapStore.activeLayerId.value;
+      if (activeLayerId && tileSelectionStore.hasSelection) {
+        tileSelectionStore.deleteSelection(activeLayerId);
+      }
+      return;
+    }
+
+    // Art mode: Delete pixel selection
     const state = selectionStore.state.value;
 
     if (state.type === "selected") {
@@ -636,8 +659,18 @@ export function registerShortcuts() {
   // CLIPBOARD SHORTCUTS
   // ============================================
 
-  // Mod+C = Copy selection
+  // Mod+C = Copy selection (mode-aware: Art mode = pixel copy, Map mode = tile copy)
   const copySelection = () => {
+    // Map mode: Copy tile selection
+    if (modeStore.mode.value === 'map') {
+      const activeLayerId = tilemapStore.activeLayerId.value;
+      if (activeLayerId && tileSelectionStore.hasSelection) {
+        tileSelectionStore.copySelection(activeLayerId);
+      }
+      return;
+    }
+
+    // Art mode: Copy pixel selection
     const state = selectionStore.state.value;
     if (state.type !== "selected") return;
 
@@ -674,8 +707,18 @@ export function registerShortcuts() {
   };
   keyboardService.register("c", [MOD_PRIMARY], copySelection, "Copy");
 
-  // Mod+X = Cut selection
+  // Mod+X = Cut selection (mode-aware: Art mode = pixel cut, Map mode = tile cut)
   const cutSelection = () => {
+    // Map mode: Cut tile selection
+    if (modeStore.mode.value === 'map') {
+      const activeLayerId = tilemapStore.activeLayerId.value;
+      if (activeLayerId && tileSelectionStore.hasSelection) {
+        tileSelectionStore.cutSelection(activeLayerId);
+      }
+      return;
+    }
+
+    // Art mode: Cut pixel selection
     const state = selectionStore.state.value;
     if (state.type !== "selected") return;
 
@@ -697,8 +740,17 @@ export function registerShortcuts() {
   };
   keyboardService.register("x", [MOD_PRIMARY], cutSelection, "Cut");
 
-  // Mod+V = Paste
+  // Mod+V = Paste (mode-aware: Art mode = pixel paste, Map mode = tile paste preview)
   const pasteSelection = () => {
+    // Map mode: Start tile paste preview
+    if (modeStore.mode.value === 'map') {
+      if (tileSelectionStore.hasClipboard) {
+        tileSelectionStore.startPastePreview();
+      }
+      return;
+    }
+
+    // Art mode: Pixel paste
     const data = clipboardStore.getData();
     if (!data) return;
 

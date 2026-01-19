@@ -73,6 +73,21 @@ export const tilemapToolGroups: ToolGroup[] = [
     defaultTool: "tile-brush",
   },
   {
+    id: "tile-eraser",
+    tools: ["tile-eraser"],
+    defaultTool: "tile-eraser",
+  },
+  {
+    id: "tile-fill",
+    tools: ["tile-fill"],
+    defaultTool: "tile-fill",
+  },
+  {
+    id: "tile-select",
+    tools: ["tile-select"],
+    defaultTool: "tile-select",
+  },
+  {
     id: "navigation",
     tools: ["hand", "zoom"],
     defaultTool: "hand",

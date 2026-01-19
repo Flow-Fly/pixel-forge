@@ -461,6 +461,25 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
       { key: "click", action: "Fill contiguous region" },
     ],
   },
+
+  "tile-select": {
+    name: "Tile Select",
+    icon: "/icons/tools/rect-marquee.webp",
+    label: "TS",
+    shortcutKey: "M",
+    group: "tilemap",
+    mode: "map",
+    options: [],
+    alternatives: ["tile-brush", "tile-eraser", "tile-fill"],
+    shortcuts: [
+      { key: "drag", action: "Create selection" },
+      { key: "mod+c", action: "Copy selection" },
+      { key: "mod+x", action: "Cut selection" },
+      { key: "mod+v", action: "Paste" },
+      { key: "delete", action: "Delete selection" },
+      { key: "escape", action: "Cancel paste / Clear selection" },
+    ],
+  },
 };
 
 /**
