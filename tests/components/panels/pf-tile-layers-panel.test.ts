@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tilemapStore } from '../../../src/stores/tilemap';
+import { modeStore } from '../../../src/stores/mode';
 
 // Helper to dynamically import and create component
 async function createTileLayersPanel(): Promise<HTMLElement & {
@@ -112,6 +113,22 @@ describe('pf-tile-layers-panel', () => {
       const newLayer = layers[layers.length - 1];
       expect(newLayer.name).toMatch(/Layer \d+/);
     });
+
+    it('should fire layer-added custom event (Task 3.5)', async () => {
+      const listener = vi.fn();
+      element.addEventListener('layer-added', listener);
+
+      const addBtn = element.shadowRoot?.querySelector('.add-layer-btn') as HTMLButtonElement;
+      addBtn?.click();
+      await (element as any).updateComplete;
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      const event = listener.mock.calls[0][0] as CustomEvent;
+      expect(event.detail.layer).toBeDefined();
+      expect(event.detail.layer.name).toMatch(/Layer \d+/);
+
+      element.removeEventListener('layer-added', listener);
+    });
   });
 
   describe('Task 4: Inline layer renaming (AC #5, #6)', () => {
@@ -189,6 +206,203 @@ describe('pf-tile-layers-panel', () => {
 
       const layers = tilemapStore.layers.value;
       expect(layers[0].name).toBe('Blur Renamed');
+    });
+  });
+
+  describe('Keyboard navigation (NFR17)', () => {
+    it('should navigate to next layer with ArrowDown', async () => {
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      // Set first layer active (Layer 3 is at index 0 in reversed UI)
+      const layers = tilemapStore.layers.value;
+      tilemapStore.setActiveLayer(layers[2].id); // Layer 3 (top)
+      await (element as any).updateComplete;
+
+      const firstItem = element.shadowRoot?.querySelector('.layer-item') as HTMLElement;
+      firstItem?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await (element as any).updateComplete;
+
+      // Should now be on Layer 2 (second in reversed UI)
+      expect(tilemapStore.activeLayerId.value).toBe(layers[1].id);
+    });
+
+    it('should navigate to previous layer with ArrowUp', async () => {
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      // Set second layer active
+      const layers = tilemapStore.layers.value;
+      tilemapStore.setActiveLayer(layers[1].id); // Layer 2 (middle)
+      await (element as any).updateComplete;
+
+      const layerItems = element.shadowRoot?.querySelectorAll('.layer-item');
+      const secondItem = layerItems?.[1] as HTMLElement;
+      secondItem?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      await (element as any).updateComplete;
+
+      // Should now be on Layer 3 (top)
+      expect(tilemapStore.activeLayerId.value).toBe(layers[2].id);
+    });
+  });
+
+  describe('Task 1 & 2: Visibility and Lock Toggle (Story 4-2)', () => {
+    it('should toggle layer visibility when visibility icon is clicked (AC #1)', async () => {
+      const layerId = tilemapStore.layers.value[0].id;
+      expect(tilemapStore.layers.value[0].visible).toBe(true);
+
+      const visibilityIcon = element.shadowRoot?.querySelector('.visibility-icon') as HTMLElement;
+      visibilityIcon?.click();
+      await (element as any).updateComplete;
+
+      expect(tilemapStore.layers.value[0].visible).toBe(false);
+    });
+
+    it('should toggle layer locked when lock icon is clicked (AC #3)', async () => {
+      const layerId = tilemapStore.layers.value[0].id;
+      expect(tilemapStore.layers.value[0].locked).toBe(false);
+
+      const lockIcon = element.shadowRoot?.querySelector('.lock-icon') as HTMLElement;
+      lockIcon?.click();
+      await (element as any).updateComplete;
+
+      expect(tilemapStore.layers.value[0].locked).toBe(true);
+    });
+
+    it('should not trigger layer selection when clicking visibility icon', async () => {
+      // Add second layer and select it
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      tilemapStore.setActiveLayer(layers[1].id); // Select Layer 2
+      await (element as any).updateComplete;
+
+      // Click visibility icon on Layer 1 (second in reversed UI)
+      const visibilityIcons = element.shadowRoot?.querySelectorAll('.visibility-icon');
+      (visibilityIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Active layer should still be Layer 2
+      expect(tilemapStore.activeLayerId.value).toBe(layers[1].id);
+    });
+
+    it('should not trigger layer selection when clicking lock icon', async () => {
+      // Add second layer and select it
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      tilemapStore.setActiveLayer(layers[1].id); // Select Layer 2
+      await (element as any).updateComplete;
+
+      // Click lock icon on Layer 1 (second in reversed UI)
+      const lockIcons = element.shadowRoot?.querySelectorAll('.lock-icon');
+      (lockIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Active layer should still be Layer 2
+      expect(tilemapStore.activeLayerId.value).toBe(layers[1].id);
+    });
+
+    it('should update visibility icon styling when layer is hidden (Task 1.5)', async () => {
+      const visibilityIcon = element.shadowRoot?.querySelector('.visibility-icon') as HTMLElement;
+      visibilityIcon?.click();
+      await (element as any).updateComplete;
+
+      const updatedIcon = element.shadowRoot?.querySelector('.visibility-icon');
+      expect(updatedIcon?.classList.contains('hidden')).toBe(true);
+    });
+
+    it('should update lock icon styling when layer is locked (Task 2.5)', async () => {
+      const lockIcon = element.shadowRoot?.querySelector('.lock-icon') as HTMLElement;
+      lockIcon?.click();
+      await (element as any).updateComplete;
+
+      const updatedIcon = element.shadowRoot?.querySelector('.lock-icon');
+      expect(updatedIcon?.classList.contains('locked')).toBe(true);
+    });
+
+    it('should update visibility icon title based on state (Task 1.4)', async () => {
+      let visibilityIcon = element.shadowRoot?.querySelector('.visibility-icon') as HTMLElement;
+      expect(visibilityIcon?.getAttribute('title')).toBe('Hide layer');
+
+      visibilityIcon?.click();
+      await (element as any).updateComplete;
+
+      visibilityIcon = element.shadowRoot?.querySelector('.visibility-icon') as HTMLElement;
+      expect(visibilityIcon?.getAttribute('title')).toBe('Show layer');
+    });
+
+    it('should update lock icon title based on state (Task 2.4)', async () => {
+      let lockIcon = element.shadowRoot?.querySelector('.lock-icon') as HTMLElement;
+      expect(lockIcon?.getAttribute('title')).toBe('Lock layer');
+
+      lockIcon?.click();
+      await (element as any).updateComplete;
+
+      lockIcon = element.shadowRoot?.querySelector('.lock-icon') as HTMLElement;
+      expect(lockIcon?.getAttribute('title')).toBe('Unlock layer');
+    });
+  });
+
+  describe('Task 5: Keyboard Shortcuts (Story 4-2)', () => {
+    it('should toggle visibility of active layer when H key is pressed', async () => {
+      // Shortcuts only work in Map mode
+      modeStore.setMode('map');
+
+      const layerId = tilemapStore.layers.value[0].id;
+      expect(tilemapStore.layers.value[0].visible).toBe(true);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h' }));
+      await (element as any).updateComplete;
+
+      expect(tilemapStore.layers.value[0].visible).toBe(false);
+    });
+
+    it('should toggle lock of active layer when / key is pressed', async () => {
+      // Shortcuts only work in Map mode
+      modeStore.setMode('map');
+
+      const layerId = tilemapStore.layers.value[0].id;
+      expect(tilemapStore.layers.value[0].locked).toBe(false);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '/' }));
+      await (element as any).updateComplete;
+
+      expect(tilemapStore.layers.value[0].locked).toBe(true);
+    });
+
+    it('should not toggle when editing layer name', async () => {
+      // Shortcuts only work in Map mode
+      modeStore.setMode('map');
+
+      // Enter edit mode
+      const layerName = element.shadowRoot?.querySelector('.layer-name') as HTMLElement;
+      layerName?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      await (element as any).updateComplete;
+
+      expect(element.editingLayerId).not.toBeNull();
+
+      const originalVisible = tilemapStore.layers.value[0].visible;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h' }));
+      await (element as any).updateComplete;
+
+      expect(tilemapStore.layers.value[0].visible).toBe(originalVisible);
+    });
+
+    it('should not toggle in Art mode', async () => {
+      // Ensure we're in Art mode
+      modeStore.setMode('art');
+
+      const originalVisible = tilemapStore.layers.value[0].visible;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h' }));
+      await (element as any).updateComplete;
+
+      // Should not change because we're in Art mode
+      expect(tilemapStore.layers.value[0].visible).toBe(originalVisible);
     });
   });
 

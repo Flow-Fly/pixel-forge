@@ -253,6 +253,50 @@ class TilemapStore extends EventTarget {
   }
 
   /**
+   * Toggle layer visibility
+   * Story 4-2 Task 1.2
+   * @param layerId - The layer ID
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  toggleLayerVisibility(layerId: string): void {
+    const layer = this.getLayerById(layerId);
+    if (!layer) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    const newVisible = !layer.visible;
+    this._layers.value = this._layers.value.map(l =>
+      l.id === layerId ? { ...l, visible: newVisible } : l
+    );
+
+    this.dispatchEvent(new CustomEvent('layer-visibility-changed', {
+      detail: { layerId, visible: newVisible }
+    }));
+  }
+
+  /**
+   * Toggle layer locked state
+   * Story 4-2 Task 2.2
+   * @param layerId - The layer ID
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  toggleLayerLocked(layerId: string): void {
+    const layer = this.getLayerById(layerId);
+    if (!layer) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    const newLocked = !layer.locked;
+    this._layers.value = this._layers.value.map(l =>
+      l.id === layerId ? { ...l, locked: newLocked } : l
+    );
+
+    this.dispatchEvent(new CustomEvent('layer-locked-changed', {
+      detail: { layerId, locked: newLocked }
+    }));
+  }
+
+  /**
    * Rename a layer
    * Story 4-1 Task 5
    * @param layerId - The layer ID
@@ -265,10 +309,10 @@ class TilemapStore extends EventTarget {
       throw new InvalidLayerError(layerId);
     }
 
-    // Trim whitespace and validate
     const trimmedName = newName.trim();
-    if (!trimmedName) {
-      // Reject empty names - caller should handle revert
+
+    // Skip if empty or unchanged
+    if (!trimmedName || trimmedName === layer.name) {
       return;
     }
 
@@ -279,7 +323,6 @@ class TilemapStore extends EventTarget {
       l.id === layerId ? { ...l, name: trimmedName } : l
     );
 
-    // Fire event
     this.dispatchEvent(new CustomEvent('layer-renamed', {
       detail: { layerId, oldName, newName: trimmedName }
     }));

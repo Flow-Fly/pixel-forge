@@ -11,11 +11,11 @@ import { historyStore } from '../stores/history';
 import { dirtyRectStore } from '../stores/dirty-rect';
 import { TilePlaceCommand } from '../commands/tile-place-command';
 import { TileBatchCommand, type TileChange } from '../commands/tile-batch-command';
-import { pixelToTile, isInBounds, getLinePositions, canModifyLayer } from './tile-tool-utils';
+import { pixelToTile, isInBounds, getLinePositions, canModifyLayer, canModifyLayerWithFeedback, getTileCursor } from './tile-tool-utils';
 
 export class TileEraserTool extends BaseTool {
   name = 'tile-eraser';
-  cursor = 'crosshair';
+  get cursor() { return getTileCursor(); }
 
   // Erasing state
   private isErasing = false;
@@ -55,6 +55,11 @@ export class TileEraserTool extends BaseTool {
 
   onDown(x: number, y: number, modifiers?: ModifierKeys): void {
     const { tileX, tileY } = pixelToTile(x, y);
+
+    // Early exit with feedback if layer is locked (Story 4-2 Task 4.4)
+    if (!canModifyLayerWithFeedback(tilemapStore.activeLayerId.value)) {
+      return;
+    }
 
     this.isErasing = true;
     this.pendingChanges = [];

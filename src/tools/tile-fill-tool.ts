@@ -11,11 +11,11 @@ import { tilesetStore } from '../stores/tileset';
 import { historyStore } from '../stores/history';
 import { dirtyRectStore } from '../stores/dirty-rect';
 import { TileBatchCommand, type TileChange } from '../commands/tile-batch-command';
-import { pixelToTile, isInBounds, canModifyLayer } from './tile-tool-utils';
+import { pixelToTile, isInBounds, canModifyLayer, canModifyLayerWithFeedback, getTileCursor } from './tile-tool-utils';
 
 export class TileFillTool extends BaseTool {
   name = 'tile-fill';
-  cursor = 'crosshair';
+  get cursor() { return getTileCursor(); }
 
   // For hover preview
   private hoverX: number | null = null;
@@ -83,7 +83,8 @@ export class TileFillTool extends BaseTool {
     if (selectedTile === null) return;
 
     const activeLayerId = tilemapStore.activeLayerId.value;
-    if (!canModifyLayer(activeLayerId)) return;
+    // Use feedback version for user notification (Story 4-2 Task 4.4)
+    if (!canModifyLayerWithFeedback(activeLayerId)) return;
 
     const targetTileId = tilemapStore.getTile(activeLayerId!, tileX, tileY);
     const fillTileId = selectedTile + 1;

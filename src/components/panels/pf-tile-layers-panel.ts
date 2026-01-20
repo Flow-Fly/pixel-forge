@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { tilemapStore } from '../../stores/tilemap';
+import { modeStore } from '../../stores/mode';
 import type { TileLayer } from '../../types/tilemap';
 
 /**
@@ -18,6 +19,53 @@ import type { TileLayer } from '../../types/tilemap';
  */
 @customElement('pf-tile-layers-panel')
 export class PFTileLayersPanel extends BaseComponent {
+  private boundKeydownHandler: (e: KeyboardEvent) => void;
+
+  constructor() {
+    super();
+    this.boundKeydownHandler = this.handleGlobalKeydown.bind(this);
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    window.addEventListener('keydown', this.boundKeydownHandler);
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    window.removeEventListener('keydown', this.boundKeydownHandler);
+  }
+
+  private handleGlobalKeydown(e: KeyboardEvent): void {
+    // Only handle shortcuts in Map mode (Story 4-2 Task 5 / M4 fix)
+    if (modeStore.mode.value !== 'map') {
+      return;
+    }
+
+    // Ignore if typing in an input or editing a layer name
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+    if (this.editingLayerId) {
+      return;
+    }
+
+    const activeLayerId = this.activeLayerId;
+    if (!activeLayerId) return;
+
+    // H key - toggle visibility of active layer
+    if (e.key === 'h' || e.key === 'H') {
+      e.preventDefault();
+      tilemapStore.toggleLayerVisibility(activeLayerId);
+    }
+
+    // / key - toggle lock of active layer
+    if (e.key === '/') {
+      e.preventDefault();
+      tilemapStore.toggleLayerLocked(activeLayerId);
+    }
+  }
+
   static styles = css`
     :host {
       display: flex;
@@ -174,7 +222,13 @@ export class PFTileLayersPanel extends BaseComponent {
   }
 
   private handleAddLayer(): void {
-    tilemapStore.addLayer();
+    const newLayer = tilemapStore.addLayer();
+    // Fire component-level event for testing/integration (Task 3.5)
+    this.dispatchEvent(new CustomEvent('layer-added', {
+      bubbles: true,
+      composed: true,
+      detail: { layer: newLayer }
+    }));
   }
 
   private handleLayerClick(layerId: string): void {
@@ -189,7 +243,44 @@ export class PFTileLayersPanel extends BaseComponent {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       this.handleLayerClick(layerId);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      this.navigateLayers(e.key === 'ArrowUp' ? -1 : 1);
     }
+  }
+
+  private navigateLayers(direction: number): void {
+    const layers = this.layers;
+    if (layers.length === 0) return;
+
+    // Layers are rendered in reverse order (top layer first in UI)
+    const reversedLayers = [...layers].reverse();
+    const currentIndex = reversedLayers.findIndex(l => l.id === this.activeLayerId);
+
+    // If no current selection, start at 0; otherwise move and clamp to valid range
+    const newIndex = currentIndex === -1
+      ? 0
+      : Math.max(0, Math.min(reversedLayers.length - 1, currentIndex + direction));
+
+    const newLayer = reversedLayers[newIndex];
+    if (newLayer && newLayer.id !== this.activeLayerId) {
+      tilemapStore.setActiveLayer(newLayer.id);
+      // Focus the new layer item
+      this.updateComplete.then(() => {
+        const items = this.shadowRoot?.querySelectorAll('.layer-item');
+        (items?.[newIndex] as HTMLElement)?.focus();
+      });
+    }
+  }
+
+  private handleVisibilityClick(e: Event, layerId: string): void {
+    e.stopPropagation(); // Don't trigger layer selection
+    tilemapStore.toggleLayerVisibility(layerId);
+  }
+
+  private handleLockClick(e: Event, layerId: string): void {
+    e.stopPropagation(); // Don't trigger layer selection
+    tilemapStore.toggleLayerLocked(layerId);
   }
 
   private handleNameDoubleClick(e: MouseEvent, layerId: string): void {
@@ -221,7 +312,10 @@ export class PFTileLayersPanel extends BaseComponent {
   }
 
   private confirmRename(layerId: string): void {
-    tilemapStore.renameLayer(layerId, this.editingName);
+    // Guard against layer being deleted during edit
+    if (tilemapStore.getLayerById(layerId)) {
+      tilemapStore.renameLayer(layerId, this.editingName);
+    }
     this.editingLayerId = null;
     this.editingName = '';
   }
@@ -247,13 +341,15 @@ export class PFTileLayersPanel extends BaseComponent {
         <div class="layer-icons">
           <span
             class="visibility-icon ${!layer.visible ? 'hidden' : ''}"
-            title="${layer.visible ? 'Visible' : 'Hidden'}"
+            title="${layer.visible ? 'Hide layer' : 'Show layer'}"
+            @click=${(e: Event) => this.handleVisibilityClick(e, layer.id)}
           >
             👁
           </span>
           <span
             class="lock-icon ${layer.locked ? 'locked' : ''}"
-            title="${layer.locked ? 'Locked' : 'Unlocked'}"
+            title="${layer.locked ? 'Unlock layer' : 'Lock layer'}"
+            @click=${(e: Event) => this.handleLockClick(e, layer.id)}
           >
             ${layer.locked ? '🔒' : '🔓'}
           </span>
@@ -297,6 +393,12 @@ export class PFTileLayersPanel extends BaseComponent {
 
   render() {
     const layers = this.layers;
+
+    // Clear editing state if layer was deleted externally
+    if (this.editingLayerId && !layers.find(l => l.id === this.editingLayerId)) {
+      this.editingLayerId = null;
+      this.editingName = '';
+    }
 
     // Render layers in reverse order (top layer first in UI)
     const reversedLayers = [...layers].reverse();

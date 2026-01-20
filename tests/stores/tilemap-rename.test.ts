@@ -109,6 +109,36 @@ describe('tilemapStore.renameLayer', () => {
 
       tilemapStore.removeEventListener('layer-renamed', listener);
     });
+
+    it('should not fire event when name is unchanged', () => {
+      const listener = vi.fn();
+      tilemapStore.addEventListener('layer-renamed', listener);
+
+      const layer = tilemapStore.layers.value[0];
+      const originalName = layer.name;
+
+      // Rename to the same name
+      tilemapStore.renameLayer(layer.id, originalName);
+
+      expect(listener).not.toHaveBeenCalled();
+
+      tilemapStore.removeEventListener('layer-renamed', listener);
+    });
+
+    it('should not fire event when trimmed name equals current name', () => {
+      const listener = vi.fn();
+      tilemapStore.addEventListener('layer-renamed', listener);
+
+      const layer = tilemapStore.layers.value[0];
+      const originalName = layer.name;
+
+      // Rename with extra whitespace that trims to same name
+      tilemapStore.renameLayer(layer.id, `  ${originalName}  `);
+
+      expect(listener).not.toHaveBeenCalled();
+
+      tilemapStore.removeEventListener('layer-renamed', listener);
+    });
   });
 
   describe('Integration tests', () => {

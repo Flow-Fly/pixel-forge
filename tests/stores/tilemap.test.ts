@@ -794,6 +794,132 @@ describe('TilemapStore', () => {
   });
 
   // ========================================
+  // Story 4-2: Layer Visibility Toggle Tests
+  // ========================================
+  describe('Layer Visibility Toggle (Story 4-2)', () => {
+    beforeEach(() => {
+      tilemapStore.reset();
+      tilemapStore.initializeDefaultLayer();
+    });
+
+    describe('toggleLayerVisibility() (Task 1.2)', () => {
+      it('should toggle layer visibility from true to false', () => {
+        const layerId = tilemapStore.layers.value[0].id;
+        expect(tilemapStore.layers.value[0].visible).toBe(true);
+
+        tilemapStore.toggleLayerVisibility(layerId);
+
+        expect(tilemapStore.layers.value[0].visible).toBe(false);
+      });
+
+      it('should toggle layer visibility from false to true', () => {
+        const layerId = tilemapStore.layers.value[0].id;
+        // First toggle to false
+        tilemapStore.toggleLayerVisibility(layerId);
+        expect(tilemapStore.layers.value[0].visible).toBe(false);
+
+        // Toggle back to true
+        tilemapStore.toggleLayerVisibility(layerId);
+
+        expect(tilemapStore.layers.value[0].visible).toBe(true);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer', () => {
+        expect(() => {
+          tilemapStore.toggleLayerVisibility('non-existent');
+        }).toThrow(InvalidLayerError);
+      });
+
+      it('should fire layer-visibility-changed event with correct detail (Task 1.3)', () => {
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-visibility-changed', handler);
+
+        const layerId = tilemapStore.layers.value[0].id;
+        tilemapStore.toggleLayerVisibility(layerId);
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        const detail = handler.mock.calls[0][0].detail;
+        expect(detail.layerId).toBe(layerId);
+        expect(detail.visible).toBe(false);
+
+        tilemapStore.removeEventListener('layer-visibility-changed', handler);
+      });
+
+      it('should update layer immutably', () => {
+        const layerId = tilemapStore.layers.value[0].id;
+        const originalLayers = tilemapStore.layers.value;
+
+        tilemapStore.toggleLayerVisibility(layerId);
+
+        expect(tilemapStore.layers.value).not.toBe(originalLayers);
+      });
+    });
+  });
+
+  // ========================================
+  // Story 4-2: Layer Locked Toggle Tests
+  // ========================================
+  describe('Layer Locked Toggle (Story 4-2)', () => {
+    beforeEach(() => {
+      tilemapStore.reset();
+      tilemapStore.initializeDefaultLayer();
+    });
+
+    describe('toggleLayerLocked() (Task 2.2)', () => {
+      it('should toggle layer locked from false to true', () => {
+        const layerId = tilemapStore.layers.value[0].id;
+        expect(tilemapStore.layers.value[0].locked).toBe(false);
+
+        tilemapStore.toggleLayerLocked(layerId);
+
+        expect(tilemapStore.layers.value[0].locked).toBe(true);
+      });
+
+      it('should toggle layer locked from true to false', () => {
+        const layerId = tilemapStore.layers.value[0].id;
+        // First toggle to true
+        tilemapStore.toggleLayerLocked(layerId);
+        expect(tilemapStore.layers.value[0].locked).toBe(true);
+
+        // Toggle back to false
+        tilemapStore.toggleLayerLocked(layerId);
+
+        expect(tilemapStore.layers.value[0].locked).toBe(false);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer', () => {
+        expect(() => {
+          tilemapStore.toggleLayerLocked('non-existent');
+        }).toThrow(InvalidLayerError);
+      });
+
+      it('should fire layer-locked-changed event with correct detail (Task 2.3)', () => {
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-locked-changed', handler);
+
+        const layerId = tilemapStore.layers.value[0].id;
+        tilemapStore.toggleLayerLocked(layerId);
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        const detail = handler.mock.calls[0][0].detail;
+        expect(detail.layerId).toBe(layerId);
+        expect(detail.locked).toBe(true);
+
+        tilemapStore.removeEventListener('layer-locked-changed', handler);
+      });
+
+      it('should update layer immutably', () => {
+        const layerId = tilemapStore.layers.value[0].id;
+        const originalLayers = tilemapStore.layers.value;
+
+        tilemapStore.toggleLayerLocked(layerId);
+
+        expect(tilemapStore.layers.value).not.toBe(originalLayers);
+      });
+    });
+  });
+
+  // ========================================
   // Code Review Fix: getTile Bounds Error Tests (M2)
   // ========================================
   describe('getTile Bounds Validation (Code Review Fix)', () => {

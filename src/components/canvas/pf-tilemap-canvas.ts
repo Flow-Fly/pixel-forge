@@ -165,6 +165,10 @@ export class PFTilemapCanvas extends BaseComponent {
     if (tool) {
       const { x, y } = this.getCanvasCoords(e);
       tool.onMove(x, y, this.getModifiers(e));
+      // Update cursor dynamically based on layer state (Story 4-2 Task 4.3)
+      if (this.canvas) {
+        this.canvas.style.cursor = tool.cursor;
+      }
     }
   }
 
