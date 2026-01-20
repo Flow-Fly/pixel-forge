@@ -98,3 +98,23 @@ export interface TileClipboard {
   /** Tile IDs in row-major order (index = y * width + x) */
   data: Uint32Array;
 }
+
+/**
+ * HeroEditState - State for in-place tile editing
+ * Story 5-1 Task 1.1
+ *
+ * Hero Edit is a nested context within Map mode where users can
+ * edit a tile's pixels directly in the context of their tilemap.
+ */
+export interface HeroEditState {
+  /** Whether hero edit mode is currently active */
+  active: boolean;
+  /** ID of the tile being edited (1-based storage ID, null if not editing) */
+  tileId: number | null;
+  /** ID of the tileset containing the tile (null if not editing) */
+  tilesetId: string | null;
+  /** Working copy of the tile for editing (null if not editing) */
+  editingCanvas: OffscreenCanvas | null;
+  /** Original tile data for undo support (null if not editing) */
+  originalData: ImageData | null;
+}

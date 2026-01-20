@@ -1,5 +1,5 @@
 import { html, css, type PropertyValueMap } from "lit";
-import { customElement, query } from "lit/decorators.js";
+import { customElement, query, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { tilemapStore } from "../../stores/tilemap";
 import { tilesetStore } from "../../stores/tileset";
@@ -28,6 +28,11 @@ import { TileSelectTool } from "../../tools/tile-select-tool";
 export class PFTilemapCanvas extends BaseComponent {
   @query("canvas") canvas!: HTMLCanvasElement;
 
+  // Story 5-1 Task 5: Context menu state
+  @state() private contextMenuVisible = false;
+  @state() private contextMenuPosition = { x: 0, y: 0 };
+  @state() private contextMenuTileId: number | null = null;
+
   static styles = css`
     :host {
       display: block;
@@ -55,6 +60,37 @@ export class PFTilemapCanvas extends BaseComponent {
     }
     :host([pan-cursor="grabbing"]) canvas {
       cursor: grabbing !important;
+    }
+
+    /* Story 5-1 Task 5.10: Context menu styling */
+    .context-menu {
+      position: fixed;
+      background: var(--pf-color-surface, #3a3a3a);
+      border: 1px solid var(--pf-color-border, #555);
+      border-radius: var(--pf-radius-sm, 4px);
+      padding: var(--pf-spacing-xs, 4px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      z-index: 1000;
+      min-width: 120px;
+    }
+
+    .context-menu-item {
+      padding: var(--pf-spacing-xs, 4px) var(--pf-spacing-sm, 8px);
+      cursor: pointer;
+      border-radius: var(--pf-radius-xs, 2px);
+      color: var(--pf-color-text, #fff);
+      font-size: 0.875rem;
+    }
+
+    .context-menu-item:hover {
+      background: var(--pf-color-accent, #0096FF);
+      color: white;
+    }
+
+    .context-menu-divider {
+      height: 1px;
+      background: var(--pf-color-border, #555);
+      margin: var(--pf-spacing-xs, 4px) 0;
     }
   `;
 
@@ -101,14 +137,18 @@ export class PFTilemapCanvas extends BaseComponent {
     this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
     this.boundHandleMouseUp = (e: MouseEvent) => this.handleMouseUp(e);
     this.boundHandleMouseLeave = () => this.handleMouseLeave();
-    this.boundHandleContextMenu = (e: MouseEvent) => e.preventDefault();
+    // Story 5-1 Task 5: Replace simple prevent with context menu handler
+    this.boundHandleContextMenu = (e: MouseEvent) => this.handleContextMenu(e);
+    // Story 5-1 Task 4: Add double-click handler for hero edit
+    this.boundHandleDoubleClick = (e: MouseEvent) => this.handleDoubleClick(e);
 
     this.canvas.addEventListener('mousemove', this.boundHandleMouseMove);
     this.canvas.addEventListener('mousedown', this.boundHandleMouseDown);
     this.canvas.addEventListener('mouseup', this.boundHandleMouseUp);
     this.canvas.addEventListener('mouseleave', this.boundHandleMouseLeave);
-    // Prevent context menu on right-click (enables right-click quick erase)
     this.canvas.addEventListener('contextmenu', this.boundHandleContextMenu);
+    // Story 5-1 Task 4.1: Add dblclick listener
+    this.canvas.addEventListener('dblclick', this.boundHandleDoubleClick);
   }
 
   disconnectedCallback(): void {
@@ -129,6 +169,21 @@ export class PFTilemapCanvas extends BaseComponent {
     if (this.boundHandleContextMenu) {
       this.canvas?.removeEventListener('contextmenu', this.boundHandleContextMenu);
     }
+    // Story 5-1 Task 4: Clean up double-click handler
+    if (this.boundHandleDoubleClick) {
+      this.canvas?.removeEventListener('dblclick', this.boundHandleDoubleClick);
+    }
+    // Clean up context menu listeners
+    this.cleanupContextMenuListeners();
+  }
+
+  /**
+   * Clean up context menu event listeners
+   * Story 5-1 Task 5
+   */
+  private cleanupContextMenuListeners(): void {
+    document.removeEventListener('click', this.closeContextMenu);
+    document.removeEventListener('keydown', this.handleContextMenuKeydown);
   }
 
   /**
@@ -165,8 +220,32 @@ export class PFTilemapCanvas extends BaseComponent {
     if (tool) {
       const { x, y } = this.getCanvasCoords(e);
       tool.onMove(x, y, this.getModifiers(e));
-      // Update cursor dynamically based on layer state (Story 4-2 Task 4.3)
-      if (this.canvas) {
+
+      // Story 5-1 Task 6: Cursor change for editable tiles
+      // Check if hovering over a placed tile
+      const { x: tileX, y: tileY } = this.getTileCoords(x, y);
+      const activeLayerId = tilemapStore.activeLayerId.value;
+
+      if (activeLayerId && this.canvas) {
+        const mapWidth = tilemapStore.width.value;
+        const mapHeight = tilemapStore.height.value;
+
+        // Check bounds before getting tile
+        if (tileX >= 0 && tileX < mapWidth && tileY >= 0 && tileY < mapHeight) {
+          const tileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
+
+          // Task 6.2: If over placed tile and current tool is tile brush/selection, set cursor to pointer
+          const activeTool = toolStore.activeTool.value;
+          if (tileId > 0 && (activeTool === 'tile-brush' || activeTool === 'tile-select')) {
+            this.canvas.style.cursor = 'pointer';
+          } else {
+            // Task 6.3: If over empty cell, maintain current tool cursor
+            this.canvas.style.cursor = tool.cursor;
+          }
+        } else {
+          this.canvas.style.cursor = tool.cursor;
+        }
+      } else if (this.canvas) {
         this.canvas.style.cursor = tool.cursor;
       }
     }
@@ -202,6 +281,128 @@ export class PFTilemapCanvas extends BaseComponent {
     if (tool) {
       tool.onMove(-1, -1); // Out of bounds clears preview
     }
+  }
+
+  // ========================================
+  // Story 5-1: Hero Edit Entry Handlers (Tasks 4-6)
+  // ========================================
+
+  /**
+   * Convert pixel coordinates to tile coordinates
+   * Story 5-1 Task 4.3
+   */
+  private getTileCoords(pixelX: number, pixelY: number): { x: number; y: number } {
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    return {
+      x: Math.floor(pixelX / tileWidth),
+      y: Math.floor(pixelY / tileHeight)
+    };
+  }
+
+  /**
+   * Handle double-click to enter hero edit mode
+   * Story 5-1 Task 4.2-4.7
+   */
+  private handleDoubleClick(e: MouseEvent): void {
+    // Task 4.7: Prevent default to avoid text selection
+    e.preventDefault();
+
+    // Task 4.3: Convert mouse coords to tile coords
+    const { x: pixelX, y: pixelY } = this.getCanvasCoords(e);
+    const { x: tileX, y: tileY } = this.getTileCoords(pixelX, pixelY);
+
+    // Task 4.4: Get tile ID at clicked position
+    const activeLayerId = tilemapStore.activeLayerId.value;
+    if (!activeLayerId) return;
+
+    // Check bounds
+    const mapWidth = tilemapStore.width.value;
+    const mapHeight = tilemapStore.height.value;
+    if (tileX < 0 || tileX >= mapWidth || tileY < 0 || tileY >= mapHeight) {
+      return;
+    }
+
+    const tileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
+
+    // Task 4.5: If tileId === 0 (empty), return early - no action
+    if (tileId === 0) {
+      return;
+    }
+
+    // Task 4.6: If tileId > 0, call enterHeroEdit
+    tilemapStore.enterHeroEdit(tileId);
+  }
+
+  /**
+   * Handle context menu (right-click)
+   * Story 5-1 Task 5.1-5.6
+   */
+  private handleContextMenu(e: MouseEvent): void {
+    // Task 5.5: Prevent default browser context menu
+    e.preventDefault();
+
+    // Task 5.3: Convert mouse coords to tile coords
+    const { x: pixelX, y: pixelY } = this.getCanvasCoords(e);
+    const { x: tileX, y: tileY } = this.getTileCoords(pixelX, pixelY);
+
+    const activeLayerId = tilemapStore.activeLayerId.value;
+    if (!activeLayerId) return;
+
+    // Check bounds
+    const mapWidth = tilemapStore.width.value;
+    const mapHeight = tilemapStore.height.value;
+    if (tileX < 0 || tileX >= mapWidth || tileY < 0 || tileY >= mapHeight) {
+      return;
+    }
+
+    // Task 5.4: Get tile ID at position
+    const tileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
+
+    // Store context menu state
+    this.contextMenuTileId = tileId;
+    // Task 5.6: Position at mouse coords
+    this.contextMenuPosition = { x: e.clientX, y: e.clientY };
+    this.contextMenuVisible = true;
+
+    // Task 5.8: Add click-outside handler
+    // Use setTimeout to avoid immediate close from current click
+    setTimeout(() => {
+      document.addEventListener('click', this.closeContextMenu, { once: true });
+      // Task 5.9: Add Escape key handler
+      document.addEventListener('keydown', this.handleContextMenuKeydown);
+    }, 0);
+  }
+
+  /**
+   * Close the context menu
+   * Story 5-1 Task 5.8
+   */
+  private closeContextMenu = (): void => {
+    this.contextMenuVisible = false;
+    this.contextMenuTileId = null;
+    document.removeEventListener('keydown', this.handleContextMenuKeydown);
+  };
+
+  /**
+   * Handle keyboard events for context menu
+   * Story 5-1 Task 5.9
+   */
+  private handleContextMenuKeydown = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      this.closeContextMenu();
+    }
+  };
+
+  /**
+   * Handle Edit Tile menu item click
+   * Story 5-1 Task 5.7
+   */
+  private handleEditTileClick(): void {
+    if (this.contextMenuTileId && this.contextMenuTileId > 0) {
+      tilemapStore.enterHeroEdit(this.contextMenuTileId);
+    }
+    this.closeContextMenu();
   }
 
   protected updated(
@@ -253,6 +454,8 @@ export class PFTilemapCanvas extends BaseComponent {
   private boundHandleMouseUp: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseLeave: (() => void) | null = null;
   private boundHandleContextMenu: ((e: MouseEvent) => void) | null = null;
+  // Story 5-1 Task 4: Double-click handler
+  private boundHandleDoubleClick: ((e: MouseEvent) => void) | null = null;
 
   /**
    * Render the tilemap canvas
@@ -588,7 +791,27 @@ export class PFTilemapCanvas extends BaseComponent {
     void tilesetStore.selectedTileIndex.value; // Re-render when selected tile changes (for preview)
     void tileSelectionStore.selection.value; // Re-render when selection changes
     void tileSelectionStore.pastePreview.value; // Re-render when paste preview changes
+    // Story 5-1: Re-render when hero edit state changes
+    void tilemapStore.heroEditState.value;
 
-    return html`<canvas></canvas>`;
+    return html`
+      <canvas></canvas>
+      ${this.contextMenuVisible ? html`
+        <div
+          class="context-menu"
+          style="left: ${this.contextMenuPosition.x}px; top: ${this.contextMenuPosition.y}px;"
+        >
+          ${this.contextMenuTileId && this.contextMenuTileId > 0 ? html`
+            <div class="context-menu-item" @click=${this.handleEditTileClick}>
+              Edit Tile
+            </div>
+            <div class="context-menu-divider"></div>
+          ` : ''}
+          <div class="context-menu-item" @click=${this.closeContextMenu}>
+            Cancel
+          </div>
+        </div>
+      ` : ''}
+    `;
   }
 }

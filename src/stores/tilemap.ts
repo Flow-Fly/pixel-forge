@@ -1,7 +1,19 @@
 import { signal } from '../core/signal';
-import type { TileLayer } from '../types/tilemap';
-import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError, MinimumLayerError } from '../errors/tilemap-errors';
+import type { TileLayer, HeroEditState } from '../types/tilemap';
+import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError, MinimumLayerError, TilemapError, InvalidTilesetError } from '../errors/tilemap-errors';
 import { tilesetStore } from './tileset';
+
+/**
+ * Initial state for hero edit mode
+ * Story 5-1 Task 1.2
+ */
+const INITIAL_HERO_EDIT_STATE: HeroEditState = {
+  active: false,
+  tileId: null,
+  tilesetId: null,
+  editingCanvas: null,
+  originalData: null
+};
 
 /**
  * Tilemap Store - Manages tilemap dimensions, tile size, grid visibility,
@@ -134,6 +146,137 @@ class TilemapStore extends EventTarget {
     return this._activeTilesetId;
   }
 
+  // ========================================
+  // Story 5-1: Hero Edit State (Task 1)
+  // ========================================
+
+  /**
+   * Hero edit state for in-place tile editing
+   * Story 5-1 Task 1.2
+   */
+  private _heroEditState = signal<HeroEditState>({ ...INITIAL_HERO_EDIT_STATE });
+
+  /**
+   * Get the hero edit state signal for reactive subscriptions
+   * Story 5-1 Task 1.3
+   */
+  get heroEditState() {
+    return this._heroEditState;
+  }
+
+  /**
+   * Convenience getter for checking if hero edit is active
+   * Story 5-1 Task 1.4
+   */
+  get heroEditActive(): boolean {
+    return this._heroEditState.value.active;
+  }
+
+  /**
+   * Convenience getter for the tile ID being edited
+   * Story 5-1 Task 1.5
+   */
+  get editingTileId(): number | null {
+    return this._heroEditState.value.tileId;
+  }
+
+  /**
+   * Enter hero edit mode for a specific tile
+   * Story 5-1 Task 2.1-2.9
+   *
+   * @param tileId - The tile ID to edit (1-based storage ID, must be > 0)
+   * @param tilesetId - Optional tileset ID (defaults to activeTilesetId)
+   * @throws TilemapError if no active tileset
+   * @throws InvalidTilesetError if tileset doesn't exist
+   * @throws InvalidTileIdError if tileId is invalid (0 or not in tileset)
+   */
+  enterHeroEdit(tileId: number, tilesetId?: string): void {
+    // Task 2.3: Resolve tilesetId from parameter or activeTilesetId
+    const resolvedTilesetId = tilesetId ?? this._activeTilesetId.value;
+    if (!resolvedTilesetId) {
+      throw new TilemapError('No active tileset for hero edit');
+    }
+
+    // Task 2.2: Validate tileId is valid (> 0 and exists in tileset)
+    if (tileId === 0) {
+      throw new InvalidTileIdError(tileId);
+    }
+
+    // Get tileset to validate and get dimensions
+    const tileset = tilesetStore.getTileset(resolvedTilesetId);
+    if (!tileset) {
+      throw new InvalidTilesetError(resolvedTilesetId);
+    }
+
+    // Validate tile ID against tileset bounds
+    if (!this.isValidTileId(tileId)) {
+      throw new InvalidTileIdError(tileId);
+    }
+
+    // Task 2.4: Get tile image data from tilesetStore (0-based tileset index)
+    const originalData = tilesetStore.getTileImage(resolvedTilesetId, tileId - 1);
+    if (!originalData) {
+      throw new TilemapError(`Cannot get tile image for tile ${tileId}`);
+    }
+
+    // Task 2.5: Create OffscreenCanvas with tileset's tile dimensions
+    const editingCanvas = new OffscreenCanvas(tileset.tileWidth, tileset.tileHeight);
+    const ctx = editingCanvas.getContext('2d');
+
+    // Task 2.6: Draw tile image onto editingCanvas
+    if (ctx) {
+      ctx.putImageData(originalData, 0, 0);
+    }
+
+    // Task 2.7: Store original ImageData for undo support (deep copy)
+    const originalDataCopy = new ImageData(
+      new Uint8ClampedArray(originalData.data),
+      originalData.width,
+      originalData.height
+    );
+
+    // Task 2.8: Update _heroEditState signal immutably
+    this._heroEditState.value = {
+      active: true,
+      tileId,
+      tilesetId: resolvedTilesetId,
+      editingCanvas,
+      originalData: originalDataCopy
+    };
+
+    // Task 2.9: Fire hero-edit-entered event
+    this.dispatchEvent(new CustomEvent('hero-edit-entered', {
+      detail: { tileId, tilesetId: resolvedTilesetId }
+    }));
+  }
+
+  /**
+   * Exit hero edit mode
+   * Story 5-1 Task 3.1-3.5
+   *
+   * @param save - Whether to save changes (default true, stub for Story 5-6)
+   */
+  exitHeroEdit(save: boolean = true): void {
+    // Task 3.2: Return early if hero edit is not active
+    if (!this._heroEditState.value.active) {
+      return;
+    }
+
+    const { tileId } = this._heroEditState.value;
+
+    // Task 3.3: Stub for future TileEditCommand (actual implementation in Story 5-6)
+    // if (save) {
+    //   // Will create TileEditCommand here
+    // }
+
+    // Task 3.4: Reset _heroEditState to initial state
+    this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
+
+    // Task 3.5: Fire hero-edit-exited event
+    this.dispatchEvent(new CustomEvent('hero-edit-exited', {
+      detail: { tileId, saved: save }
+    }));
+  }
 
   /**
    * Add a new tile layer
@@ -779,6 +922,7 @@ class TilemapStore extends EventTarget {
     this._layers.value = [];
     this._activeLayerId.value = null;
     this._activeTilesetId.value = null;
+    this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
     this.width.value = 20;
     this.height.value = 15;
     this.tileWidth.value = 16;
