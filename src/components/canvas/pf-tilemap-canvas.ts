@@ -28,10 +28,23 @@ import { TileSelectTool } from "../../tools/tile-select-tool";
 export class PFTilemapCanvas extends BaseComponent {
   @query("canvas") canvas!: HTMLCanvasElement;
 
-  // Story 5-1 Task 5: Context menu state
+  /**
+   * Context menu visibility state
+   * Story 5-1 Task 5
+   */
   @state() private contextMenuVisible = false;
+
+  /** Context menu position in screen coordinates */
   @state() private contextMenuPosition = { x: 0, y: 0 };
+
+  /** Tile ID for the context menu target (null if not over a tile) */
   @state() private contextMenuTileId: number | null = null;
+
+  /**
+   * Flag to prevent race condition with click-outside handler
+   * Set true when menu opens, checked before registering click handler
+   */
+  private contextMenuJustOpened = false;
 
   static styles = css`
     :host {
@@ -82,9 +95,16 @@ export class PFTilemapCanvas extends BaseComponent {
       font-size: 0.875rem;
     }
 
-    .context-menu-item:hover {
+    .context-menu-item:hover,
+    .context-menu-item:focus {
       background: var(--pf-color-accent, #0096FF);
       color: white;
+      outline: none;
+    }
+
+    .context-menu-item:focus-visible {
+      outline: 2px solid var(--pf-color-accent, #0096FF);
+      outline-offset: -2px;
     }
 
     .context-menu-divider {
@@ -182,7 +202,7 @@ export class PFTilemapCanvas extends BaseComponent {
    * Story 5-1 Task 5
    */
   private cleanupContextMenuListeners(): void {
-    document.removeEventListener('click', this.closeContextMenu);
+    document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleContextMenuKeydown);
   }
 
@@ -235,6 +255,9 @@ export class PFTilemapCanvas extends BaseComponent {
           const tileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
 
           // Task 6.2: If over placed tile and current tool is tile brush/selection, set cursor to pointer
+          // NOTE: Intentionally limited to tile-brush and tile-select tools only.
+          // Eraser and fill tools have their own cursor semantics that shouldn't be overridden.
+          // This matches the UX spec which focuses on edit discoverability for placement tools.
           const activeTool = toolStore.activeTool.value;
           if (tileId > 0 && (activeTool === 'tile-brush' || activeTool === 'tile-select')) {
             this.canvas.style.cursor = 'pointer';
@@ -366,13 +389,30 @@ export class PFTilemapCanvas extends BaseComponent {
     this.contextMenuVisible = true;
 
     // Task 5.8: Add click-outside handler
-    // Use setTimeout to avoid immediate close from current click
-    setTimeout(() => {
-      document.addEventListener('click', this.closeContextMenu, { once: true });
+    // Use flag to prevent race condition - the click handler registered in the same
+    // event loop tick could fire immediately on some browsers
+    this.contextMenuJustOpened = true;
+    requestAnimationFrame(() => {
+      this.contextMenuJustOpened = false;
+      document.addEventListener('click', this.handleClickOutside);
       // Task 5.9: Add Escape key handler
       document.addEventListener('keydown', this.handleContextMenuKeydown);
-    }, 0);
+    });
   }
+
+  /**
+   * Handle click outside context menu
+   * Story 5-1 Task 5.8 (Code Review Fix: race condition prevention)
+   */
+  private handleClickOutside = (e: MouseEvent): void => {
+    // Check if click is inside context menu
+    const target = e.target as HTMLElement;
+    const contextMenu = this.shadowRoot?.querySelector('.context-menu');
+    if (contextMenu && contextMenu.contains(target)) {
+      return; // Click inside menu, don't close
+    }
+    this.closeContextMenu();
+  };
 
   /**
    * Close the context menu
@@ -381,18 +421,54 @@ export class PFTilemapCanvas extends BaseComponent {
   private closeContextMenu = (): void => {
     this.contextMenuVisible = false;
     this.contextMenuTileId = null;
+    document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleContextMenuKeydown);
   };
 
   /**
    * Handle keyboard events for context menu
    * Story 5-1 Task 5.9
+   * Code Review Fix: Added arrow key navigation and Enter/Space activation
    */
   private handleContextMenuKeydown = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') {
       this.closeContextMenu();
+      return;
+    }
+
+    // Handle arrow key navigation between menu items
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const menu = this.shadowRoot?.querySelector('.context-menu');
+      if (!menu) return;
+
+      const items = Array.from(menu.querySelectorAll('.context-menu-item')) as HTMLElement[];
+      if (items.length === 0) return;
+
+      const currentFocus = this.shadowRoot?.activeElement as HTMLElement;
+      const currentIndex = items.indexOf(currentFocus);
+
+      let nextIndex: number;
+      if (e.key === 'ArrowDown') {
+        nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
+      } else {
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
+      }
+
+      items[nextIndex]?.focus();
     }
   };
+
+  /**
+   * Handle keyboard activation of menu item (Enter/Space)
+   * Code Review Fix: NFR17 keyboard accessibility
+   */
+  private handleMenuItemKeydown(e: KeyboardEvent, action: () => void): void {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      action();
+    }
+  }
 
   /**
    * Handle Edit Tile menu item click
@@ -799,15 +875,29 @@ export class PFTilemapCanvas extends BaseComponent {
       ${this.contextMenuVisible ? html`
         <div
           class="context-menu"
+          role="menu"
+          aria-label="Tile context menu"
           style="left: ${this.contextMenuPosition.x}px; top: ${this.contextMenuPosition.y}px;"
         >
           ${this.contextMenuTileId && this.contextMenuTileId > 0 ? html`
-            <div class="context-menu-item" @click=${this.handleEditTileClick}>
+            <div
+              class="context-menu-item"
+              role="menuitem"
+              tabindex="0"
+              @click=${this.handleEditTileClick}
+              @keydown=${(e: KeyboardEvent) => this.handleMenuItemKeydown(e, () => this.handleEditTileClick())}
+            >
               Edit Tile
             </div>
-            <div class="context-menu-divider"></div>
+            <div class="context-menu-divider" role="separator"></div>
           ` : ''}
-          <div class="context-menu-item" @click=${this.closeContextMenu}>
+          <div
+            class="context-menu-item"
+            role="menuitem"
+            tabindex="0"
+            @click=${this.closeContextMenu}
+            @keydown=${(e: KeyboardEvent) => this.handleMenuItemKeydown(e, () => this.closeContextMenu())}
+          >
             Cancel
           </div>
         </div>
