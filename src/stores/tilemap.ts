@@ -257,6 +257,39 @@ class TilemapStore extends EventTarget {
     );
   }
 
+  /**
+   * Rename a layer
+   * Story 4-1 Task 5
+   * @param layerId - The layer ID
+   * @param newName - The new name for the layer
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  renameLayer(layerId: string, newName: string): void {
+    const layer = this.getLayerById(layerId);
+    if (!layer) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    // Trim whitespace and validate
+    const trimmedName = newName.trim();
+    if (!trimmedName) {
+      // Reject empty names - caller should handle revert
+      return;
+    }
+
+    const oldName = layer.name;
+
+    // Update layer name immutably
+    this._layers.value = this._layers.value.map(l =>
+      l.id === layerId ? { ...l, name: trimmedName } : l
+    );
+
+    // Fire event
+    this.dispatchEvent(new CustomEvent('layer-renamed', {
+      detail: { layerId, oldName, newName: trimmedName }
+    }));
+  }
+
   // ========================================
   // Story 3-1: Tile Data Operations (Task 2)
   // ========================================
@@ -273,6 +306,45 @@ class TilemapStore extends EventTarget {
   }
 
   /**
+   * Get a validated, writeable layer
+   * @param layerId - The layer ID
+   * @returns The validated layer
+   * @throws InvalidLayerError if layer doesn't exist
+   * @throws LockedLayerError if layer is locked
+   */
+  private getWriteableLayer(layerId: string): TileLayer {
+    const layer = this.getLayerById(layerId);
+    if (!layer) {
+      throw new InvalidLayerError(layerId);
+    }
+    if (layer.locked) {
+      throw new LockedLayerError(layerId);
+    }
+    return layer;
+  }
+
+  /**
+   * Internal method to set a tile and fire events
+   * @param layer - The validated layer
+   * @param layerId - The layer ID
+   * @param x - X coordinate in tiles
+   * @param y - Y coordinate in tiles
+   * @param tileId - The tile ID
+   */
+  private setTileInternal(layer: TileLayer, layerId: string, x: number, y: number, tileId: number): void {
+    const index = y * layer.width + x;
+    const previousTileId = layer.data[index];
+
+    layer.data[index] = tileId;
+    this.markDirty(x, y);
+    this._layers.value = [...this._layers.value];
+
+    this.dispatchEvent(new CustomEvent('tile-placed', {
+      detail: { layerId, x, y, tileId, previousTileId }
+    }));
+  }
+
+  /**
    * Set a tile at the given coordinates
    * Story 3-1 Task 2.1
    * @param layerId - The layer ID
@@ -285,40 +357,14 @@ class TilemapStore extends EventTarget {
    * @throws InvalidTileIdError if tileId is not a non-negative integer
    */
   setTile(layerId: string, x: number, y: number, tileId: number): void {
-    const layer = this.getLayerById(layerId);
-    if (!layer) {
-      throw new InvalidLayerError(layerId);
-    }
-
-    // Check if layer is locked
-    if (layer.locked) {
-      throw new LockedLayerError(layerId);
-    }
-
-    // Validate tileId
+    const layer = this.getWriteableLayer(layerId);
     this.validateTileId(tileId);
 
-    // Bounds check
     if (x < 0 || x >= layer.width || y < 0 || y >= layer.height) {
       throw new TileOutOfBoundsError(x, y, layer.width, layer.height);
     }
 
-    const index = y * layer.width + x;
-    const previousTileId = layer.data[index];
-
-    // Set tile data
-    layer.data[index] = tileId;
-
-    // Mark dirty
-    this.markDirty(x, y);
-
-    // Trigger signal update (needed for reactivity on layer data change)
-    this._layers.value = [...this._layers.value];
-
-    // Fire event
-    this.dispatchEvent(new CustomEvent('tile-placed', {
-      detail: { layerId, x, y, tileId, previousTileId }
-    }));
+    this.setTileInternal(layer, layerId, x, y, tileId);
   }
 
   /**
@@ -337,13 +383,11 @@ class TilemapStore extends EventTarget {
       throw new InvalidLayerError(layerId);
     }
 
-    // Bounds check
     if (x < 0 || x >= layer.width || y < 0 || y >= layer.height) {
       throw new TileOutOfBoundsError(x, y, layer.width, layer.height);
     }
 
-    const index = y * layer.width + x;
-    return layer.data[index];
+    return layer.data[y * layer.width + x];
   }
 
   /**
@@ -358,17 +402,7 @@ class TilemapStore extends EventTarget {
    * @throws InvalidTileIdError if tileId is not a non-negative integer
    */
   setTileAt(layerId: string, index: number, tileId: number): void {
-    const layer = this.getLayerById(layerId);
-    if (!layer) {
-      throw new InvalidLayerError(layerId);
-    }
-
-    // Check if layer is locked
-    if (layer.locked) {
-      throw new LockedLayerError(layerId);
-    }
-
-    // Validate tileId
+    const layer = this.getWriteableLayer(layerId);
     this.validateTileId(tileId);
 
     if (index < 0 || index >= layer.data.length) {
@@ -377,20 +411,9 @@ class TilemapStore extends EventTarget {
       throw new TileOutOfBoundsError(x, y, layer.width, layer.height);
     }
 
-    const previousTileId = layer.data[index];
-    layer.data[index] = tileId;
-
-    // Calculate coordinates for dirty tracking
     const x = index % layer.width;
     const y = Math.floor(index / layer.width);
-    this.markDirty(x, y);
-
-    // Trigger signal update
-    this._layers.value = [...this._layers.value];
-
-    this.dispatchEvent(new CustomEvent('tile-placed', {
-      detail: { layerId, x, y, tileId, previousTileId }
-    }));
+    this.setTileInternal(layer, layerId, x, y, tileId);
   }
 
   /**

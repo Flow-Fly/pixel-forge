@@ -32,6 +32,7 @@ import "../shape/pf-shape-options";
 import "../layers/pf-layers-panel";
 import "../reference/pf-references-panel";
 import "../panels/pf-tileset-panel";
+import "../panels/pf-tile-layers-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
 import { persistenceService } from "../../services/persistence/indexed-db";
@@ -397,22 +398,27 @@ export class PixelForgeApp extends BaseComponent {
       return;
     }
 
+    // Only handle Cmd/Ctrl + Shift combinations
+    if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) {
+      return;
+    }
+
+    const key = e.key.toLowerCase();
+    const currentMode = modeStore.mode.value;
+
     // Cmd/Ctrl + Shift + M to open map config (only in Map mode)
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "m") {
-      if (modeStore.mode.value === "map") {
-        e.preventDefault();
-        this.showMapConfigDialog = true;
-        e.stopPropagation();
-      }
+    if (key === "m" && currentMode === "map") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.showMapConfigDialog = true;
+      return;
     }
 
     // Cmd/Ctrl + Shift + T to open send to tileset (only in Art mode)
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "t") {
-      if (modeStore.mode.value === "art") {
-        e.preventDefault();
-        this.showSendToTilesetDialog = true;
-        e.stopPropagation();
-      }
+    if (key === "t" && currentMode === "art") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.showSendToTilesetDialog = true;
     }
   };
 
@@ -592,15 +598,16 @@ export class PixelForgeApp extends BaseComponent {
       </main>
 
       <aside class="panels">
-        ${isTimelineCollapsed
-          ? html`
-              <pf-panel header="Layers" collapsible panel-id="layers" bordered>
-                <pf-layers-panel></pf-layers-panel>
-              </pf-panel>
-            `
-          : ""}
         ${currentMode === "map"
           ? html`
+              <pf-panel
+                header="Tile Layers"
+                collapsible
+                panel-id="tile-layers"
+                bordered
+              >
+                <pf-tile-layers-panel></pf-tile-layers-panel>
+              </pf-panel>
               <pf-panel
                 header="Tileset"
                 collapsible
@@ -610,7 +617,13 @@ export class PixelForgeApp extends BaseComponent {
                 <pf-tileset-panel></pf-tileset-panel>
               </pf-panel>
             `
-          : ""}
+          : isTimelineCollapsed
+            ? html`
+                <pf-panel header="Layers" collapsible panel-id="layers" bordered>
+                  <pf-layers-panel></pf-layers-panel>
+                </pf-panel>
+              `
+            : ""}
         <pf-panel
           header="References"
           collapsible
