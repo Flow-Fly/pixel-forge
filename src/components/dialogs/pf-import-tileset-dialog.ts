@@ -584,9 +584,10 @@ export class PFImportTilesetDialog extends BaseComponent {
     }, 100);
   }
 
+  private static readonly PRESET_SIZES = [8, 16, 32, 64] as const;
+
   private getSelectedPreset(): number | null {
-    const sizes = [8, 16, 32, 64];
-    if (this.tileWidth === this.tileHeight && sizes.includes(this.tileWidth)) {
+    if (this.tileWidth === this.tileHeight && PFImportTilesetDialog.PRESET_SIZES.includes(this.tileWidth as 8 | 16 | 32 | 64)) {
       return this.tileWidth;
     }
     return null;
@@ -602,15 +603,6 @@ export class PFImportTilesetDialog extends BaseComponent {
         const tileWidthInput = this.shadowRoot?.querySelector<HTMLInputElement>('#tile-width');
         tileWidthInput?.focus();
       });
-    }
-
-    if (changedProperties.has('tileWidth') ||
-        changedProperties.has('tileHeight') ||
-        changedProperties.has('spacing') ||
-        changedProperties.has('margin')) {
-      if (this.imageBitmap) {
-        this.debouncedUpdatePreview();
-      }
     }
   }
 

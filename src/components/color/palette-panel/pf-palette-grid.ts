@@ -2,7 +2,7 @@ import { html, css } from "lit";
 import { customElement, state, property } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
 import { colorStore } from "../../../stores/colors";
-import { paletteStore } from "../../../stores/palette";
+import { paletteStore, normalizeHex } from "../../../stores/palette";
 import type { DisplayColor } from "../../../stores/palette";
 
 @customElement("pf-palette-grid")
@@ -364,21 +364,9 @@ export class PFPaletteGrid extends BaseComponent {
 
   // Drag-drop handlers
   private getModifierFromEvent(e: DragEvent | MouseEvent): 'move' | 'copy' | 'swap' {
-    // Ctrl (or Cmd on Mac) = copy, Shift = swap, neither = move
     if (e.ctrlKey || e.metaKey) return 'copy';
     if (e.shiftKey) return 'swap';
     return 'move';
-  }
-
-  private handleDragStart(index: number, color: string, e: DragEvent) {
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "copyMove";
-      e.dataTransfer.setData("application/x-palette-index", String(index));
-      e.dataTransfer.setData("application/x-palette-color", color);
-    }
-    this.isDragging = true;
-    this.draggedIndex = index;
-    this.dragModifier = this.getModifierFromEvent(e);
   }
 
   private resetDragState() {
@@ -469,10 +457,6 @@ export class PFPaletteGrid extends BaseComponent {
     this.resetDragState();
   }
 
-  private normalizeColor(color: string): string {
-    return color.toLowerCase();
-  }
-
   private getUsageClass(normalizedColor: string): string {
     const usedInCurrent = paletteStore.usedColorsInCurrentFrame.value.has(normalizedColor);
     const usedInOther = paletteStore.usedColorsInOtherFrames.value.has(normalizedColor);
@@ -500,12 +484,12 @@ export class PFPaletteGrid extends BaseComponent {
   }
 
   private renderSwatch(displayColor: DisplayColor, visualIndex: number) {
-    const { color, isEphemeral, originalIndex, groupStart, hueFamily } = displayColor;
-    const normalizedColor = this.normalizeColor(color);
+    const { color, isEphemeral, originalIndex, groupStart } = displayColor;
+    const normalizedColor = normalizeHex(color);
     const usageClass = this.getUsageClass(normalizedColor);
     const usageTitle = this.getUsageTitle(normalizedColor);
-    const fgColor = this.normalizeColor(colorStore.primaryColor.value);
-    const bgColor = this.normalizeColor(colorStore.secondaryColor.value);
+    const fgColor = normalizeHex(colorStore.primaryColor.value);
+    const bgColor = normalizeHex(colorStore.secondaryColor.value);
     const isFg = normalizedColor === fgColor;
     const isBg = normalizedColor === bgColor;
 

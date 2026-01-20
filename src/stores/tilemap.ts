@@ -134,11 +134,6 @@ class TilemapStore extends EventTarget {
     return this._activeTilesetId;
   }
 
-  /**
-   * Dirty tile coordinates for efficient re-rendering
-   * Story 3-1 Task 4.1
-   */
-  private _dirtyTiles = signal<Set<string>>(new Set());
 
   /**
    * Add a new tile layer
@@ -336,7 +331,6 @@ class TilemapStore extends EventTarget {
     const previousTileId = layer.data[index];
 
     layer.data[index] = tileId;
-    this.markDirty(x, y);
     this._layers.value = [...this._layers.value];
 
     this.dispatchEvent(new CustomEvent('tile-placed', {
@@ -425,74 +419,6 @@ class TilemapStore extends EventTarget {
    */
   clearTile(layerId: string, x: number, y: number): void {
     this.setTile(layerId, x, y, 0);
-  }
-
-  // ========================================
-  // Story 3-1: Dirty Rect Tracking (Task 4)
-  // ========================================
-
-  /**
-   * Mark a tile position as dirty
-   * Story 3-1 Task 4.2
-   * @param x - X coordinate
-   * @param y - Y coordinate
-   */
-  private markDirty(x: number, y: number): void {
-    const key = `${x},${y}`;
-    const dirty = new Set(this._dirtyTiles.value);
-    dirty.add(key);
-    this._dirtyTiles.value = dirty;
-  }
-
-  /**
-   * Get all dirty regions
-   * Story 3-1 Task 4.3
-   * @returns Array of dirty tile coordinates
-   */
-  getDirtyRegions(): { x: number; y: number }[] {
-    return Array.from(this._dirtyTiles.value).map(key => {
-      const [x, y] = key.split(',').map(Number);
-      return { x, y };
-    });
-  }
-
-  /**
-   * Clear all dirty regions (call after render cycle)
-   * Story 3-1 Task 4.4
-   */
-  clearDirtyRegions(): void {
-    this._dirtyTiles.value = new Set();
-  }
-
-  /**
-   * Get coalesced dirty rectangles for efficient rendering
-   * Story 3-1 Task 4.5
-   * @returns Array of rectangular regions covering dirty tiles
-   */
-  getCoalescedDirtyRegions(): { x: number; y: number; width: number; height: number }[] {
-    const dirty = this.getDirtyRegions();
-    if (dirty.length === 0) {
-      return [];
-    }
-
-    // Simple bounding box approach for MVP
-    // More sophisticated region merging can be added later
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
-
-    for (const { x, y } of dirty) {
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-
-    return [{
-      x: minX,
-      y: minY,
-      width: maxX - minX + 1,
-      height: maxY - minY + 1
-    }];
   }
 
   // ========================================
@@ -625,7 +551,6 @@ class TilemapStore extends EventTarget {
     this._layers.value = [];
     this._activeLayerId.value = null;
     this._activeTilesetId.value = null;
-    this._dirtyTiles.value = new Set();
     this.width.value = 20;
     this.height.value = 15;
     this.tileWidth.value = 16;

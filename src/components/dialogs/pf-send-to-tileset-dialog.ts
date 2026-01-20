@@ -1,5 +1,5 @@
 import { html, css } from 'lit';
-import type { PropertyValues } from 'lit';
+import type { PropertyValues, TemplateResult } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { tilesetStore } from '../../stores/tileset';
@@ -482,13 +482,9 @@ export class PFSendToTilesetDialog extends BaseComponent {
       // Switch to map mode if requested
       if (this.switchToMapMode) {
         modeStore.setMode('map');
-        // Select the newly added tile
+        // Select the newly added tile (tileIndex is guaranteed valid from the add/replace above)
         if (this.selectedTilesetId) {
-          try {
-            tilesetStore.setSelectedTile(tileIndex);
-          } catch {
-            // Ignore if tile selection fails
-          }
+          tilesetStore.setSelectedTile(tileIndex);
         }
       }
 
@@ -658,7 +654,7 @@ export class PFSendToTilesetDialog extends BaseComponent {
     }
   }
 
-  private renderTilePicker(): unknown {
+  private renderTilePicker(): TemplateResult | null {
     if (!this.selectedTilesetId) return null;
 
     const tileset = tilesetStore.getTileset(this.selectedTilesetId);

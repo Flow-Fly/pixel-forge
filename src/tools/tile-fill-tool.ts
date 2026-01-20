@@ -1,17 +1,8 @@
 /**
  * Tile Fill Tool
  *
- * Flood fills a contiguous region with the selected tile.
- * Supports:
- * - Single click fill on empty regions
- * - Single click fill on regions with matching tile ID
- * - Early exit when fill tile matches target tile
- * - Undo/redo via TileBatchCommand (Story 3-6)
- *
- * Uses 4-way connectivity (cardinal directions only).
- * Iterative BFS approach prevents stack overflow on large maps.
- *
- * Story: 3-4-tile-fill-tool, 3-6-tilemap-undo-redo-integration
+ * Flood fills a contiguous region with the selected tile using 4-way connectivity
+ * and iterative BFS. Supports undo/redo.
  */
 
 import { BaseTool, type ModifierKeys } from './base-tool';
@@ -20,6 +11,7 @@ import { tilesetStore } from '../stores/tileset';
 import { historyStore } from '../stores/history';
 import { dirtyRectStore } from '../stores/dirty-rect';
 import { TileBatchCommand, type TileChange } from '../commands/tile-batch-command';
+import { pixelToTile, isInBounds, canModifyLayer } from './tile-tool-utils';
 
 export class TileFillTool extends BaseTool {
   name = 'tile-fill';
@@ -29,101 +21,49 @@ export class TileFillTool extends BaseTool {
   private hoverX: number | null = null;
   private hoverY: number | null = null;
 
-  /**
-   * Convert pixel coordinates to tile coordinates
-   * Uses tilemapStore tile dimensions
-   */
-  private pixelToTile(pixelX: number, pixelY: number): { tileX: number; tileY: number } {
-    const tileWidth = tilemapStore.tileWidth.value;
-    const tileHeight = tilemapStore.tileHeight.value;
+  // 4-way directions: up, down, left, right
+  private static readonly DIRECTIONS = [
+    { dx: 0, dy: -1 },
+    { dx: 0, dy: 1 },
+    { dx: -1, dy: 0 },
+    { dx: 1, dy: 0 },
+  ];
 
-    const tileX = Math.floor(pixelX / tileWidth);
-    const tileY = Math.floor(pixelY / tileHeight);
-
-    return { tileX, tileY };
-  }
-
-  /**
-   * Check if coordinates are within tilemap bounds
-   */
-  private isInBounds(tileX: number, tileY: number): boolean {
-    const width = tilemapStore.width.value;
-    const height = tilemapStore.height.value;
-    return tileX >= 0 && tileX < width && tileY >= 0 && tileY < height;
-  }
-
-  /**
-   * Flood fill algorithm with change tracking (Story 3-6)
-   * Uses 4-way connectivity and iterative BFS to avoid stack overflow
-   *
-   * @param startX - Starting X tile coordinate
-   * @param startY - Starting Y tile coordinate
-   * @param targetTileId - The tile ID to replace (0 for empty)
-   * @param fillTileId - The tile ID to fill with
-   * @returns Array of changes made for undo/redo
-   */
-  private floodFillWithTracking(
+  private floodFill(
+    activeLayerId: string,
     startX: number,
     startY: number,
     targetTileId: number,
     fillTileId: number
   ): TileChange[] {
-    const activeLayerId = tilemapStore.activeLayerId.value;
-    if (!activeLayerId) return [];
-
-    const layer = tilemapStore.getLayerById(activeLayerId);
-    if (!layer || layer.locked) return [];
-
-    // Early exit: same tile, no work needed (AC #5)
     if (targetTileId === fillTileId) return [];
 
     const width = tilemapStore.width.value;
     const height = tilemapStore.height.value;
     const changes: TileChange[] = [];
-
-    // Queue for BFS traversal
     const queue: { x: number; y: number }[] = [{ x: startX, y: startY }];
-
-    // Set to track visited tiles (use integer key for performance: y * width + x)
-    // Avoids string allocation overhead for large fills
     const visited = new Set<number>();
     visited.add(startY * width + startX);
-
-    // 4-way directions: up, down, left, right
-    const directions = [
-      { dx: 0, dy: -1 }, // up
-      { dx: 0, dy: 1 },  // down
-      { dx: -1, dy: 0 }, // left
-      { dx: 1, dy: 0 },  // right
-    ];
 
     while (queue.length > 0) {
       const { x, y } = queue.shift()!;
 
-      // Skip if out of bounds
       if (x < 0 || x >= width || y < 0 || y >= height) continue;
 
-      // Get current tile at this position
       const currentTileId = tilemapStore.getTile(activeLayerId, x, y);
-
-      // Skip if not the target tile
       if (currentTileId !== targetTileId) continue;
 
-      // Fill this tile (immediate visual feedback) - only record change if successful
       try {
         tilemapStore.setTile(activeLayerId, x, y, fillTileId);
-        // Record the change only after successful setTile (fixes phantom history entries)
         changes.push({ x, y, previousTileId: currentTileId, newTileId: fillTileId });
-      } catch (e) {
-        console.warn('Tile fill failed at', x, y, e);
+      } catch {
         continue;
       }
 
-      // Add neighbors to queue
-      for (const { dx, dy } of directions) {
+      for (const { dx, dy } of TileFillTool.DIRECTIONS) {
         const nx = x + dx;
         const ny = y + dy;
-        const key = ny * width + nx; // Integer key for performance
+        const key = ny * width + nx;
 
         if (!visited.has(key)) {
           visited.add(key);
@@ -135,91 +75,51 @@ export class TileFillTool extends BaseTool {
     return changes;
   }
 
-  /**
-   * Handle mouse/pen down - trigger flood fill with undo support (Story 3-6)
-   */
   onDown(x: number, y: number, _modifiers?: ModifierKeys): void {
-    const { tileX, tileY } = this.pixelToTile(x, y);
+    const { tileX, tileY } = pixelToTile(x, y);
+    if (!isInBounds(tileX, tileY)) return;
 
-    // Bounds check
-    if (!this.isInBounds(tileX, tileY)) return;
-
-    // Check for selected tile
     const selectedTile = tilesetStore.selectedTileIndex.value;
     if (selectedTile === null) return;
 
-    // Check for active layer
     const activeLayerId = tilemapStore.activeLayerId.value;
-    if (!activeLayerId) return;
+    if (!canModifyLayer(activeLayerId)) return;
 
-    const layer = tilemapStore.getLayerById(activeLayerId);
-    if (!layer || layer.locked) return;
-
-    // Get target tile (the tile we're replacing)
-    const targetTileId = tilemapStore.getTile(activeLayerId, tileX, tileY);
-
-    // Fill tile is 1-based in storage (selectedTileIndex is 0-based)
+    const targetTileId = tilemapStore.getTile(activeLayerId!, tileX, tileY);
     const fillTileId = selectedTile + 1;
 
-    // Flood fill with change tracking (Story 3-6 Task 4.4)
-    const changes = this.floodFillWithTracking(tileX, tileY, targetTileId, fillTileId);
+    const changes = this.floodFill(activeLayerId!, tileX, tileY, targetTileId, fillTileId);
 
-    // Create command for undo/redo if changes were made
     if (changes.length > 0) {
-      const command = new TileBatchCommand(activeLayerId, changes, 'Fill');
-      // Already executed visually, add to history without re-executing
+      const command = new TileBatchCommand(activeLayerId!, changes, 'Fill');
       historyStore.addWithoutExecuting(command);
     }
   }
 
-  /**
-   * No-op for drag - fill is single-click operation
-   */
   onDrag(_x: number, _y: number, _modifiers?: ModifierKeys): void {
-    // Fill tool doesn't support drag painting
+    // Fill is single-click only
   }
 
-  /**
-   * No-op for up - fill completes on down
-   */
   onUp(_x: number, _y: number, _modifiers?: ModifierKeys): void {
-    // Nothing to do
+    // Fill completes on down
   }
 
-  /**
-   * Handle mouse move (hover) for preview
-   */
   onMove(x: number, y: number, _modifiers?: ModifierKeys): void {
-    const { tileX, tileY } = this.pixelToTile(x, y);
-
+    const { tileX, tileY } = pixelToTile(x, y);
     const prevX = this.hoverX;
     const prevY = this.hoverY;
 
-    // Check if layer is available and unlocked before showing preview
-    const activeLayerId = tilemapStore.activeLayerId.value;
-    const layer = activeLayerId ? tilemapStore.getLayerById(activeLayerId) : null;
-    const canFill = layer && !layer.locked;
-
-    if (this.isInBounds(tileX, tileY) && canFill) {
-      this.hoverX = tileX;
-      this.hoverY = tileY;
-    } else {
-      this.hoverX = null;
-      this.hoverY = null;
-    }
+    const canFill = canModifyLayer(tilemapStore.activeLayerId.value) && isInBounds(tileX, tileY);
+    this.hoverX = canFill ? tileX : null;
+    this.hoverY = canFill ? tileY : null;
 
     if (this.hoverX !== prevX || this.hoverY !== prevY) {
       dirtyRectStore.requestFullRedraw();
     }
   }
 
-  /**
-   * Get fill preview position for visual feedback
-   */
   getFillPreviewPosition(): { x: number; y: number } | null {
-    if (this.hoverX === null || this.hoverY === null) {
-      return null;
-    }
+    if (this.hoverX === null || this.hoverY === null) return null;
     return { x: this.hoverX, y: this.hoverY };
   }
 }

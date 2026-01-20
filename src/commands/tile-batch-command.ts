@@ -1,17 +1,8 @@
 /**
  * TileBatchCommand - Multi-tile placement command for undo/redo
  *
- * Story 3-6: Tilemap Undo/Redo Integration
- * Task 2: Create TileBatchCommand for multi-tile operations
- *
- * This command handles placing multiple tiles at once on the tilemap.
- * Used for:
- * - Brush strokes (multiple tiles in one drag)
- * - Fill operations (flood fill)
- * - Paste operations (clipboard paste)
- * - Cut/delete operations (setting multiple tiles to 0)
- *
- * All tiles in a batch are undone/redone in a single step (AC: #6).
+ * Handles placing multiple tiles at once (brush strokes, fill, paste, cut/delete).
+ * All tiles in a batch are undone/redone in a single step.
  */
 
 import type { Command } from '../stores/history';

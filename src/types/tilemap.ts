@@ -67,43 +67,6 @@ export interface TileLayer {
 }
 
 /**
- * Tilemap - The complete tilemap document
- */
-export interface Tilemap {
-  /** Width of the map in tiles */
-  width: number;
-  /** Height of the map in tiles */
-  height: number;
-  /** Width of each tile in pixels */
-  tileWidth: number;
-  /** Height of each tile in pixels */
-  tileHeight: number;
-  /** Ordered list of tile layers (bottom to top) */
-  layers: TileLayer[];
-  /** Reference to the active tileset ID */
-  tilesetId: string;
-}
-
-/**
- * HeroEditState - State for in-place tile editing (Hero Feature)
- *
- * Hero Edit allows editing individual tiles in isolation,
- * with art tools operating on a local canvas.
- */
-export interface HeroEditState {
-  /** Whether hero edit mode is currently active */
-  active: boolean;
-  /** The tile ID being edited (0-based index), null if not editing */
-  tileId: number | null;
-  /** The tileset ID containing the tile being edited */
-  tilesetId: string | null;
-  /** The canvas used for editing the tile */
-  editingCanvas: OffscreenCanvas | null;
-  /** Original tile data before editing (for undo) */
-  originalData: ImageData | null;
-}
-
-/**
  * LoadStatus - Status of async loading operations
  */
 export type LoadStatus = 'idle' | 'loading' | 'error' | 'success';

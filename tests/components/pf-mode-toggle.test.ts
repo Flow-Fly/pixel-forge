@@ -37,7 +37,6 @@ describe('pf-mode-toggle', () => {
   beforeEach(async () => {
     // Reset mode store to default state before each test
     modeStore.setMode('art');
-    modeStore.setHeroEditActive(false);
 
     element = await createModeToggle();
   });

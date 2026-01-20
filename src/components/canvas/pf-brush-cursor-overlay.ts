@@ -6,8 +6,7 @@ import { colorStore } from '../../stores/colors';
 import { toolStore } from '../../stores/tools';
 import { toolSizes } from '../../stores/tool-settings';
 import { viewportStore } from '../../stores/viewport';
-import { PencilTool } from '../../tools/pencil-tool';
-import { EraserTool } from '../../tools/eraser-tool';
+import { DrawingTool } from '../../tools/drawing-tool';
 import type { BrushImageData } from '../../types/brush';
 
 @customElement('pf-brush-cursor-overlay')
@@ -152,9 +151,7 @@ export class PFBrushCursorOverlay extends BaseComponent {
     if (!this.cursorPos) return;
 
     // Get last stroke end from the active tool
-    const lastStrokeEnd = tool === 'pencil'
-      ? PencilTool.getLastStrokeEnd()
-      : EraserTool.getLastStrokeEnd();
+    const lastStrokeEnd = DrawingTool.getLastStrokeEndForTool(tool);
 
     if (lastStrokeEnd) {
       this.linePreview = {

@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { modeStore } from '../../src/stores/mode';
 import type {
-  Tileset,
   TileLayer,
-  Tilemap,
-  HeroEditState,
   LoadStatus,
 } from '../../src/types/tilemap';
 
@@ -104,48 +101,7 @@ describe('ModeStore', () => {
     });
   });
 
-  describe('setHeroEditActive() method', () => {
-    it('should set heroEditActive to true', () => {
-      modeStore.setHeroEditActive(true);
-      expect(modeStore.heroEditActive.value).toBe(true);
-    });
-
-    it('should set heroEditActive to false', () => {
-      modeStore.setHeroEditActive(true);
-      modeStore.setHeroEditActive(false);
-      expect(modeStore.heroEditActive.value).toBe(false);
-    });
-  });
-
-  describe('toggleHeroEdit() method', () => {
-    it('should toggle heroEditActive from false to true', () => {
-      expect(modeStore.heroEditActive.value).toBe(false);
-      modeStore.toggleHeroEdit();
-      expect(modeStore.heroEditActive.value).toBe(true);
-    });
-
-    it('should toggle heroEditActive from true to false', () => {
-      modeStore.setHeroEditActive(true);
-      modeStore.toggleHeroEdit();
-      expect(modeStore.heroEditActive.value).toBe(false);
-    });
-  });
-
   describe('Mode switch edge cases', () => {
-    it('should disable heroEditActive when toggling mode while hero edit is active', () => {
-      // Set up: in map mode with hero edit active
-      modeStore.setMode('map');
-      modeStore.setHeroEditActive(true);
-      expect(modeStore.heroEditActive.value).toBe(true);
-
-      // Toggle to art mode
-      modeStore.toggleMode();
-
-      // Hero edit should be automatically disabled
-      expect(modeStore.mode.value).toBe('art');
-      expect(modeStore.heroEditActive.value).toBe(false);
-    });
-
     it('should not affect heroEditActive when toggling mode if already false', () => {
       modeStore.setMode('map');
       expect(modeStore.heroEditActive.value).toBe(false);
@@ -203,46 +159,6 @@ describe('Tilemap Type Definitions (AC #2)', () => {
     // Set a tile (1+ = valid tile index)
     data[0] = 1;
     expect(data[0]).toBe(1);
-  });
-
-  it('should allow creating a valid Tilemap structure', () => {
-    const layer: TileLayer = {
-      id: 'layer-1',
-      name: 'Ground',
-      width: 10,
-      height: 10,
-      data: new Uint32Array(100),
-      visible: true,
-      opacity: 1,
-      locked: false,
-    };
-
-    const tilemap: Tilemap = {
-      width: 10,
-      height: 10,
-      tileWidth: 16,
-      tileHeight: 16,
-      layers: [layer],
-      tilesetId: 'tileset-1',
-    };
-
-    expect(tilemap.width).toBe(10);
-    expect(tilemap.tileWidth).toBe(16);
-    expect(tilemap.layers.length).toBe(1);
-    expect(tilemap.tilesetId).toBe('tileset-1');
-  });
-
-  it('should allow creating HeroEditState', () => {
-    const inactiveState: HeroEditState = {
-      active: false,
-      tileId: null,
-      tilesetId: null,
-      editingCanvas: null,
-      originalData: null,
-    };
-
-    expect(inactiveState.active).toBe(false);
-    expect(inactiveState.tileId).toBeNull();
   });
 
   it('should validate LoadStatus type values', () => {

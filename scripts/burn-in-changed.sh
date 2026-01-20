@@ -39,7 +39,6 @@ echo "Running burn-in on $SPEC_COUNT test file(s)..."
 echo ""
 
 # Burn-in loop
-FAILURES=()
 for i in $(seq 1 $ITERATIONS); do
   echo "============================================"
   echo "  Iteration $i/$ITERATIONS"

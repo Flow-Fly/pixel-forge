@@ -10,7 +10,7 @@
  */
 
 import { DrawingTool } from './drawing-tool';
-import { type Point, type ModifierKeys } from './base-tool';
+import { type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { toolSizes } from '../stores/tool-settings';
@@ -22,9 +22,6 @@ import { setIndexBufferPixel } from '../utils/indexed-color';
 export class PencilTool extends DrawingTool {
   name = 'pencil';
   cursor = 'crosshair';
-
-  // Track last stroke end for Shift+Click line feature (per-tool static)
-  private static lastStrokeEnd: Point | null = null;
 
   // Cached palette index for current stroke
   private currentPaletteIndex: number = 0;
@@ -51,14 +48,6 @@ export class PencilTool extends DrawingTool {
 
   protected cleanupStrokeState(): void {
     this.currentPaletteIndex = 0;
-  }
-
-  protected getLastStrokeEnd(): Point | null {
-    return PencilTool.lastStrokeEnd;
-  }
-
-  protected setLastStrokeEnd(point: Point | null): void {
-    PencilTool.lastStrokeEnd = point;
   }
 
   protected supportsAngleSnapping(): boolean {
@@ -222,10 +211,4 @@ export class PencilTool extends DrawingTool {
     this.markDirty(dirtyX, dirtyY, Math.max(width, height));
   }
 
-  /**
-   * Get the last stroke end position (for Shift+Click feature)
-   */
-  static getLastStrokeEnd(): Point | null {
-    return PencilTool.lastStrokeEnd;
-  }
 }

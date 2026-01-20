@@ -157,6 +157,7 @@ export class PFTimelineHeader extends BaseComponent {
         min: this.durationUnit === "fps" ? 1 : 10,
         max: this.durationUnit === "fps" ? 60 : 2000,
         step: this.durationUnit === "fps" ? 1 : 10,
+        unit: this.durationUnit === "fps" ? "" : "ms",
         value:
           this.durationUnit === "fps"
             ? Math.round(1000 / frame.duration)

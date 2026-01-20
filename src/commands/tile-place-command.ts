@@ -1,12 +1,5 @@
 /**
  * TilePlaceCommand - Single tile placement command for undo/redo
- *
- * Story 3-6: Tilemap Undo/Redo Integration
- * Task 1: Create TilePlaceCommand class
- *
- * This command handles placing a single tile on the tilemap.
- * Used for individual tile placements where batch operations are not needed.
- * For multi-tile operations (fill, paste, brush strokes), use TileBatchCommand.
  */
 
 import type { Command } from '../stores/history';

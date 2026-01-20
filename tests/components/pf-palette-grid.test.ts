@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { paletteStore } from '../../src/stores/palette';
+import { paletteStore, SortMode } from '../../src/stores/palette';
 import { colorStore } from '../../src/stores/colors';
 
 /**
@@ -853,19 +853,19 @@ describe('PfPaletteGrid', () => {
   describe('Hue Group Display', () => {
     it('should show group dividers when autoSort is enabled', async () => {
       paletteStore.mainColors.value = ['#ff0000', '#00ff00', '#0000ff'];
-      paletteStore.setAutoSortByHue(true);
+      paletteStore.setSortMode(SortMode.HSL);
       await (element as any).updateComplete;
 
       const groupStarts = element.shadowRoot?.querySelectorAll('.hue-group-start');
       expect(groupStarts?.length).toBeGreaterThanOrEqual(1);
 
       // Cleanup
-      paletteStore.setAutoSortByHue(false);
+      paletteStore.setSortMode(SortMode.None);
     });
 
     it('should not mark first group with hue-group-start', async () => {
       paletteStore.mainColors.value = ['#ff0000', '#00ff00', '#0000ff'];
-      paletteStore.setAutoSortByHue(true);
+      paletteStore.setSortMode(SortMode.HSL);
       await (element as any).updateComplete;
 
       // First container should NOT have hue-group-start (it's the first group)
@@ -873,12 +873,12 @@ describe('PfPaletteGrid', () => {
       expect(containers?.[0]?.classList.contains('hue-group-start')).toBe(false);
 
       // Cleanup
-      paletteStore.setAutoSortByHue(false);
+      paletteStore.setSortMode(SortMode.None);
     });
 
     it('should not show dividers when autoSort is disabled', async () => {
       paletteStore.mainColors.value = ['#ff0000', '#00ff00', '#0000ff'];
-      paletteStore.setAutoSortByHue(false);
+      paletteStore.setSortMode(SortMode.None);
       await (element as any).updateComplete;
 
       const groupStarts = element.shadowRoot?.querySelectorAll('.hue-group-start');
@@ -889,21 +889,21 @@ describe('PfPaletteGrid', () => {
       paletteStore.mainColors.value = ['#ff0000'];
       paletteStore.ephemeralColors.value = ['#00ff00'];
 
-      paletteStore.setAutoSortByHue(true);
+      paletteStore.setSortMode(SortMode.HSL);
       await (element as any).updateComplete;
 
       // Find ephemeral swatch
       const uncommittedSwatches = element.shadowRoot?.querySelectorAll('.swatch-uncommitted');
       expect(uncommittedSwatches?.length).toBe(1);
 
-      paletteStore.setAutoSortByHue(false);
+      paletteStore.setSortMode(SortMode.None);
       await (element as any).updateComplete;
 
       const uncommittedAfter = element.shadowRoot?.querySelectorAll('.swatch-uncommitted');
       expect(uncommittedAfter?.length).toBe(1);
 
       // Cleanup
-      paletteStore.setAutoSortByHue(false);
+      paletteStore.setSortMode(SortMode.None);
     });
   });
 

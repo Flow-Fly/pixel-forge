@@ -60,19 +60,13 @@ export class PFTilemapCanvas extends BaseComponent {
 
   private ctx!: CanvasRenderingContext2D;
 
-  /**
-   * Get the total width of the tilemap in pixels
-   */
-  private get pixelWidth(): number {
-    return tilemapStore.pixelWidth;
-  }
-
-  /**
-   * Get the total height of the tilemap in pixels
-   */
-  private get pixelHeight(): number {
-    return tilemapStore.pixelHeight;
-  }
+  // Tool instances for tile operations and preview
+  private readonly tileTools = {
+    'tile-brush': new TileBrushTool(),
+    'tile-eraser': new TileEraserTool(),
+    'tile-fill': new TileFillTool(),
+    'tile-select': new TileSelectTool(),
+  } as const;
 
   protected firstUpdated(_changedProperties: PropertyValueMap<any>): void {
     super.firstUpdated(_changedProperties);
@@ -162,27 +156,19 @@ export class PFTilemapCanvas extends BaseComponent {
     };
   }
 
-  private handleMouseMove(e: MouseEvent): void {
-    const activeTool = toolStore.activeTool.value;
-    const { x, y } = this.getCanvasCoords(e);
-    const modifiers = this.getModifiers(e);
+  private getTileTool(toolName: string) {
+    return this.tileTools[toolName as keyof typeof this.tileTools];
+  }
 
-    if (activeTool === 'tile-brush') {
-      this.tileBrushTool.onMove(x, y, modifiers);
-    } else if (activeTool === 'tile-eraser') {
-      this.tileEraserTool.onMove(x, y, modifiers);
-    } else if (activeTool === 'tile-fill') {
-      this.tileFillTool.onMove(x, y, modifiers);
-    } else if (activeTool === 'tile-select') {
-      this.tileSelectTool.onMove(x, y, modifiers);
+  private handleMouseMove(e: MouseEvent): void {
+    const tool = this.getTileTool(toolStore.activeTool.value);
+    if (tool) {
+      const { x, y } = this.getCanvasCoords(e);
+      tool.onMove(x, y, this.getModifiers(e));
     }
   }
 
   private handleMouseDown(e: MouseEvent): void {
-    const activeTool = toolStore.activeTool.value;
-    const { x, y } = this.getCanvasCoords(e);
-    const modifiers = this.getModifiers(e);
-
     // If in paste preview mode, click confirms paste at current position
     if (tileSelectionStore.isPasteMode) {
       const activeLayerId = tilemapStore.activeLayerId.value;
@@ -192,45 +178,25 @@ export class PFTilemapCanvas extends BaseComponent {
       return;
     }
 
-    if (activeTool === 'tile-brush') {
-      this.tileBrushTool.onDown(x, y, modifiers);
-    } else if (activeTool === 'tile-eraser') {
-      this.tileEraserTool.onDown(x, y, modifiers);
-    } else if (activeTool === 'tile-fill') {
-      this.tileFillTool.onDown(x, y, modifiers);
-    } else if (activeTool === 'tile-select') {
-      this.tileSelectTool.onDown(x, y, modifiers);
+    const tool = this.getTileTool(toolStore.activeTool.value);
+    if (tool) {
+      const { x, y } = this.getCanvasCoords(e);
+      tool.onDown(x, y, this.getModifiers(e));
     }
   }
 
   private handleMouseUp(e: MouseEvent): void {
-    const activeTool = toolStore.activeTool.value;
-    const { x, y } = this.getCanvasCoords(e);
-    const modifiers = this.getModifiers(e);
-
-    if (activeTool === 'tile-brush') {
-      this.tileBrushTool.onUp(x, y, modifiers);
-    } else if (activeTool === 'tile-eraser') {
-      this.tileEraserTool.onUp(x, y, modifiers);
-    } else if (activeTool === 'tile-fill') {
-      this.tileFillTool.onUp(x, y, modifiers);
-    } else if (activeTool === 'tile-select') {
-      this.tileSelectTool.onUp(x, y, modifiers);
+    const tool = this.getTileTool(toolStore.activeTool.value);
+    if (tool) {
+      const { x, y } = this.getCanvasCoords(e);
+      tool.onUp(x, y, this.getModifiers(e));
     }
   }
 
   private handleMouseLeave(): void {
-    const activeTool = toolStore.activeTool.value;
-
-    // Clear preview when mouse leaves canvas
-    if (activeTool === 'tile-brush') {
-      this.tileBrushTool.onMove(-1, -1); // Out of bounds clears preview
-    } else if (activeTool === 'tile-eraser') {
-      this.tileEraserTool.onMove(-1, -1); // Out of bounds clears preview
-    } else if (activeTool === 'tile-fill') {
-      this.tileFillTool.onMove(-1, -1); // Out of bounds clears preview
-    } else if (activeTool === 'tile-select') {
-      this.tileSelectTool.onMove(-1, -1); // Out of bounds clears preview
+    const tool = this.getTileTool(toolStore.activeTool.value);
+    if (tool) {
+      tool.onMove(-1, -1); // Out of bounds clears preview
     }
   }
 
@@ -242,8 +208,8 @@ export class PFTilemapCanvas extends BaseComponent {
     // Check if tilemap dimensions changed and resize if needed
     if (
       this.canvas &&
-      (this.canvas.width !== this.pixelWidth ||
-        this.canvas.height !== this.pixelHeight)
+      (this.canvas.width !== tilemapStore.pixelWidth ||
+        this.canvas.height !== tilemapStore.pixelHeight)
     ) {
       this.resizeCanvas();
     }
@@ -260,28 +226,22 @@ export class PFTilemapCanvas extends BaseComponent {
     if (!this.canvas) return;
 
     // Set canvas to logical pixel dimensions
-    this.canvas.width = this.pixelWidth;
-    this.canvas.height = this.pixelHeight;
+    this.canvas.width = tilemapStore.pixelWidth;
+    this.canvas.height = tilemapStore.pixelHeight;
 
     // Display size matches logical size - viewport scales it
-    this.canvas.style.width = `${this.pixelWidth}px`;
-    this.canvas.style.height = `${this.pixelHeight}px`;
+    this.canvas.style.width = `${tilemapStore.pixelWidth}px`;
+    this.canvas.style.height = `${tilemapStore.pixelHeight}px`;
 
     // Host matches canvas size
-    this.style.width = `${this.pixelWidth}px`;
-    this.style.height = `${this.pixelHeight}px`;
+    this.style.width = `${tilemapStore.pixelWidth}px`;
+    this.style.height = `${tilemapStore.pixelHeight}px`;
 
     // Re-apply context settings after resize (context may be reset)
     if (this.ctx) {
       this.ctx.imageSmoothingEnabled = false;
     }
   }
-
-  // Tool instances for tile operations and preview
-  private tileBrushTool: TileBrushTool = new TileBrushTool();
-  private tileEraserTool: TileEraserTool = new TileEraserTool();
-  private tileFillTool: TileFillTool = new TileFillTool();
-  private tileSelectTool: TileSelectTool = new TileSelectTool();
 
   // Bound event handlers for cleanup
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
@@ -303,7 +263,7 @@ export class PFTilemapCanvas extends BaseComponent {
 
     if (fullRedraw) {
       // Full redraw - clear entire canvas
-      this.ctx.clearRect(0, 0, this.pixelWidth, this.pixelHeight);
+      this.ctx.clearRect(0, 0, tilemapStore.pixelWidth, tilemapStore.pixelHeight);
 
       // Render all visible layers
       this.renderLayers();
@@ -381,18 +341,15 @@ export class PFTilemapCanvas extends BaseComponent {
     const activeTool = toolStore.activeTool.value;
 
     if (activeTool === 'tile-brush') {
-      // Get preview from brush tool
-      const preview = this.tileBrushTool.getPreviewTile();
+      const preview = this.tileTools['tile-brush'].getPreviewTile();
       if (!preview) return;
       this.renderTilePreview(preview.tileIndex, preview.x, preview.y);
     } else if (activeTool === 'tile-eraser') {
-      // Get eraser position
-      const eraserPos = this.tileEraserTool.getEraserPosition();
+      const eraserPos = this.tileTools['tile-eraser'].getEraserPosition();
       if (!eraserPos) return;
       this.renderEraserPreview(eraserPos.x, eraserPos.y);
     } else if (activeTool === 'tile-fill') {
-      // Get fill position
-      const fillPos = this.tileFillTool.getFillPreviewPosition();
+      const fillPos = this.tileTools['tile-fill'].getFillPreviewPosition();
       if (!fillPos) return;
       this.renderFillPreview(fillPos.x, fillPos.y);
     }
@@ -495,7 +452,7 @@ export class PFTilemapCanvas extends BaseComponent {
     const tileHeight = tilemapStore.tileHeight.value;
 
     // Render drag preview during selection (takes priority)
-    const preview = this.tileSelectTool.getSelectionPreview();
+    const preview = this.tileTools['tile-select'].getSelectionPreview();
     if (preview) {
       this.renderSelectionRect(
         preview.x * tileWidth,

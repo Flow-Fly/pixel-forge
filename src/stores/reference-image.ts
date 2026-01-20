@@ -10,6 +10,15 @@ class ReferenceImageStore {
     return `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
+  private createCanvasFromImage(img: HTMLImageElement): HTMLCanvasElement {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0);
+    return canvas;
+  }
+
   async addImage(source: HTMLImageElement | File): Promise<string> {
     const id = this.generateId();
 
@@ -20,11 +29,7 @@ class ReferenceImageStore {
       img = source;
     }
 
-    const canvas = document.createElement("canvas");
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(img, 0, 0);
+    const canvas = this.createCanvasFromImage(img);
 
     const refImage: ReferenceImage = {
       id,
@@ -116,11 +121,7 @@ class ReferenceImageStore {
         img.src = item.dataUrl;
       });
 
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0);
+      const canvas = this.createCanvasFromImage(img);
 
       images.push({
         id: item.id,

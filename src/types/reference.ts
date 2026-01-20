@@ -1,6 +1,6 @@
-export interface ReferenceImage {
+/** Base properties shared between runtime and serialized reference images */
+interface ReferenceImageBase {
   id: string;
-  canvas: HTMLCanvasElement;
   x: number;
   y: number;
   scale: number;
@@ -11,15 +11,12 @@ export interface ReferenceImage {
   aboveLayers: boolean;
 }
 
-export interface SerializedReferenceImage {
-  id: string;
+/** Runtime reference image with canvas element */
+export interface ReferenceImage extends ReferenceImageBase {
+  canvas: HTMLCanvasElement;
+}
+
+/** Serialized reference image with data URL for persistence */
+export interface SerializedReferenceImage extends ReferenceImageBase {
   dataUrl: string;
-  x: number;
-  y: number;
-  scale: number;
-  rotation: number;
-  opacity: number;
-  visible: boolean;
-  locked: boolean;
-  aboveLayers: boolean;
 }

@@ -10,6 +10,8 @@ export {
   type CanvasOptions,
 } from './canvas-factory';
 
+import { createCanvas } from './canvas-factory';
+
 /**
  * Create a temporary canvas for rendering operations.
  * Uses project dimensions as defaults.
@@ -18,17 +20,10 @@ export function createTempCanvas(
   width?: number,
   height?: number
 ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
-  const w = width ?? projectStore.width.value;
-  const h = height ?? projectStore.height.value;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-
-  const ctx = canvas.getContext('2d', { alpha: true })!;
-  ctx.imageSmoothingEnabled = false;
-
-  return { canvas, ctx };
+  return createCanvas(
+    width ?? projectStore.width.value,
+    height ?? projectStore.height.value
+  );
 }
 
 /**

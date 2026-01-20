@@ -1,5 +1,5 @@
 import { html, css } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 
 export type PopoverPosition = "right" | "bottom" | "left" | "top";
@@ -9,9 +9,6 @@ export class PFPopover extends BaseComponent {
   @property({ type: Boolean, reflect: true }) open = false;
   @property({ type: String }) position: PopoverPosition = "right";
   @property({ type: Object }) anchorRect?: DOMRect;
-
-  @state() private computedTop = 0;
-  @state() private computedLeft = 0;
 
   static styles = css`
     :host {
@@ -94,8 +91,6 @@ export class PFPopover extends BaseComponent {
     super.updated(changedProperties);
     if (changedProperties.has("open") || changedProperties.has("anchorRect")) {
       if (this.open && this.anchorRect) {
-        // Initial position update
-        this.updatePosition();
         // Recalculate after content renders (for accurate dimensions)
         requestAnimationFrame(() => this.updatePosition());
       }
@@ -113,22 +108,25 @@ export class PFPopover extends BaseComponent {
     const popoverWidth = popover?.offsetWidth || 280;
     const popoverHeight = popover?.offsetHeight || 400;
 
+    let top = 0;
+    let left = 0;
+
     switch (this.position) {
       case "right":
-        this.computedTop = rect.top;
-        this.computedLeft = rect.right + gap;
+        top = rect.top;
+        left = rect.right + gap;
         break;
       case "left":
-        this.computedTop = rect.top;
-        this.computedLeft = rect.left - gap - popoverWidth;
+        top = rect.top;
+        left = rect.left - gap - popoverWidth;
         break;
       case "bottom":
-        this.computedTop = rect.bottom + gap;
-        this.computedLeft = rect.left;
+        top = rect.bottom + gap;
+        left = rect.left;
         break;
       case "top":
-        this.computedTop = rect.top - gap - popoverHeight;
-        this.computedLeft = rect.left;
+        top = rect.top - gap - popoverHeight;
+        left = rect.left;
         break;
     }
 
@@ -136,11 +134,9 @@ export class PFPopover extends BaseComponent {
     const margin = 8;
     const maxLeft = window.innerWidth - popoverWidth - margin;
     const maxTop = window.innerHeight - popoverHeight - margin;
-    this.computedLeft = Math.max(margin, Math.min(this.computedLeft, maxLeft));
-    this.computedTop = Math.max(margin, Math.min(this.computedTop, maxTop));
 
-    this.style.top = `${this.computedTop}px`;
-    this.style.left = `${this.computedLeft}px`;
+    this.style.left = `${Math.max(margin, Math.min(left, maxLeft))}px`;
+    this.style.top = `${Math.max(margin, Math.min(top, maxTop))}px`;
   }
 
   private handleSelfClick = (e: Event) => {

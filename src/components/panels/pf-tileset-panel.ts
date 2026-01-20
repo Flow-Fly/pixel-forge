@@ -164,9 +164,7 @@ export class PFTilesetPanel extends BaseComponent {
 
     if (e.dataTransfer?.types.includes('Files')) {
       this.isDragOver = true;
-      if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = 'copy';
-      }
+      e.dataTransfer.dropEffect = 'copy';
     }
   }
 
@@ -209,15 +207,11 @@ export class PFTilesetPanel extends BaseComponent {
     }));
   }
 
-  private handleEmptyStateClick(): void {
-    this.handleImportClick();
-  }
-
   private renderEmptyState() {
     return html`
       <div
         class="empty-state ${this.isDragOver ? 'drag-active' : ''}"
-        @click=${this.handleEmptyStateClick}
+        @click=${this.handleImportClick}
         @dragover=${this.handleDragOver}
         @dragleave=${this.handleDragLeave}
         @drop=${this.handleDrop}

@@ -14,7 +14,7 @@
  */
 
 import { DrawingTool } from './drawing-tool';
-import { type Point, type ModifierKeys } from './base-tool';
+import { type ModifierKeys } from './base-tool';
 import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-settings';
@@ -32,9 +32,6 @@ export type { EraserMode };
 export class EraserTool extends DrawingTool {
   name = 'eraser';
   cursor = 'crosshair';
-
-  // Track last stroke end for Shift+Click line feature (per-tool static)
-  private static lastStrokeEnd: Point | null = null;
 
   // Cached background palette index for current stroke
   private backgroundPaletteIndex: number = 0;
@@ -81,14 +78,6 @@ export class EraserTool extends DrawingTool {
 
   protected cleanupStrokeState(): void {
     this.backgroundPaletteIndex = 0;
-  }
-
-  protected getLastStrokeEnd(): Point | null {
-    return EraserTool.lastStrokeEnd;
-  }
-
-  protected setLastStrokeEnd(point: Point | null): void {
-    EraserTool.lastStrokeEnd = point;
   }
 
   // ============= Eraser-Specific Methods =============
@@ -172,10 +161,4 @@ export class EraserTool extends DrawingTool {
     this.markDirty(dirtyX, dirtyY, size);
   }
 
-  /**
-   * Get the last stroke end position (for Shift+Click feature)
-   */
-  static getLastStrokeEnd(): Point | null {
-    return EraserTool.lastStrokeEnd;
-  }
 }

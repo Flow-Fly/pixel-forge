@@ -538,63 +538,6 @@ describe('TilemapStore', () => {
   });
 
   // ========================================
-  // Story 3-1: Dirty Rect Tracking Tests (Task 7.7)
-  // ========================================
-  describe('Dirty Rect Tracking (Story 3-1)', () => {
-    beforeEach(() => {
-      tilemapStore.reset();
-      tilemapStore.initializeDefaultLayer();
-    });
-
-    it('should track dirty tiles after setTile', () => {
-      const layerId = tilemapStore.layers.value[0].id;
-
-      tilemapStore.setTile(layerId, 5, 3, 1);
-      tilemapStore.setTile(layerId, 6, 4, 2);
-
-      const dirty = tilemapStore.getDirtyRegions();
-
-      expect(dirty).toContainEqual({ x: 5, y: 3 });
-      expect(dirty).toContainEqual({ x: 6, y: 4 });
-    });
-
-    it('should clear dirty regions', () => {
-      const layerId = tilemapStore.layers.value[0].id;
-
-      tilemapStore.setTile(layerId, 0, 0, 1);
-      tilemapStore.clearDirtyRegions();
-
-      const dirty = tilemapStore.getDirtyRegions();
-      expect(dirty.length).toBe(0);
-    });
-
-    it('should coalesce dirty regions into bounding box', () => {
-      const layerId = tilemapStore.layers.value[0].id;
-
-      tilemapStore.setTile(layerId, 2, 2, 1);
-      tilemapStore.setTile(layerId, 5, 5, 1);
-
-      const coalesced = tilemapStore.getCoalescedDirtyRegions();
-
-      expect(coalesced.length).toBe(1);
-      expect(coalesced[0]).toEqual({
-        x: 2,
-        y: 2,
-        width: 4,
-        height: 4
-      });
-    });
-
-    it('should return empty array when no dirty regions', () => {
-      const dirty = tilemapStore.getDirtyRegions();
-      const coalesced = tilemapStore.getCoalescedDirtyRegions();
-
-      expect(dirty.length).toBe(0);
-      expect(coalesced.length).toBe(0);
-    });
-  });
-
-  // ========================================
   // Story 3-1: Tilemap Resize Tests (Task 7.8)
   // ========================================
   describe('Tilemap Resize with Data Preservation (Story 3-1)', () => {

@@ -65,6 +65,17 @@ function isWithinThreshold(
 }
 
 export abstract class DrawingTool extends BaseTool {
+  // Shared storage for last stroke end positions, keyed by tool name
+  private static lastStrokeEnds = new Map<string, Point>();
+
+  /**
+   * Get the last stroke end position for a tool by name.
+   * Used by external components (e.g., brush cursor overlay) for line preview.
+   */
+  static getLastStrokeEndForTool(toolName: string): Point | null {
+    return DrawingTool.lastStrokeEnds.get(toolName) ?? null;
+  }
+
   // Stroke state
   protected isDrawing = false;
   protected lastX = 0;
@@ -131,15 +142,23 @@ export abstract class DrawingTool extends BaseTool {
   protected abstract cleanupStrokeState(): void;
 
   /**
-   * Get the static lastStrokeEnd for this tool class.
-   * Each tool class (pencil, eraser) maintains its own lastStrokeEnd.
+   * Get the last stroke end position for this tool.
+   * Each tool maintains its own lastStrokeEnd via the shared Map.
    */
-  protected abstract getLastStrokeEnd(): Point | null;
+  protected getLastStrokeEnd(): Point | null {
+    return DrawingTool.lastStrokeEnds.get(this.name) ?? null;
+  }
 
   /**
-   * Set the static lastStrokeEnd for this tool class.
+   * Set the last stroke end position for this tool.
    */
-  protected abstract setLastStrokeEnd(point: Point | null): void;
+  protected setLastStrokeEnd(point: Point | null): void {
+    if (point) {
+      DrawingTool.lastStrokeEnds.set(this.name, point);
+    } else {
+      DrawingTool.lastStrokeEnds.delete(this.name);
+    }
+  }
 
   /**
    * Whether to use Ctrl+Shift angle snapping on shift-click lines.

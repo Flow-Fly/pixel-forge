@@ -149,10 +149,6 @@ export class PFTileLayersPanel extends BaseComponent {
       outline: none;
     }
 
-    .layer-name-input:focus {
-      outline: none;
-    }
-
     .empty-state {
       display: flex;
       flex-direction: column;
@@ -178,13 +174,7 @@ export class PFTileLayersPanel extends BaseComponent {
   }
 
   private handleAddLayer(): void {
-    const newLayer = tilemapStore.addLayer();
-
-    this.dispatchEvent(new CustomEvent('layer-added', {
-      detail: { layer: newLayer },
-      bubbles: true,
-      composed: true
-    }));
+    tilemapStore.addLayer();
   }
 
   private handleLayerClick(layerId: string): void {
@@ -231,11 +221,7 @@ export class PFTileLayersPanel extends BaseComponent {
   }
 
   private confirmRename(layerId: string): void {
-    const trimmedName = this.editingName.trim();
-    if (trimmedName) {
-      tilemapStore.renameLayer(layerId, trimmedName);
-    }
-    // If empty, name reverts (we don't call renameLayer)
+    tilemapStore.renameLayer(layerId, this.editingName);
     this.editingLayerId = null;
     this.editingName = '';
   }

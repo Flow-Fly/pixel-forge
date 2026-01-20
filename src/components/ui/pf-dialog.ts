@@ -171,11 +171,6 @@ export class PFDialog extends BaseComponent {
     }
   };
 
-  private handleDialogClick = (e: MouseEvent) => {
-    // Prevent backdrop click when clicking inside dialog
-    e.stopPropagation();
-  };
-
   /** Close the dialog and dispatch pf-close event */
   close() {
     this.open = false;
@@ -195,7 +190,7 @@ export class PFDialog extends BaseComponent {
         <div
           class="dialog"
           style="width: ${this.width}"
-          @click=${this.handleDialogClick}
+          @click=${(e: MouseEvent) => e.stopPropagation()}
         >
           <div class="header">
             <span class="title">

@@ -100,20 +100,16 @@ export class PFPlaybackControls extends BaseComponent {
     );
   }
 
+  private getTotalDuration(): number {
+    return animationStore.frames.value.reduce((sum, f) => sum + f.duration, 0);
+  }
+
   private getEffectiveFPS(): number {
     const frames = animationStore.frames.value;
     if (frames.length === 0) return 0;
 
-    const totalDuration = frames.reduce((sum, f) => sum + f.duration, 0);
-    const avgDuration = totalDuration / frames.length;
+    const avgDuration = this.getTotalDuration() / frames.length;
     return Math.round(1000 / avgDuration);
-  }
-
-  private getTotalDuration(): number {
-    const frames = animationStore.frames.value;
-    if (frames.length === 0) return 0;
-
-    return frames.reduce((sum, f) => sum + f.duration, 0);
   }
 
   private formatDuration(ms: number): string {

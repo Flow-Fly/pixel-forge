@@ -100,7 +100,7 @@ export function updateCelIndexBuffer(
   newCels.set(key, { ...cel, indexBuffer });
 
   // Rebuild canvas from index buffer
-  const palette = paletteStore.colors.value;
+  const palette = paletteStore.mainColors.value;
   rebuildCanvasFromIndices(cel.canvas, indexBuffer, palette);
 
   return newCels;
@@ -111,7 +111,7 @@ export function updateCelIndexBuffer(
  * Called when palette colors change.
  */
 export function rebuildAllCelCanvases(cels: Map<string, Cel>): void {
-  const palette = paletteStore.colors.value;
+  const palette = paletteStore.mainColors.value;
 
   for (const [_key, cel] of cels) {
     // Skip cels without index buffers (empty/linked cels sharing transparent canvas)

@@ -154,15 +154,12 @@ export class PFTilesetGrid extends BaseComponent {
   }
 
   private getGridColumns(): number {
-    // Try to calculate actual columns from grid layout
     const grid = this.shadowRoot?.querySelector('.grid') as HTMLElement;
     if (!grid) {
-      // Fallback to tileset columns
       return this.activeTileset?.columns ?? 8;
     }
 
-    const gridStyle = getComputedStyle(grid);
-    const columnCount = gridStyle.gridTemplateColumns.split(' ').length;
+    const columnCount = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
     return columnCount || this.activeTileset?.columns || 8;
   }
 

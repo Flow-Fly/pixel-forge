@@ -87,10 +87,6 @@ export class PFFormField extends BaseComponent {
   // Instead, for checkbox layout, we use a click handler on the label.
 
   render() {
-    const showSuffix =
-      this.suffix || (this.layout !== "checkbox" && this.label);
-    const suffixText = this.suffix || ":";
-
     // For checkbox layout, render input first
     if (this.layout === "checkbox") {
       return html`
@@ -109,8 +105,8 @@ export class PFFormField extends BaseComponent {
     return html`
       ${this.label
         ? html`<label class="label"
-            >${this.label}${showSuffix
-              ? html`<span class="label-suffix">${suffixText}</span>`
+            >${this.label}${this.suffix
+              ? html`<span class="label-suffix">${this.suffix}</span>`
               : nothing}</label
           >`
         : nothing}
@@ -122,8 +118,6 @@ export class PFFormField extends BaseComponent {
 
   /** Handle label click for checkbox layout - toggles the slotted checkbox */
   private handleLabelClick() {
-    if (this.layout !== "checkbox") return;
-
     // Find the slotted checkbox input
     const slot = this.shadowRoot?.querySelector("slot");
     const slottedElements = slot?.assignedElements({ flatten: true }) || [];

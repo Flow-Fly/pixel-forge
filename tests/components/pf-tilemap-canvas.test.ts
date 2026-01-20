@@ -41,7 +41,6 @@ describe('pf-tilemap-canvas', () => {
   beforeEach(async () => {
     // Reset stores to default state before each test
     modeStore.setMode('art');
-    modeStore.setHeroEditActive(false);
     tilemapStore.resizeTilemap(20, 15);
     tilemapStore.setTileSize(16, 16);
 

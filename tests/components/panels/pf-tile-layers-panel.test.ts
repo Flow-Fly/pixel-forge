@@ -112,17 +112,6 @@ describe('pf-tile-layers-panel', () => {
       const newLayer = layers[layers.length - 1];
       expect(newLayer.name).toMatch(/Layer \d+/);
     });
-
-    it('should fire layer-added custom event', async () => {
-      const listener = vi.fn();
-      element.addEventListener('layer-added', listener);
-
-      const addBtn = element.shadowRoot?.querySelector('.add-layer-btn') as HTMLButtonElement;
-      addBtn?.click();
-      await (element as any).updateComplete;
-
-      expect(listener).toHaveBeenCalled();
-    });
   });
 
   describe('Task 4: Inline layer renaming (AC #5, #6)', () => {

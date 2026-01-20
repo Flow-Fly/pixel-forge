@@ -76,16 +76,6 @@ class PaletteStore {
     };
   }
 
-  /** Legacy getter for backward compatibility */
-  get autoSortByHue(): { value: boolean } {
-    const self = this;
-    return {
-      get value() {
-        return self.sortMode.value !== SortMode.None;
-      }
-    };
-  }
-
   // ==========================================
   // Private State
   // ==========================================
@@ -100,17 +90,8 @@ class PaletteStore {
   private initialScanComplete = false;
   private initialScanInProgress = false;
 
-  // ==========================================
-  // Deprecated Aliases
-  // ==========================================
-
-  /** @deprecated Use currentPresetId instead */
-  get currentPaletteId() {
-    return this.currentPresetId;
-  }
-
-  /** @deprecated Use mainColors instead */
-  get colors() {
+  /** @deprecated Use mainColors instead - kept for internal compatibility */
+  private get colors() {
     return this.mainColors;
   }
 
@@ -174,14 +155,6 @@ class PaletteStore {
 
     this.setSortMode(newMode);
     return newMode;
-  }
-
-  /**
-   * Legacy: Toggle or set auto-sort by hue setting.
-   * @deprecated Use setSortMode() instead
-   */
-  setAutoSortByHue(enabled: boolean): void {
-    this.setSortMode(enabled ? SortMode.HSL : SortMode.None);
   }
 
   private setupFrameChangeListener(): void {
@@ -1006,6 +979,9 @@ class PaletteStore {
    * - Subsequent calls: Only scans previous + current frame, updates incrementally
    */
   refreshFrameUsedColors(): void {
+    // Guard against circular dependency during store initialization
+    if (!animationStore) return;
+
     // Skip if animation is playing to avoid performance issues
     if (animationStore.isPlaying.value) return;
 

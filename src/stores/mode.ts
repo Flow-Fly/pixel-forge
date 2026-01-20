@@ -42,30 +42,11 @@ class ModeStore {
    */
   toggleMode() {
     const newMode = this.mode.value === 'art' ? 'map' : 'art';
-    this.mode.value = newMode;
-    // Initialize default layer on first Map mode entry
-    if (newMode === 'map') {
-      tilemapStore.initializeDefaultLayer();
-    }
+    this.setMode(newMode);
     // Hero edit is only valid in map mode - disable when switching
     if (this.heroEditActive.value) {
       this.heroEditActive.value = false;
     }
-  }
-
-  /**
-   * Set the hero edit active state
-   * @param active - Whether hero edit mode should be active
-   */
-  setHeroEditActive(active: boolean) {
-    this.heroEditActive.value = active;
-  }
-
-  /**
-   * Toggle hero edit mode on/off
-   */
-  toggleHeroEdit() {
-    this.heroEditActive.value = !this.heroEditActive.value;
   }
 }
 

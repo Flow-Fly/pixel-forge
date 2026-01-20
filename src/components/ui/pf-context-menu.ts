@@ -396,10 +396,6 @@ export class PFContextMenu extends BaseComponent {
     this.menuElement.style.top = `${top}px`;
   }
 
-  private clearAnchor() {
-    this.anchorElement = null;
-  }
-
   private handlePopoverToggle = (e: Event) => {
     const event = e as ToggleEvent;
     if (event.newState === "closed" && this.open) {
@@ -552,15 +548,9 @@ export class PFContextMenu extends BaseComponent {
     }
   }
 
-  private handleColorSelect(item: ContextMenuItem, color: string) {
-    if (item.onColorSelect) {
-      item.onColorSelect(color);
-    }
-  }
-
   close() {
     this.open = false;
-    this.clearAnchor();
+    this.anchorElement = null;
     this.dispatchEvent(new CustomEvent("close"));
   }
 
@@ -582,9 +572,6 @@ export class PFContextMenu extends BaseComponent {
     itemsOrY: ContextMenuItem[] | number,
     maybeItems?: ContextMenuItem[]
   ) {
-    // Clear previous anchor
-    this.clearAnchor();
-
     if (typeof anchorOrX === "number") {
       // Legacy: show(x, y, items)
       this.x = anchorOrX;
@@ -595,10 +582,6 @@ export class PFContextMenu extends BaseComponent {
       // New: show(anchor, items)
       this.anchorElement = anchorOrX;
       this.items = itemsOrY as ContextMenuItem[];
-      // Store coordinates for positioning
-      const rect = anchorOrX.getBoundingClientRect();
-      this.x = rect.left;
-      this.y = rect.bottom;
     }
 
     this.open = true;
@@ -613,13 +596,8 @@ export class PFContextMenu extends BaseComponent {
         // Use displayed value if we have one, otherwise item.value
         const displayValue =
           this.sliderDisplayValues.get(index) ?? item.value ?? 100;
-        // Use explicit unit if provided, otherwise default based on label
-        const suffix =
-          item.unit !== undefined
-            ? item.unit
-            : item.label?.includes("FPS")
-              ? ""
-              : "ms";
+        // Use explicit unit if provided, otherwise empty string
+        const suffix = item.unit ?? "";
         return html`
           <div
             class="slider-item"
@@ -708,7 +686,7 @@ export class PFContextMenu extends BaseComponent {
                     style="background-color: ${color}"
                     @click="${(e: Event) => {
                       e.stopPropagation();
-                      this.handleColorSelect(item, color);
+                      item.onColorSelect?.(color);
                     }}"
                   ></div>
                 `
