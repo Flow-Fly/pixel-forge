@@ -4,7 +4,7 @@ import { BaseComponent } from '../../core/base-component';
 import { tilemapStore } from '../../stores/tilemap';
 import { modeStore } from '../../stores/mode';
 import { historyStore } from '../../stores/history';
-import { TileLayerReorderCommand } from '../../commands/tile-layer-command';
+import { TileLayerReorderCommand, TileLayerDeleteCommand } from '../../commands/tile-layer-command';
 import type { TileLayer } from '../../types/tilemap';
 
 /**
@@ -91,6 +91,12 @@ export class PFTileLayersPanel extends BaseComponent {
         const command = new TileLayerReorderCommand(activeLayerId, currentIndex, currentIndex - 1);
         historyStore.execute(command);
       }
+    }
+
+    // Delete/Backspace - delete active layer (Story 4-4 Task 1.7)
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      this.handleDeleteClick(new Event('keydown'), activeLayerId);
     }
   }
 
@@ -206,7 +212,8 @@ export class PFTileLayersPanel extends BaseComponent {
     }
 
     .visibility-icon,
-    .lock-icon {
+    .lock-icon,
+    .delete-icon {
       width: 16px;
       height: 16px;
       display: flex;
@@ -224,12 +231,115 @@ export class PFTileLayersPanel extends BaseComponent {
       background: rgba(255, 255, 255, 0.1);
     }
 
+    .delete-icon {
+      opacity: 0.6;
+      transition: opacity 0.15s, color 0.15s;
+    }
+
+    .delete-icon:hover {
+      opacity: 1;
+      color: var(--pf-color-danger, #ef4444);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
     .visibility-icon.hidden {
       opacity: 0.4;
     }
 
     .lock-icon.locked {
       color: var(--pf-color-accent, #f59e0b);
+    }
+
+    /* Confirmation dialog styles (Story 4-4 Task 7) */
+    .confirm-dialog-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .confirm-dialog {
+      background: var(--pf-color-bg-panel, #252525);
+      border: 1px solid var(--pf-color-border, #404040);
+      border-radius: var(--pf-radius-md, 8px);
+      padding: var(--pf-spacing-4, 16px);
+      max-width: 300px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    .confirm-dialog-title {
+      font-size: var(--pf-font-size-md, 14px);
+      font-weight: 500;
+      color: var(--pf-color-text-main, #e0e0e0);
+      margin-bottom: var(--pf-spacing-2, 8px);
+    }
+
+    .confirm-dialog-message {
+      font-size: var(--pf-font-size-sm, 12px);
+      color: var(--pf-color-text-muted, #808080);
+      margin-bottom: var(--pf-spacing-4, 16px);
+    }
+
+    .confirm-dialog-buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--pf-spacing-2, 8px);
+    }
+
+    .confirm-dialog-btn {
+      padding: var(--pf-spacing-1, 4px) var(--pf-spacing-3, 12px);
+      border-radius: var(--pf-radius-sm, 4px);
+      font-size: var(--pf-font-size-sm, 12px);
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s;
+    }
+
+    .confirm-dialog-btn-cancel {
+      background: var(--pf-color-bg-dark, #1a1a1a);
+      color: var(--pf-color-text-main, #e0e0e0);
+    }
+
+    .confirm-dialog-btn-cancel:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .confirm-dialog-btn-delete {
+      background: var(--pf-color-danger, #ef4444);
+      color: white;
+    }
+
+    .confirm-dialog-btn-delete:hover {
+      background: #dc2626;
+    }
+
+    /* Toast message for "at least one layer required" */
+    .toast-message {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--pf-color-bg-dark, #1a1a1a);
+      border: 1px solid var(--pf-color-border, #404040);
+      border-radius: var(--pf-radius-sm, 4px);
+      padding: var(--pf-spacing-2, 8px) var(--pf-spacing-4, 16px);
+      font-size: var(--pf-font-size-sm, 12px);
+      color: var(--pf-color-text-main, #e0e0e0);
+      z-index: 1001;
+      animation: fadeInOut 2.5s ease-in-out;
+    }
+
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+      15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+      85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+      100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
     }
 
     .layer-name {
@@ -272,6 +382,11 @@ export class PFTileLayersPanel extends BaseComponent {
   @state() private draggingLayerId: string | null = null;
   @state() private dropTargetId: string | null = null;
   @state() private dropPosition: 'above' | 'below' | null = null;
+
+  // Delete confirmation state (Story 4-4 Task 7)
+  @state() private pendingDeleteLayerId: string | null = null;
+  @state() private toastMessage: string | null = null;
+  private toastTimeoutId: number | null = null;
 
   private get layers(): TileLayer[] {
     return tilemapStore.layers.value;
@@ -341,6 +456,96 @@ export class PFTileLayersPanel extends BaseComponent {
   private handleLockClick(e: Event, layerId: string): void {
     e.stopPropagation(); // Don't trigger layer selection
     tilemapStore.toggleLayerLocked(layerId);
+  }
+
+  // ========================================
+  // Story 4-4: Layer Deletion Handlers
+  // ========================================
+
+  /**
+   * Handle delete button click (Story 4-4 Task 1.2-1.6)
+   */
+  private handleDeleteClick(e: Event, layerId: string): void {
+    e.stopPropagation();
+
+    const layers = tilemapStore.layers.value;
+
+    // Block if only one layer (AC #3)
+    if (layers.length === 1) {
+      this.showToast('At least one layer is required');
+      return;
+    }
+
+    // Check if layer is empty (AC #1)
+    if (tilemapStore.isLayerEmpty(layerId)) {
+      // Delete immediately without confirmation
+      this.executeDelete(layerId);
+    } else {
+      // Show confirmation dialog
+      this.pendingDeleteLayerId = layerId;
+    }
+  }
+
+  /**
+   * Confirm deletion from dialog (Story 4-4 Task 7.3)
+   */
+  private confirmDelete(): void {
+    if (this.pendingDeleteLayerId) {
+      this.executeDelete(this.pendingDeleteLayerId);
+      this.pendingDeleteLayerId = null;
+    }
+  }
+
+  /**
+   * Cancel deletion dialog (Story 4-4 Task 7.3)
+   */
+  private cancelDelete(): void {
+    this.pendingDeleteLayerId = null;
+  }
+
+  /**
+   * Execute layer deletion via command (Story 4-4 Task 1.4, AC #2)
+   */
+  private executeDelete(layerId: string): void {
+    const layers = tilemapStore.layers.value;
+    const layerIndex = layers.findIndex(l => l.id === layerId);
+    const layer = layers[layerIndex];
+
+    if (layer) {
+      const command = new TileLayerDeleteCommand(layer, layerIndex);
+      historyStore.execute(command);
+    }
+  }
+
+  /**
+   * Show toast message (Story 4-4 Task 1.6)
+   */
+  private showToast(message: string): void {
+    // Clear existing timeout
+    if (this.toastTimeoutId !== null) {
+      clearTimeout(this.toastTimeoutId);
+    }
+
+    this.toastMessage = message;
+
+    // Auto-hide after animation completes (2.5s)
+    this.toastTimeoutId = window.setTimeout(() => {
+      this.toastMessage = null;
+      this.toastTimeoutId = null;
+    }, 2500);
+  }
+
+  /**
+   * Handle dialog keyboard events (Story 4-4 Task 7.4)
+   */
+  private handleDialogKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.cancelDelete();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      this.confirmDelete();
+    }
   }
 
   private handleNameDoubleClick(e: MouseEvent, layerId: string): void {
@@ -528,6 +733,13 @@ export class PFTileLayersPanel extends BaseComponent {
           >
             ${layer.locked ? '🔒' : '🔓'}
           </span>
+          <span
+            class="delete-icon"
+            title="Delete layer"
+            @click=${(e: Event) => this.handleDeleteClick(e, layer.id)}
+          >
+            🗑️
+          </span>
         </div>
         ${isEditing
           ? html`
@@ -575,8 +787,18 @@ export class PFTileLayersPanel extends BaseComponent {
       this.editingName = '';
     }
 
+    // Clear pending delete if layer was deleted externally
+    if (this.pendingDeleteLayerId && !layers.find(l => l.id === this.pendingDeleteLayerId)) {
+      this.pendingDeleteLayerId = null;
+    }
+
     // Render layers in reverse order (top layer first in UI)
     const reversedLayers = [...layers].reverse();
+
+    // Get the layer name for confirmation dialog
+    const pendingDeleteLayer = this.pendingDeleteLayerId
+      ? layers.find(l => l.id === this.pendingDeleteLayerId)
+      : null;
 
     return html`
       <div class="header">
@@ -595,6 +817,41 @@ export class PFTileLayersPanel extends BaseComponent {
           ? html`<div class="empty-state">No layers</div>`
           : reversedLayers.map(layer => this.renderLayerItem(layer))}
       </div>
+
+      ${this.pendingDeleteLayerId && pendingDeleteLayer
+        ? html`
+            <div
+              class="confirm-dialog-overlay"
+              @click=${this.cancelDelete}
+              @keydown=${(e: KeyboardEvent) => this.handleDialogKeydown(e)}
+            >
+              <div class="confirm-dialog" @click=${(e: Event) => e.stopPropagation()}>
+                <div class="confirm-dialog-title">Delete Layer?</div>
+                <div class="confirm-dialog-message">
+                  Delete layer "${pendingDeleteLayer.name}"? This layer contains tiles that will be lost.
+                </div>
+                <div class="confirm-dialog-buttons">
+                  <button
+                    class="confirm-dialog-btn confirm-dialog-btn-cancel"
+                    @click=${this.cancelDelete}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    class="confirm-dialog-btn confirm-dialog-btn-delete"
+                    @click=${this.confirmDelete}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          `
+        : ''}
+
+      ${this.toastMessage
+        ? html`<div class="toast-message">${this.toastMessage}</div>`
+        : ''}
     `;
   }
 }

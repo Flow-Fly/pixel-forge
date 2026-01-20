@@ -94,3 +94,14 @@ export class InvalidTileIdError extends TilemapError {
     this.name = 'InvalidTileIdError';
   }
 }
+
+/**
+ * Error thrown when attempting to delete the last remaining layer
+ * Story 4-4 Task 4
+ */
+export class MinimumLayerError extends TilemapError {
+  constructor() {
+    super('Cannot delete the last layer. At least one layer is required.');
+    this.name = 'MinimumLayerError';
+  }
+}

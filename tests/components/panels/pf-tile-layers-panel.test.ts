@@ -679,4 +679,235 @@ describe('pf-tile-layers-panel', () => {
       expect(newOrder).toEqual(originalOrder);
     });
   });
+
+  // ========================================
+  // Story 4-4: Layer Deletion UI Tests (Task 8.2)
+  // ========================================
+  describe('Layer Deletion UI (Story 4-4 Task 8.2)', () => {
+    it('should show delete button on layer items (Task 8.2.1)', async () => {
+      const deleteIcon = element.shadowRoot?.querySelector('.delete-icon');
+      expect(deleteIcon).not.toBeNull();
+    });
+
+    it('should trigger deletion flow when delete button clicked (Task 8.2.1)', async () => {
+      // Add second layer (so we can delete one)
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      // Get the first layer (empty, so should delete immediately)
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      expect(deleteIcons?.length).toBe(2);
+
+      const initialCount = tilemapStore.layers.value.length;
+
+      // Click delete on the first rendered layer (Layer 2 in reversed order)
+      (deleteIcons?.[0] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Layer should be deleted immediately (it's empty)
+      expect(tilemapStore.layers.value.length).toBe(initialCount - 1);
+    });
+
+    it('should block deletion when only one layer (shows message) (Task 8.2.3)', async () => {
+      // Only one layer exists from beforeEach
+      expect(tilemapStore.layers.value.length).toBe(1);
+
+      const deleteIcon = element.shadowRoot?.querySelector('.delete-icon') as HTMLElement;
+      deleteIcon?.click();
+      await (element as any).updateComplete;
+
+      // Layer should NOT be deleted
+      expect(tilemapStore.layers.value.length).toBe(1);
+
+      // Toast message should be shown
+      const toast = element.shadowRoot?.querySelector('.toast-message');
+      expect(toast).not.toBeNull();
+      expect(toast?.textContent).toContain('At least one layer is required');
+    });
+
+    it('should show confirmation dialog when layer has tiles (Task 8.2.4)', async () => {
+      // Add second layer
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      // Add tiles to the first layer
+      const layer1Id = tilemapStore.layers.value[0].id;
+      tilemapStore.setTile(layer1Id, 0, 0, 1);
+      await (element as any).updateComplete;
+
+      // Click delete on Layer 1 (second in UI - reversed order)
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Confirmation dialog should appear
+      const dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).not.toBeNull();
+
+      // Dialog should contain layer name
+      const message = element.shadowRoot?.querySelector('.confirm-dialog-message');
+      expect(message?.textContent).toContain('Layer 1');
+    });
+
+    it('should not show confirmation for empty layer (Task 8.2.5)', async () => {
+      // Add second layer (empty)
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const initialCount = tilemapStore.layers.value.length;
+
+      // Click delete on Layer 2 (first in UI - empty)
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[0] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Should delete immediately without dialog
+      expect(tilemapStore.layers.value.length).toBe(initialCount - 1);
+
+      // No confirmation dialog
+      const dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).toBeNull();
+    });
+
+    it('should delete layer on confirm button click', async () => {
+      // Add second layer and add tiles to make deletion require confirmation
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layer1Id = tilemapStore.layers.value[0].id;
+      tilemapStore.setTile(layer1Id, 0, 0, 1);
+      await (element as any).updateComplete;
+
+      // Click delete on Layer 1
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Confirmation dialog should be shown
+      let dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).not.toBeNull();
+
+      // Click confirm
+      const confirmBtn = element.shadowRoot?.querySelector('.confirm-dialog-btn-delete') as HTMLElement;
+      confirmBtn?.click();
+      await (element as any).updateComplete;
+
+      // Layer should be deleted
+      expect(tilemapStore.layers.value.length).toBe(1);
+      expect(tilemapStore.layers.value.find(l => l.id === layer1Id)).toBeUndefined();
+
+      // Dialog should be closed
+      dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).toBeNull();
+    });
+
+    it('should cancel deletion on cancel button click', async () => {
+      // Add second layer and add tiles
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layer1Id = tilemapStore.layers.value[0].id;
+      tilemapStore.setTile(layer1Id, 0, 0, 1);
+      await (element as any).updateComplete;
+
+      const initialCount = tilemapStore.layers.value.length;
+
+      // Click delete on Layer 1
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Confirmation dialog should be shown
+      let dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).not.toBeNull();
+
+      // Click cancel
+      const cancelBtn = element.shadowRoot?.querySelector('.confirm-dialog-btn-cancel') as HTMLElement;
+      cancelBtn?.click();
+      await (element as any).updateComplete;
+
+      // Layer should NOT be deleted
+      expect(tilemapStore.layers.value.length).toBe(initialCount);
+
+      // Dialog should be closed
+      dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).toBeNull();
+    });
+
+    it('should not trigger layer selection when clicking delete icon', async () => {
+      // Add second layer and select it
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      tilemapStore.setActiveLayer(layers[1].id); // Select Layer 2
+      await (element as any).updateComplete;
+
+      // Click delete icon on Layer 1 (second in reversed UI)
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Active layer should still be Layer 2
+      expect(tilemapStore.activeLayerId.value).toBe(layers[1].id);
+    });
+  });
+
+  describe('Layer Deletion - Keyboard Shortcuts (Story 4-4 Task 8.2.2)', () => {
+    it('should delete active layer with Delete key (Task 8.2.2)', async () => {
+      modeStore.setMode('map');
+
+      // Add second layer so we can delete one
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      const layer1Id = layers[0].id;
+
+      // Layer 1 is active (first added)
+      expect(tilemapStore.activeLayerId.value).toBe(layer1Id);
+
+      // Press Delete key
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }));
+      await (element as any).updateComplete;
+
+      // Layer 1 should be deleted (empty layer, no confirmation)
+      expect(tilemapStore.layers.value.find(l => l.id === layer1Id)).toBeUndefined();
+    });
+
+    it('should not delete in Art mode (Task 8.2.6)', async () => {
+      modeStore.setMode('art');
+
+      // Add second layer
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const initialCount = tilemapStore.layers.value.length;
+
+      // Press Delete key
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }));
+      await (element as any).updateComplete;
+
+      // Layer count should be unchanged
+      expect(tilemapStore.layers.value.length).toBe(initialCount);
+    });
+
+    it('should work with Backspace key', async () => {
+      modeStore.setMode('map');
+
+      // Add second layer
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      const layer1Id = layers[0].id;
+
+      // Press Backspace key
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' }));
+      await (element as any).updateComplete;
+
+      // Layer 1 should be deleted
+      expect(tilemapStore.layers.value.find(l => l.id === layer1Id)).toBeUndefined();
+    });
+  });
 });

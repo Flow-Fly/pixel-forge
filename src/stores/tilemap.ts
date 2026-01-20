@@ -1,6 +1,6 @@
 import { signal } from '../core/signal';
 import type { TileLayer } from '../types/tilemap';
-import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError } from '../errors/tilemap-errors';
+import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError, MinimumLayerError } from '../errors/tilemap-errors';
 import { tilesetStore } from './tileset';
 
 /**
@@ -410,6 +410,106 @@ class TilemapStore extends EventTarget {
 
     this.dispatchEvent(new CustomEvent('layer-renamed', {
       detail: { layerId, oldName, newName: trimmedName }
+    }));
+  }
+
+  // ========================================
+  // Story 4-4: Layer Deletion
+  // ========================================
+
+  /**
+   * Check if a layer has no tiles (all values are 0)
+   * Story 4-4 Task 3
+   * @param layerId - The layer ID
+   * @returns true if layer is empty (all tiles are 0), false otherwise
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  isLayerEmpty(layerId: string): boolean {
+    const layer = this.getLayerById(layerId);
+    if (!layer) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    // Optimize with early return on first non-zero value
+    for (let i = 0; i < layer.data.length; i++) {
+      if (layer.data[i] !== 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Delete a layer with full data capture for undo support
+   * Story 4-4 Task 2
+   * @param layerId - The layer ID to delete
+   * @returns The deleted layer data (for undo)
+   * @throws InvalidLayerError if layer doesn't exist
+   * @throws MinimumLayerError if this is the only layer
+   */
+  deleteLayer(layerId: string): TileLayer {
+    const layers = this._layers.value;
+    const layerIndex = layers.findIndex(l => l.id === layerId);
+
+    if (layerIndex === -1) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    if (layers.length === 1) {
+      throw new MinimumLayerError();
+    }
+
+    const deletedLayer = layers[layerIndex];
+    const wasActive = this._activeLayerId.value === layerId;
+
+    // Remove layer immutably
+    const newLayers = layers.filter(l => l.id !== layerId);
+    this._layers.value = newLayers;
+
+    // Update active layer if needed
+    let newActiveId: string | null = null;
+    if (wasActive && newLayers.length > 0) {
+      // Select same index if available (which is now the layer that was above)
+      // Otherwise select last layer
+      const newActiveIndex = Math.min(layerIndex, newLayers.length - 1);
+      newActiveId = newLayers[newActiveIndex].id;
+      this._activeLayerId.value = newActiveId;
+    }
+
+    this.dispatchEvent(new CustomEvent('layer-deleted', {
+      detail: { layerId, layer: deletedLayer, wasActive, newActiveId }
+    }));
+
+    return deletedLayer;
+  }
+
+  /**
+   * Restore a previously deleted layer (for undo)
+   * Story 4-4 Task 6
+   * @param layerData - The full layer data to restore
+   * @param index - The index to insert at (optional, defaults to end)
+   */
+  restoreLayer(layerData: TileLayer, index?: number): void {
+    const layers = this._layers.value;
+
+    // Create a fresh copy of the layer data
+    const restoredLayer: TileLayer = {
+      ...layerData,
+      data: new Uint32Array(layerData.data) // Deep copy
+    };
+
+    // Determine insertion index
+    const insertIndex = index !== undefined
+      ? Math.max(0, Math.min(index, layers.length))
+      : layers.length;
+
+    // Insert at index
+    const newLayers = [...layers];
+    newLayers.splice(insertIndex, 0, restoredLayer);
+    this._layers.value = newLayers;
+
+    this.dispatchEvent(new CustomEvent('layer-restored', {
+      detail: { layerId: restoredLayer.id, layer: restoredLayer, index: insertIndex }
     }));
   }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { tilemapStore } from '../../src/stores/tilemap';
-import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError } from '../../src/errors/tilemap-errors';
+import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError, MinimumLayerError } from '../../src/errors/tilemap-errors';
 
 /**
  * Tilemap Store Tests
@@ -1137,6 +1137,277 @@ describe('TilemapStore', () => {
         expect(() => {
           tilemapStore.moveLayerDown('non-existent');
         }).toThrow(InvalidLayerError);
+      });
+    });
+  });
+
+  // ========================================
+  // Story 4-4: Layer Deletion Tests (Task 8.1)
+  // ========================================
+  describe('Layer Deletion (Story 4-4)', () => {
+    beforeEach(() => {
+      tilemapStore.reset();
+    });
+
+    describe('isLayerEmpty() (Task 8.1.7, 8.1.8)', () => {
+      it('should return true for layer with no tiles (Task 8.1.7)', () => {
+        const layer = tilemapStore.addLayer('Empty Layer');
+
+        expect(tilemapStore.isLayerEmpty(layer.id)).toBe(true);
+      });
+
+      it('should return false for layer with tiles (Task 8.1.8)', () => {
+        const layer = tilemapStore.addLayer('Layer with tiles');
+        tilemapStore.setTile(layer.id, 0, 0, 1);
+
+        expect(tilemapStore.isLayerEmpty(layer.id)).toBe(false);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer', () => {
+        expect(() => {
+          tilemapStore.isLayerEmpty('non-existent');
+        }).toThrow(InvalidLayerError);
+      });
+
+      it('should detect non-zero value at any position', () => {
+        const layer = tilemapStore.addLayer('Test Layer');
+        // Set tile at end of data
+        tilemapStore.setTile(layer.id, tilemapStore.width.value - 1, tilemapStore.height.value - 1, 99);
+
+        expect(tilemapStore.isLayerEmpty(layer.id)).toBe(false);
+      });
+    });
+
+    describe('deleteLayer() (Task 8.1.1-8.1.6)', () => {
+      it('should remove layer from array (Task 8.1.1)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+
+        tilemapStore.deleteLayer(layer1.id);
+
+        expect(tilemapStore.layers.value.length).toBe(1);
+        expect(tilemapStore.layers.value[0].id).toBe(layer2.id);
+      });
+
+      it('should fire layer-deleted event with correct detail (Task 8.1.2)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-deleted', handler);
+
+        tilemapStore.deleteLayer(layer1.id);
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        const detail = handler.mock.calls[0][0].detail;
+        expect(detail.layerId).toBe(layer1.id);
+        expect(detail.layer.name).toBe('Layer 1');
+        expect(detail.wasActive).toBe(true);
+        expect(detail.newActiveId).toBe(layer2.id);
+
+        tilemapStore.removeEventListener('layer-deleted', handler);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer (Task 8.1.3)', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        expect(() => {
+          tilemapStore.deleteLayer('non-existent');
+        }).toThrow(InvalidLayerError);
+      });
+
+      it('should throw MinimumLayerError when only one layer (Task 8.1.4)', () => {
+        const layer = tilemapStore.addLayer('Only Layer');
+
+        expect(() => {
+          tilemapStore.deleteLayer(layer.id);
+        }).toThrow(MinimumLayerError);
+      });
+
+      it('should update active layer to next sibling (Task 8.1.5)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        // Select Layer 2 (middle)
+        tilemapStore.setActiveLayer(layer2.id);
+
+        // Delete Layer 2
+        tilemapStore.deleteLayer(layer2.id);
+
+        // Active should now be Layer 3 (was at index 2, now at index 1)
+        // Since we take the layer at same index position
+        expect(tilemapStore.activeLayerId.value).toBe(layer3.id);
+      });
+
+      it('should update active layer to previous if deleted was last (Task 8.1.6)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        // Select Layer 3 (top/last)
+        tilemapStore.setActiveLayer(layer3.id);
+
+        // Delete Layer 3
+        tilemapStore.deleteLayer(layer3.id);
+
+        // Active should now be Layer 2 (last remaining at top)
+        expect(tilemapStore.activeLayerId.value).toBe(layer2.id);
+      });
+
+      it('should return deleted layer data for undo', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        tilemapStore.addLayer('Layer 2');
+
+        // Add some tile data
+        tilemapStore.setTile(layer1.id, 0, 0, 5);
+        tilemapStore.setTile(layer1.id, 1, 1, 10);
+
+        const deletedLayer = tilemapStore.deleteLayer(layer1.id);
+
+        expect(deletedLayer.name).toBe('Layer 1');
+        expect(deletedLayer.data[0]).toBe(5);
+        expect(deletedLayer.data[tilemapStore.width.value + 1]).toBe(10);
+      });
+
+      it('should not change active layer if non-active layer is deleted', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+
+        // Layer 1 should be active (first added)
+        expect(tilemapStore.activeLayerId.value).toBe(layer1.id);
+
+        // Delete Layer 2 (not active)
+        tilemapStore.deleteLayer(layer2.id);
+
+        // Active should still be Layer 1
+        expect(tilemapStore.activeLayerId.value).toBe(layer1.id);
+      });
+    });
+
+    describe('restoreLayer() (Task 8.1.9, 8.1.10)', () => {
+      it('should add layer at specified index (Task 8.1.9)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+
+        const restoredLayerData = {
+          id: 'restored-id',
+          name: 'Restored Layer',
+          width: tilemapStore.width.value,
+          height: tilemapStore.height.value,
+          data: new Uint32Array(tilemapStore.width.value * tilemapStore.height.value),
+          visible: true,
+          opacity: 1,
+          locked: false
+        };
+
+        tilemapStore.restoreLayer(restoredLayerData, 1);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers.length).toBe(3);
+        expect(layers[1].name).toBe('Restored Layer');
+        expect(layers[0].name).toBe('Layer 1');
+        expect(layers[2].name).toBe('Layer 2');
+      });
+
+      it('should fire layer-restored event (Task 8.1.10)', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-restored', handler);
+
+        const restoredLayerData = {
+          id: 'restored-id',
+          name: 'Restored Layer',
+          width: tilemapStore.width.value,
+          height: tilemapStore.height.value,
+          data: new Uint32Array(tilemapStore.width.value * tilemapStore.height.value),
+          visible: true,
+          opacity: 1,
+          locked: false
+        };
+
+        tilemapStore.restoreLayer(restoredLayerData, 0);
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        const detail = handler.mock.calls[0][0].detail;
+        expect(detail.layerId).toBe('restored-id');
+        expect(detail.layer.name).toBe('Restored Layer');
+        expect(detail.index).toBe(0);
+
+        tilemapStore.removeEventListener('layer-restored', handler);
+      });
+
+      it('should add at end if index not provided', () => {
+        tilemapStore.addLayer('Layer 1');
+        tilemapStore.addLayer('Layer 2');
+
+        const restoredLayerData = {
+          id: 'restored-id',
+          name: 'Restored Layer',
+          width: tilemapStore.width.value,
+          height: tilemapStore.height.value,
+          data: new Uint32Array(tilemapStore.width.value * tilemapStore.height.value),
+          visible: true,
+          opacity: 1,
+          locked: false
+        };
+
+        tilemapStore.restoreLayer(restoredLayerData);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers.length).toBe(3);
+        expect(layers[2].name).toBe('Restored Layer');
+      });
+
+      it('should clamp index to valid bounds', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        const restoredLayerData = {
+          id: 'restored-id',
+          name: 'Restored Layer',
+          width: tilemapStore.width.value,
+          height: tilemapStore.height.value,
+          data: new Uint32Array(tilemapStore.width.value * tilemapStore.height.value),
+          visible: true,
+          opacity: 1,
+          locked: false
+        };
+
+        // Try to restore at index 100 (out of bounds)
+        tilemapStore.restoreLayer(restoredLayerData, 100);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers.length).toBe(2);
+        // Should be added at end
+        expect(layers[1].name).toBe('Restored Layer');
+      });
+
+      it('should deep copy Uint32Array data', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        const originalData = new Uint32Array(tilemapStore.width.value * tilemapStore.height.value);
+        originalData[0] = 42;
+
+        const restoredLayerData = {
+          id: 'restored-id',
+          name: 'Restored Layer',
+          width: tilemapStore.width.value,
+          height: tilemapStore.height.value,
+          data: originalData,
+          visible: true,
+          opacity: 1,
+          locked: false
+        };
+
+        tilemapStore.restoreLayer(restoredLayerData);
+
+        // Modify original data
+        originalData[0] = 999;
+
+        // Restored layer should still have 42
+        const restoredLayer = tilemapStore.layers.value.find(l => l.id === 'restored-id');
+        expect(restoredLayer?.data[0]).toBe(42);
       });
     });
   });
