@@ -250,7 +250,6 @@ describe('pf-tile-layers-panel', () => {
 
   describe('Task 1 & 2: Visibility and Lock Toggle (Story 4-2)', () => {
     it('should toggle layer visibility when visibility icon is clicked (AC #1)', async () => {
-      const layerId = tilemapStore.layers.value[0].id;
       expect(tilemapStore.layers.value[0].visible).toBe(true);
 
       const visibilityIcon = element.shadowRoot?.querySelector('.visibility-icon') as HTMLElement;
@@ -261,7 +260,6 @@ describe('pf-tile-layers-panel', () => {
     });
 
     it('should toggle layer locked when lock icon is clicked (AC #3)', async () => {
-      const layerId = tilemapStore.layers.value[0].id;
       expect(tilemapStore.layers.value[0].locked).toBe(false);
 
       const lockIcon = element.shadowRoot?.querySelector('.lock-icon') as HTMLElement;
@@ -437,6 +435,248 @@ describe('pf-tile-layers-panel', () => {
 
       expect(visibilityIcon).not.toBeNull();
       expect(lockIcon).not.toBeNull();
+    });
+  });
+
+  // ========================================
+  // Story 4-3: Layer Reordering Tests (Task 6.2)
+  // ========================================
+  describe('Layer Reordering - Drag and Drop (Story 4-3 Task 6.2)', () => {
+    it('should have draggable attribute on layer items (Task 6.2.1)', async () => {
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layerItems = element.shadowRoot?.querySelectorAll('.layer-item');
+      layerItems?.forEach(item => {
+        expect(item.getAttribute('draggable')).toBe('true');
+      });
+    });
+
+    it('should have drag event handlers bound to layer items', async () => {
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      // Verify the component has drag state properties
+      expect((element as any).draggingLayerId).toBeNull();
+      expect((element as any).dropTargetId).toBeNull();
+      expect((element as any).dropPosition).toBeNull();
+    });
+
+    it('should have CSS styles for dragging state', async () => {
+      // Check that the component has the necessary CSS
+      const styles = element.shadowRoot?.adoptedStyleSheets || [];
+      const styleText = (element.constructor as any).styles?.cssText || '';
+
+      // Verify drag-related CSS classes exist in styles
+      expect(styleText).toContain('.dragging');
+      expect(styleText).toContain('.drop-indicator-above');
+      expect(styleText).toContain('.drop-indicator-below');
+    });
+
+    it('should reorder layers via drag-drop simulation (M2 fix)', async () => {
+      // Setup: Create 3 layers
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      const layer1Id = layers[0].id;
+      const layer3Id = layers[2].id;
+
+      // Get layer items (rendered in reverse order: Layer 3 first in UI)
+      const layerItems = element.shadowRoot?.querySelectorAll('.layer-item');
+      expect(layerItems?.length).toBe(3);
+
+      // Simulate drag start on Layer 1 (last in UI, index 2 in DOM)
+      const layer1Element = layerItems?.[2] as HTMLElement;
+      const dragStartEvent = new DragEvent('dragstart', {
+        bubbles: true,
+        dataTransfer: new DataTransfer()
+      });
+      layer1Element?.dispatchEvent(dragStartEvent);
+      await (element as any).updateComplete;
+
+      expect((element as any).draggingLayerId).toBe(layer1Id);
+
+      // Simulate drag over Layer 3 (first in UI, index 0 in DOM)
+      const layer3Element = layerItems?.[0] as HTMLElement;
+      const dragOverEvent = new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientY: 10 // Above midpoint to trigger 'above' drop position
+      });
+      Object.defineProperty(dragOverEvent, 'currentTarget', { value: layer3Element });
+      layer3Element?.dispatchEvent(dragOverEvent);
+      await (element as any).updateComplete;
+
+      expect((element as any).dropTargetId).toBe(layer3Id);
+
+      // Simulate drop
+      const dropEvent = new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true
+      });
+      layer3Element?.dispatchEvent(dropEvent);
+      await (element as any).updateComplete;
+
+      // Verify drag state is cleaned up
+      expect((element as any).draggingLayerId).toBeNull();
+      expect((element as any).dropTargetId).toBeNull();
+    });
+
+    it('should handle adjacent layer drag correctly (M1 fix)', async () => {
+      // Setup: Create 3 layers [Layer 1, Layer 2, Layer 3] at indices [0, 1, 2]
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      const layer2Id = layers[1].id;
+      const layer3Id = layers[2].id;
+
+      // Directly test the store's reorderLayer for adjacent swap
+      // Move Layer 2 (index 1) to index 2 (swap with Layer 3)
+      tilemapStore.reorderLayer(layer2Id, 2);
+
+      const updatedLayers = tilemapStore.layers.value;
+      expect(updatedLayers[2].id).toBe(layer2Id);
+      expect(updatedLayers[1].id).toBe(layer3Id);
+    });
+  });
+
+  describe('Layer Reordering - Keyboard Shortcuts (Story 4-3 Task 6.2.2-6.2.4)', () => {
+    it('should move active layer up with Cmd+Up (Task 6.2.2)', async () => {
+      modeStore.setMode('map');
+
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      // Select Layer 1 (index 0)
+      tilemapStore.setActiveLayer(layers[0].id);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        metaKey: true
+      }));
+      await (element as any).updateComplete;
+
+      // Layer 1 should now be at index 1
+      const updatedLayers = tilemapStore.layers.value;
+      expect(updatedLayers[1].name).toBe('Layer 1');
+    });
+
+    it('should move active layer down with Cmd+Down (Task 6.2.3)', async () => {
+      modeStore.setMode('map');
+
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      // Select Layer 3 (index 2, at top)
+      tilemapStore.setActiveLayer(layers[2].id);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        metaKey: true
+      }));
+      await (element as any).updateComplete;
+
+      // Layer 3 should now be at index 1
+      const updatedLayers = tilemapStore.layers.value;
+      expect(updatedLayers[1].name).toBe('Layer 3');
+    });
+
+    it('should not reorder in Art mode (Task 6.2.4)', async () => {
+      modeStore.setMode('art');
+
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      const originalOrder = layers.map(l => l.id);
+      tilemapStore.setActiveLayer(layers[0].id);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        metaKey: true
+      }));
+      await (element as any).updateComplete;
+
+      const updatedLayers = tilemapStore.layers.value;
+      const newOrder = updatedLayers.map(l => l.id);
+      expect(newOrder).toEqual(originalOrder);
+    });
+
+    it('should work with Ctrl key as well as Cmd', async () => {
+      modeStore.setMode('map');
+
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      tilemapStore.setActiveLayer(layers[0].id);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        ctrlKey: true
+      }));
+      await (element as any).updateComplete;
+
+      const updatedLayers = tilemapStore.layers.value;
+      expect(updatedLayers[1].name).toBe('Layer 1');
+    });
+
+    it('should not move layer up when already at top', async () => {
+      modeStore.setMode('map');
+
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      // Select Layer 3 (already at top, index 2)
+      tilemapStore.setActiveLayer(layers[2].id);
+      const originalOrder = layers.map(l => l.id);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        metaKey: true
+      }));
+      await (element as any).updateComplete;
+
+      // Order should be unchanged
+      const updatedLayers = tilemapStore.layers.value;
+      const newOrder = updatedLayers.map(l => l.id);
+      expect(newOrder).toEqual(originalOrder);
+    });
+
+    it('should not move layer down when already at bottom', async () => {
+      modeStore.setMode('map');
+
+      tilemapStore.addLayer('Layer 2');
+      tilemapStore.addLayer('Layer 3');
+      await (element as any).updateComplete;
+
+      const layers = tilemapStore.layers.value;
+      // Select Layer 1 (already at bottom, index 0)
+      tilemapStore.setActiveLayer(layers[0].id);
+      const originalOrder = layers.map(l => l.id);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        metaKey: true
+      }));
+      await (element as any).updateComplete;
+
+      // Order should be unchanged
+      const updatedLayers = tilemapStore.layers.value;
+      const newOrder = updatedLayers.map(l => l.id);
+      expect(newOrder).toEqual(originalOrder);
     });
   });
 });

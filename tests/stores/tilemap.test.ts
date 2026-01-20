@@ -962,4 +962,182 @@ describe('TilemapStore', () => {
       }).toThrow(TileOutOfBoundsError);
     });
   });
+
+  // ========================================
+  // Story 4-3: Layer Reordering Tests (Task 6.1)
+  // ========================================
+  describe('Layer Reordering (Story 4-3)', () => {
+    beforeEach(() => {
+      tilemapStore.reset();
+    });
+
+    describe('reorderLayer() (Task 6.1.1-6.1.4)', () => {
+      it('should move layer to new position (Task 6.1.1)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        // Move Layer 1 (index 0) to top (index 2)
+        tilemapStore.reorderLayer(layer1.id, 2);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers[2].id).toBe(layer1.id);
+        expect(layers[0].id).toBe(layer2.id);
+        expect(layers[1].id).toBe(layer3.id);
+      });
+
+      it('should fire layer-reordered event with correct detail (Task 6.1.2)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-reordered', handler);
+
+        tilemapStore.reorderLayer(layer1.id, 2);
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        const detail = handler.mock.calls[0][0].detail;
+        expect(detail.layerId).toBe(layer1.id);
+        expect(detail.oldIndex).toBe(0);
+        expect(detail.newIndex).toBe(2);
+
+        tilemapStore.removeEventListener('layer-reordered', handler);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer (Task 6.1.3)', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        expect(() => {
+          tilemapStore.reorderLayer('non-existent', 0);
+        }).toThrow(InvalidLayerError);
+      });
+
+      it('should clamp newIndex to valid bounds (Task 6.1.4)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        // Try to move to index 10 (out of bounds - should clamp to 2)
+        tilemapStore.reorderLayer(layer1.id, 10);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers[2].id).toBe(layer1.id);
+
+        // Try to move to negative index (should clamp to 0)
+        tilemapStore.reorderLayer(layer1.id, -5);
+
+        const updatedLayers = tilemapStore.layers.value;
+        expect(updatedLayers[0].id).toBe(layer1.id);
+      });
+
+      it('should be no-op when moving to same position', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        tilemapStore.addLayer('Layer 2');
+
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-reordered', handler);
+
+        // Move Layer 1 to index 0 (where it already is)
+        tilemapStore.reorderLayer(layer1.id, 0);
+
+        // Should not fire event since no actual move happened
+        expect(handler).not.toHaveBeenCalled();
+
+        tilemapStore.removeEventListener('layer-reordered', handler);
+      });
+
+      it('should update layers immutably', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        tilemapStore.addLayer('Layer 2');
+        const originalLayers = tilemapStore.layers.value;
+
+        tilemapStore.reorderLayer(layer1.id, 1);
+
+        expect(tilemapStore.layers.value).not.toBe(originalLayers);
+      });
+    });
+
+    describe('moveLayerUp() (Task 6.1.5, 6.1.7)', () => {
+      it('should swap layer with one above (Task 6.1.5)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        // Move Layer 1 up (from index 0 to index 1)
+        tilemapStore.moveLayerUp(layer1.id);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers[0].id).toBe(layer2.id);
+        expect(layers[1].id).toBe(layer1.id);
+        expect(layers[2].id).toBe(layer3.id);
+      });
+
+      it('should be no-op when already at top (Task 6.1.7)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-reordered', handler);
+
+        // Try to move Layer 3 up (already at top, index 2)
+        tilemapStore.moveLayerUp(layer3.id);
+
+        expect(handler).not.toHaveBeenCalled();
+        expect(tilemapStore.layers.value[2].id).toBe(layer3.id);
+
+        tilemapStore.removeEventListener('layer-reordered', handler);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        expect(() => {
+          tilemapStore.moveLayerUp('non-existent');
+        }).toThrow(InvalidLayerError);
+      });
+    });
+
+    describe('moveLayerDown() (Task 6.1.6, 6.1.8)', () => {
+      it('should swap layer with one below (Task 6.1.6)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        // Move Layer 3 down (from index 2 to index 1)
+        tilemapStore.moveLayerDown(layer3.id);
+
+        const layers = tilemapStore.layers.value;
+        expect(layers[0].id).toBe(layer1.id);
+        expect(layers[1].id).toBe(layer3.id);
+        expect(layers[2].id).toBe(layer2.id);
+      });
+
+      it('should be no-op when already at bottom (Task 6.1.8)', () => {
+        const layer1 = tilemapStore.addLayer('Layer 1');
+        const layer2 = tilemapStore.addLayer('Layer 2');
+        const layer3 = tilemapStore.addLayer('Layer 3');
+
+        const handler = vi.fn();
+        tilemapStore.addEventListener('layer-reordered', handler);
+
+        // Try to move Layer 1 down (already at bottom, index 0)
+        tilemapStore.moveLayerDown(layer1.id);
+
+        expect(handler).not.toHaveBeenCalled();
+        expect(tilemapStore.layers.value[0].id).toBe(layer1.id);
+
+        tilemapStore.removeEventListener('layer-reordered', handler);
+      });
+
+      it('should throw InvalidLayerError for non-existent layer', () => {
+        tilemapStore.addLayer('Layer 1');
+
+        expect(() => {
+          tilemapStore.moveLayerDown('non-existent');
+        }).toThrow(InvalidLayerError);
+      });
+    });
+  });
 });

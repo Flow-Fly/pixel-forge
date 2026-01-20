@@ -296,6 +296,91 @@ class TilemapStore extends EventTarget {
     }));
   }
 
+  // ========================================
+  // Story 4-3: Layer Reordering
+  // ========================================
+
+  /**
+   * Reorder a layer to a new position
+   * Story 4-3 Task 2.1-2.6
+   * @param layerId - The layer ID to move
+   * @param newIndex - The target index (0 = bottom, higher = top)
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  reorderLayer(layerId: string, newIndex: number): void {
+    const layers = this._layers.value;
+    const oldIndex = layers.findIndex(l => l.id === layerId);
+
+    if (oldIndex === -1) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    // Clamp newIndex to valid bounds
+    const clampedIndex = Math.max(0, Math.min(layers.length - 1, newIndex));
+
+    // No-op if same position
+    if (oldIndex === clampedIndex) {
+      return;
+    }
+
+    // Create new array with layer moved
+    const newLayers = [...layers];
+    const [removed] = newLayers.splice(oldIndex, 1);
+    newLayers.splice(clampedIndex, 0, removed);
+
+    this._layers.value = newLayers;
+
+    this.dispatchEvent(new CustomEvent('layer-reordered', {
+      detail: { layerId, oldIndex, newIndex: clampedIndex }
+    }));
+  }
+
+  /**
+   * Move layer up in z-order (towards top)
+   * In array terms: move towards higher index
+   * Story 4-3 Task 3.1, 3.3, 3.4
+   * @param layerId - The layer ID to move
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  moveLayerUp(layerId: string): void {
+    const layers = this._layers.value;
+    const index = layers.findIndex(l => l.id === layerId);
+
+    if (index === -1) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    // Already at top - no-op
+    if (index >= layers.length - 1) {
+      return;
+    }
+
+    this.reorderLayer(layerId, index + 1);
+  }
+
+  /**
+   * Move layer down in z-order (towards bottom)
+   * In array terms: move towards lower index
+   * Story 4-3 Task 3.2, 3.3, 3.4
+   * @param layerId - The layer ID to move
+   * @throws InvalidLayerError if layer doesn't exist
+   */
+  moveLayerDown(layerId: string): void {
+    const layers = this._layers.value;
+    const index = layers.findIndex(l => l.id === layerId);
+
+    if (index === -1) {
+      throw new InvalidLayerError(layerId);
+    }
+
+    // Already at bottom - no-op
+    if (index <= 0) {
+      return;
+    }
+
+    this.reorderLayer(layerId, index - 1);
+  }
+
   /**
    * Rename a layer
    * Story 4-1 Task 5

@@ -3,6 +3,7 @@ export * from './palette-command';
 export * from './optimized-drawing-command';
 export * from './tile-place-command';
 export * from './tile-batch-command';
+export * from './tile-layer-command';
 
 import type { Command } from '../stores/history';
 import type { Rect } from '../types/geometry';

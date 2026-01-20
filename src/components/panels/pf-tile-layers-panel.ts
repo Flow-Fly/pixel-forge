@@ -3,6 +3,8 @@ import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { tilemapStore } from '../../stores/tilemap';
 import { modeStore } from '../../stores/mode';
+import { historyStore } from '../../stores/history';
+import { TileLayerReorderCommand } from '../../commands/tile-layer-command';
 import type { TileLayer } from '../../types/tilemap';
 
 /**
@@ -63,6 +65,32 @@ export class PFTileLayersPanel extends BaseComponent {
     if (e.key === '/') {
       e.preventDefault();
       tilemapStore.toggleLayerLocked(activeLayerId);
+    }
+
+    // Cmd/Ctrl+Up - move layer up (towards top in z-order)
+    // Story 4-3 Task 4.1, 4.3, 4.4
+    // Note: Boundary check here avoids creating no-op commands in history stack
+    if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowUp') {
+      e.preventDefault();
+      const layers = tilemapStore.layers.value;
+      const currentIndex = layers.findIndex(l => l.id === activeLayerId);
+      if (currentIndex !== -1 && currentIndex < layers.length - 1) {
+        const command = new TileLayerReorderCommand(activeLayerId, currentIndex, currentIndex + 1);
+        historyStore.execute(command);
+      }
+    }
+
+    // Cmd/Ctrl+Down - move layer down (towards bottom in z-order)
+    // Story 4-3 Task 4.2, 4.3, 4.4
+    // Note: Boundary check here avoids creating no-op commands in history stack
+    if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowDown') {
+      e.preventDefault();
+      const layers = tilemapStore.layers.value;
+      const currentIndex = layers.findIndex(l => l.id === activeLayerId);
+      if (currentIndex !== -1 && currentIndex > 0) {
+        const command = new TileLayerReorderCommand(activeLayerId, currentIndex, currentIndex - 1);
+        historyStore.execute(command);
+      }
     }
   }
 
@@ -128,6 +156,33 @@ export class PFTileLayersPanel extends BaseComponent {
       border-radius: var(--pf-radius-sm, 4px);
       cursor: pointer;
       transition: background 0.15s;
+      position: relative;
+    }
+
+    /* Drag-and-drop styles (Story 4-3 Task 1.6, 1.7) */
+    .layer-item.dragging {
+      opacity: 0.5;
+      border: 1px dashed var(--pf-color-accent, #f59e0b);
+    }
+
+    .layer-item.drop-indicator-above::before {
+      content: '';
+      position: absolute;
+      top: -2px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--pf-color-accent, #f59e0b);
+    }
+
+    .layer-item.drop-indicator-below::after {
+      content: '';
+      position: absolute;
+      bottom: -2px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--pf-color-accent, #f59e0b);
     }
 
     .layer-item:hover {
@@ -212,6 +267,11 @@ export class PFTileLayersPanel extends BaseComponent {
 
   @state() private editingLayerId: string | null = null;
   @state() private editingName: string = '';
+
+  // Drag-and-drop state (Story 4-3 Task 1)
+  @state() private draggingLayerId: string | null = null;
+  @state() private dropTargetId: string | null = null;
+  @state() private dropPosition: 'above' | 'below' | null = null;
 
   private get layers(): TileLayer[] {
     return tilemapStore.layers.value;
@@ -325,18 +385,133 @@ export class PFTileLayersPanel extends BaseComponent {
     this.editingName = '';
   }
 
+  // ========================================
+  // Story 4-3: Drag-and-Drop Handlers (Task 1)
+  // ========================================
+
+  private handleDragStart(e: DragEvent, layerId: string): void {
+    this.draggingLayerId = layerId;
+    if (e.dataTransfer) {
+      e.dataTransfer.setData('text/plain', layerId);
+      e.dataTransfer.effectAllowed = 'move';
+    }
+
+    // Add dragging class after brief delay for visual feedback
+    requestAnimationFrame(() => {
+      this.requestUpdate();
+    });
+  }
+
+  private handleDragOver(e: DragEvent, targetLayerId: string): void {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+
+    if (targetLayerId === this.draggingLayerId) {
+      this.dropTargetId = null;
+      this.dropPosition = null;
+      return;
+    }
+
+    // Determine if dropping above or below based on mouse position
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+
+    this.dropTargetId = targetLayerId;
+    this.dropPosition = e.clientY < midpoint ? 'above' : 'below';
+  }
+
+  private handleDragLeave(e: DragEvent): void {
+    // Only clear if leaving the layer item entirely
+    const relatedTarget = e.relatedTarget as Node | null;
+    const currentTarget = e.currentTarget as HTMLElement;
+
+    if (!currentTarget.contains(relatedTarget)) {
+      // Check if we're moving to another layer item
+      const layerList = this.shadowRoot?.querySelector('.layer-list');
+      if (relatedTarget && layerList?.contains(relatedTarget)) {
+        // Moving to another layer item, don't clear
+        return;
+      }
+      this.dropTargetId = null;
+      this.dropPosition = null;
+    }
+  }
+
+  private handleDrop(e: DragEvent, targetLayerId: string): void {
+    e.preventDefault();
+
+    if (!this.draggingLayerId || this.draggingLayerId === targetLayerId) {
+      this.cleanupDragState();
+      return;
+    }
+
+    const layers = tilemapStore.layers.value;
+    const sourceIndex = layers.findIndex(l => l.id === this.draggingLayerId);
+    const targetIndex = layers.findIndex(l => l.id === targetLayerId);
+
+    if (sourceIndex === -1 || targetIndex === -1) {
+      this.cleanupDragState();
+      return;
+    }
+
+    // Calculate new index based on drop position
+    // Remember: UI is reversed, so "above" in UI = higher z-order = higher array index
+    let newIndex: number;
+    if (this.dropPosition === 'above') {
+      // In reversed UI, "above" means higher z-order = higher array index
+      newIndex = sourceIndex < targetIndex ? targetIndex : targetIndex + 1;
+    } else {
+      // "below" means lower z-order = lower array index
+      newIndex = sourceIndex > targetIndex ? targetIndex : targetIndex - 1;
+    }
+
+    // Clamp to valid range
+    newIndex = Math.max(0, Math.min(layers.length - 1, newIndex));
+
+    // Execute via history for undo support
+    if (sourceIndex !== newIndex) {
+      const command = new TileLayerReorderCommand(this.draggingLayerId, sourceIndex, newIndex);
+      historyStore.execute(command);
+    }
+
+    this.cleanupDragState();
+  }
+
+  private handleDragEnd(_e: DragEvent): void {
+    this.cleanupDragState();
+  }
+
+  private cleanupDragState(): void {
+    this.draggingLayerId = null;
+    this.dropTargetId = null;
+    this.dropPosition = null;
+  }
+
   private renderLayerItem(layer: TileLayer) {
     const isSelected = layer.id === this.activeLayerId;
     const isEditing = this.editingLayerId === layer.id;
+    const isDragging = this.draggingLayerId === layer.id;
+    const isDropTarget = this.dropTargetId === layer.id;
+    const dropClass = isDropTarget && this.dropPosition
+      ? `drop-indicator-${this.dropPosition}`
+      : '';
 
     return html`
       <div
-        class="layer-item ${isSelected ? 'selected' : ''}"
+        class="layer-item ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${dropClass}"
         tabindex="0"
         role="option"
         aria-selected="${isSelected}"
+        draggable="true"
         @click=${() => this.handleLayerClick(layer.id)}
         @keydown=${(e: KeyboardEvent) => this.handleLayerKeyDown(e, layer.id)}
+        @dragstart=${(e: DragEvent) => this.handleDragStart(e, layer.id)}
+        @dragover=${(e: DragEvent) => this.handleDragOver(e, layer.id)}
+        @dragleave=${(e: DragEvent) => this.handleDragLeave(e)}
+        @drop=${(e: DragEvent) => this.handleDrop(e, layer.id)}
+        @dragend=${(e: DragEvent) => this.handleDragEnd(e)}
       >
         <div class="layer-icons">
           <span
