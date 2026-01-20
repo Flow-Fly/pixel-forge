@@ -776,6 +776,14 @@ export class PFTileLayersPanel extends BaseComponent {
         input.select();
       }
     }
+
+    // Focus dialog overlay when confirmation dialog opens (H2/M3 fix)
+    if (changedProperties.has('pendingDeleteLayerId') && this.pendingDeleteLayerId) {
+      const overlay = this.shadowRoot?.querySelector('.confirm-dialog-overlay') as HTMLElement;
+      if (overlay) {
+        overlay.focus();
+      }
+    }
   }
 
   render() {
@@ -822,11 +830,15 @@ export class PFTileLayersPanel extends BaseComponent {
         ? html`
             <div
               class="confirm-dialog-overlay"
+              tabindex="-1"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="confirm-dialog-title"
               @click=${this.cancelDelete}
               @keydown=${(e: KeyboardEvent) => this.handleDialogKeydown(e)}
             >
               <div class="confirm-dialog" @click=${(e: Event) => e.stopPropagation()}>
-                <div class="confirm-dialog-title">Delete Layer?</div>
+                <div class="confirm-dialog-title" id="confirm-dialog-title">Delete Layer?</div>
                 <div class="confirm-dialog-message">
                   Delete layer "${pendingDeleteLayer.name}"? This layer contains tiles that will be lost.
                 </div>

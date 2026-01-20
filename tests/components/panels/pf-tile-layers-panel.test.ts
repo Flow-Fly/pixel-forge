@@ -853,6 +853,95 @@ describe('pf-tile-layers-panel', () => {
     });
   });
 
+  describe('Layer Deletion - Dialog Keyboard Handling (Story 4-4 Task 7.4)', () => {
+    it('should confirm deletion when Enter key is pressed on dialog', async () => {
+      // Add second layer and add tiles to trigger confirmation dialog
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layer1Id = tilemapStore.layers.value[0].id;
+      tilemapStore.setTile(layer1Id, 0, 0, 1);
+      await (element as any).updateComplete;
+
+      // Click delete on Layer 1 to open dialog
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Verify dialog is open
+      const dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).not.toBeNull();
+
+      // Press Enter key on the overlay
+      const overlay = element.shadowRoot?.querySelector('.confirm-dialog-overlay') as HTMLElement;
+      overlay?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await (element as any).updateComplete;
+
+      // Layer should be deleted
+      expect(tilemapStore.layers.value.find(l => l.id === layer1Id)).toBeUndefined();
+
+      // Dialog should be closed
+      const closedDialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(closedDialog).toBeNull();
+    });
+
+    it('should cancel deletion when Escape key is pressed on dialog', async () => {
+      // Add second layer and add tiles to trigger confirmation dialog
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layer1Id = tilemapStore.layers.value[0].id;
+      tilemapStore.setTile(layer1Id, 0, 0, 1);
+      await (element as any).updateComplete;
+
+      const initialCount = tilemapStore.layers.value.length;
+
+      // Click delete on Layer 1 to open dialog
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Verify dialog is open
+      const dialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(dialog).not.toBeNull();
+
+      // Press Escape key on the overlay
+      const overlay = element.shadowRoot?.querySelector('.confirm-dialog-overlay') as HTMLElement;
+      overlay?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await (element as any).updateComplete;
+
+      // Layer should NOT be deleted
+      expect(tilemapStore.layers.value.length).toBe(initialCount);
+
+      // Dialog should be closed
+      const closedDialog = element.shadowRoot?.querySelector('.confirm-dialog');
+      expect(closedDialog).toBeNull();
+    });
+
+    it('should focus the dialog overlay when dialog opens', async () => {
+      // Add second layer and add tiles to trigger confirmation dialog
+      tilemapStore.addLayer('Layer 2');
+      await (element as any).updateComplete;
+
+      const layer1Id = tilemapStore.layers.value[0].id;
+      tilemapStore.setTile(layer1Id, 0, 0, 1);
+      await (element as any).updateComplete;
+
+      // Click delete on Layer 1 to open dialog
+      const deleteIcons = element.shadowRoot?.querySelectorAll('.delete-icon');
+      (deleteIcons?.[1] as HTMLElement)?.click();
+      await (element as any).updateComplete;
+
+      // Verify overlay has tabindex for focusability
+      const overlay = element.shadowRoot?.querySelector('.confirm-dialog-overlay') as HTMLElement;
+      expect(overlay?.getAttribute('tabindex')).toBe('-1');
+
+      // Verify dialog has ARIA attributes
+      expect(overlay?.getAttribute('role')).toBe('dialog');
+      expect(overlay?.getAttribute('aria-modal')).toBe('true');
+    });
+  });
+
   describe('Layer Deletion - Keyboard Shortcuts (Story 4-4 Task 8.2.2)', () => {
     it('should delete active layer with Delete key (Task 8.2.2)', async () => {
       modeStore.setMode('map');
