@@ -1,5 +1,5 @@
 import { signal } from '../core/signal';
-import type { TileLayer, HeroEditState } from '../types/tilemap';
+import type { TileLayer, HeroEditState, HeroEditTransitionState } from '../types/tilemap';
 import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError, MinimumLayerError, TilemapError, InvalidTilesetError } from '../errors/tilemap-errors';
 import { tilesetStore } from './tileset';
 
@@ -165,6 +165,20 @@ class TilemapStore extends EventTarget {
   }
 
   /**
+   * Hero edit transition state for zoom animations
+   * Story 5-2 Task 1.2
+   */
+  private _heroEditTransition = signal<HeroEditTransitionState>('idle');
+
+  /**
+   * Get the hero edit transition signal for reactive subscriptions
+   * Story 5-2 Task 1.3
+   */
+  get heroEditTransition() {
+    return this._heroEditTransition;
+  }
+
+  /**
    * Convenience getter for checking if hero edit is active
    * Story 5-1 Task 1.4
    */
@@ -235,6 +249,14 @@ class TilemapStore extends EventTarget {
       originalData.height
     );
 
+    // Story 5-2 Task 1.4: Set transition to 'zooming-in' before setting active
+    this._heroEditTransition.value = 'zooming-in';
+
+    // Story 5-2 Task 1.7: Fire hero-edit-transition-started event
+    this.dispatchEvent(new CustomEvent('hero-edit-transition-started', {
+      detail: { direction: 'in', tileId, tilesetId: resolvedTilesetId }
+    }));
+
     // Task 2.8: Update _heroEditState signal immutably
     this._heroEditState.value = {
       active: true,
@@ -262,12 +284,20 @@ class TilemapStore extends EventTarget {
       return;
     }
 
-    const { tileId } = this._heroEditState.value;
+    const { tileId, tilesetId } = this._heroEditState.value;
 
     // Task 3.3: Stub for future TileEditCommand (actual implementation in Story 5-6)
     // if (save) {
     //   // Will create TileEditCommand here
     // }
+
+    // Story 5-2 Task 1.5: Set transition to 'zooming-out' before resetting state
+    this._heroEditTransition.value = 'zooming-out';
+
+    // Story 5-2 Task 1.7: Fire hero-edit-transition-started event
+    this.dispatchEvent(new CustomEvent('hero-edit-transition-started', {
+      detail: { direction: 'out', tileId, tilesetId }
+    }));
 
     // Task 3.4: Reset _heroEditState to initial state
     this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
@@ -275,6 +305,24 @@ class TilemapStore extends EventTarget {
     // Task 3.5: Fire hero-edit-exited event
     this.dispatchEvent(new CustomEvent('hero-edit-exited', {
       detail: { tileId, saved: save }
+    }));
+  }
+
+  /**
+   * Finish hero edit transition and reset to idle
+   * Story 5-2 Task 1.6
+   *
+   * Called when zoom animation completes (via transitionend event)
+   */
+  finishHeroEditTransition(): void {
+    // Capture previous state BEFORE updating (Code Review Fix H1)
+    const previousState = this._heroEditTransition.value;
+
+    this._heroEditTransition.value = 'idle';
+
+    // Story 5-2 Task 1.7: Fire hero-edit-transition-ended event
+    this.dispatchEvent(new CustomEvent('hero-edit-transition-ended', {
+      detail: { previousState }
     }));
   }
 
@@ -923,6 +971,7 @@ class TilemapStore extends EventTarget {
     this._activeLayerId.value = null;
     this._activeTilesetId.value = null;
     this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
+    this._heroEditTransition.value = 'idle';
     this.width.value = 20;
     this.height.value = 15;
     this.tileWidth.value = 16;

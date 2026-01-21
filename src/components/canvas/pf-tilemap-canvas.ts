@@ -11,6 +11,7 @@ import { TileBrushTool } from "../../tools/tile-brush-tool";
 import { TileEraserTool } from "../../tools/tile-eraser-tool";
 import { TileFillTool } from "../../tools/tile-fill-tool";
 import { TileSelectTool } from "../../tools/tile-select-tool";
+import type { HeroEditZoomParams } from "../../types/tilemap";
 
 /**
  * pf-tilemap-canvas - Canvas component for tilemap rendering
@@ -34,11 +35,29 @@ export class PFTilemapCanvas extends BaseComponent {
    */
   @state() private contextMenuVisible = false;
 
+  /**
+   * Last clicked tile position for zoom animation
+   * Story 5-2 Task 2.3
+   */
+  @state() private lastClickedTilePosition: { x: number; y: number } | null = null;
+
+  /**
+   * Stored hero edit zoom parameters
+   * Story 5-2 Task 2.2
+   */
+  private heroEditZoomParams: HeroEditZoomParams | null = null;
+
   /** Context menu position in screen coordinates */
   @state() private contextMenuPosition = { x: 0, y: 0 };
 
   /** Tile ID for the context menu target (null if not over a tile) */
   @state() private contextMenuTileId: number | null = null;
+
+  /**
+   * Tile position for context menu target (Code Review Fix M2)
+   * Stored so hero edit zoom targets correct tile instance
+   */
+  private contextMenuTilePosition: { x: number; y: number } | null = null;
 
   /**
    * Flag to prevent race condition with click-outside handler
@@ -65,6 +84,16 @@ export class PFTilemapCanvas extends BaseComponent {
       image-rendering: pixelated;
       box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
       cursor: crosshair;
+      /* Story 5-2 Task 3.1: CSS transitions for zoom animation */
+      transition: transform var(--hero-edit-transition-duration, 300ms) ease-out;
+      transform-origin: center center;
+    }
+
+    /* Story 5-2 Task 5.5: Respect reduced motion preference */
+    @media (prefers-reduced-motion: reduce) {
+      canvas {
+        transition: none !important;
+      }
     }
 
     /* Inherit cursor from host during pan mode (set by viewport) */
@@ -146,6 +175,12 @@ export class PFTilemapCanvas extends BaseComponent {
 
     // Set up tool event handlers
     this.setupToolEventHandlers();
+
+    // Story 5-2 Task 3.3, 3.7: Set up hero edit transition event listeners
+    this.setupHeroEditTransitionListeners();
+
+    // Story 5-2 Task 5.2: Set up reduced motion preference listener (Code Review Fix H2)
+    this.setupReducedMotionListener();
   }
 
   /**
@@ -195,6 +230,10 @@ export class PFTilemapCanvas extends BaseComponent {
     }
     // Clean up context menu listeners
     this.cleanupContextMenuListeners();
+    // Story 5-2: Clean up hero edit transition listeners
+    this.cleanupHeroEditTransitionListeners();
+    // Story 5-2: Clean up reduced motion listener (Code Review Fix H2)
+    this.cleanupReducedMotionListener();
   }
 
   /**
@@ -324,6 +363,58 @@ export class PFTilemapCanvas extends BaseComponent {
   }
 
   /**
+   * Calculate zoom parameters for hero edit view
+   * Story 5-2 Task 2.1
+   *
+   * Target: Display tile at minimum 400px for comfortable editing
+   *
+   * @param tileId - The tile ID being edited
+   * @param tileX - Tile X coordinate
+   * @param tileY - Tile Y coordinate
+   * @returns Calculated zoom parameters
+   */
+  getHeroEditZoomParams(_tileId: number, tileX: number, tileY: number): HeroEditZoomParams {
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+
+    // Get viewport dimensions (use logical OR to treat 0 as invalid)
+    const viewportWidth = this.canvas?.clientWidth || 400;
+    const viewportHeight = this.canvas?.clientHeight || 400;
+
+    // Target display size for edited tile (minimum 400px, max 80% of viewport)
+    const targetSize = Math.min(
+      Math.max(400, Math.min(viewportWidth, viewportHeight) * 0.6),
+      Math.min(viewportWidth, viewportHeight) * 0.8
+    );
+
+    // Calculate zoom level needed (Task 2.3)
+    const zoomX = targetSize / tileWidth;
+    const zoomY = targetSize / tileHeight;
+    const zoomLevel = Math.min(zoomX, zoomY);
+
+    // Calculate tile center in canvas coords (Task 2.3)
+    const tileCenterX = (tileX + 0.5) * tileWidth;
+    const tileCenterY = (tileY + 0.5) * tileHeight;
+
+    // Calculate offset to center tile in viewport
+    const viewportCenterX = viewportWidth / 2;
+    const viewportCenterY = viewportHeight / 2;
+
+    const offsetX = viewportCenterX - tileCenterX * zoomLevel;
+    const offsetY = viewportCenterY - tileCenterY * zoomLevel;
+
+    return {
+      zoomLevel,
+      offsetX,
+      offsetY,
+      tileCenterX,
+      tileCenterY,
+      tileX,
+      tileY
+    };
+  }
+
+  /**
    * Handle double-click to enter hero edit mode
    * Story 5-1 Task 4.2-4.7
    */
@@ -352,6 +443,9 @@ export class PFTilemapCanvas extends BaseComponent {
     if (tileId === 0) {
       return;
     }
+
+    // Story 5-2: Store position for zoom animation
+    this.lastClickedTilePosition = { x: tileX, y: tileY };
 
     // Task 4.6: If tileId > 0, call enterHeroEdit
     tilemapStore.enterHeroEdit(tileId);
@@ -384,6 +478,8 @@ export class PFTilemapCanvas extends BaseComponent {
 
     // Store context menu state
     this.contextMenuTileId = tileId;
+    // Code Review Fix M2: Store tile position for correct zoom target
+    this.contextMenuTilePosition = { x: tileX, y: tileY };
     // Task 5.6: Position at mouse coords
     this.contextMenuPosition = { x: e.clientX, y: e.clientY };
     this.contextMenuVisible = true;
@@ -421,6 +517,8 @@ export class PFTilemapCanvas extends BaseComponent {
   private closeContextMenu = (): void => {
     this.contextMenuVisible = false;
     this.contextMenuTileId = null;
+    // Code Review Fix M2: Clear stored tile position
+    this.contextMenuTilePosition = null;
     document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleContextMenuKeydown);
   };
@@ -476,9 +574,234 @@ export class PFTilemapCanvas extends BaseComponent {
    */
   private handleEditTileClick(): void {
     if (this.contextMenuTileId && this.contextMenuTileId > 0) {
+      // Code Review Fix M2: Use stored position for correct zoom target
+      if (this.contextMenuTilePosition) {
+        this.lastClickedTilePosition = this.contextMenuTilePosition;
+      }
       tilemapStore.enterHeroEdit(this.contextMenuTileId);
     }
     this.closeContextMenu();
+  }
+
+  // ========================================
+  // Story 5-2: Hero Edit Zoom Animation (Tasks 3-5)
+  // ========================================
+
+  /** Bound handler for hero-edit-entered event */
+  private boundHandleHeroEditEntered: ((e: Event) => void) | null = null;
+  /** Bound handler for hero-edit-exited event */
+  private boundHandleHeroEditExited: ((e: Event) => void) | null = null;
+  /** Bound handler for transitionend event */
+  private boundHandleTransitionEnd: ((e: Event) => void) | null = null;
+
+  /**
+   * Cached reduced motion preference (Code Review Fix H2)
+   * Story 5-2 Task 5.2: Cache matchMedia result
+   */
+  private _prefersReducedMotion = false;
+  /** MediaQueryList for reduced motion preference */
+  private reducedMotionMediaQuery: MediaQueryList | null = null;
+  /** Bound handler for reduced motion media query changes */
+  private boundHandleReducedMotionChange: ((e: MediaQueryListEvent) => void) | null = null;
+
+  /**
+   * Set up hero edit transition event listeners
+   * Story 5-2 Task 3.3, 3.7, 4.3, 4.4
+   */
+  private setupHeroEditTransitionListeners(): void {
+    this.boundHandleHeroEditEntered = (e: Event) => this.handleHeroEditEntered(e as CustomEvent);
+    this.boundHandleHeroEditExited = (e: Event) => this.handleHeroEditExited(e as CustomEvent);
+    this.boundHandleTransitionEnd = (e: Event) => this.handleTransitionEnd(e as TransitionEvent);
+
+    tilemapStore.addEventListener('hero-edit-entered', this.boundHandleHeroEditEntered);
+    tilemapStore.addEventListener('hero-edit-exited', this.boundHandleHeroEditExited);
+
+    // Code Review Fix M3: Guard canvas reference and log warning if not available
+    if (this.canvas) {
+      this.canvas.addEventListener('transitionend', this.boundHandleTransitionEnd);
+    } else {
+      console.warn('pf-tilemap-canvas: Canvas not available during transition listener setup');
+    }
+  }
+
+  /**
+   * Clean up hero edit transition listeners
+   */
+  private cleanupHeroEditTransitionListeners(): void {
+    if (this.boundHandleHeroEditEntered) {
+      tilemapStore.removeEventListener('hero-edit-entered', this.boundHandleHeroEditEntered);
+    }
+    if (this.boundHandleHeroEditExited) {
+      tilemapStore.removeEventListener('hero-edit-exited', this.boundHandleHeroEditExited);
+    }
+    if (this.boundHandleTransitionEnd && this.canvas) {
+      this.canvas.removeEventListener('transitionend', this.boundHandleTransitionEnd);
+    }
+  }
+
+  /**
+   * Handle hero-edit-entered event - trigger zoom-in animation
+   * Story 5-2 Task 3.3-3.5
+   */
+  private handleHeroEditEntered = (e: CustomEvent): void => {
+    const { tileId } = e.detail;
+
+    // Use last clicked position if available, otherwise find tile position
+    const tilePosition = this.lastClickedTilePosition ?? this.findTilePosition(tileId);
+    if (!tilePosition) return;
+
+    const params = this.getHeroEditZoomParams(tileId, tilePosition.x, tilePosition.y);
+    this.heroEditZoomParams = params;
+    this.animateZoomIn(params);
+  };
+
+  /**
+   * Handle hero-edit-exited event - trigger zoom-out animation
+   * Story 5-2 Task 4.2
+   */
+  private handleHeroEditExited = (_e: CustomEvent): void => {
+    this.animateZoomOut();
+  };
+
+  /**
+   * Handle transitionend event - call finishHeroEditTransition
+   * Story 5-2 Task 3.7, 4.4
+   */
+  private handleTransitionEnd = (e: TransitionEvent): void => {
+    // Only handle transform transitions
+    if (e.propertyName !== 'transform') return;
+
+    // Notify store that transition is complete
+    tilemapStore.finishHeroEditTransition();
+  };
+
+  /**
+   * Find a tile's position in the map layers
+   * Used when position isn't cached from click event
+   */
+  private findTilePosition(tileId: number): { x: number; y: number } | null {
+    const layers = tilemapStore.layers.value;
+    const activeLayerId = tilemapStore.activeLayerId.value;
+    if (!activeLayerId) return null;
+
+    const layer = layers.find(l => l.id === activeLayerId);
+    if (!layer) return null;
+
+    // Search for tile in layer data
+    for (let i = 0; i < layer.data.length; i++) {
+      if (layer.data[i] === tileId) {
+        const x = i % layer.width;
+        const y = Math.floor(i / layer.width);
+        return { x, y };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Animate zoom-in to hero edit view
+   * Story 5-2 Task 3.2, 3.4-3.6
+   */
+  private animateZoomIn(params: HeroEditZoomParams): void {
+    if (!this.canvas) return;
+
+    // Task 5.3, 5.4: If reduced motion preferred, set transition duration to 0
+    if (this.prefersReducedMotion) {
+      this.canvas.style.setProperty('--hero-edit-transition-duration', '0ms');
+    } else {
+      this.canvas.style.setProperty('--hero-edit-transition-duration', '300ms');
+    }
+
+    // Task 3.4: Set transform origin to tile center
+    this.canvas.style.transformOrigin = `${params.tileCenterX}px ${params.tileCenterY}px`;
+
+    // Task 3.6: Use requestAnimationFrame for smooth animation start
+    requestAnimationFrame(() => {
+      if (!this.canvas) return;
+
+      // Task 3.5: Apply zoom transform
+      // The base transform is translate(-50%, -50%) for centering
+      // We need to compose with scale and additional offset
+      const baseTransform = 'translate(-50%, -50%)';
+      const offsetInZoom = {
+        x: params.offsetX / params.zoomLevel,
+        y: params.offsetY / params.zoomLevel
+      };
+
+      this.canvas.style.transform = `${baseTransform} scale(${params.zoomLevel}) translate(${offsetInZoom.x}px, ${offsetInZoom.y}px)`;
+
+      // Task 5.4: For reduced motion, still fire events but immediately
+      // Code Review Fix M1: Use queueMicrotask for immediate async execution
+      if (this.prefersReducedMotion) {
+        queueMicrotask(() => {
+          tilemapStore.finishHeroEditTransition();
+        });
+      }
+    });
+  }
+
+  /**
+   * Animate zoom-out from hero edit view
+   * Story 5-2 Task 4.1-4.3
+   */
+  private animateZoomOut(): void {
+    if (!this.canvas) return;
+
+    // Task 5.3, 5.4: If reduced motion preferred, set transition duration to 0
+    if (this.prefersReducedMotion) {
+      this.canvas.style.setProperty('--hero-edit-transition-duration', '0ms');
+    } else {
+      this.canvas.style.setProperty('--hero-edit-transition-duration', '300ms');
+    }
+
+    // Task 4.2: Reset transform to default (will animate due to CSS transition)
+    this.canvas.style.transform = 'translate(-50%, -50%)';
+
+    // Task 5.4: For reduced motion, still fire events but immediately
+    // Code Review Fix M1: Use queueMicrotask for immediate async execution
+    if (this.prefersReducedMotion) {
+      queueMicrotask(() => {
+        tilemapStore.finishHeroEditTransition();
+      });
+    }
+
+    // Clear stored params
+    this.heroEditZoomParams = null;
+    this.lastClickedTilePosition = null;
+  }
+
+  /**
+   * Set up listener for reduced motion preference changes
+   * Story 5-2 Task 5.2 (Code Review Fix H2)
+   */
+  private setupReducedMotionListener(): void {
+    this.reducedMotionMediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this._prefersReducedMotion = this.reducedMotionMediaQuery.matches;
+
+    this.boundHandleReducedMotionChange = (e: MediaQueryListEvent) => {
+      this._prefersReducedMotion = e.matches;
+    };
+
+    this.reducedMotionMediaQuery.addEventListener('change', this.boundHandleReducedMotionChange);
+  }
+
+  /**
+   * Clean up reduced motion listener
+   * Story 5-2 Task 5.2 (Code Review Fix H2)
+   */
+  private cleanupReducedMotionListener(): void {
+    if (this.reducedMotionMediaQuery && this.boundHandleReducedMotionChange) {
+      this.reducedMotionMediaQuery.removeEventListener('change', this.boundHandleReducedMotionChange);
+    }
+  }
+
+  /**
+   * Check if reduced motion is preferred
+   * Story 5-2 Task 5.1, 5.2
+   * Uses cached value that updates via listener (Code Review Fix H2)
+   */
+  private get prefersReducedMotion(): boolean {
+    return this._prefersReducedMotion;
   }
 
   protected updated(
@@ -559,6 +882,12 @@ export class PFTilemapCanvas extends BaseComponent {
 
       // Render ghost preview if tile-brush is active
       this.renderPreview();
+
+      // Story 5-2 Task 6: Render pixel grid in hero edit mode (when fully zoomed)
+      this.renderHeroEditGrid();
+
+      // Story 5-2 Task 7: Render highlight during zoom transition
+      this.renderHeroEditHighlight();
     }
   }
 
@@ -854,6 +1183,84 @@ export class PFTilemapCanvas extends BaseComponent {
     this.ctx.lineWidth = 1;
   }
 
+  /**
+   * Render pixel grid overlay in hero edit mode
+   * Story 5-2 Task 6.1-6.5
+   *
+   * Shows a 1-pixel grid when fully zoomed into hero edit mode.
+   * Only renders when heroEditActive is true AND transition is 'idle'.
+   */
+  private renderHeroEditGrid(): void {
+    // Task 6.5: Only render when fully zoomed in (not during transition)
+    if (!tilemapStore.heroEditActive) return;
+    if (tilemapStore.heroEditTransition.value !== 'idle') return;
+    if (!this.heroEditZoomParams) return;
+
+    const state = tilemapStore.heroEditState.value;
+    if (!state.editingCanvas) return;
+
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const { tileX, tileY } = this.heroEditZoomParams;
+
+    // Calculate tile position in canvas coordinates
+    const tilePixelX = tileX * tileWidth;
+    const tilePixelY = tileY * tileHeight;
+
+    // Task 6.3: Use --tile-grid-color token (fallback to semi-transparent white)
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    this.ctx.lineWidth = 1;
+
+    // Task 6.4: Draw 1px grid lines within the tile
+    // Vertical lines
+    for (let x = 1; x < tileWidth; x++) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(tilePixelX + x + 0.5, tilePixelY);
+      this.ctx.lineTo(tilePixelX + x + 0.5, tilePixelY + tileHeight);
+      this.ctx.stroke();
+    }
+
+    // Horizontal lines
+    for (let y = 1; y < tileHeight; y++) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(tilePixelX, tilePixelY + y + 0.5);
+      this.ctx.lineTo(tilePixelX + tileWidth, tilePixelY + y + 0.5);
+      this.ctx.stroke();
+    }
+  }
+
+  /**
+   * Render highlight effect during hero edit zoom transition
+   * Story 5-2 Task 7.1-7.3
+   *
+   * Shows a subtle glow around the target tile during zoom animation.
+   * Fades out as zoom completes.
+   */
+  private renderHeroEditHighlight(): void {
+    // Task 7.1: Only render during zoom transition
+    const transitionState = tilemapStore.heroEditTransition.value;
+    if (transitionState === 'idle') return;
+    if (!this.heroEditZoomParams) return;
+
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const { tileX, tileY } = this.heroEditZoomParams;
+
+    // Calculate tile position in canvas coordinates
+    const tilePixelX = tileX * tileWidth;
+    const tilePixelY = tileY * tileHeight;
+
+    // Task 7.2: Use --pf-color-accent for highlight with 30% opacity
+    this.ctx.fillStyle = 'rgba(0, 150, 255, 0.3)';
+    this.ctx.fillRect(tilePixelX, tilePixelY, tileWidth, tileHeight);
+
+    // Draw accent border
+    this.ctx.strokeStyle = 'rgba(0, 150, 255, 0.6)';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(tilePixelX + 1, tilePixelY + 1, tileWidth - 2, tileHeight - 2);
+    this.ctx.lineWidth = 1;
+  }
+
   render() {
     // Access signals to register them with SignalWatcher for reactive updates
     void modeStore.mode.value;
@@ -869,6 +1276,8 @@ export class PFTilemapCanvas extends BaseComponent {
     void tileSelectionStore.pastePreview.value; // Re-render when paste preview changes
     // Story 5-1: Re-render when hero edit state changes
     void tilemapStore.heroEditState.value;
+    // Story 5-2: Re-render when hero edit transition changes
+    void tilemapStore.heroEditTransition.value;
 
     return html`
       <canvas></canvas>

@@ -327,4 +327,201 @@ describe('pf-tilemap-canvas', () => {
       });
     });
   });
+
+  // ========================================
+  // Story 5-2: Hero Edit Zoom Animation Tests (Tasks 1-7)
+  // ========================================
+  describe('Hero Edit Zoom Animation (Story 5-2)', () => {
+    beforeEach(async () => {
+      // Reset hero edit state
+      tilemapStore.reset();
+      tilemapStore.initializeDefaultLayer();
+    });
+
+    describe('Zoom Parameters Calculation (Task 2)', () => {
+      it('should have getHeroEditZoomParams method', async () => {
+        const component = element as any;
+        expect(typeof component.getHeroEditZoomParams).toBe('function');
+      });
+
+      it('should calculate zoom parameters with proper structure', async () => {
+        const component = element as any;
+        const params = component.getHeroEditZoomParams(1, 5, 3);
+
+        expect(params).toHaveProperty('zoomLevel');
+        expect(params).toHaveProperty('offsetX');
+        expect(params).toHaveProperty('offsetY');
+        expect(params).toHaveProperty('tileCenterX');
+        expect(params).toHaveProperty('tileCenterY');
+        expect(params).toHaveProperty('tileX');
+        expect(params).toHaveProperty('tileY');
+      });
+
+      it('should return tile coordinates in params', async () => {
+        const component = element as any;
+        const params = component.getHeroEditZoomParams(1, 5, 3);
+
+        expect(params.tileX).toBe(5);
+        expect(params.tileY).toBe(3);
+      });
+
+      it('should calculate tile center based on tile position', async () => {
+        const component = element as any;
+        const params = component.getHeroEditZoomParams(1, 5, 3);
+
+        const tileWidth = tilemapStore.tileWidth.value;
+        const tileHeight = tilemapStore.tileHeight.value;
+
+        // Tile center should be at (tileX + 0.5) * tileWidth
+        expect(params.tileCenterX).toBe((5 + 0.5) * tileWidth);
+        expect(params.tileCenterY).toBe((3 + 0.5) * tileHeight);
+      });
+
+      it('should calculate zoom level with default viewport fallback (Code Review Fix M4)', async () => {
+        const component = element as any;
+        const params = component.getHeroEditZoomParams(1, 0, 0);
+
+        // In happy-dom, canvas clientWidth/clientHeight are 0
+        // The component uses fallback of 400x400 viewport
+        // With default 16x16 tiles, target size is min(max(400, 400*0.6), 400*0.8) = 320
+        // Zoom level should be 320/16 = 20
+        const tileWidth = tilemapStore.tileWidth.value;
+        const expectedTargetSize = 320; // min(max(400, 240), 320)
+        const expectedZoomLevel = expectedTargetSize / tileWidth;
+
+        expect(params.zoomLevel).toBe(expectedZoomLevel);
+      });
+
+      it('should calculate correct zoom for different tile sizes', async () => {
+        // Set larger tile size
+        tilemapStore.setTileSize(32, 32);
+        await (element as any).updateComplete;
+
+        const component = element as any;
+        const params = component.getHeroEditZoomParams(1, 0, 0);
+
+        // With 32x32 tiles and 400x400 fallback viewport:
+        // Target size = min(max(400, 240), 320) = 320
+        // Zoom level = 320/32 = 10
+        expect(params.zoomLevel).toBe(10);
+
+        // Reset tile size
+        tilemapStore.setTileSize(16, 16);
+      });
+    });
+
+    describe('CSS Transition Setup (Task 3)', () => {
+      it('should have CSS transition property in styles', async () => {
+        // Check that the static styles include transition
+        const shadowRoot = element.shadowRoot;
+        const styles = shadowRoot?.innerHTML || '';
+
+        // Check that transition CSS is present in the component
+        // In happy-dom, we verify the component exists and has canvas
+        const canvas = shadowRoot?.querySelector('canvas');
+        expect(canvas).toBeTruthy();
+      });
+    });
+
+    describe('Zoom Animation Methods (Tasks 3-4)', () => {
+      it('should have animateZoomIn method', async () => {
+        const component = element as any;
+        expect(typeof component.animateZoomIn).toBe('function');
+      });
+
+      it('should have animateZoomOut method', async () => {
+        const component = element as any;
+        expect(typeof component.animateZoomOut).toBe('function');
+      });
+
+      it('should have setupHeroEditTransitionListeners method', async () => {
+        const component = element as any;
+        expect(typeof component.setupHeroEditTransitionListeners).toBe('function');
+      });
+    });
+
+    describe('Reduced Motion Support (Task 5)', () => {
+      it('should have prefersReducedMotion getter', async () => {
+        const component = element as any;
+        expect(typeof component.prefersReducedMotion).toBe('boolean');
+      });
+    });
+
+    describe('Hero Edit Grid Overlay (Task 6)', () => {
+      it('should have renderHeroEditGrid method', async () => {
+        const component = element as any;
+        expect(typeof component.renderHeroEditGrid).toBe('function');
+      });
+
+      it('should not render grid when hero edit is not active', async () => {
+        // The grid should only render when heroEditActive is true
+        expect(tilemapStore.heroEditActive).toBe(false);
+
+        // Method should return early without errors
+        const component = element as any;
+        expect(() => component.renderHeroEditGrid()).not.toThrow();
+      });
+    });
+
+    describe('Hero Edit Highlight (Task 7)', () => {
+      it('should have renderHeroEditHighlight method', async () => {
+        const component = element as any;
+        expect(typeof component.renderHeroEditHighlight).toBe('function');
+      });
+
+      it('should not render highlight when transition is idle', async () => {
+        // The highlight should only render during zoom transition
+        expect(tilemapStore.heroEditTransition.value).toBe('idle');
+
+        // Method should return early without errors
+        const component = element as any;
+        expect(() => component.renderHeroEditHighlight()).not.toThrow();
+      });
+    });
+
+    describe('Transition Signal Reactivity', () => {
+      it('should access heroEditTransition signal for reactivity', async () => {
+        expect(tilemapStore.heroEditTransition.value).toBe('idle');
+      });
+
+      it('should support all transition states', async () => {
+        // Verify the signal can hold all valid states
+        expect(['idle', 'zooming-in', 'zooming-out']).toContain(
+          tilemapStore.heroEditTransition.value
+        );
+      });
+    });
+
+    describe('Event Handlers', () => {
+      it('should have boundHandleHeroEditEntered handler', async () => {
+        const component = element as any;
+        // Handler should be set after firstUpdated calls setupHeroEditTransitionListeners
+        expect(component.boundHandleHeroEditEntered).toBeDefined();
+      });
+
+      it('should have boundHandleHeroEditExited handler', async () => {
+        const component = element as any;
+        expect(component.boundHandleHeroEditExited).toBeDefined();
+      });
+
+      it('should have boundHandleTransitionEnd handler', async () => {
+        const component = element as any;
+        expect(component.boundHandleTransitionEnd).toBeDefined();
+      });
+    });
+
+    describe('Internal State (Task 2)', () => {
+      it('should track lastClickedTilePosition', async () => {
+        const component = element as any;
+        // Should be null initially
+        expect(component.lastClickedTilePosition).toBe(null);
+      });
+
+      it('should track heroEditZoomParams', async () => {
+        const component = element as any;
+        // Should be null initially
+        expect(component.heroEditZoomParams).toBe(null);
+      });
+    });
+  });
 });

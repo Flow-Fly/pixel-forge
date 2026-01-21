@@ -100,6 +100,37 @@ export interface TileClipboard {
 }
 
 /**
+ * HeroEditTransitionState - State for hero edit zoom animation
+ * Story 5-2 Task 1.1
+ *
+ * Tracks the transition state during hero edit zoom animations.
+ */
+export type HeroEditTransitionState = 'idle' | 'zooming-in' | 'zooming-out';
+
+/**
+ * HeroEditZoomParams - Parameters for hero edit zoom animation
+ * Story 5-2 Task 2.2
+ *
+ * Stores calculated zoom parameters for animating into/out of hero edit mode.
+ */
+export interface HeroEditZoomParams {
+  /** Zoom level needed to display tile at comfortable editing size */
+  zoomLevel: number;
+  /** X offset to center tile in viewport */
+  offsetX: number;
+  /** Y offset to center tile in viewport */
+  offsetY: number;
+  /** Tile center X coordinate in canvas space */
+  tileCenterX: number;
+  /** Tile center Y coordinate in canvas space */
+  tileCenterY: number;
+  /** Tile X coordinate in tile grid */
+  tileX: number;
+  /** Tile Y coordinate in tile grid */
+  tileY: number;
+}
+
+/**
  * HeroEditState - State for in-place tile editing
  * Story 5-1 Task 1.1
  *
