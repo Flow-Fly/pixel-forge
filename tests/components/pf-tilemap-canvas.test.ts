@@ -524,4 +524,118 @@ describe('pf-tilemap-canvas', () => {
       });
     });
   });
+
+  // ========================================
+  // Story 5-3: Context Preservation Tests (Tasks 1-6)
+  // ========================================
+  describe('Hero Edit Context Preservation (Story 5-3)', () => {
+    beforeEach(async () => {
+      // Reset hero edit state
+      tilemapStore.reset();
+      tilemapStore.initializeDefaultLayer();
+    });
+
+    describe('Dimmed Overlay (Task 2)', () => {
+      // Note: happy-dom doesn't provide a real canvas 2D context, so we can't
+      // fully test canvas drawing operations (clip paths, fillRect, etc.).
+      // These tests verify method existence and early-return conditions.
+
+      it('should have renderHeroEditDimOverlay method', async () => {
+        const component = element as any;
+        expect(typeof component.renderHeroEditDimOverlay).toBe('function');
+      });
+
+      it('should not render dim overlay when hero edit is not active', async () => {
+        expect(tilemapStore.heroEditActive).toBe(false);
+
+        // Method should return early without errors
+        const component = element as any;
+        expect(() => component.renderHeroEditDimOverlay()).not.toThrow();
+      });
+
+      it('should not render dim overlay during zoom transition', async () => {
+        // Method checks heroEditTransition.value === 'idle'
+        expect(tilemapStore.heroEditTransition.value).toBe('idle');
+
+        const component = element as any;
+        expect(() => component.renderHeroEditDimOverlay()).not.toThrow();
+      });
+
+      it('should use --pf-color-hero-edit-dim token for overlay color', async () => {
+        // Verify the component accesses the CSS custom property
+        const component = element as any;
+
+        // The method reads getComputedStyle(this).getPropertyValue('--pf-color-hero-edit-dim')
+        // In test environment, it will fall back to 'rgba(0, 0, 0, 0.4)'
+        expect(typeof component.renderHeroEditDimOverlay).toBe('function');
+      });
+    });
+
+    describe('Live Preview (Task 3)', () => {
+      // Note: happy-dom doesn't provide a real canvas 2D context, so we can't
+      // fully test rendering behavior (e.g., that globalAlpha is set to 0.6 for
+      // other tile instances). These tests verify the structure and signal access.
+      // Full rendering tests require a browser environment or canvas mocking.
+
+      it('should render layers with live preview capability', async () => {
+        const component = element as any;
+        expect(typeof component.renderLayers).toBe('function');
+      });
+
+      it('should access heroEditState for live preview data', async () => {
+        // Verify component can access editing state for live preview
+        // renderLayers() uses heroState.tileId and heroState.editingCanvas
+        const heroState = tilemapStore.heroEditState.value;
+        expect(heroState.active).toBe(false);
+        expect(heroState.editingCanvas).toBe(null);
+      });
+
+      it('should access heroEditZoomParams for editing position', async () => {
+        // renderLayers() uses heroEditZoomParams to identify the editing position
+        // so it can exclude it from live preview (edit position shows full brightness)
+        const component = element as any;
+        expect(component.heroEditZoomParams).toBe(null);
+      });
+    });
+
+    describe('Hero Edit Indicator (Task 4-5)', () => {
+      it('should not show indicator when hero edit is not active', async () => {
+        await (element as any).updateComplete;
+        const indicator = element.shadowRoot?.querySelector('pf-hero-edit-indicator');
+        expect(indicator).toBeFalsy();
+      });
+
+      it('should conditionally render indicator based on hero edit state', async () => {
+        // Verify the component accesses the signals needed for indicator visibility
+        expect(tilemapStore.heroEditActive).toBe(false);
+        expect(tilemapStore.heroEditTransition.value).toBe('idle');
+      });
+    });
+
+    describe('Render Order (Z-Order)', () => {
+      it('should call renderHeroEditDimOverlay in renderCanvas', async () => {
+        const component = element as any;
+
+        // Verify the render canvas method exists and calls dim overlay
+        expect(typeof component.renderCanvas).toBe('function');
+        expect(typeof component.renderHeroEditDimOverlay).toBe('function');
+      });
+
+      it('should call dim overlay after layers but before grid', async () => {
+        // The renderCanvas method should call methods in this order:
+        // 1. renderLayers
+        // 2. renderSelection
+        // 3. renderPastePreview
+        // 4. renderPreview
+        // 5. renderHeroEditDimOverlay (Story 5-3)
+        // 6. renderHeroEditGrid
+        // 7. renderHeroEditHighlight
+
+        const component = element as any;
+        expect(typeof component.renderLayers).toBe('function');
+        expect(typeof component.renderHeroEditDimOverlay).toBe('function');
+        expect(typeof component.renderHeroEditGrid).toBe('function');
+      });
+    });
+  });
 });

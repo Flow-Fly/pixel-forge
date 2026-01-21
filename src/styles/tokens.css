@@ -65,4 +65,9 @@
   --pf-z-canvas: 10;
   --pf-z-ui: 100;
   --pf-z-modal: 1000;
+
+  /* Hero Edit Mode - Story 5-3 */
+  /* Dimming overlay for surroundings during hero edit */
+  /* 40% dim = 60% visible per UX-9 specification */
+  --pf-color-hero-edit-dim: rgba(0, 0, 0, 0.4);
 }

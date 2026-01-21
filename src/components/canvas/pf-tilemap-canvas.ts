@@ -12,6 +12,8 @@ import { TileEraserTool } from "../../tools/tile-eraser-tool";
 import { TileFillTool } from "../../tools/tile-fill-tool";
 import { TileSelectTool } from "../../tools/tile-select-tool";
 import type { HeroEditZoomParams } from "../../types/tilemap";
+// Story 5-3 Task 5.1: Import hero edit indicator component
+import "./pf-hero-edit-indicator";
 
 /**
  * pf-tilemap-canvas - Canvas component for tilemap rendering
@@ -501,6 +503,9 @@ export class PFTilemapCanvas extends BaseComponent {
    * Story 5-1 Task 5.8 (Code Review Fix: race condition prevention)
    */
   private handleClickOutside = (e: MouseEvent): void => {
+    // Check race condition flag - menu just opened, ignore this click
+    if (this.contextMenuJustOpened) return;
+
     // Check if click is inside context menu
     const target = e.target as HTMLElement;
     const contextMenu = this.shadowRoot?.querySelector('.context-menu');
@@ -883,6 +888,9 @@ export class PFTilemapCanvas extends BaseComponent {
       // Render ghost preview if tile-brush is active
       this.renderPreview();
 
+      // Story 5-3 Task 2.6: Render dim overlay AFTER layers, BEFORE grid
+      this.renderHeroEditDimOverlay();
+
       // Story 5-2 Task 6: Render pixel grid in hero edit mode (when fully zoomed)
       this.renderHeroEditGrid();
 
@@ -893,6 +901,10 @@ export class PFTilemapCanvas extends BaseComponent {
 
   /**
    * Render all visible tile layers
+   * Story 5-3 Task 3: Enhanced with live preview during hero edit
+   *
+   * When in hero edit mode, other instances of the editing tile
+   * show live preview of changes at 60% opacity (dimmed).
    */
   private renderLayers(): void {
     const layers = tilemapStore.layers.value;
@@ -906,6 +918,14 @@ export class PFTilemapCanvas extends BaseComponent {
     const tileHeight = tilemapStore.tileHeight.value;
     const mapWidth = tilemapStore.width.value;
     const mapHeight = tilemapStore.height.value;
+
+    // Story 5-3 Task 3.2: Hero edit state for live preview
+    const heroEditActive = tilemapStore.heroEditActive;
+    const transitionIdle = tilemapStore.heroEditTransition.value === 'idle';
+    const heroState = tilemapStore.heroEditState.value;
+    const editingTileId = heroState.tileId;
+    const editingCanvas = heroState.editingCanvas;
+    const editingTilePos = this.heroEditZoomParams;
 
     // Render layers from bottom to top (first in array = bottom)
     for (const layer of layers) {
@@ -926,17 +946,43 @@ export class PFTilemapCanvas extends BaseComponent {
 
           // Convert 1-based storage ID to 0-based tileset index
           const tileIndex = tileId - 1;
+          const destX = x * tileWidth;
+          const destY = y * tileHeight;
 
-          // Get tile source rectangle
-          const rect = tilesetStore.getTileRect(tilesetId, tileIndex);
-          if (!rect) continue;
+          // Story 5-3 Task 3.3-3.4: Check for live preview
+          const isEditingTile = heroEditActive &&
+            transitionIdle &&
+            tileId === editingTileId &&
+            editingCanvas;
 
-          // Draw tile
-          this.ctx.drawImage(
-            tileset.image,
-            rect.x, rect.y, rect.width, rect.height,
-            x * tileWidth, y * tileHeight, tileWidth, tileHeight
-          );
+          const isEditingPosition = editingTilePos &&
+            x === editingTilePos.tileX &&
+            y === editingTilePos.tileY;
+
+          if (isEditingTile && !isEditingPosition) {
+            // Task 3.3: Render editingCanvas for other instances of same tile
+            // Task 3.4: Apply 60% opacity (dimmed)
+            const savedAlpha = this.ctx.globalAlpha;
+            this.ctx.globalAlpha *= 0.6; // Stack with layer opacity
+
+            this.ctx.drawImage(
+              editingCanvas,
+              0, 0, editingCanvas.width, editingCanvas.height,
+              destX, destY, tileWidth, tileHeight
+            );
+
+            this.ctx.globalAlpha = savedAlpha;
+          } else {
+            // Normal tile rendering
+            const rect = tilesetStore.getTileRect(tilesetId, tileIndex);
+            if (!rect) continue;
+
+            this.ctx.drawImage(
+              tileset.image,
+              rect.x, rect.y, rect.width, rect.height,
+              destX, destY, tileWidth, tileHeight
+            );
+          }
         }
       }
 
@@ -1184,6 +1230,52 @@ export class PFTilemapCanvas extends BaseComponent {
   }
 
   /**
+   * Render dimmed overlay for hero edit mode
+   * Story 5-3 Task 2.1-2.7
+   *
+   * Renders semi-transparent overlay over entire map, with clear
+   * window for the tile being edited. Surrounding tiles are dimmed
+   * at 60% opacity (40% dim overlay) per UX-9 specification.
+   */
+  private renderHeroEditDimOverlay(): void {
+    // Task 2.2: Only render when fully in hero edit mode
+    if (!tilemapStore.heroEditActive) return;
+    if (tilemapStore.heroEditTransition.value !== 'idle') return;
+    if (!this.heroEditZoomParams) return;
+
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const { tileX, tileY } = this.heroEditZoomParams;
+
+    // Calculate editing tile bounds
+    const editTileX = tileX * tileWidth;
+    const editTileY = tileY * tileHeight;
+
+    // Task 2.3: Draw dimmed overlay using --pf-color-hero-edit-dim token
+    // Use CSS custom property or fallback
+    const dimColor = getComputedStyle(this).getPropertyValue('--pf-color-hero-edit-dim').trim()
+      || 'rgba(0, 0, 0, 0.4)';
+
+    // Save context state
+    this.ctx.save();
+
+    // Task 2.5: Use clip path to exclude editing tile
+    this.ctx.beginPath();
+    // Full canvas rect
+    this.ctx.rect(0, 0, tilemapStore.pixelWidth, tilemapStore.pixelHeight);
+    // Cut out editing tile (reverse winding for hole)
+    this.ctx.rect(editTileX + tileWidth, editTileY, -tileWidth, tileHeight);
+    this.ctx.clip('evenodd');
+
+    // Task 2.3: Fill with dim color
+    this.ctx.fillStyle = dimColor;
+    this.ctx.fillRect(0, 0, tilemapStore.pixelWidth, tilemapStore.pixelHeight);
+
+    // Restore context state
+    this.ctx.restore();
+  }
+
+  /**
    * Render pixel grid overlay in hero edit mode
    * Story 5-2 Task 6.1-6.5
    *
@@ -1279,8 +1371,13 @@ export class PFTilemapCanvas extends BaseComponent {
     // Story 5-2: Re-render when hero edit transition changes
     void tilemapStore.heroEditTransition.value;
 
+    // Story 5-3 Task 5.2, 5.5: Show indicator only when hero edit active and transition idle
+    const showHeroEditIndicator = tilemapStore.heroEditActive &&
+      tilemapStore.heroEditTransition.value === 'idle';
+
     return html`
       <canvas></canvas>
+      ${showHeroEditIndicator ? html`<pf-hero-edit-indicator></pf-hero-edit-indicator>` : ''}
       ${this.contextMenuVisible ? html`
         <div
           class="context-menu"
