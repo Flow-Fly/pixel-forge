@@ -27,13 +27,14 @@ export class FillTool extends BaseTool {
     const imageData = this.ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
 
-    // Get index buffer for indexed color mode
+    // Story 5-4 Task 3.3: Skip indexed buffer in hero edit mode (override canvas)
+    // Get index buffer for indexed color mode (only in normal mode)
     const layerId = layerStore.activeLayerId.value;
     const frameId = animationStore.currentFrameId.value;
     let indexBuffer: Uint8Array | undefined;
     let fillPaletteIndex = 0;
 
-    if (layerId) {
+    if (layerId && !this.isOverrideMode()) {
       indexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
       // Get palette index for drawing - adds to ephemeral if not in main palette
       const fillHex = colorStore.primaryColor.value;

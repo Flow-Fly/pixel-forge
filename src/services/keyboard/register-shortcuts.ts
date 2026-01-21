@@ -64,15 +64,18 @@ export function registerShortcuts() {
       modifiers,
       () => {
         const currentMode = modeStore.mode.value;
+        // Story 5-4 Task 5.1: Hero edit mode uses art tools
+        const isHeroEdit = tilemapStore.heroEditActive && tilemapStore.heroEditTransition.value === 'idle';
+        const effectiveMode = isHeroEdit ? 'art' : currentMode;
 
         // Find the tool that matches the current mode
         // Priority: exact mode match > no mode specified (defaults to art)
-        const modeMatchingTool = tools.find(t => t.mode === currentMode);
+        const modeMatchingTool = tools.find(t => t.mode === effectiveMode);
         const defaultTool = tools.find(t => !t.mode); // No mode = art mode default
 
         if (modeMatchingTool) {
           toolStore.setActiveTool(modeMatchingTool.toolName as ToolType);
-        } else if (defaultTool && currentMode === 'art') {
+        } else if (defaultTool && effectiveMode === 'art') {
           toolStore.setActiveTool(defaultTool.toolName as ToolType);
         } else if (tools.length > 0) {
           // Fallback to first tool if no mode match
@@ -515,10 +518,17 @@ export function registerShortcuts() {
   );
 
   // Escape = Cancel floating selection (undo cut) or clear selection (mode-aware)
+  // Story 5-4 Task 5.2: Also exits hero edit mode
   keyboardService.register(
     "Escape",
     [],
     () => {
+      // Story 5-4 Task 5.2: Exit hero edit mode first
+      if (tilemapStore.heroEditActive && tilemapStore.heroEditTransition.value === 'idle') {
+        tilemapStore.exitHeroEdit(true); // Save changes on Escape
+        return;
+      }
+
       // Map mode: Cancel paste preview or clear tile selection
       if (modeStore.mode.value === 'map') {
         if (tileSelectionStore.isPasteMode) {
@@ -537,7 +547,7 @@ export function registerShortcuts() {
         selectionStore.clear();
       }
     },
-    "Cancel selection"
+    "Cancel selection / Exit hero edit"
   );
 
   // Helper function for delete operations (mode-aware)

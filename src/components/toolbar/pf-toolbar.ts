@@ -11,6 +11,7 @@ import {
 } from "../../stores/tool-groups";
 import { getToolShortcutKey } from "../../tools/tool-registry";
 import { modeStore } from "../../stores/mode";
+import { tilemapStore } from "../../stores/tilemap";
 import "./pf-tool-button";
 import "../color/pf-color-selector-compact";
 
@@ -27,6 +28,27 @@ export class PFToolbar extends BaseComponent {
     .tools-section {
       display: flex;
       flex-direction: column;
+      /* Story 5-4 Task 1.5: Transition animation for toolbar swap */
+      animation: toolbar-fade-in 200ms ease-out;
+    }
+
+    /* Story 5-4 Task 1.5: Fade-in animation for toolbar swap */
+    @keyframes toolbar-fade-in {
+      from {
+        opacity: 0;
+        transform: translateY(-4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Story 5-4 Task 1.6: Respect prefers-reduced-motion */
+    @media (prefers-reduced-motion: reduce) {
+      .tools-section {
+        animation: none;
+      }
     }
 
     .separator {
@@ -52,6 +74,14 @@ export class PFToolbar extends BaseComponent {
 
   // Track last seen active tool to detect changes
   private lastSeenActiveTool: ToolType | null = null;
+
+  // Track previous map tool for restoration on hero edit exit
+  // Story 5-4 Task 1.3
+  private previousMapTool: ToolType | null = null;
+
+  // Track hero edit state to detect transitions
+  // Story 5-4 Task 1.4
+  private wasHeroEditActive: boolean = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -98,9 +128,44 @@ export class PFToolbar extends BaseComponent {
     this.groupDisplayTools = new Map(this.groupDisplayTools.set(groupId, tool));
   }
 
+  /**
+   * Get the previous map tool that was active before hero edit
+   * Story 5-4 Task 7.2: Used for restoring tool on hero edit exit
+   */
+  getPreviousMapTool(): ToolType | null {
+    return this.previousMapTool;
+  }
+
+  /**
+   * Clear the stored previous map tool
+   * Story 5-4 Task 7.2: Called after tool restoration
+   */
+  clearPreviousMapTool(): void {
+    this.previousMapTool = null;
+  }
+
   render() {
     // Access mode signal to trigger re-render on mode change
     const currentMode = modeStore.mode.value;
+
+    // Story 5-4 Task 1.1-1.4: Detect hero edit mode and transition state
+    const heroEditActive = tilemapStore.heroEditActive;
+    const heroEditIdle = tilemapStore.heroEditTransition.value === 'idle';
+
+    // Story 5-4 Task 1.3: Store current map tool when entering hero edit
+    if (currentMode === 'map' && heroEditActive && !this.wasHeroEditActive) {
+      this.previousMapTool = toolStore.activeTool.value;
+      // Story 5-4 Task 1.4: Set pencil as default tool on hero edit entry
+      toolStore.setActiveTool('pencil');
+    }
+
+    // Track hero edit state for next render
+    this.wasHeroEditActive = heroEditActive;
+
+    // Story 5-4 Task 1.2: Show art toolbar when hero edit is active AND idle
+    if (currentMode === 'map' && heroEditActive && heroEditIdle) {
+      return this.renderArtModeToolbar();
+    }
 
     if (currentMode === 'map') {
       return this.renderMapModeToolbar();

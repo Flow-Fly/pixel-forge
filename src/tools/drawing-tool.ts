@@ -176,15 +176,19 @@ export abstract class DrawingTool extends BaseTool {
     const currentX = Math.floor(x);
     const currentY = Math.floor(y);
 
-    // Capture canvas state before stroke for pixel-perfect restore
-    const canvas = this.context.canvas;
-    this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
+    // Story 5-4 Task 3: Skip snapshot and index buffer for hero edit mode
+    // In hero edit mode, we draw directly to the override canvas
+    if (!this.isOverrideMode()) {
+      // Capture canvas state before stroke for pixel-perfect restore
+      const canvas = this.context.canvas;
+      this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
 
-    // Initialize indexed color support for this stroke
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
-    if (layerId) {
-      this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+      // Initialize indexed color support for this stroke
+      const layerId = layerStore.activeLayerId.value;
+      const frameId = animationStore.currentFrameId.value;
+      if (layerId) {
+        this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+      }
     }
 
     // Tool-specific initialization

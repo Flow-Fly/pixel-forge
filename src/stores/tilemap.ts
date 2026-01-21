@@ -12,7 +12,8 @@ const INITIAL_HERO_EDIT_STATE: HeroEditState = {
   tileId: null,
   tilesetId: null,
   editingCanvas: null,
-  originalData: null
+  originalData: null,
+  previousMapTool: null
 };
 
 /**
@@ -195,6 +196,47 @@ class TilemapStore extends EventTarget {
   }
 
   /**
+   * HTMLCanvasElement for art tools in hero edit mode
+   * Story 5-4 Task 2.1: Shadow canvas that syncs with editingCanvas
+   */
+  private _heroEditHTMLCanvas: HTMLCanvasElement | null = null;
+
+  /**
+   * Get the HTMLCanvasElement for art tools during hero edit
+   * Story 5-4 Task 2.1: Returns the shadow HTMLCanvasElement that syncs with OffscreenCanvas
+   *
+   * @returns HTMLCanvasElement or null if not in hero edit mode
+   */
+  getHeroEditTargetCanvas(): HTMLCanvasElement | null {
+    if (!this._heroEditState.value.active || !this._heroEditState.value.editingCanvas) {
+      return null;
+    }
+    return this._heroEditHTMLCanvas;
+  }
+
+  /**
+   * Sync changes from the HTMLCanvasElement to the editingCanvas (OffscreenCanvas)
+   * Story 5-4 Task 2.1: Called after each tool operation
+   */
+  syncHeroEditCanvas(): void {
+    if (!this._heroEditHTMLCanvas || !this._heroEditState.value.editingCanvas) {
+      return;
+    }
+
+    const offscreenCtx = this._heroEditState.value.editingCanvas.getContext('2d');
+    if (!offscreenCtx) return;
+
+    // Clear and copy from HTMLCanvasElement to OffscreenCanvas
+    offscreenCtx.clearRect(0, 0, this._heroEditHTMLCanvas.width, this._heroEditHTMLCanvas.height);
+    offscreenCtx.drawImage(this._heroEditHTMLCanvas, 0, 0);
+
+    // Fire event for live preview updates
+    this.dispatchEvent(new CustomEvent('hero-edit-canvas-updated', {
+      detail: { tileId: this._heroEditState.value.tileId }
+    }));
+  }
+
+  /**
    * Enter hero edit mode for a specific tile
    * Story 5-1 Task 2.1-2.9
    *
@@ -249,6 +291,15 @@ class TilemapStore extends EventTarget {
       originalData.height
     );
 
+    // Story 5-4 Task 2.1: Create shadow HTMLCanvasElement for art tools
+    this._heroEditHTMLCanvas = document.createElement('canvas');
+    this._heroEditHTMLCanvas.width = tileset.tileWidth;
+    this._heroEditHTMLCanvas.height = tileset.tileHeight;
+    const htmlCtx = this._heroEditHTMLCanvas.getContext('2d');
+    if (htmlCtx) {
+      htmlCtx.putImageData(originalData, 0, 0);
+    }
+
     // Story 5-2 Task 1.4: Set transition to 'zooming-in' before setting active
     this._heroEditTransition.value = 'zooming-in';
 
@@ -258,12 +309,14 @@ class TilemapStore extends EventTarget {
     }));
 
     // Task 2.8: Update _heroEditState signal immutably
+    // Story 5-4 Task 7.3: Include previousMapTool (null - toolbar handles storage)
     this._heroEditState.value = {
       active: true,
       tileId,
       tilesetId: resolvedTilesetId,
       editingCanvas,
-      originalData: originalDataCopy
+      originalData: originalDataCopy,
+      previousMapTool: null
     };
 
     // Task 2.9: Fire hero-edit-entered event
@@ -298,6 +351,9 @@ class TilemapStore extends EventTarget {
     this.dispatchEvent(new CustomEvent('hero-edit-transition-started', {
       detail: { direction: 'out', tileId, tilesetId }
     }));
+
+    // Story 5-4 Task 2.6: Clear the HTMLCanvasElement
+    this._heroEditHTMLCanvas = null;
 
     // Task 3.4: Reset _heroEditState to initial state
     this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
@@ -972,6 +1028,7 @@ class TilemapStore extends EventTarget {
     this._activeTilesetId.value = null;
     this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
     this._heroEditTransition.value = 'idle';
+    this._heroEditHTMLCanvas = null; // Story 5-4: Clear HTML canvas
     this.width.value = 20;
     this.height.value = 15;
     this.tileWidth.value = 16;

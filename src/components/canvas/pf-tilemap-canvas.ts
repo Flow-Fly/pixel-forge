@@ -671,14 +671,74 @@ export class PFTilemapCanvas extends BaseComponent {
   /**
    * Handle transitionend event - call finishHeroEditTransition
    * Story 5-2 Task 3.7, 4.4
+   * Story 5-4 Task 2.2, 2.3: Set up override canvas when zoomed in
    */
   private handleTransitionEnd = (e: TransitionEvent): void => {
     // Only handle transform transitions
     if (e.propertyName !== 'transform') return;
 
+    // Capture transition state BEFORE calling finishHeroEditTransition
+    const wasZoomingIn = tilemapStore.heroEditTransition.value === 'zooming-in';
+    const wasZoomingOut = tilemapStore.heroEditTransition.value === 'zooming-out';
+
     // Notify store that transition is complete
     tilemapStore.finishHeroEditTransition();
+
+    // Story 5-4 Task 2.2: Set up override canvas when zoom-in completes
+    if (wasZoomingIn && this.heroEditZoomParams) {
+      this.setupHeroEditOverrideCanvas();
+    }
+
+    // Story 5-4 Task 2.6: Clear override canvas when zoom-out completes
+    // Story 5-4 Task 7.1: Restore previous map tool
+    if (wasZoomingOut) {
+      toolStore.clearOverrideCanvas();
+      // Restore the previous map tool (default to tile-brush if not set)
+      const toolbar = document.querySelector('pf-toolbar') as any;
+      const previousTool = toolbar?.getPreviousMapTool?.() || 'tile-brush';
+      toolStore.setActiveTool(previousTool);
+      toolbar?.clearPreviousMapTool?.();
+    }
   };
+
+  /**
+   * Set up override canvas for hero edit mode
+   * Story 5-4 Task 2.2-2.5: Configure toolStore.overrideCanvas for art tools
+   */
+  private setupHeroEditOverrideCanvas(): void {
+    if (!this.heroEditZoomParams) return;
+
+    // Task 2.1: Get the HTMLCanvasElement for art tools
+    const targetCanvas = tilemapStore.getHeroEditTargetCanvas();
+    if (!targetCanvas) {
+      console.warn('pf-tilemap-canvas: No hero edit target canvas available');
+      return;
+    }
+
+    // Task 2.3: Calculate transform for coordinate conversion
+    // The transform maps viewport coordinates to the editing canvas
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const { tileX, tileY, zoomLevel } = this.heroEditZoomParams;
+
+    // Get the canvas's current bounding rect to calculate screen position
+    const canvasRect = this.canvas.getBoundingClientRect();
+
+    // Calculate the tile's position in screen coordinates
+    // The tile is at (tileX, tileY) in tile grid, which is (tileX * tileWidth, tileY * tileHeight) in canvas pixels
+    // The canvas is scaled by zoomLevel and positioned in the viewport
+    const tileCanvasX = tileX * tileWidth;
+    const tileCanvasY = tileY * tileHeight;
+
+    // Task 2.3: Set override canvas transform
+    toolStore.setOverrideCanvas(targetCanvas, {
+      screenX: canvasRect.left + (canvasRect.width / 2) - (tilemapStore.pixelWidth * zoomLevel / 2) + (tileCanvasX * zoomLevel),
+      screenY: canvasRect.top + (canvasRect.height / 2) - (tilemapStore.pixelHeight * zoomLevel / 2) + (tileCanvasY * zoomLevel),
+      zoom: zoomLevel,
+      width: tileWidth,
+      height: tileHeight
+    });
+  }
 
   /**
    * Find a tile's position in the map layers
@@ -740,6 +800,8 @@ export class PFTilemapCanvas extends BaseComponent {
       if (this.prefersReducedMotion) {
         queueMicrotask(() => {
           tilemapStore.finishHeroEditTransition();
+          // Story 5-4: Set up override canvas immediately for reduced motion
+          this.setupHeroEditOverrideCanvas();
         });
       }
     });
@@ -767,6 +829,13 @@ export class PFTilemapCanvas extends BaseComponent {
     if (this.prefersReducedMotion) {
       queueMicrotask(() => {
         tilemapStore.finishHeroEditTransition();
+        // Story 5-4: Clear override canvas immediately for reduced motion
+        toolStore.clearOverrideCanvas();
+        // Story 5-4 Task 7.1: Restore previous map tool
+        const toolbar = document.querySelector('pf-toolbar') as any;
+        const previousTool = toolbar?.getPreviousMapTool?.() || 'tile-brush';
+        toolStore.setActiveTool(previousTool);
+        toolbar?.clearPreviousMapTool?.();
       });
     }
 

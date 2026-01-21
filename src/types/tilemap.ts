@@ -148,4 +148,6 @@ export interface HeroEditState {
   editingCanvas: OffscreenCanvas | null;
   /** Original tile data for undo support (null if not editing) */
   originalData: ImageData | null;
+  /** Story 5-4 Task 7.3: Previous map tool to restore on exit (null if not set) */
+  previousMapTool: string | null;
 }

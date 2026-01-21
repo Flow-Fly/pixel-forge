@@ -258,6 +258,15 @@ export class PixelForgeApp extends BaseComponent {
   private warningTimer: number | null = null;
   private successTimer: number | null = null;
 
+  /**
+   * Check if hero edit mode is active (and transition is idle)
+   * Story 5-4 Task 4.1: Used for panel switching
+   */
+  private isHeroEditMode(): boolean {
+    return tilemapStore.heroEditActive &&
+           tilemapStore.heroEditTransition.value === 'idle';
+  }
+
   connectedCallback() {
     super.connectedCallback();
     // Load saved timeline height
@@ -598,7 +607,7 @@ export class PixelForgeApp extends BaseComponent {
       </main>
 
       <aside class="panels">
-        ${currentMode === "map"
+        ${currentMode === "map" && !this.isHeroEditMode()
           ? html`
               <pf-panel
                 header="Tile Layers"
@@ -617,7 +626,7 @@ export class PixelForgeApp extends BaseComponent {
                 <pf-tileset-panel></pf-tileset-panel>
               </pf-panel>
             `
-          : isTimelineCollapsed
+          : isTimelineCollapsed || this.isHeroEditMode()
             ? html`
                 <pf-panel header="Layers" collapsible panel-id="layers" bordered>
                   <pf-layers-panel></pf-layers-panel>
