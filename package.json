@@ -23,7 +23,7 @@
     "@types/pako": "^2.0.4",
     "@types/uuid": "^10.0.0",
     "@vitest/ui": "^4.0.14",
-    "happy-dom": "^20.0.11",
+    "happy-dom": "^20.8.9",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vitest": "^4.0.14"
