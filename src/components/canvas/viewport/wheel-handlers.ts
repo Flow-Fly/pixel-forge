@@ -16,6 +16,17 @@ export interface WheelHandlerCallbacks {
   contains: (node: Node) => boolean;
 }
 
+function normalizeWheelDelta(delta: number, deltaMode: number): number {
+  switch (deltaMode) {
+    case WheelEvent.DOM_DELTA_LINE:
+      return delta * 16;
+    case WheelEvent.DOM_DELTA_PAGE:
+      return delta * 120;
+    default:
+      return delta;
+  }
+}
+
 /**
  * Handle wheel events on the viewport content.
  */
@@ -33,54 +44,32 @@ export function handleWheel(
     const tool = toolStore.activeTool.value;
     const currentSize = getToolSize(tool);
     const scrollDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-    // Positive deltaY (natural scroll up on Mac, traditional scroll down) = increase
-    // Negative deltaY = decrease
     const delta = scrollDelta > 0 ? 1 : -1;
     setToolSize(tool, currentSize + delta);
     return;
   }
 
-  // Pinch gesture = zoom at cursor position
-  if (isPinchGesture) {
-    const rect = callbacks.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
+  const rect = callbacks.getBoundingClientRect();
+  const screenX = e.clientX - rect.left;
+  const screenY = e.clientY - rect.top;
 
-    if (e.deltaY < 0) {
-      viewportStore.zoomInAt(screenX, screenY);
-    } else if (e.deltaY > 0) {
-      viewportStore.zoomOutAt(screenX, screenY);
-    }
+  const absX = Math.abs(e.deltaX);
+  const absY = Math.abs(e.deltaY);
+  const isLineWheel = e.deltaMode === WheelEvent.DOM_DELTA_LINE;
+  const isPageWheel = e.deltaMode === WheelEvent.DOM_DELTA_PAGE;
+  const isLargePixelStep = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && absX < 1 && absY >= 40;
+  const shouldZoom = isPinchGesture || isLineWheel || isPageWheel || isLargePixelStep;
 
+  if (shouldZoom) {
+    const normalizedDelta = normalizeWheelDelta(e.deltaY, e.deltaMode);
+    const zoomFactor = Math.exp(-normalizedDelta * (isPinchGesture ? 0.0035 : 0.0025));
+    viewportStore.zoomByFactorAt(zoomFactor, screenX, screenY);
     callbacks.requestUpdate();
     return;
   }
 
-  // Distinguish mouse wheel from trackpad two-finger scroll:
-  // - deltaMode === 1 (LINE) = definitely mouse wheel → zoom
-  // - deltaMode === 0 (PIXEL) with horizontal component = trackpad → pan
-  // - deltaMode === 0 (PIXEL) Y-only = likely mouse wheel → zoom
-  // On macOS, both use deltaMode === 0, but trackpad usually has deltaX due to finger imprecision
-  const isMouseWheel =
-    e.deltaMode === 1 || // LINE mode is definitely mouse wheel
-    (e.deltaMode === 0 && e.deltaX === 0); // Y-only scroll = likely mouse wheel
-
-  if (isMouseWheel) {
-    // Mouse wheel = zoom at cursor position
-    const rect = callbacks.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-
-    if (e.deltaY < 0) {
-      viewportStore.zoomInAt(screenX, screenY);
-    } else if (e.deltaY > 0) {
-      viewportStore.zoomOutAt(screenX, screenY);
-    }
-  } else {
-    // Trackpad two-finger scroll = pan
-    viewportStore.panBy(-e.deltaX, -e.deltaY);
-  }
-
+  // Trackpad two-finger scroll = pan.
+  viewportStore.panBy(-e.deltaX, -e.deltaY);
   callbacks.requestUpdate();
 }
 
@@ -101,11 +90,14 @@ export function handleGlobalWheel(
   // Skip pinch gestures (ctrlKey is injected by macOS for pinch)
   if (e.ctrlKey) return;
 
-  // Only handle trackpad (has horizontal component), not mouse wheel
-  // Mouse wheels have deltaMode === 1 OR Y-only scroll (deltaX === 0)
-  const isMouseWheel =
-    e.deltaMode === 1 || (e.deltaMode === 0 && e.deltaX === 0);
-  if (isMouseWheel) return;
+  const absX = Math.abs(e.deltaX);
+  const absY = Math.abs(e.deltaY);
+  const isWheelLike =
+    e.deltaMode === WheelEvent.DOM_DELTA_LINE ||
+    e.deltaMode === WheelEvent.DOM_DELTA_PAGE ||
+    (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && absX < 1 && absY >= 40);
+
+  if (isWheelLike) return;
 
   // Trackpad two-finger scroll = pan
   e.preventDefault();
