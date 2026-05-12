@@ -1,11 +1,14 @@
 import { signal } from '../core/signal';
-import type { TileLayer, HeroEditState, HeroEditTransitionState } from '../types/tilemap';
+import type { TileLayer, HeroEditState, HeroEditTransitionState, NavigationDirection, HeroEditSession } from '../types/tilemap';
 import { TileOutOfBoundsError, InvalidLayerError, LockedLayerError, InvalidTileIdError, MinimumLayerError, TilemapError, InvalidTilesetError } from '../errors/tilemap-errors';
 import { tilesetStore } from './tileset';
+import { historyStore } from './history';
+import { TileEditCommand } from '../commands/tile-edit-command';
 
 /**
  * Initial state for hero edit mode
  * Story 5-1 Task 1.2
+ * Story 5-5 Task 2.4: Added session and currentPosition fields
  */
 const INITIAL_HERO_EDIT_STATE: HeroEditState = {
   active: false,
@@ -13,7 +16,9 @@ const INITIAL_HERO_EDIT_STATE: HeroEditState = {
   tilesetId: null,
   editingCanvas: null,
   originalData: null,
-  previousMapTool: null
+  previousMapTool: null,
+  session: null,
+  currentPosition: null
 };
 
 /**
@@ -180,6 +185,20 @@ class TilemapStore extends EventTarget {
   }
 
   /**
+   * Navigation direction signal for slide animations
+   * Story 5-5 Task 3.1
+   */
+  private _heroEditNavigationDirection = signal<NavigationDirection>(null);
+
+  /**
+   * Get the navigation direction signal for reactive subscriptions
+   * Story 5-5 Task 3.1
+   */
+  get heroEditNavigationDirection() {
+    return this._heroEditNavigationDirection;
+  }
+
+  /**
    * Convenience getter for checking if hero edit is active
    * Story 5-1 Task 1.4
    */
@@ -239,14 +258,16 @@ class TilemapStore extends EventTarget {
   /**
    * Enter hero edit mode for a specific tile
    * Story 5-1 Task 2.1-2.9
+   * Story 5-5: Added position parameter for session tracking
    *
    * @param tileId - The tile ID to edit (1-based storage ID, must be > 0)
    * @param tilesetId - Optional tileset ID (defaults to activeTilesetId)
+   * @param position - Optional tile position in grid (for session tracking)
    * @throws TilemapError if no active tileset
    * @throws InvalidTilesetError if tileset doesn't exist
    * @throws InvalidTileIdError if tileId is invalid (0 or not in tileset)
    */
-  enterHeroEdit(tileId: number, tilesetId?: string): void {
+  enterHeroEdit(tileId: number, tilesetId?: string, position?: { x: number; y: number }): void {
     // Task 2.3: Resolve tilesetId from parameter or activeTilesetId
     const resolvedTilesetId = tilesetId ?? this._activeTilesetId.value;
     if (!resolvedTilesetId) {
@@ -310,13 +331,23 @@ class TilemapStore extends EventTarget {
 
     // Task 2.8: Update _heroEditState signal immutably
     // Story 5-4 Task 7.3: Include previousMapTool (null - toolbar handles storage)
+    // Story 5-5 Task 2.4: Initialize session for multi-tile editing
+    const session: HeroEditSession = {
+      editedTilesBefore: new Map<number, ImageData>(),
+      editedTilesAfter: new Map<number, ImageData>(),
+      startTileId: tileId,
+      startPosition: position ?? { x: 0, y: 0 }
+    };
+
     this._heroEditState.value = {
       active: true,
       tileId,
       tilesetId: resolvedTilesetId,
       editingCanvas,
       originalData: originalDataCopy,
-      previousMapTool: null
+      previousMapTool: null,
+      session,
+      currentPosition: position ?? null
     };
 
     // Task 2.9: Fire hero-edit-entered event
@@ -328,8 +359,10 @@ class TilemapStore extends EventTarget {
   /**
    * Exit hero edit mode
    * Story 5-1 Task 3.1-3.5
+   * Story 5-5 Task 2.5: Commit ALL edited tiles from session
+   * Story 5-6 Task 4: Create TileEditCommand for undo/redo
    *
-   * @param save - Whether to save changes (default true, stub for Story 5-6)
+   * @param save - Whether to save changes (default true)
    */
   exitHeroEdit(save: boolean = true): void {
     // Task 3.2: Return early if hero edit is not active
@@ -337,12 +370,49 @@ class TilemapStore extends EventTarget {
       return;
     }
 
-    const { tileId, tilesetId } = this._heroEditState.value;
+    const { tileId, tilesetId, session } = this._heroEditState.value;
 
-    // Task 3.3: Stub for future TileEditCommand (actual implementation in Story 5-6)
-    // if (save) {
-    //   // Will create TileEditCommand here
-    // }
+    // Story 5-6 Task 4.1: Save current tile's final state to session.editedTilesAfter
+    if (save && tileId !== null && this._heroEditHTMLCanvas) {
+      this.saveCurrentTileToSession();
+    }
+
+    // Story 5-6 Task 4.2-4.5: Check for changes and create TileEditCommand
+    let hadChanges = false;
+    const editedTileIds: number[] = [];
+
+    if (save && session && tilesetId) {
+      // Task 4.2: Check if any tiles were actually modified
+      hadChanges = this.hasSessionChanges(session);
+
+      if (hadChanges) {
+        // Task 4.3: Create TileEditCommand with session data and execute on mapHistory
+        const command = new TileEditCommand(
+          tilesetId,
+          new Map(session.editedTilesBefore),
+          new Map(session.editedTilesAfter)
+        );
+
+        // Execute command via historyStore (adds to mapHistory since we're in Map mode)
+        // Use addWithoutExecuting since changes are already applied visually
+        historyStore.addWithoutExecuting(command);
+
+        // Task 4.5: Update tileset source image with ALL final edited tile ImageData
+        for (const [editedTileId, afterData] of session.editedTilesAfter) {
+          tilesetStore.updateTileImage(tilesetId, editedTileId - 1, afterData);
+          editedTileIds.push(editedTileId);
+        }
+
+        // Fire event for all committed tiles
+        this.dispatchEvent(new CustomEvent('hero-edit-tiles-committed', {
+          detail: {
+            tileIds: editedTileIds,
+            tilesetId
+          }
+        }));
+      }
+      // Task 4.4: If NO changes exist (AC #6), skip command creation entirely
+    }
 
     // Story 5-2 Task 1.5: Set transition to 'zooming-out' before resetting state
     this._heroEditTransition.value = 'zooming-out';
@@ -355,12 +425,273 @@ class TilemapStore extends EventTarget {
     // Story 5-4 Task 2.6: Clear the HTMLCanvasElement
     this._heroEditHTMLCanvas = null;
 
-    // Task 3.4: Reset _heroEditState to initial state
+    // Story 5-5 Task 7.5: Clear navigation direction
+    this._heroEditNavigationDirection.value = null;
+
+    // Task 4.6: Clear heroEditState and session data after commit
     this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
 
-    // Task 3.5: Fire hero-edit-exited event
+    // Task 4.7: Fire hero-edit-exited event with hadChanges info
     this.dispatchEvent(new CustomEvent('hero-edit-exited', {
-      detail: { tileId, saved: save }
+      detail: { tileId, tileIds: editedTileIds, saved: save, hadChanges }
+    }));
+  }
+
+  /**
+   * Check if a hero edit session has any actual changes
+   * Story 5-6 Task 4.2: Compare before/after ImageData for each tile
+   *
+   * @param session - The hero edit session to check
+   * @returns true if any tile was modified, false if no changes
+   */
+  private hasSessionChanges(session: HeroEditSession): boolean {
+    for (const [tileId, beforeData] of session.editedTilesBefore) {
+      const afterData = session.editedTilesAfter.get(tileId);
+      if (!afterData) continue;
+
+      // Compare ImageData byte-by-byte
+      if (this.hasImageDataChanges(beforeData, afterData)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Compare two ImageData objects for differences
+   * Story 5-6: Used for no-op detection (AC #6)
+   *
+   * @param before - Original ImageData
+   * @param after - Modified ImageData
+   * @returns true if there are differences, false if identical
+   */
+  private hasImageDataChanges(before: ImageData, after: ImageData): boolean {
+    if (before.width !== after.width || before.height !== after.height) {
+      return true;
+    }
+
+    const beforeData = before.data;
+    const afterData = after.data;
+
+    for (let i = 0; i < beforeData.length; i++) {
+      if (beforeData[i] !== afterData[i]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Save current tile's edits to the session
+   * Story 5-5 Task 2.2
+   */
+  private saveCurrentTileToSession(): void {
+    const { tileId, session, tilesetId, originalData } = this._heroEditState.value;
+    if (!session || !tileId || !this._heroEditHTMLCanvas || !tilesetId) return;
+
+    const ctx = this._heroEditHTMLCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Get current image data from editing canvas
+    const currentData = ctx.getImageData(0, 0, this._heroEditHTMLCanvas.width, this._heroEditHTMLCanvas.height);
+
+    // Store original data if not already stored (first edit of this tile)
+    if (!session.editedTilesBefore.has(tileId) && originalData) {
+      session.editedTilesBefore.set(tileId, new ImageData(
+        new Uint8ClampedArray(originalData.data),
+        originalData.width,
+        originalData.height
+      ));
+    }
+
+    // Store current state
+    session.editedTilesAfter.set(tileId, new ImageData(
+      new Uint8ClampedArray(currentData.data),
+      currentData.width,
+      currentData.height
+    ));
+
+    // Update tileset source for live preview
+    tilesetStore.updateTileImage(tilesetId, tileId - 1, currentData);
+  }
+
+  /**
+   * Navigate to an adjacent tile in hero edit mode
+   * Story 5-5 Task 2.1-2.8
+   *
+   * @param direction - Direction to navigate: 'up' | 'down' | 'left' | 'right'
+   * @returns true if navigation succeeded, false otherwise
+   */
+  navigateToAdjacentTile(direction: 'up' | 'down' | 'left' | 'right'): boolean {
+    // Task 2.1: Verify hero edit is active and transition is idle
+    if (!this._heroEditState.value.active || this._heroEditTransition.value !== 'idle') {
+      return false;
+    }
+
+    const { currentPosition, tilesetId, session } = this._heroEditState.value;
+    if (!currentPosition || !tilesetId || !session) return false;
+
+    // Task 2.6: Calculate adjacent tile position
+    const deltaMap = {
+      up: { dx: 0, dy: -1 },
+      down: { dx: 0, dy: 1 },
+      left: { dx: -1, dy: 0 },
+      right: { dx: 1, dy: 0 }
+    };
+    const { dx, dy } = deltaMap[direction];
+    const newX = currentPosition.x + dx;
+    const newY = currentPosition.y + dy;
+
+    // Task 2.7: Validate adjacent position is within map bounds
+    if (newX < 0 || newX >= this.width.value || newY < 0 || newY >= this.height.value) {
+      return false;
+    }
+
+    // Get active layer to check for tile at new position
+    const activeLayerId = this._activeLayerId.value;
+    if (!activeLayerId) return false;
+
+    // Task 7.2: Check if adjacent cell has a tile (0 = empty, don't navigate to empty)
+    const newTileId = this.getTile(activeLayerId, newX, newY);
+    if (newTileId === 0) {
+      return false;
+    }
+
+    // Task 2.2: Auto-save current editing canvas changes before navigation
+    this.saveCurrentTileToSession();
+
+    // Task 3.1: Set navigation direction for slide animation
+    this._heroEditNavigationDirection.value = direction;
+
+    // Fire navigation event for canvas to animate
+    this.dispatchEvent(new CustomEvent('hero-edit-navigation-started', {
+      detail: {
+        direction,
+        fromPosition: { ...currentPosition },
+        toPosition: { x: newX, y: newY },
+        fromTileId: this._heroEditState.value.tileId,
+        toTileId: newTileId
+      }
+    }));
+
+    // Task 2.8: Update heroEditState with new tileId and position
+    this.switchToTile(newTileId, { x: newX, y: newY });
+
+    return true;
+  }
+
+  /**
+   * Check if navigation to adjacent tile is possible
+   * Story 5-5 Task 1.3, Task 7.1-7.2
+   *
+   * @param direction - Direction to check
+   * @returns true if adjacent tile exists and navigation is possible
+   */
+  hasAdjacentTile(direction: 'up' | 'down' | 'left' | 'right'): boolean {
+    if (!this._heroEditState.value.active || this._heroEditTransition.value !== 'idle') {
+      return false;
+    }
+
+    const { currentPosition } = this._heroEditState.value;
+    if (!currentPosition) return false;
+
+    const deltaMap = {
+      up: { dx: 0, dy: -1 },
+      down: { dx: 0, dy: 1 },
+      left: { dx: -1, dy: 0 },
+      right: { dx: 1, dy: 0 }
+    };
+    const { dx, dy } = deltaMap[direction];
+    const newX = currentPosition.x + dx;
+    const newY = currentPosition.y + dy;
+
+    // Task 7.1: Check map bounds
+    if (newX < 0 || newX >= this.width.value || newY < 0 || newY >= this.height.value) {
+      return false;
+    }
+
+    // Task 7.2: Check if cell has a tile
+    const activeLayerId = this._activeLayerId.value;
+    if (!activeLayerId) return false;
+
+    try {
+      const tileId = this.getTile(activeLayerId, newX, newY);
+      return tileId > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Switch to a new tile during navigation
+   * Story 5-5 Task 2.8
+   *
+   * @param newTileId - The new tile ID to edit
+   * @param newPosition - The new position in the grid
+   */
+  private switchToTile(newTileId: number, newPosition: { x: number; y: number }): void {
+    const { tilesetId, session } = this._heroEditState.value;
+    if (!tilesetId || !session) return;
+
+    // Get tileset for dimensions
+    const tileset = tilesetStore.getTileset(tilesetId);
+    if (!tileset) return;
+
+    // Get new tile's image data (0-based tileset index)
+    const newTileData = tilesetStore.getTileImage(tilesetId, newTileId - 1);
+    if (!newTileData) return;
+
+    // Create new editing canvas
+    const editingCanvas = new OffscreenCanvas(tileset.tileWidth, tileset.tileHeight);
+    const ctx = editingCanvas.getContext('2d');
+    if (ctx) {
+      ctx.putImageData(newTileData, 0, 0);
+    }
+
+    // Store original data for undo support
+    const originalDataCopy = new ImageData(
+      new Uint8ClampedArray(newTileData.data),
+      newTileData.width,
+      newTileData.height
+    );
+
+    // Update HTML canvas for art tools
+    if (this._heroEditHTMLCanvas) {
+      this._heroEditHTMLCanvas.width = tileset.tileWidth;
+      this._heroEditHTMLCanvas.height = tileset.tileHeight;
+      const htmlCtx = this._heroEditHTMLCanvas.getContext('2d');
+      if (htmlCtx) {
+        htmlCtx.putImageData(newTileData, 0, 0);
+      }
+    }
+
+    // Update state with new tile
+    this._heroEditState.value = {
+      ...this._heroEditState.value,
+      tileId: newTileId,
+      editingCanvas,
+      originalData: originalDataCopy,
+      currentPosition: newPosition
+    };
+
+    // Fire event for canvas to update
+    this.dispatchEvent(new CustomEvent('hero-edit-tile-switched', {
+      detail: { tileId: newTileId, position: newPosition }
+    }));
+  }
+
+  /**
+   * Finish navigation animation and reset direction
+   * Story 5-5 Task 3.7
+   */
+  finishHeroEditNavigation(): void {
+    this._heroEditNavigationDirection.value = null;
+
+    this.dispatchEvent(new CustomEvent('hero-edit-navigation-ended', {
+      detail: {
+        tileId: this._heroEditState.value.tileId,
+        position: this._heroEditState.value.currentPosition
+      }
     }));
   }
 
@@ -1028,6 +1359,7 @@ class TilemapStore extends EventTarget {
     this._activeTilesetId.value = null;
     this._heroEditState.value = { ...INITIAL_HERO_EDIT_STATE };
     this._heroEditTransition.value = 'idle';
+    this._heroEditNavigationDirection.value = null; // Story 5-5: Clear navigation direction
     this._heroEditHTMLCanvas = null; // Story 5-4: Clear HTML canvas
     this.width.value = 20;
     this.height.value = 15;

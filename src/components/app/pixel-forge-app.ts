@@ -184,6 +184,29 @@ export class PixelForgeApp extends BaseComponent {
       flex-shrink: 0;
     }
 
+    /* Story 5-4 Task 4.3: Panel swap transition for hero edit mode */
+    .panels pf-panel {
+      animation: panel-fade-in 200ms ease-out;
+    }
+
+    @keyframes panel-fade-in {
+      from {
+        opacity: 0;
+        transform: translateX(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    /* Story 5-4 Task 4.4: Respect reduced motion preference */
+    @media (prefers-reduced-motion: reduce) {
+      .panels pf-panel {
+        animation: none;
+      }
+    }
+
     .status-bar {
       grid-column: 1 / -1;
       grid-row: 4;
@@ -588,7 +611,7 @@ export class PixelForgeApp extends BaseComponent {
         <pf-preview-overlay></pf-preview-overlay>
         <pf-shortcuts-overlay></pf-shortcuts-overlay>
         <!-- <pf-shortcuts-toggle></pf-shortcuts-toggle> -->
-        ${!isTimelineCollapsed
+        ${currentMode === "art" && !isTimelineCollapsed
           ? html`
               <div
                 class="timeline-resize-handle ${this.isResizingTimeline

@@ -85,9 +85,9 @@ export class PFCanvasViewport extends BaseComponent {
     });
     this.resizeObserver.observe(this);
 
-    // Center canvas on launch
+    // Center active canvas on launch
     requestAnimationFrame(() => {
-      viewportStore.zoomToFit(this.clientWidth, this.clientHeight);
+      viewportStore.resetView();
       this.initGrid();
       this.requestUpdate();
     });
@@ -121,6 +121,7 @@ export class PFCanvasViewport extends BaseComponent {
 
   private handleResize = () => {
     this.updateContainerDimensions();
+    viewportStore.clampPanToBounds();
     this.resizeGrid();
     this.requestUpdate();
   };

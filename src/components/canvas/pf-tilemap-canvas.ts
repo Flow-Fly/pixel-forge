@@ -316,6 +316,11 @@ export class PFTilemapCanvas extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent): void {
+    // Story 5-6 Task 2: Check for click-outside exit during hero edit
+    if (this.handleHeroEditClickOutside(e)) {
+      return;
+    }
+
     // If in paste preview mode, click confirms paste at current position
     if (tileSelectionStore.isPasteMode) {
       const activeLayerId = tilemapStore.activeLayerId.value;
@@ -330,6 +335,59 @@ export class PFTilemapCanvas extends BaseComponent {
       const { x, y } = this.getCanvasCoords(e);
       tool.onDown(x, y, this.getModifiers(e));
     }
+  }
+
+  /**
+   * Handle click-outside to exit hero edit mode
+   * Story 5-6 Task 2.1-2.5
+   *
+   * @param e - The mouse event
+   * @returns true if click triggered hero edit exit, false otherwise
+   */
+  private handleHeroEditClickOutside(e: MouseEvent): boolean {
+    // Task 2.1: Only check during hero edit with idle transition
+    if (!tilemapStore.heroEditActive) return false;
+    if (tilemapStore.heroEditTransition.value !== 'idle') return false;
+    if (!this.heroEditZoomParams) return false;
+
+    // Task 2.4: Check if click is on hero-edit-indicator elements (arrows, badge)
+    // These have stopPropagation, but for extra safety check the target
+    const target = e.target as HTMLElement;
+    if (target.closest('pf-hero-edit-indicator') ||
+        target.closest('.nav-arrow') ||
+        target.closest('.indicator')) {
+      return false;
+    }
+
+    // Task 2.2: Calculate click position relative to heroEditZoomParams bounding box
+    const { x: pixelX, y: pixelY } = this.getCanvasCoords(e);
+    const { tileX, tileY } = this.heroEditZoomParams;
+
+    // Calculate tile bounds in pixel coordinates
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const tileBounds = {
+      left: tileX * tileWidth,
+      top: tileY * tileHeight,
+      right: (tileX + 1) * tileWidth,
+      bottom: (tileY + 1) * tileHeight
+    };
+
+    // Task 2.3: Check if click is within tile bounds
+    const isInsideTile =
+      pixelX >= tileBounds.left &&
+      pixelX < tileBounds.right &&
+      pixelY >= tileBounds.top &&
+      pixelY < tileBounds.bottom;
+
+    // If click is inside the tile, allow normal tool operation
+    if (isInsideTile) {
+      return false;
+    }
+
+    // Task 2.3: Click was outside the tile - exit hero edit
+    tilemapStore.exitHeroEdit(true); // Save changes on click-outside
+    return true;
   }
 
   private handleMouseUp(e: MouseEvent): void {
@@ -610,16 +668,57 @@ export class PFTilemapCanvas extends BaseComponent {
   private boundHandleReducedMotionChange: ((e: MediaQueryListEvent) => void) | null = null;
 
   /**
+   * Bound handler for navigation started events
+   * Story 5-5 Task 3
+   */
+  private boundHandleNavigationStarted: ((e: Event) => void) | null = null;
+
+  /**
+   * Bound handler for tile switched events
+   * Story 5-5 Task 6
+   */
+  private boundHandleTileSwitched: ((e: Event) => void) | null = null;
+
+  /**
+   * Bound handler for tiles committed events
+   * Story 5-6 Task 5: Pulse animation on save
+   */
+  private boundHandleTilesCommitted: ((e: Event) => void) | null = null;
+
+  /**
+   * Tile IDs to pulse (set when tiles are committed, cleared after animation)
+   * Story 5-6 Task 5
+   */
+  private pulsingTileIds: Set<number> = new Set();
+
+  /**
+   * Animation frame ID for pulse cleanup
+   * Story 5-6 Task 5
+   */
+  private pulseAnimationTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  /**
    * Set up hero edit transition event listeners
    * Story 5-2 Task 3.3, 3.7, 4.3, 4.4
+   * Story 5-5 Task 3, 6: Added navigation listeners
    */
   private setupHeroEditTransitionListeners(): void {
     this.boundHandleHeroEditEntered = (e: Event) => this.handleHeroEditEntered(e as CustomEvent);
     this.boundHandleHeroEditExited = (e: Event) => this.handleHeroEditExited(e as CustomEvent);
     this.boundHandleTransitionEnd = (e: Event) => this.handleTransitionEnd(e as TransitionEvent);
+    // Story 5-5 Task 3: Navigation animation
+    this.boundHandleNavigationStarted = (e: Event) => this.handleNavigationStarted(e as CustomEvent);
+    // Story 5-5 Task 6: Override canvas update on tile switch
+    this.boundHandleTileSwitched = (e: Event) => this.handleTileSwitched(e as CustomEvent);
 
     tilemapStore.addEventListener('hero-edit-entered', this.boundHandleHeroEditEntered);
     tilemapStore.addEventListener('hero-edit-exited', this.boundHandleHeroEditExited);
+    tilemapStore.addEventListener('hero-edit-navigation-started', this.boundHandleNavigationStarted);
+    tilemapStore.addEventListener('hero-edit-tile-switched', this.boundHandleTileSwitched);
+
+    // Story 5-6 Task 5: Pulse animation when tiles are committed
+    this.boundHandleTilesCommitted = (e: Event) => this.handleTilesCommitted(e as CustomEvent);
+    tilemapStore.addEventListener('hero-edit-tiles-committed', this.boundHandleTilesCommitted);
 
     // Code Review Fix M3: Guard canvas reference and log warning if not available
     if (this.canvas) {
@@ -641,6 +740,22 @@ export class PFTilemapCanvas extends BaseComponent {
     }
     if (this.boundHandleTransitionEnd && this.canvas) {
       this.canvas.removeEventListener('transitionend', this.boundHandleTransitionEnd);
+    }
+    // Story 5-5: Clean up navigation listeners
+    if (this.boundHandleNavigationStarted) {
+      tilemapStore.removeEventListener('hero-edit-navigation-started', this.boundHandleNavigationStarted);
+    }
+    if (this.boundHandleTileSwitched) {
+      tilemapStore.removeEventListener('hero-edit-tile-switched', this.boundHandleTileSwitched);
+    }
+    // Story 5-6: Clean up tiles committed listener
+    if (this.boundHandleTilesCommitted) {
+      tilemapStore.removeEventListener('hero-edit-tiles-committed', this.boundHandleTilesCommitted);
+    }
+    // Clear any pending pulse animation
+    if (this.pulseAnimationTimeout) {
+      clearTimeout(this.pulseAnimationTimeout);
+      this.pulseAnimationTimeout = null;
     }
   }
 
@@ -878,6 +993,200 @@ export class PFTilemapCanvas extends BaseComponent {
     return this._prefersReducedMotion;
   }
 
+  /**
+   * Handle navigation started event - trigger slide animation
+   * Story 5-5 Task 3.2-3.6
+   */
+  private handleNavigationStarted = (e: CustomEvent): void => {
+    const { direction, toPosition } = e.detail;
+    if (!this.heroEditZoomParams) return;
+
+    // Task 3.3: Calculate slide offset based on direction
+    // When navigating UP, the view slides DOWN (new tile comes from top)
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+
+    const slideOffsets: Record<string, { x: number; y: number }> = {
+      up: { x: 0, y: tileHeight },      // View slides down
+      down: { x: 0, y: -tileHeight },   // View slides up
+      left: { x: tileWidth, y: 0 },     // View slides right
+      right: { x: -tileWidth, y: 0 }    // View slides left
+    };
+
+    const slideOffset = slideOffsets[direction] || { x: 0, y: 0 };
+
+    // Task 3.5: Respect prefers-reduced-motion for instant navigation
+    if (this.prefersReducedMotion) {
+      // Instant transition - just update zoom params and override canvas
+      this.updateHeroEditZoomParams(toPosition.x, toPosition.y);
+      queueMicrotask(() => {
+        this.setupHeroEditOverrideCanvas();
+        tilemapStore.finishHeroEditNavigation();
+      });
+      return;
+    }
+
+    // Task 3.4: Apply slide animation using transform with 200ms ease-out timing
+    if (!this.canvas) return;
+
+    this.canvas.style.setProperty('--hero-edit-transition-duration', '200ms');
+
+    // Calculate new position after slide
+    const newParams = this.getHeroEditZoomParams(
+      tilemapStore.editingTileId!,
+      toPosition.x,
+      toPosition.y
+    );
+
+    // Apply the transform with slide offset
+    const baseTransform = 'translate(-50%, -50%)';
+    const offsetInZoom = {
+      x: (newParams.offsetX + slideOffset.x) / newParams.zoomLevel,
+      y: (newParams.offsetY + slideOffset.y) / newParams.zoomLevel
+    };
+
+    // Update transform origin for new tile position
+    this.canvas.style.transformOrigin = `${newParams.tileCenterX}px ${newParams.tileCenterY}px`;
+
+    requestAnimationFrame(() => {
+      if (!this.canvas) return;
+
+      // Apply intermediate transform (with slide offset - creates motion effect)
+      this.canvas.style.transform = `${baseTransform} scale(${newParams.zoomLevel}) translate(${offsetInZoom.x}px, ${offsetInZoom.y}px)`;
+
+      // After a frame, remove slide offset to settle into final position
+      requestAnimationFrame(() => {
+        if (!this.canvas) return;
+
+        const finalOffset = {
+          x: newParams.offsetX / newParams.zoomLevel,
+          y: newParams.offsetY / newParams.zoomLevel
+        };
+
+        this.canvas.style.transform = `${baseTransform} scale(${newParams.zoomLevel}) translate(${finalOffset.x}px, ${finalOffset.y}px)`;
+
+        // Task 3.7: Update heroEditZoomParams with new tile position after transition
+        this.heroEditZoomParams = newParams;
+      });
+    });
+  };
+
+  /**
+   * Handle tile switched event - update override canvas
+   * Story 5-5 Task 6.1-6.5
+   */
+  private handleTileSwitched = (e: CustomEvent): void => {
+    const { position } = e.detail;
+
+    // Task 6.1: Update zoom params for new position
+    this.updateHeroEditZoomParams(position.x, position.y);
+
+    // Task 6.2-6.5: Set up override canvas for new tile after short delay
+    // This ensures the transition has time to start before we update the override
+    setTimeout(() => {
+      this.setupHeroEditOverrideCanvas();
+      // Story 5-5 Task 3.6: Fire navigation ended event
+      tilemapStore.finishHeroEditNavigation();
+    }, 50);
+  };
+
+  /**
+   * Update hero edit zoom params for new tile position
+   * Story 5-5 Task 3.7
+   */
+  private updateHeroEditZoomParams(tileX: number, tileY: number): void {
+    const tileId = tilemapStore.editingTileId;
+    if (tileId === null) return;
+
+    const newParams = this.getHeroEditZoomParams(tileId, tileX, tileY);
+    this.heroEditZoomParams = newParams;
+  }
+
+  /**
+   * Handle tiles committed event - start pulse animation
+   * Story 5-6 Task 5.1-5.4
+   */
+  private handleTilesCommitted = (e: CustomEvent): void => {
+    const { tileIds } = e.detail;
+    if (!tileIds || tileIds.length === 0) return;
+
+    // Task 5.1: Check reduced motion preference - skip animation if preferred
+    if (this.prefersReducedMotion) {
+      // Still trigger a re-render to show updated tiles, but no animation
+      dirtyRectStore.requestFullRedraw();
+      return;
+    }
+
+    // Task 5.2: Set pulsing tile IDs
+    this.pulsingTileIds = new Set(tileIds);
+
+    // Task 5.3: Request re-render to show pulse
+    dirtyRectStore.requestFullRedraw();
+    this.renderCanvas();
+
+    // Task 5.4: Clear pulse after 500ms (matches animation duration)
+    if (this.pulseAnimationTimeout) {
+      clearTimeout(this.pulseAnimationTimeout);
+    }
+    this.pulseAnimationTimeout = setTimeout(() => {
+      this.pulsingTileIds.clear();
+      this.pulseAnimationTimeout = null;
+      // Final re-render without pulse
+      dirtyRectStore.requestFullRedraw();
+      this.renderCanvas();
+    }, 500);
+  };
+
+  /**
+   * Render pulse animation overlay for committed tiles
+   * Story 5-6 Task 5.5-5.7
+   *
+   * Called from renderCanvas when pulsingTileIds is non-empty.
+   * Draws a brief glow effect on all instances of committed tiles.
+   */
+  private renderPulseAnimation(): void {
+    if (this.pulsingTileIds.size === 0) return;
+
+    const layers = tilemapStore.layers.value;
+    const tileWidth = tilemapStore.tileWidth.value;
+    const tileHeight = tilemapStore.tileHeight.value;
+    const mapWidth = tilemapStore.width.value;
+    const mapHeight = tilemapStore.height.value;
+
+    // Save context state
+    this.ctx.save();
+
+    // Task 5.5: Use accent color with 40% opacity for pulse
+    this.ctx.fillStyle = 'rgba(0, 150, 255, 0.4)';
+    this.ctx.strokeStyle = 'rgba(0, 150, 255, 0.8)';
+    this.ctx.lineWidth = 2;
+
+    // Scan all layers for instances of committed tiles
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+
+      for (let y = 0; y < mapHeight; y++) {
+        for (let x = 0; x < mapWidth; x++) {
+          const index = y * layer.width + x;
+          const tileId = layer.data[index];
+
+          // Check if this tile should pulse
+          if (this.pulsingTileIds.has(tileId)) {
+            const destX = x * tileWidth;
+            const destY = y * tileHeight;
+
+            // Task 5.6: Draw pulse effect
+            this.ctx.fillRect(destX, destY, tileWidth, tileHeight);
+            this.ctx.strokeRect(destX + 1, destY + 1, tileWidth - 2, tileHeight - 2);
+          }
+        }
+      }
+    }
+
+    // Restore context state
+    this.ctx.restore();
+  }
+
   protected updated(
     _changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>
   ): void {
@@ -965,6 +1274,9 @@ export class PFTilemapCanvas extends BaseComponent {
 
       // Story 5-2 Task 7: Render highlight during zoom transition
       this.renderHeroEditHighlight();
+
+      // Story 5-6 Task 5: Render pulse animation for committed tiles
+      this.renderPulseAnimation();
     }
   }
 

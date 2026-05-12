@@ -131,6 +131,30 @@ export interface HeroEditZoomParams {
 }
 
 /**
+ * HeroEditSession - Tracks all tiles edited during a hero edit session
+ * Story 5-5 Task 2.4
+ *
+ * During adjacent tile navigation, users can edit multiple tiles in one session.
+ * This interface tracks all edits for bulk commit on exit.
+ */
+export interface HeroEditSession {
+  /** Map of tileId -> before ImageData (for undo support) */
+  editedTilesBefore: Map<number, ImageData>;
+  /** Map of tileId -> after ImageData (current state) */
+  editedTilesAfter: Map<number, ImageData>;
+  /** The first tile edited in this session */
+  startTileId: number;
+  /** Tile position where the session started (for navigation tracking) */
+  startPosition: { x: number; y: number };
+}
+
+/**
+ * NavigationDirection - Direction for adjacent tile navigation
+ * Story 5-5 Task 3.1
+ */
+export type NavigationDirection = 'up' | 'down' | 'left' | 'right' | null;
+
+/**
  * HeroEditState - State for in-place tile editing
  * Story 5-1 Task 1.1
  *
@@ -150,4 +174,8 @@ export interface HeroEditState {
   originalData: ImageData | null;
   /** Story 5-4 Task 7.3: Previous map tool to restore on exit (null if not set) */
   previousMapTool: string | null;
+  /** Story 5-5 Task 2.4: Session tracking for multi-tile edits */
+  session: HeroEditSession | null;
+  /** Story 5-5: Current position in tile grid during hero edit */
+  currentPosition: { x: number; y: number } | null;
 }

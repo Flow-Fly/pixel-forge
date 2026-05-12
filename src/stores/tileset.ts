@@ -379,6 +379,38 @@ class TilesetStore extends EventTarget {
   }
 
   /**
+   * Update a tile's image data in a tileset (synchronous, for live preview)
+   * Story 5-5: Used during hero edit navigation for live preview
+   * @param tilesetId - The tileset ID
+   * @param tileIndex - The 0-based tile index to update
+   * @param imageData - The new image data for the tile
+   */
+  updateTileImage(
+    tilesetId: string,
+    tileIndex: number,
+    imageData: ImageData
+  ): void {
+    const tileset = this.getTileset(tilesetId);
+    if (!tileset) {
+      throw new InvalidTilesetError(`Tileset ${tilesetId} not found`);
+    }
+
+    if (tileIndex < 0 || tileIndex >= tileset.tileCount) {
+      throw new TileOutOfBoundsError(
+        `Tile index ${tileIndex} out of bounds (0-${tileset.tileCount - 1})`
+      );
+    }
+
+    // Note: This updates tile data for rendering purposes during hero edit.
+    // The actual ImageBitmap is not updated synchronously (would require async createImageBitmap).
+    // The rendering system should check for pending tile updates.
+    // For now, we just fire an event to trigger re-renders.
+    this.dispatchEvent(new CustomEvent('tile-updated', {
+      detail: { tilesetId, tileIndex, imageData }
+    }));
+  }
+
+  /**
    * Replace an existing tile in a tileset
    * Used by "Send to Tileset" feature for tile replacement
    * @param tilesetId - The tileset ID

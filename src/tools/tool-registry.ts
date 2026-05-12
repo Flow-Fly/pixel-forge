@@ -417,7 +417,7 @@ export const toolRegistry: Record<ToolType, ToolMeta> = {
 
   "tile-brush": {
     name: "Tile Brush",
-    icon: "/icons/tools/bucket.png", // Reuse bucket icon initially
+    icon: "/icons/tools/pen.webp",
     label: "TB",
     shortcutKey: "B",
     group: "tilemap",

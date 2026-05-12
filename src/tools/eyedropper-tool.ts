@@ -30,25 +30,30 @@ export class EyedropperTool extends BaseTool {
     const pixelY = Math.floor(y);
     const width = this.context.canvas.width;
 
-    // Try to get color from index buffer first (indexed color mode)
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
+    // Story 5-4: Skip index buffer in hero edit mode (override canvas)
+    // In hero edit mode, we pick directly from the editing canvas
     let hex: string | null = null;
 
-    if (layerId) {
-      const indexBuffer = animationStore.getCelIndexBuffer(layerId, frameId);
-      if (indexBuffer) {
-        const pixelIndex = pixelY * width + pixelX;
-        const paletteIndex = indexBuffer[pixelIndex];
+    if (!this.isOverrideMode()) {
+      // Try to get color from index buffer first (indexed color mode)
+      const layerId = layerStore.activeLayerId.value;
+      const frameId = animationStore.currentFrameId.value;
 
-        if (paletteIndex > 0) {
-          // Get color from palette
-          hex = paletteStore.getColorByIndex(paletteIndex);
+      if (layerId) {
+        const indexBuffer = animationStore.getCelIndexBuffer(layerId, frameId);
+        if (indexBuffer) {
+          const pixelIndex = pixelY * width + pixelX;
+          const paletteIndex = indexBuffer[pixelIndex];
+
+          if (paletteIndex > 0) {
+            // Get color from palette
+            hex = paletteStore.getColorByIndex(paletteIndex);
+          }
         }
       }
     }
 
-    // Fallback: read from canvas if no index buffer or transparent pixel
+    // Fallback: read from canvas if no index buffer, override mode, or transparent pixel
     if (!hex) {
       const pixel = this.context.getImageData(pixelX, pixelY, 1, 1).data;
       // If pixel is transparent, don't pick anything

@@ -49,7 +49,7 @@ export class PFStatusBar extends BaseComponent {
   }
 
   render() {
-    const zoomPercent = viewportStore.zoomPercent;
+    const zoomPercent = Math.round(viewportStore.zoomPercent);
     const lastSaved = projectStore.lastSaved.value;
 
     return html`

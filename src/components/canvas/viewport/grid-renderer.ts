@@ -6,7 +6,6 @@
 
 import { gridStore } from '../../../stores/grid';
 import { viewportStore } from '../../../stores/viewport';
-import { projectStore } from '../../../stores/project';
 
 /**
  * Initialize the grid canvas context.
@@ -63,8 +62,8 @@ export function drawGrids(
   const zoom = viewportStore.zoom.value;
   const panX = viewportStore.panX.value;
   const panY = viewportStore.panY.value;
-  const canvasWidth = projectStore.width.value;
-  const canvasHeight = projectStore.height.value;
+  const canvasWidth = viewportStore.getCanvasWidth();
+  const canvasHeight = viewportStore.getCanvasHeight();
 
   // Pixel grid: only show at or above threshold
   if (

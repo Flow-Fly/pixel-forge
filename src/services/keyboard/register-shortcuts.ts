@@ -298,50 +298,99 @@ export function registerShortcuts() {
     }
   };
 
-  // Arrow keys = Move selection (if active) or Previous/Next frame
+  // Story 5-5 Task 4: Track last navigation time for debounce
+  let lastNavigationTime = 0;
+  const NAVIGATION_DEBOUNCE_MS = 200;
+
+  /**
+   * Handle hero edit navigation with debounce
+   * Story 5-5 Task 4.1-4.5
+   */
+  const handleHeroEditNavigation = (direction: 'up' | 'down' | 'left' | 'right'): boolean => {
+    // Task 4.2: Verify hero edit is active AND transition is 'idle'
+    if (!tilemapStore.heroEditActive || tilemapStore.heroEditTransition.value !== 'idle') {
+      return false;
+    }
+
+    // Task 4.5: Debounce to prevent rapid multiple navigations
+    const now = Date.now();
+    if (now - lastNavigationTime < NAVIGATION_DEBOUNCE_MS) {
+      return true; // Still consume the event, but don't navigate
+    }
+
+    // Task 4.3: Call navigateToAdjacentTile
+    const navigated = tilemapStore.navigateToAdjacentTile(direction);
+    if (navigated) {
+      lastNavigationTime = now;
+    }
+
+    return true; // Consume event even if navigation failed (edge of map)
+  };
+
+  // Arrow keys = Hero edit navigation / Move selection / Previous/Next frame
   keyboardService.register(
     "ArrowLeft",
     [],
     () => {
+      // Story 5-5 Task 4.1, 4.4: Hero edit navigation takes priority
+      if (handleHeroEditNavigation('left')) {
+        return;
+      }
+
       if (selectionStore.isActive) {
         moveSelectionByArrow(-1, 0);
       } else {
         animationStore.prevFrame();
       }
     },
-    "Move selection left / Previous frame"
+    "Move selection left / Previous frame / Navigate hero edit"
   );
   keyboardService.register(
     "ArrowRight",
     [],
     () => {
+      // Story 5-5 Task 4.1, 4.4: Hero edit navigation takes priority
+      if (handleHeroEditNavigation('right')) {
+        return;
+      }
+
       if (selectionStore.isActive) {
         moveSelectionByArrow(1, 0);
       } else {
         animationStore.nextFrame();
       }
     },
-    "Move selection right / Next frame"
+    "Move selection right / Next frame / Navigate hero edit"
   );
   keyboardService.register(
     "ArrowUp",
     [],
     () => {
+      // Story 5-5 Task 4.1, 4.4: Hero edit navigation takes priority
+      if (handleHeroEditNavigation('up')) {
+        return;
+      }
+
       if (selectionStore.isActive) {
         moveSelectionByArrow(0, -1);
       }
     },
-    "Move selection up"
+    "Move selection up / Navigate hero edit"
   );
   keyboardService.register(
     "ArrowDown",
     [],
     () => {
+      // Story 5-5 Task 4.1, 4.4: Hero edit navigation takes priority
+      if (handleHeroEditNavigation('down')) {
+        return;
+      }
+
       if (selectionStore.isActive) {
         moveSelectionByArrow(0, 1);
       }
     },
-    "Move selection down"
+    "Move selection down / Navigate hero edit"
   );
 
   // Shift+Arrow = Move selection by 10px

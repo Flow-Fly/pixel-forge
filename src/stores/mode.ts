@@ -1,5 +1,6 @@
 import { signal } from '../core/signal';
 import { tilemapStore } from './tilemap';
+import { viewportStore } from './viewport';
 
 /**
  * Mode Store - Manages application mode state
@@ -31,6 +32,7 @@ class ModeStore {
    */
   setMode(newMode: 'art' | 'map') {
     this.mode.value = newMode;
+    viewportStore.setContext(newMode);
     if (newMode === 'map') {
       tilemapStore.initializeDefaultLayer();
     }

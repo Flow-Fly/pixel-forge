@@ -3,6 +3,8 @@ import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { viewportStore } from "../../stores/viewport";
 import { projectStore } from "../../stores/project";
+import { tilemapStore } from "../../stores/tilemap";
+import { modeStore } from "../../stores/mode";
 import { guidesStore } from "../../stores/guides";
 import "../ui";
 
@@ -205,13 +207,32 @@ export class PFRuler extends BaseComponent {
     }
   }
 
+  private getCoordinateConfig() {
+    const isMapMode = modeStore.mode.value === "map";
+
+    return {
+      isMapMode,
+      canvasWidth: isMapMode ? tilemapStore.pixelWidth : projectStore.width.value,
+      canvasHeight: isMapMode ? tilemapStore.pixelHeight : projectStore.height.value,
+      unitWidth: isMapMode ? tilemapStore.tileWidth.value : 1,
+      unitHeight: isMapMode ? tilemapStore.tileHeight.value : 1,
+      unitCountX: isMapMode ? tilemapStore.width.value : projectStore.width.value,
+      unitCountY: isMapMode ? tilemapStore.height.value : projectStore.height.value,
+    };
+  }
+
   render() {
     // Access reactive signals
     void viewportStore.zoom.value;
     void viewportStore.panX.value;
     void viewportStore.panY.value;
+    void modeStore.mode.value;
     void projectStore.width.value;
     void projectStore.height.value;
+    void tilemapStore.width.value;
+    void tilemapStore.height.value;
+    void tilemapStore.tileWidth.value;
+    void tilemapStore.tileHeight.value;
     void guidesStore.horizontalGuide.value;
     void guidesStore.verticalGuide.value;
     void guidesStore.visible.value;
@@ -368,48 +389,56 @@ export class PFRuler extends BaseComponent {
     const zoom = viewportStore.zoom.value;
     const panX = viewportStore.panX.value;
     const panY = viewportStore.panY.value;
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
     const rulerOffset = this.EXPANDED_SIZE; // 24px
+    const config = this.getCoordinateConfig();
 
     this.tooltipX = e.clientX;
     this.tooltipY = e.clientY;
 
-    // Get the ruler's own bounding rect
     const rulerRect = this.getBoundingClientRect();
 
-    let pixelPos: number;
+    let guidePositionPixels: number;
 
     if (this.orientation === "horizontal") {
-      // Top ruler creates vertical guides (X position)
-      // Position within ruler canvas
       const posInRuler = e.clientX - rulerRect.left;
-      // Adjust for ruler offset: ruler starts at 24px from viewport, canvas at panX
       const adjustedPanX = panX - rulerOffset;
-      // Convert to pixel position
-      pixelPos = Math.round((posInRuler - adjustedPanX) / zoom);
-      pixelPos = Math.max(0, Math.min(canvasWidth, pixelPos));
-      this.tooltipText = `X: ${pixelPos}`;
+
+      if (config.isMapMode) {
+        const tilePos = Math.round(
+          (posInRuler - adjustedPanX) / (zoom * config.unitWidth)
+        );
+        const clampedTilePos = Math.max(0, Math.min(config.unitCountX, tilePos));
+        guidePositionPixels = clampedTilePos * config.unitWidth;
+        this.tooltipText = `X: ${clampedTilePos}`;
+      } else {
+        const pixelPos = Math.round((posInRuler - adjustedPanX) / zoom);
+        guidePositionPixels = Math.max(0, Math.min(config.canvasWidth, pixelPos));
+        this.tooltipText = `X: ${guidePositionPixels}`;
+      }
     } else {
-      // Left ruler creates horizontal guides (Y position)
-      // Position within ruler canvas
       const posInRuler = e.clientY - rulerRect.top;
-      // Adjust for ruler offset: ruler starts at 24px from viewport, canvas at panY
       const adjustedPanY = panY - rulerOffset;
-      // Convert to pixel position
-      pixelPos = Math.round((posInRuler - adjustedPanY) / zoom);
-      pixelPos = Math.max(0, Math.min(canvasHeight, pixelPos));
-      this.tooltipText = `Y: ${pixelPos}`;
+
+      if (config.isMapMode) {
+        const tilePos = Math.round(
+          (posInRuler - adjustedPanY) / (zoom * config.unitHeight)
+        );
+        const clampedTilePos = Math.max(0, Math.min(config.unitCountY, tilePos));
+        guidePositionPixels = clampedTilePos * config.unitHeight;
+        this.tooltipText = `Y: ${clampedTilePos}`;
+      } else {
+        const pixelPos = Math.round((posInRuler - adjustedPanY) / zoom);
+        guidePositionPixels = Math.max(0, Math.min(config.canvasHeight, pixelPos));
+        this.tooltipText = `Y: ${guidePositionPixels}`;
+      }
     }
 
-    this.dragPosition = pixelPos;
+    this.dragPosition = guidePositionPixels;
 
-    // Update drag preview in store
-    // Top ruler (horizontal) controls vertical guide, left ruler (vertical) controls horizontal guide
     if (this.orientation === "horizontal") {
-      guidesStore.setDragPreview("vertical", pixelPos);
+      guidesStore.setDragPreview("vertical", guidePositionPixels);
     } else {
-      guidesStore.setDragPreview("horizontal", pixelPos);
+      guidesStore.setDragPreview("horizontal", guidePositionPixels);
     }
 
     this.requestUpdate();
@@ -422,184 +451,123 @@ export class PFRuler extends BaseComponent {
     const dpr = window.devicePixelRatio || 1;
     const width = this.canvas.width / dpr;
     const height = this.canvas.height / dpr;
+    const zoom = viewportStore.zoom.value;
+    const panX = viewportStore.panX.value;
+    const panY = viewportStore.panY.value;
+    const config = this.getCoordinateConfig();
 
-    // Clear
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.scale(dpr, dpr);
 
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-
-    // Colors
     const tickColor = "rgba(255, 255, 255, 0.5)";
     const majorTickColor = "rgba(255, 255, 255, 0.8)";
     const textColor = "rgba(255, 255, 255, 0.9)";
 
-    ctx.font = "9px monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-
     if (this.orientation === "horizontal") {
-      this.drawHorizontalRuler(
+      this.drawAxisRuler(
         ctx,
         width,
         height,
         zoom,
         panX,
-        canvasWidth,
+        config.unitWidth,
+        config.unitCountX,
         tickColor,
         majorTickColor,
-        textColor
+        textColor,
+        "horizontal",
+        config.isMapMode
       );
     } else {
-      this.drawVerticalRuler(
+      this.drawAxisRuler(
         ctx,
         width,
         height,
         zoom,
         panY,
-        canvasHeight,
+        config.unitHeight,
+        config.unitCountY,
         tickColor,
         majorTickColor,
-        textColor
+        textColor,
+        "vertical",
+        config.isMapMode
       );
     }
   }
 
-  private drawHorizontalRuler(
+  private drawAxisRuler(
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
     zoom: number,
-    panX: number,
-    canvasWidth: number,
+    pan: number,
+    unitSize: number,
+    unitCount: number,
     tickColor: string,
     majorTickColor: string,
-    textColor: string
+    textColor: string,
+    orientation: RulerOrientation,
+    isMapMode: boolean
   ): void {
-    // The ruler is CSS-positioned at left: 24px, but viewport-content starts at (0,0)
-    // So we need to offset by -24 to align ticks with the canvas
-    const rulerOffset = this.EXPANDED_SIZE; // 24px
+    const rulerOffset = this.EXPANDED_SIZE;
+    const adjustedPan = pan - rulerOffset;
+    const screenUnitSize = zoom * unitSize;
+    const safeScreenUnitSize = Math.max(screenUnitSize, 0.0001);
+    const axisLength = orientation === "horizontal" ? width : height;
 
-    // Calculate visible range accounting for the offset
-    const adjustedPanX = panX - rulerOffset;
-    const startPixel = Math.max(0, Math.floor(-adjustedPanX / zoom));
-    const endPixel = Math.min(
-      canvasWidth,
-      Math.ceil((width - adjustedPanX) / zoom)
+    const startUnit = Math.max(0, Math.floor(-adjustedPan / safeScreenUnitSize));
+    const endUnit = Math.min(
+      unitCount,
+      Math.ceil((axisLength - adjustedPan) / safeScreenUnitSize)
     );
 
-    // Determine tick density based on zoom
-    const minTickSpacing = 4; // Minimum screen pixels between ticks
-    const tickStep =
-      zoom >= minTickSpacing ? 1 : Math.ceil(minTickSpacing / zoom);
-
-    // Determine label skip for major ticks
-    const minLabelSpacing = 30;
-    const labelSkip = Math.ceil(
-      minLabelSpacing / (this.MAJOR_TICK_INTERVAL * zoom)
-    );
-
-    for (let pixel = startPixel; pixel <= endPixel; pixel += tickStep) {
-      const screenX = adjustedPanX + pixel * zoom;
-      if (screenX < 0 || screenX > width) continue;
-
-      const isMajor = pixel % this.MAJOR_TICK_INTERVAL === 0;
-      // Major ticks take full height, minor ticks are shorter
-      const tickHeight = isMajor ? height : Math.max(height * 0.4, 3);
-
-      ctx.strokeStyle = isMajor ? majorTickColor : tickColor;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      // Draw ticks from top (y=0) going down - same pattern as vertical ruler
-      // Major ticks span full height, minor ticks are partial
-      const y1 = height; // top of canvas
-      const y2 = isMajor ? height : tickHeight; // full height for major, partial for minor
-      ctx.moveTo(Math.round(screenX) + 0.5, y1);
-      ctx.lineTo(Math.round(screenX) + 0.5, y1 - y2);
-      ctx.stroke();
-
-      // Draw numbers for major ticks when expanded
-      if (
-        this.expanded &&
-        isMajor &&
-        pixel % (this.MAJOR_TICK_INTERVAL * labelSkip) === 0
-      ) {
-        ctx.fillStyle = textColor;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(String(pixel), screenX + 3, height / 2);
-      }
-    }
-  }
-
-  private drawVerticalRuler(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    zoom: number,
-    panY: number,
-    canvasHeight: number,
-    tickColor: string,
-    majorTickColor: string,
-    textColor: string
-  ): void {
-    // The ruler is CSS-positioned at top: 24px, but viewport-content starts at (0,0)
-    // So we need to offset by -24 to align ticks with the canvas
-    const rulerOffset = this.EXPANDED_SIZE; // 24px
-
-    // Calculate visible range accounting for the offset
-    const adjustedPanY = panY - rulerOffset;
-    const startPixel = Math.max(0, Math.floor(-adjustedPanY / zoom));
-    const endPixel = Math.min(
-      canvasHeight,
-      Math.ceil((height - adjustedPanY) / zoom)
-    );
-
-    // Determine tick density based on zoom
     const minTickSpacing = 4;
-    const tickStep =
-      zoom >= minTickSpacing ? 1 : Math.ceil(minTickSpacing / zoom);
-
-    // Determine label skip for major ticks
+    const tickStep = Math.max(1, Math.ceil(minTickSpacing / safeScreenUnitSize));
+    const majorInterval = isMapMode ? 1 : this.MAJOR_TICK_INTERVAL;
     const minLabelSpacing = 30;
-    const labelSkip = Math.ceil(
-      minLabelSpacing / (this.MAJOR_TICK_INTERVAL * zoom)
+    const labelSkip = Math.max(
+      1,
+      Math.ceil(minLabelSpacing / (majorInterval * safeScreenUnitSize))
     );
 
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
+    for (let unit = startUnit; unit <= endUnit; unit += tickStep) {
+      const screenPos = adjustedPan + unit * safeScreenUnitSize;
+      if (screenPos < 0 || screenPos > axisLength) continue;
 
-    for (let pixel = startPixel; pixel <= endPixel; pixel += tickStep) {
-      const screenY = adjustedPanY + pixel * zoom;
-      if (screenY < 0 || screenY > height) continue;
-
-      const isMajor = pixel % this.MAJOR_TICK_INTERVAL === 0;
-      // Major ticks take full width, minor ticks are shorter
-      const tickWidth = isMajor ? width : Math.max(width * 0.4, 3);
+      const isMajor = unit % majorInterval === 0;
+      const tickExtent = isMajor
+        ? orientation === "horizontal"
+          ? height
+          : width
+        : Math.max((orientation === "horizontal" ? height : width) * 0.4, 3);
 
       ctx.strokeStyle = isMajor ? majorTickColor : tickColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      // Draw ticks from right edge going left (toward canvas)
-      ctx.moveTo(width - tickWidth, Math.round(screenY) + 0.5);
-      ctx.lineTo(width, Math.round(screenY) + 0.5);
+
+      if (orientation === "horizontal") {
+        ctx.moveTo(Math.round(screenPos) + 0.5, height);
+        ctx.lineTo(Math.round(screenPos) + 0.5, height - tickExtent);
+      } else {
+        ctx.moveTo(width - tickExtent, Math.round(screenPos) + 0.5);
+        ctx.lineTo(width, Math.round(screenPos) + 0.5);
+      }
       ctx.stroke();
 
-      // Draw numbers for major ticks when expanded (below the tick)
-      if (
-        this.expanded &&
-        isMajor &&
-        pixel % (this.MAJOR_TICK_INTERVAL * labelSkip) === 0
-      ) {
+      if (this.expanded && isMajor && unit % (majorInterval * labelSkip) === 0) {
         ctx.fillStyle = textColor;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(String(pixel), width / 2, screenY + 2);
+
+        if (orientation === "horizontal") {
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(String(unit), screenPos + 3, height / 2);
+        } else {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText(String(unit), width / 2, screenPos + 2);
+        }
       }
     }
   }

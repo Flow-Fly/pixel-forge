@@ -8,6 +8,41 @@ import { vi } from 'vitest';
 import 'fake-indexeddb/auto';
 
 /**
+ * Mock ImageData class for testing
+ * Story 5-5: Required for enterHeroEdit which creates ImageData copies
+ */
+class MockImageData {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+  colorSpace: PredefinedColorSpace;
+
+  constructor(
+    dataOrWidth: Uint8ClampedArray | number,
+    widthOrHeight: number,
+    heightOrSettings?: number | ImageDataSettings,
+    settings?: ImageDataSettings
+  ) {
+    if (dataOrWidth instanceof Uint8ClampedArray) {
+      // Constructor: new ImageData(data, width, height?, settings?)
+      this.data = new Uint8ClampedArray(dataOrWidth);
+      this.width = widthOrHeight;
+      this.height = typeof heightOrSettings === 'number' ? heightOrSettings : widthOrHeight;
+      this.colorSpace = (typeof heightOrSettings === 'object' ? heightOrSettings.colorSpace : settings?.colorSpace) || 'srgb';
+    } else {
+      // Constructor: new ImageData(width, height, settings?)
+      this.width = dataOrWidth;
+      this.height = widthOrHeight;
+      this.data = new Uint8ClampedArray(this.width * this.height * 4);
+      this.colorSpace = (typeof heightOrSettings === 'object' ? heightOrSettings.colorSpace : undefined) || 'srgb';
+    }
+  }
+}
+
+// Expose ImageData globally
+(globalThis as unknown as Record<string, unknown>).ImageData = MockImageData;
+
+/**
  * Mock ImageBitmap class for testing
  */
 class MockImageBitmap {
