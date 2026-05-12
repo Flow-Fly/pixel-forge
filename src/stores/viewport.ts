@@ -1,13 +1,16 @@
 import { signal } from '../core/signal';
 import { projectStore } from './project';
 
-// Power-of-2 zoom levels (100% = 1, 200% = 2, etc.)
+// Preset zoom levels used by keyboard shortcuts, menus, and stepped zoom actions.
 export const ZOOM_LEVELS = [1, 2, 4, 8, 16, 32] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
 class ViewportStore {
+  private readonly MIN_ZOOM = 0.125;
+  private readonly MAX_ZOOM = 64;
+
   // Core state
-  zoom = signal<ZoomLevel>(8); // Default 800%
+  zoom = signal<number>(8); // 8 = 800%
   panX = signal<number>(0); // Pan offset in screen pixels
   panY = signal<number>(0);
 
@@ -34,71 +37,72 @@ class ViewportStore {
   }
 
   /**
-   * Set zoom to a specific level
+   * Set zoom to a specific level.
    */
-  setZoom(level: ZoomLevel): void {
-    if (ZOOM_LEVELS.includes(level)) {
-      this.zoom.value = level;
-    }
+  setZoom(level: number): void {
+    this.zoom.value = this.clampZoom(level);
+    this.clampPanToBounds();
   }
 
   /**
-   * Zoom in one level
+   * Zoom in one preset level.
    */
   zoomIn(): void {
-    const currentIndex = ZOOM_LEVELS.indexOf(this.zoom.value);
-    if (currentIndex < ZOOM_LEVELS.length - 1) {
-      this.zoom.value = ZOOM_LEVELS[currentIndex + 1];
-    }
+    const next = ZOOM_LEVELS.find((level) => level > this.zoom.value) ?? this.MAX_ZOOM;
+    this.setZoom(next);
   }
 
   /**
-   * Zoom out one level
+   * Zoom out one preset level.
    */
   zoomOut(): void {
-    const currentIndex = ZOOM_LEVELS.indexOf(this.zoom.value);
-    if (currentIndex > 0) {
-      this.zoom.value = ZOOM_LEVELS[currentIndex - 1];
-    }
+    const previous = [...ZOOM_LEVELS].reverse().find((level) => level < this.zoom.value) ?? this.MIN_ZOOM;
+    this.setZoom(previous);
   }
 
   /**
-   * Zoom in at a specific screen position (keeps that point stable)
+   * Zoom in one preset level at a specific screen position.
    */
   zoomInAt(screenX: number, screenY: number): void {
-    const currentIndex = ZOOM_LEVELS.indexOf(this.zoom.value);
-    if (currentIndex < ZOOM_LEVELS.length - 1) {
-      this.zoomAt(ZOOM_LEVELS[currentIndex + 1], screenX, screenY);
-    }
+    const next = ZOOM_LEVELS.find((level) => level > this.zoom.value) ?? this.MAX_ZOOM;
+    this.zoomAt(next, screenX, screenY);
   }
 
   /**
-   * Zoom out at a specific screen position (keeps that point stable)
+   * Zoom out one preset level at a specific screen position.
    */
   zoomOutAt(screenX: number, screenY: number): void {
-    const currentIndex = ZOOM_LEVELS.indexOf(this.zoom.value);
-    if (currentIndex > 0) {
-      this.zoomAt(ZOOM_LEVELS[currentIndex - 1], screenX, screenY);
-    }
+    const previous = [...ZOOM_LEVELS].reverse().find((level) => level < this.zoom.value) ?? this.MIN_ZOOM;
+    this.zoomAt(previous, screenX, screenY);
   }
 
   /**
-   * Zoom to a specific level, keeping the point under cursor stable
+   * Multiply zoom by a factor at a specific screen position.
+   * Used for smooth wheel / trackpad pinch zooming.
    */
-  zoomAt(newZoom: ZoomLevel, screenX: number, screenY: number): void {
+  zoomByFactorAt(factor: number, screenX: number, screenY: number): void {
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    this.zoomAt(this.zoom.value * factor, screenX, screenY);
+  }
+
+  /**
+   * Zoom to a specific level, keeping the point under cursor stable.
+   */
+  zoomAt(newZoom: number, screenX: number, screenY: number): void {
     const oldZoom = this.zoom.value;
+    const clampedZoom = this.clampZoom(newZoom);
+
+    if (oldZoom === clampedZoom) return;
 
     // Point under cursor in canvas coords (before zoom)
     const canvasX = (screenX - this.panX.value) / oldZoom;
     const canvasY = (screenY - this.panY.value) / oldZoom;
 
     // After zoom, that canvas point should still be at screenX, screenY
-    // screenX = canvasX * newZoom + newPanX
-    // newPanX = screenX - canvasX * newZoom
-    const newPanX = screenX - canvasX * newZoom;
-    const newPanY = screenY - canvasY * newZoom;
+    const newPanX = screenX - canvasX * clampedZoom;
+    const newPanY = screenY - canvasY * clampedZoom;
 
-    this.zoom.value = newZoom;
+    this.zoom.value = clampedZoom;
     this.panX.value = newPanX;
     this.panY.value = newPanY;
 
@@ -107,48 +111,40 @@ class ViewportStore {
   }
 
   /**
-   * Zoom to level by index (1-6 for keys 1-6), at cursor or center
+   * Zoom to level by index (1-6 for keys 1-6), at cursor or center.
    */
   zoomToLevel(level: 1 | 2 | 3 | 4 | 5 | 6): void {
     const zoomLevel = ZOOM_LEVELS[level - 1];
-    if (zoomLevel) {
-      // If cursor is in viewport, zoom at cursor position
-      const cursorX = this.cursorScreenX.value;
-      const cursorY = this.cursorScreenY.value;
+    if (!zoomLevel) return;
 
-      if (cursorX !== null && cursorY !== null) {
-        this.zoomAt(zoomLevel, cursorX, cursorY);
-      } else {
-        // Zoom at center of viewport
-        const centerX = this.containerWidth.value / 2;
-        const centerY = this.containerHeight.value / 2;
-        this.zoomAt(zoomLevel, centerX, centerY);
-      }
+    const cursorX = this.cursorScreenX.value;
+    const cursorY = this.cursorScreenY.value;
+
+    if (cursorX !== null && cursorY !== null) {
+      this.zoomAt(zoomLevel, cursorX, cursorY);
+    } else {
+      const centerX = this.containerWidth.value / 2;
+      const centerY = this.containerHeight.value / 2;
+      this.zoomAt(zoomLevel, centerX, centerY);
     }
   }
 
   /**
-   * Fit canvas to container, centered
+   * Fit canvas to container, centered.
    */
   zoomToFit(containerWidth: number, containerHeight: number): void {
     const canvasWidth = projectStore.width.value;
     const canvasHeight = projectStore.height.value;
 
-    // Find largest zoom level that fits
-    let bestZoom: ZoomLevel = ZOOM_LEVELS[0];
-    for (const zoom of ZOOM_LEVELS) {
-      const scaledWidth = canvasWidth * zoom;
-      const scaledHeight = canvasHeight * zoom;
-      if (scaledWidth <= containerWidth && scaledHeight <= containerHeight) {
-        bestZoom = zoom;
-      } else {
-        break;
-      }
+    if (canvasWidth <= 0 || canvasHeight <= 0 || containerWidth <= 0 || containerHeight <= 0) {
+      return;
     }
+
+    const fitZoom = Math.min(containerWidth / canvasWidth, containerHeight / canvasHeight);
+    const bestZoom = this.clampZoom(fitZoom);
 
     this.zoom.value = bestZoom;
 
-    // Center the canvas
     const scaledWidth = canvasWidth * bestZoom;
     const scaledHeight = canvasHeight * bestZoom;
     this.panX.value = (containerWidth - scaledWidth) / 2;
@@ -172,7 +168,7 @@ class ViewportStore {
   }
 
   /**
-   * Reset view to centered, default zoom
+   * Reset view to centered fit.
    */
   resetView(): void {
     const containerWidth = this.containerWidth.value;
@@ -180,16 +176,16 @@ class ViewportStore {
 
     if (containerWidth > 0 && containerHeight > 0) {
       this.zoomToFit(containerWidth, containerHeight);
-    } else {
-      // Fallback: just reset to defaults
-      this.zoom.value = 8;
-      this.panX.value = 0;
-      this.panY.value = 0;
+      return;
     }
+
+    this.zoom.value = 8;
+    this.panX.value = 0;
+    this.panY.value = 0;
   }
 
   /**
-   * Convert screen coordinates to canvas coordinates
+   * Convert screen coordinates to canvas coordinates.
    */
   screenToCanvas(screenX: number, screenY: number): { x: number; y: number } {
     const x = (screenX - this.panX.value) / this.zoom.value;
@@ -198,7 +194,7 @@ class ViewportStore {
   }
 
   /**
-   * Convert canvas coordinates to screen coordinates
+   * Convert canvas coordinates to screen coordinates.
    */
   canvasToScreen(canvasX: number, canvasY: number): { x: number; y: number } {
     const x = canvasX * this.zoom.value + this.panX.value;
@@ -233,7 +229,7 @@ class ViewportStore {
   }
 
   /**
-   * Check if current pan is within valid bounds
+   * Check if current pan is within valid bounds.
    */
   isPanInBounds(): boolean {
     const { minX, maxX, minY, maxY } = this.getPanBounds();
@@ -243,7 +239,7 @@ class ViewportStore {
   }
 
   /**
-   * Clamp pan to valid bounds (rubber band snap-back)
+   * Clamp pan to valid bounds (rubber band snap-back).
    */
   clampPanToBounds(): void {
     const { minX, maxX, minY, maxY } = this.getPanBounds();
@@ -280,6 +276,11 @@ class ViewportStore {
 
     // Clamp to valid bounds
     this.clampPanToBounds();
+  }
+
+  private clampZoom(zoom: number): number {
+    if (!Number.isFinite(zoom)) return this.zoom.value;
+    return Math.min(this.MAX_ZOOM, Math.max(this.MIN_ZOOM, zoom));
   }
 }
 

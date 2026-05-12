@@ -74,7 +74,7 @@ export class PFCanvasViewport extends BaseComponent {
 
     // Center canvas on launch
     requestAnimationFrame(() => {
-      viewportStore.zoomToFit(this.clientWidth, this.clientHeight);
+      viewportStore.resetView();
       this.initGrid();
       this.requestUpdate();
     });
@@ -106,6 +106,7 @@ export class PFCanvasViewport extends BaseComponent {
 
   private handleResize = () => {
     this.updateContainerDimensions();
+    viewportStore.clampPanToBounds();
     this.resizeGrid();
     this.requestUpdate();
   };
