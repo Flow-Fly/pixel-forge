@@ -36,9 +36,9 @@ export class PFDrawingCanvas extends BaseComponent {
       position: relative;
       width: 100%;
       height: 100%;
-      background-color: #2a2a2a; /* Dark background for canvas area */
+      background-color: #151a21; /* Dark transparency base for canvas area */
       overflow: hidden;
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 0 0 1px var(--pf-color-border), 0 20px 70px rgba(0, 0, 0, 0.42);
     }
 
     canvas {
@@ -48,7 +48,7 @@ export class PFDrawingCanvas extends BaseComponent {
       transform: translate(-50%, -50%);
       image-rendering: pixelated;
       /* Transparent background - checkerboard pattern shows through from viewport */
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+      box-shadow: none;
       /* Cursor is set dynamically based on active tool */
       cursor: crosshair;
     }

@@ -85,18 +85,18 @@ export class PFUndoHistory extends BaseComponent {
       font-size: 10px;
       color: var(--pf-color-text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
     }
 
     .canvas-wrapper {
       border: 1px solid var(--pf-color-border);
-      background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
-        linear-gradient(-45deg, #404040 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #404040 75%),
-        linear-gradient(-45deg, transparent 75%, #404040 75%);
+      background-image: linear-gradient(45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%);
       background-size: 8px 8px;
       background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
-      background-color: #2a2a2a;
+      background-color: #151a21;
     }
 
     .diff-canvas {

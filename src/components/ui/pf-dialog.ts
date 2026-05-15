@@ -38,19 +38,20 @@ export class PFDialog extends BaseComponent {
     .overlay {
       position: fixed;
       inset: 0;
-      background-color: rgba(0, 0, 0, 0.5);
+      background-color: rgba(0, 0, 0, 0.64);
       z-index: 1000;
       display: flex;
       align-items: center;
       justify-content: center;
+      backdrop-filter: blur(8px);
     }
 
     .dialog {
-      background-color: var(--pf-color-bg-panel, #1e1e1e);
+      background-color: rgba(13, 16, 21, 0.96);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-md);
       padding: 16px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      box-shadow: var(--pf-shadow-lg);
       max-height: 90vh;
       overflow-y: auto;
     }
@@ -66,6 +67,8 @@ export class PFDialog extends BaseComponent {
       font-weight: bold;
       font-size: 14px;
       color: var(--pf-color-text-main, #e0e0e0);
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .close-btn {
@@ -73,7 +76,7 @@ export class PFDialog extends BaseComponent {
       border: 1px solid var(--pf-color-border, #333);
       color: var(--pf-color-text-main, #e0e0e0);
       padding: 2px 6px;
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
       font-size: 12px;
       line-height: 1;
@@ -100,16 +103,18 @@ export class PFDialog extends BaseComponent {
     ::slotted(button),
     ::slotted(.btn) {
       padding: 6px 12px;
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
       font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     ::slotted(button.primary),
     ::slotted(.btn-primary) {
-      background-color: var(--pf-color-primary, #4a9eff);
-      color: white;
-      border: none;
+      background-color: var(--pf-color-primary-transparent, #4a9eff);
+      color: var(--pf-color-accent-hover);
+      border: 1px solid var(--pf-color-accent);
     }
 
     ::slotted(button.primary:hover),

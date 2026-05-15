@@ -25,23 +25,24 @@ export class PFPreviewOverlay extends BaseComponent {
 
     .container {
       position: relative;
-      background: var(--pf-color-bg-panel);
+      background: rgba(12, 15, 20, 0.9);
       border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      border-radius: var(--pf-radius-sm);
+      box-shadow: var(--pf-shadow-panel);
       display: flex;
       flex-direction: column;
       min-width: 120px;
       pointer-events: auto;
+      backdrop-filter: blur(14px);
     }
 
     .header {
       display: flex;
       align-items: center;
       padding: 4px 8px;
-      background: var(--pf-color-bg-surface);
+      background: rgba(255, 255, 255, 0.025);
       border-bottom: 1px solid var(--pf-color-border);
-      border-radius: 4px 4px 0 0;
+      border-radius: var(--pf-radius-sm) var(--pf-radius-sm) 0 0;
       cursor: grab;
       gap: 8px;
     }
@@ -54,6 +55,8 @@ export class PFPreviewOverlay extends BaseComponent {
       flex: 1;
       font-size: 11px;
       color: var(--pf-color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .chevron {
@@ -90,14 +93,14 @@ export class PFPreviewOverlay extends BaseComponent {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--pf-color-bg-dark);
+      background: rgba(6, 8, 12, 0.72);
       position: relative;
       cursor: crosshair;
     }
 
     .preview-canvas-wrapper {
       position: relative;
-      box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 0 0 1px var(--pf-color-border), 0 12px 30px rgba(0, 0, 0, 0.36);
     }
 
     canvas {
@@ -136,7 +139,7 @@ export class PFPreviewOverlay extends BaseComponent {
       justify-content: space-between;
       padding: 4px 8px;
       border-top: 1px solid var(--pf-color-border);
-      background: var(--pf-color-bg-surface);
+      background: rgba(255, 255, 255, 0.025);
       gap: 4px;
     }
 
@@ -149,7 +152,7 @@ export class PFPreviewOverlay extends BaseComponent {
       width: 18px;
       height: 18px;
       border: 1px solid var(--pf-color-border);
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
       padding: 0;
     }
@@ -182,13 +185,14 @@ export class PFPreviewOverlay extends BaseComponent {
     }
 
     .play-btn {
-      background: var(--pf-color-bg-panel);
+      background: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-muted);
       cursor: pointer;
       font-size: 10px;
       padding: 2px 8px;
+      text-transform: uppercase;
     }
 
     .play-btn:hover {

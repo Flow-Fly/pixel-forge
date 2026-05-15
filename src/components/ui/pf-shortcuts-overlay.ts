@@ -22,16 +22,17 @@ export class PfShortcutsOverlay extends BaseComponent {
     }
 
     .overlay {
-      background: var(--pf-color-bg-panel);
+      background: rgba(13, 16, 21, 0.94);
       border: 1px solid var(--pf-color-border);
-      border-radius: 6px;
+      border-radius: var(--pf-radius-sm);
       padding: 8px 12px;
       font-size: 11px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      opacity: 0.9;
+      box-shadow: var(--pf-shadow-panel);
+      opacity: 0.92;
       pointer-events: auto;
       min-width: 140px;
       max-width: 200px;
+      backdrop-filter: blur(12px);
     }
 
     .header {
@@ -53,7 +54,7 @@ export class PfShortcutsOverlay extends BaseComponent {
       color: var(--pf-color-text-muted);
       font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
     }
 
     .close-btn {
@@ -85,7 +86,7 @@ export class PfShortcutsOverlay extends BaseComponent {
       text-transform: uppercase;
       color: var(--pf-color-text-muted);
       margin-bottom: 4px;
-      letter-spacing: 0.3px;
+      letter-spacing: 0;
     }
 
     .shortcut-row {
@@ -96,9 +97,9 @@ export class PfShortcutsOverlay extends BaseComponent {
     }
 
     .key {
-      background: var(--pf-color-bg-tertiary);
+      background: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       padding: 1px 4px;
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 10px;
@@ -119,7 +120,7 @@ export class PfShortcutsOverlay extends BaseComponent {
     }
   `;
 
-  @state() private visible = true;
+  @state() private visible = false;
   @state() private posX = 0;
   @state() private posY = 0;
   @state() private isDragging = false;

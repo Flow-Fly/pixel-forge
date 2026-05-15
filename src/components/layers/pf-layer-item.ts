@@ -13,14 +13,16 @@ export class PFLayerItem extends BaseComponent {
       display: flex;
       align-items: center;
       padding: 4px 8px;
-      background-color: var(--pf-color-bg-panel);
+      background-color: rgba(10, 13, 18, 0.66);
       border-bottom: 1px solid var(--pf-color-border);
       cursor: pointer;
       user-select: none;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     :host([active]) {
-      background-color: var(--pf-color-bg-surface);
+      background-color: var(--pf-color-primary-transparent);
       border-left: 2px solid var(--pf-color-accent-cyan);
     }
 
@@ -59,7 +61,7 @@ export class PFLayerItem extends BaseComponent {
     .opacity-value {
       cursor: ew-resize;
       padding: 2px 4px;
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       min-width: 32px;
       text-align: right;
       user-select: none;
@@ -78,7 +80,7 @@ export class PFLayerItem extends BaseComponent {
       padding: 2px 4px;
       background: var(--pf-color-bg-dark);
       border: 1px solid var(--pf-color-border);
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-main);
       font-size: 10px;
       text-align: right;
@@ -93,7 +95,7 @@ export class PFLayerItem extends BaseComponent {
       font-size: 9px;
       font-weight: bold;
       padding: 1px 3px;
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       margin-right: 4px;
       background: var(--pf-color-accent-cyan);
       color: var(--pf-color-bg-dark);

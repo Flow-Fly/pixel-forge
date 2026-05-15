@@ -12,9 +12,9 @@ export class PFToolButton extends BaseComponent {
   static styles = css`
     :host {
       display: block;
-      width: 32px;
-      height: 32px;
-      margin: 4px auto;
+      width: 40px;
+      height: 40px;
+      margin: 5px auto;
       position: relative;
     }
 
@@ -32,23 +32,41 @@ export class PFToolButton extends BaseComponent {
       justify-content: center;
       background-color: transparent;
       border: 1px solid transparent;
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-muted);
-      transition: all 0.1s;
+      transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
       cursor: pointer;
       font-size: 16px;
+      opacity: 0.82;
     }
 
     button:hover {
-      background-color: var(--pf-color-bg-surface);
+      background-color: var(--pf-color-bg-hover);
       color: var(--pf-color-text-main);
+      border-color: var(--pf-color-border);
+      opacity: 1;
     }
 
     :host([active]) button {
-      background-color: var(--pf-color-bg-surface);
+      background-color: var(--pf-color-primary-transparent);
       border-color: var(--pf-color-accent);
       color: var(--pf-color-accent);
       box-shadow: var(--pf-shadow-glow);
+      opacity: 1;
+    }
+
+    .icon {
+      max-width: 21px;
+      max-height: 21px;
+      object-fit: contain;
+      opacity: 0.78;
+      filter: grayscale(1) contrast(1.15) brightness(1.25);
+    }
+
+    button:hover .icon,
+    :host([active]) .icon {
+      opacity: 1;
+      filter: grayscale(0.25) contrast(1.12) brightness(1.12);
     }
 
     /* Triangle indicator for tool groups */

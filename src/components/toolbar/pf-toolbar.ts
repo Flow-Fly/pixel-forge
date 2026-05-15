@@ -18,7 +18,7 @@ export class PFToolbar extends BaseComponent {
     :host {
       display: flex;
       flex-direction: column;
-      padding: var(--pf-spacing-1) 0;
+      padding: 10px 0;
       height: 100%;
     }
 
@@ -29,7 +29,7 @@ export class PFToolbar extends BaseComponent {
 
     .separator {
       height: 1px;
-      margin: var(--pf-spacing-1) var(--pf-spacing-2);
+      margin: 9px 12px;
       background: var(--pf-color-border);
     }
 
@@ -38,7 +38,7 @@ export class PFToolbar extends BaseComponent {
     }
 
     .color-section {
-      padding: var(--pf-spacing-2) 0;
+      padding: 12px 0;
       border-top: 1px solid var(--pf-color-border);
       display: flex;
       justify-content: center;

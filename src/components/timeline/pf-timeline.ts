@@ -18,17 +18,19 @@ export class PFTimeline extends BaseComponent {
       display: flex;
       flex-direction: column;
       height: 100%;
-      background-color: var(--pf-color-bg-panel);
+      background:
+        linear-gradient(180deg, rgba(15, 18, 24, 0.94), rgba(8, 10, 14, 0.96));
       border-top: 1px solid var(--pf-color-border);
       overflow: hidden;
+      color: var(--pf-color-text-secondary);
     }
 
     .controls-area {
       display: flex;
       align-items: center;
-      padding: var(--pf-spacing-1);
+      padding: 7px 10px;
       border-bottom: 1px solid var(--pf-color-border);
-      background-color: var(--pf-color-bg-surface);
+      background: rgba(255, 255, 255, 0.025);
       flex-shrink: 0;
     }
 
@@ -37,7 +39,7 @@ export class PFTimeline extends BaseComponent {
       display: flex;
       flex-shrink: 0;
       border-bottom: 1px solid var(--pf-color-border);
-      background-color: var(--pf-color-bg-surface);
+      background: rgba(255, 255, 255, 0.018);
     }
 
     .layers-toolbar {
@@ -50,9 +52,9 @@ export class PFTimeline extends BaseComponent {
     }
 
     .layers-toolbar button {
-      background: var(--pf-color-bg-panel);
+      background: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-muted);
       font-size: 12px;
       width: 24px;
@@ -67,6 +69,7 @@ export class PFTimeline extends BaseComponent {
     .layers-toolbar button:hover {
       background: var(--pf-color-bg-hover);
       color: var(--pf-color-text-main);
+      border-color: var(--pf-color-border-strong);
     }
 
     .layers-toolbar button:disabled {
@@ -93,7 +96,9 @@ export class PFTimeline extends BaseComponent {
       min-height: 0; /* Allow shrinking below content size for proper overflow */
       display: flex;
       overflow: auto;
-      background-color: var(--pf-color-bg-dark);
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px) 0 0 / 32px 32px,
+        var(--pf-color-bg-dark);
 
       /* Firefox scrollbar styling */
       scrollbar-width: thin;
@@ -108,12 +113,12 @@ export class PFTimeline extends BaseComponent {
 
     .scroll-container::-webkit-scrollbar-track {
       background: var(--pf-color-scrollbar-track, #2a2a2a);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
     }
 
     .scroll-container::-webkit-scrollbar-thumb {
       background: var(--pf-color-scrollbar-thumb, #555);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       border: 2px solid var(--pf-color-scrollbar-track, #2a2a2a);
     }
 
@@ -129,7 +134,7 @@ export class PFTimeline extends BaseComponent {
       width: 200px;
       flex-shrink: 0;
       border-right: 1px solid var(--pf-color-border);
-      background-color: var(--pf-color-bg-panel);
+      background-color: rgba(10, 13, 18, 0.66);
     }
 
     .grid-column {

@@ -13,14 +13,15 @@ export interface SelectOption {
 export class PfOptionSelect extends SignalWatcher(LitElement) {
   static styles = css`
     select {
-      background: var(--pf-color-bg-tertiary);
+      background: var(--pf-color-bg-input);
       color: var(--pf-color-text-primary);
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
-      padding: 2px 4px;
+      border-radius: var(--pf-radius-sm);
+      padding: 3px 8px;
       font-size: 11px;
       cursor: pointer;
       outline: none;
+      text-transform: uppercase;
     }
 
     select:hover {

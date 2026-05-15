@@ -12,8 +12,8 @@ export class PfOptionSlider extends SignalWatcher(LitElement) {
       height: 4px;
       -webkit-appearance: none;
       appearance: none;
-      background: var(--pf-color-bg-tertiary);
-      border-radius: 2px;
+      background: var(--pf-color-bg-input);
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
     }
 
@@ -23,7 +23,7 @@ export class PfOptionSlider extends SignalWatcher(LitElement) {
       width: 12px;
       height: 12px;
       background: var(--pf-color-accent);
-      border-radius: 50%;
+      border-radius: 0;
       cursor: pointer;
     }
 
@@ -31,7 +31,7 @@ export class PfOptionSlider extends SignalWatcher(LitElement) {
       width: 12px;
       height: 12px;
       background: var(--pf-color-accent);
-      border-radius: 50%;
+      border-radius: 0;
       cursor: pointer;
       border: none;
     }

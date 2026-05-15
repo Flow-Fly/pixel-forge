@@ -20,15 +20,26 @@ export class PFStatusBar extends BaseComponent {
     .right {
       display: flex;
       gap: var(--pf-spacing-4);
+      align-items: center;
     }
 
     .center {
       color: var(--pf-color-text-muted);
+      font-family: var(--pf-font-serif);
+      font-style: italic;
+      font-size: 11px;
+      opacity: 0.82;
     }
 
     .saved-indicator {
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-xs);
+    }
+
+    .left,
+    .right {
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
   `;
 
@@ -57,7 +68,9 @@ export class PFStatusBar extends BaseComponent {
         <span>${this.cursor.x + 1}, ${this.cursor.y + 1}</span>
       </div>
       <div class="center">
-        ${lastSaved ? html`<span class="saved-indicator">${this.formatLastSaved(lastSaved)}</span>` : ''}
+        ${lastSaved
+          ? html`<span class="saved-indicator">${this.formatLastSaved(lastSaved)}</span>`
+          : html`<span>make small light.</span>`}
       </div>
       <div class="right">
         <span>${zoomPercent}%</span>

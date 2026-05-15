@@ -57,9 +57,9 @@ export class PFColorSelectorCompact extends BaseComponent {
       font-size: 10px;
       cursor: pointer;
       color: var(--pf-color-text-muted, #808080);
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-input, #1e1e1e);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;

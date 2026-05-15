@@ -59,13 +59,14 @@ export class PFContextMenu extends BaseComponent {
       margin: 0;
       padding: 4px 0;
       border: 1px solid var(--pf-color-border, #444);
-      background-color: var(--pf-color-bg-panel, #1a1a1a);
-      border-radius: 6px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      background-color: rgba(13, 16, 21, 0.98);
+      border-radius: var(--pf-radius-sm);
+      box-shadow: var(--pf-shadow-lg);
       min-width: 160px;
       max-width: 280px;
       overflow-y: auto;
       max-height: calc(100vh - 16px);
+      backdrop-filter: blur(14px);
 
       /* Fixed positioning - coordinates set via JS */
       position: fixed;
@@ -87,11 +88,13 @@ export class PFContextMenu extends BaseComponent {
       color: var(--pf-color-text-main, #fff);
       font-size: 12px;
       transition: background-color 0.1s;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .menu-item:hover,
     .menu-item.focused {
-      background-color: var(--pf-color-bg-hover, #333);
+      background-color: var(--pf-color-primary-transparent, #333);
     }
 
     .menu-item.disabled {
@@ -143,8 +146,8 @@ export class PFContextMenu extends BaseComponent {
       height: 4px;
       -webkit-appearance: none;
       appearance: none;
-      background: var(--pf-color-bg-dark, #0a0a0a);
-      border-radius: 2px;
+      background: var(--pf-color-bg-input, #0a0a0a);
+      border-radius: var(--pf-radius-sm);
       outline: none;
     }
 
@@ -154,7 +157,7 @@ export class PFContextMenu extends BaseComponent {
       width: 14px;
       height: 14px;
       background: var(--pf-color-accent, #4a9eff);
-      border-radius: 50%;
+      border-radius: 0;
       cursor: pointer;
       transition: transform 0.1s;
     }
@@ -177,9 +180,9 @@ export class PFContextMenu extends BaseComponent {
     .text-input {
       width: 100%;
       padding: 6px 8px;
-      background: var(--pf-color-bg-dark, #0a0a0a);
+      background: var(--pf-color-bg-input, #0a0a0a);
       border: 1px solid var(--pf-color-border, #444);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-main, #fff);
       font-size: 12px;
       outline: none;
@@ -194,9 +197,9 @@ export class PFContextMenu extends BaseComponent {
     .number-input {
       width: 60px;
       padding: 4px 6px;
-      background: var(--pf-color-bg-dark, #0a0a0a);
+      background: var(--pf-color-bg-input, #0a0a0a);
       border: 1px solid var(--pf-color-border, #444);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-main, #fff);
       font-size: 12px;
       outline: none;
@@ -245,7 +248,7 @@ export class PFContextMenu extends BaseComponent {
     .color-swatch {
       width: 24px;
       height: 24px;
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
       border: 2px solid transparent;
       transition: transform 0.1s, border-color 0.1s;

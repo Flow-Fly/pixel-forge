@@ -16,6 +16,8 @@ export class PFOnionSkinControls extends BaseComponent {
       color: var(--pf-color-text-secondary);
       border-left: 1px solid var(--pf-color-border);
       margin-left: var(--pf-spacing-2);
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .control-group {
@@ -43,6 +45,7 @@ export class PFOnionSkinControls extends BaseComponent {
       color: var(--pf-color-text-primary);
       border-radius: var(--pf-radius-sm);
       padding: 2px 4px;
+      font-family: inherit;
     }
 
     .icon-btn {

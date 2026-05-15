@@ -50,22 +50,23 @@ export class PFTimelineGrid extends BaseComponent {
     }
 
     .cel.selected {
-      background-color: rgba(74, 158, 255, 0.15);
+      background-color: var(--pf-color-primary-transparent);
       box-shadow: inset 0 0 0 2px var(--pf-color-accent, #4a9eff);
     }
 
     .cel.active.selected {
-      background-color: rgba(74, 158, 255, 0.25);
+      background-color: var(--pf-color-primary-muted);
       // box-shadow: inset 0 0 0 2px var(--pf-color-primary), 0 0 0 2px var(--pf-color-accent, #4a9eff);
     }
 
     .cel-content {
-      width: 6px;
-      height: 6px;
+      width: 5px;
+      height: 5px;
       border-radius: 50%;
       background-color: var(--pf-color-text-muted);
       position: relative;
       z-index: 1;
+      opacity: 0.8;
     }
 
     .cel.has-content .cel-content {

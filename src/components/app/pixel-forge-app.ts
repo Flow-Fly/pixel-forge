@@ -36,22 +36,51 @@ export class PixelForgeApp extends BaseComponent {
   static styles = css`
     :host {
       display: grid;
-      grid-template-columns: 48px 1fr 250px; /* Toolbar, Workspace, Panels */
-      grid-template-rows: 32px auto 1fr 32px; /* Menu, ContextBar, Main, Status */
+      grid-template-columns: 56px 1fr 288px; /* Toolbar, Workspace, Panels */
+      grid-template-rows: 52px 36px 1fr 28px; /* Menu, ContextBar, Main, Status */
       width: 100vw;
       height: 100vh;
-      background-color: var(--pf-color-bg-dark);
+      background:
+        radial-gradient(circle, rgba(225, 231, 237, 0.18) 0 1px, transparent 1.3px) 23px 31px / 173px 139px,
+        linear-gradient(rgba(218, 226, 235, 0.027) 1px, transparent 1px) 0 0 / 32px 32px,
+        linear-gradient(90deg, rgba(218, 226, 235, 0.027) 1px, transparent 1px) 0 0 / 32px 32px,
+        linear-gradient(180deg, #10141b 0%, var(--pf-color-bg-dark) 58%, #05070a 100%);
       color: var(--pf-color-text-main);
+      position: relative;
+      isolation: isolate;
+      overflow: hidden;
+      letter-spacing: 0;
+    }
+
+    :host::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background:
+        repeating-radial-gradient(circle at 17% 29%, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px 5px),
+        repeating-linear-gradient(0deg, transparent 0 2px, rgba(255, 255, 255, 0.014) 2px 3px);
+      mix-blend-mode: screen;
+      opacity: 0.16;
+    }
+
+    :host > * {
+      position: relative;
+      z-index: 1;
     }
 
     .menu-bar {
       grid-column: 1 / -1;
       grid-row: 1;
-      background-color: var(--pf-color-bg-panel);
+      background:
+        linear-gradient(180deg, rgba(22, 26, 33, 0.94), rgba(10, 13, 18, 0.9));
       border-bottom: 1px solid var(--pf-color-border);
       display: flex;
       align-items: center;
-      padding: 0 var(--pf-spacing-2);
+      padding: 0 18px;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+      backdrop-filter: blur(14px);
     }
 
     .context-bar {
@@ -62,17 +91,20 @@ export class PixelForgeApp extends BaseComponent {
     .toolbar {
       grid-column: 1;
       grid-row: 3;
-      background-color: var(--pf-color-bg-panel);
+      background:
+        linear-gradient(180deg, rgba(15, 18, 24, 0.92), rgba(8, 10, 14, 0.9));
       border-right: 1px solid var(--pf-color-border);
       overflow: hidden;
       min-height: 0;
+      box-shadow: 1px 0 0 rgba(255, 255, 255, 0.025) inset;
     }
 
     .workspace {
       grid-column: 2;
       grid-row: 3;
       position: relative;
-      background-color: var(--pf-color-bg-dark);
+      background:
+        linear-gradient(180deg, rgba(8, 11, 16, 0.16), rgba(0, 0, 0, 0.12));
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -101,9 +133,9 @@ export class PixelForgeApp extends BaseComponent {
       transform: translate(-50%, -50%);
       width: 40px;
       height: 3px;
-      background: var(--pf-color-border);
+      background: var(--pf-color-border-strong);
       border-radius: 2px;
-      opacity: 0;
+      opacity: 0.36;
       transition: opacity 0.15s;
     }
 
@@ -117,17 +149,20 @@ export class PixelForgeApp extends BaseComponent {
       border-top: 1px solid var(--pf-color-border);
       min-height: 100px;
       max-height: 500px;
+      box-shadow: 0 -20px 50px rgba(0, 0, 0, 0.18);
     }
 
     .panels {
       grid-column: 3;
       grid-row: 3;
-      background-color: var(--pf-color-bg-panel);
+      background:
+        linear-gradient(180deg, rgba(13, 16, 21, 0.94), rgba(8, 10, 14, 0.92));
       border-left: 1px solid var(--pf-color-border);
       display: flex;
       flex-direction: column;
       overflow-y: auto;
       overflow-x: hidden;
+      box-shadow: -1px 0 0 rgba(255, 255, 255, 0.025) inset;
     }
 
     .panels > * {
@@ -137,12 +172,14 @@ export class PixelForgeApp extends BaseComponent {
     .status-bar {
       grid-column: 1 / -1;
       grid-row: 4;
-      background-color: var(--pf-color-bg-panel);
+      background: rgba(7, 9, 13, 0.92);
       border-top: 1px solid var(--pf-color-border);
       display: flex;
       align-items: center;
-      padding: 0 var(--pf-spacing-2);
+      padding: 0 14px;
       font-size: var(--pf-font-size-xs);
+      color: var(--pf-color-text-muted);
+      backdrop-filter: blur(12px);
     }
 
     /* Warning toast - rendered at app level to avoid viewport transform issues */
@@ -151,17 +188,17 @@ export class PixelForgeApp extends BaseComponent {
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      background: rgba(40, 40, 40, 0.95);
-      border: 1px solid rgba(200, 80, 80, 0.8);
-      color: #ff8080;
+      background: rgba(13, 16, 21, 0.95);
+      border: 1px solid rgba(196, 124, 114, 0.8);
+      color: #f0aaa2;
       padding: 10px 20px;
-      border-radius: 6px;
+      border-radius: var(--pf-radius-md);
       font-size: 13px;
       font-weight: 500;
       z-index: 10000;
       pointer-events: none;
       animation: toastFadeInOut 2s ease-in-out forwards;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      box-shadow: var(--pf-shadow-lg);
       white-space: nowrap;
     }
 

@@ -20,23 +20,28 @@ export class PFPlaybackControls extends BaseComponent {
     }
 
     button {
-      background: none;
+      background: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-border);
-      color: var(--pf-color-text-main);
-      padding: 4px 8px;
-      border-radius: 4px;
+      color: var(--pf-color-text-secondary);
+      padding: 5px 10px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
       font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     button:hover {
       background-color: var(--pf-color-bg-hover);
+      border-color: var(--pf-color-border-strong);
+      color: var(--pf-color-text-main);
     }
 
     button.active {
-      background-color: var(--pf-color-primary);
-      color: white;
+      background-color: var(--pf-color-primary-transparent);
+      color: var(--pf-color-accent-hover);
       border-color: var(--pf-color-primary);
+      box-shadow: var(--pf-shadow-glow);
     }
 
     .info-text {
@@ -51,7 +56,7 @@ export class PFPlaybackControls extends BaseComponent {
     .unit-toggle {
       cursor: pointer;
       padding: 2px 4px;
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       transition: background-color 0.15s;
     }
 

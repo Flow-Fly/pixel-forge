@@ -21,7 +21,7 @@ const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
 
 @customElement("pf-menu-bar")
 export class PFMenuBar extends BaseComponent {
-  @state() private shortcutsVisible = true;
+  @state() private shortcutsVisible = false;
   @state() private isEditingName = false;
 
   static styles = css`
@@ -30,12 +30,64 @@ export class PFMenuBar extends BaseComponent {
       height: 100%;
       align-items: center;
       width: 100%;
+      position: relative;
+      gap: 16px;
+      color: var(--pf-color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 190px;
+      color: var(--pf-color-text-main);
+      font-size: 12px;
+      user-select: none;
+    }
+
+    .brand-mark {
+      width: 18px;
+      height: 18px;
+      display: inline-grid;
+      place-items: center;
+      position: relative;
+      color: var(--pf-color-accent);
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      background: currentColor;
+      box-shadow: 0 0 12px rgba(200, 173, 127, 0.22);
+    }
+
+    .brand-mark::before {
+      width: 18px;
+      height: 2px;
+      top: 8px;
+      left: 0;
+    }
+
+    .brand-mark::after {
+      width: 2px;
+      height: 18px;
+      top: 0;
+      left: 8px;
+    }
+
+    .brand-text {
+      color: var(--pf-color-text-secondary);
+      font-size: 13px;
     }
 
     .menus {
       display: flex;
       align-items: center;
       height: 100%;
+      gap: 4px;
     }
 
     .spacer {
@@ -45,36 +97,59 @@ export class PFMenuBar extends BaseComponent {
     .project-name {
       display: flex;
       align-items: center;
-      margin-right: var(--pf-spacing-4);
+      justify-content: center;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      max-width: min(40vw, 360px);
+      text-align: center;
     }
 
     .project-name-display {
-      padding: 2px 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
       font-size: var(--pf-font-size-sm);
-      color: var(--pf-color-text-muted);
+      color: var(--pf-color-text-secondary);
       cursor: pointer;
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       border: 1px solid transparent;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .project-name-display:hover {
       color: var(--pf-color-text-main);
-      background-color: var(--pf-color-bg-surface);
+      background-color: var(--pf-color-bg-hover);
+      border-color: var(--pf-color-border);
+    }
+
+    .project-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--pf-color-text-muted);
+      flex: 0 0 auto;
     }
 
     .project-name-input {
-      padding: 2px 8px;
+      padding: 4px 10px;
       font-size: var(--pf-font-size-sm);
       color: var(--pf-color-text-main);
-      background-color: var(--pf-color-bg-dark);
+      background-color: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-primary);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       outline: none;
-      width: 150px;
+      width: 180px;
+      text-transform: uppercase;
     }
 
     .menu-btn {
-      padding: 0 var(--pf-spacing-2);
+      padding: 0 10px;
       cursor: pointer;
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-sm);
@@ -84,23 +159,27 @@ export class PFMenuBar extends BaseComponent {
       height: 100%;
       display: flex;
       align-items: center;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .menu-btn:hover,
     .menu-btn:focus-visible {
       color: var(--pf-color-text-main);
-      background-color: var(--pf-color-bg-surface);
+      background-color: var(--pf-color-bg-hover);
+      outline: none;
     }
 
     [popover] {
-      padding: var(--pf-spacing-1) 0;
-      background-color: var(--pf-color-bg-panel);
+      padding: 6px 0;
+      background-color: rgba(13, 16, 21, 0.98);
       border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       box-shadow: var(--pf-shadow-lg);
       color: var(--pf-color-text-main);
-      min-width: 150px;
+      min-width: 186px;
       margin: 0; /* Important for anchor positioning */
+      backdrop-filter: blur(14px);
     }
 
     [popover]::backdrop {
@@ -108,20 +187,30 @@ export class PFMenuBar extends BaseComponent {
     }
 
     .menu-item {
-      padding: var(--pf-spacing-1) var(--pf-spacing-3);
+      padding: 7px 12px;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
+      gap: 18px;
       font-size: var(--pf-font-size-sm);
+      color: var(--pf-color-text-secondary);
+      text-transform: none;
     }
 
     .menu-item:hover {
-      background-color: var(--pf-color-bg-surface);
+      background-color: var(--pf-color-primary-transparent);
+      color: var(--pf-color-text-main);
     }
 
     .shortcut {
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-xs);
+    }
+
+    .divider {
+      height: 1px;
+      margin: 6px 10px;
+      background: var(--pf-color-border);
     }
 
     /* Anchor Positioning */
@@ -166,7 +255,7 @@ export class PFMenuBar extends BaseComponent {
     super.connectedCallback();
     // Load initial state from localStorage
     const stored = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
-    this.shortcutsVisible = stored === null || stored === "true";
+    this.shortcutsVisible = stored === "true";
     // Listen for visibility changes from the overlay
     window.addEventListener(
       "shortcuts-visibility-changed",
@@ -307,6 +396,35 @@ export class PFMenuBar extends BaseComponent {
     const projectName = projectStore.name.value;
 
     return html`
+      <div class="brand" aria-label="Pixel Forge">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">Pixel Forge</span>
+      </div>
+
+      <div class="project-name">
+        ${this.isEditingName
+          ? html`
+              <input
+                class="project-name-input"
+                type="text"
+                .value=${projectName}
+                @blur=${this.commitNameEdit}
+                @keydown=${this.handleNameKeydown}
+              />
+            `
+          : html`
+              <span
+                class="project-name-display"
+                @click=${this.startEditingName}
+                title="Click to rename"
+              >
+                ${projectName}<span class="project-dot"></span>
+              </span>
+            `}
+      </div>
+
+      <div class="spacer"></div>
+
       <div class="menus">
         <button id="btn-file" class="menu-btn" popovertarget="menu-file">
           File
@@ -410,29 +528,6 @@ export class PFMenuBar extends BaseComponent {
         </div>
       </div>
 
-      <div class="spacer"></div>
-
-      <div class="project-name">
-        ${this.isEditingName
-          ? html`
-              <input
-                class="project-name-input"
-                type="text"
-                .value=${projectName}
-                @blur=${this.commitNameEdit}
-                @keydown=${this.handleNameKeydown}
-              />
-            `
-          : html`
-              <span
-                class="project-name-display"
-                @click=${this.startEditingName}
-                title="Click to rename"
-              >
-                ${projectName}
-              </span>
-            `}
-      </div>
     `;
   }
 }
