@@ -1,22 +1,29 @@
 :root {
-  /* Forge Palette - Backgrounds */
-  --pf-color-bg-dark: #0a0a0a;
-  --pf-color-bg-panel: #141414;
-  --pf-color-bg-surface: #1e1e1e;
-  --pf-color-bg-tertiary: #282828;
-  --pf-color-bg-charcoal: #2a2a2a;
+  /* Noir terminal palette */
+  --pf-color-bg-dark: #07090d;
+  --pf-color-bg-panel: rgba(14, 17, 22, 0.92);
+  --pf-color-bg-surface: rgba(23, 27, 34, 0.82);
+  --pf-color-bg-secondary: rgba(18, 22, 29, 0.88);
+  --pf-color-bg-tertiary: rgba(32, 37, 46, 0.86);
+  --pf-color-bg-charcoal: #1b2028;
+  --pf-color-bg-input: rgba(6, 8, 12, 0.72);
+  --pf-color-bg-hover: rgba(214, 220, 226, 0.08);
+  --pf-color-bg-tooltip: rgba(13, 16, 21, 0.98);
 
   /* Text */
-  --pf-color-text-main: #e0e0e0;
-  --pf-color-text-muted: #808080;
-  --pf-color-text-secondary: #a0a0a0;
+  --pf-color-text-main: #e8e5dd;
+  --pf-color-text-primary: var(--pf-color-text-main);
+  --pf-color-text-muted: #7f8793;
+  --pf-color-text-secondary: #a6adba;
+  --pf-color-text-faint: #505865;
+  --pf-color-text-disabled: #4b5360;
 
-  /* Forge Palette - Heat Colors (ember/forge theme) */
-  --pf-color-ember-rest: #f59e0b;       /* Amber - resting/dormant state */
-  --pf-color-ember-hover: #fbbf24;      /* Bright amber - heating up */
-  --pf-color-ember-active: #ea580c;     /* Deep orange - working temperature */
-  --pf-color-ember-hot: #f97316;        /* Coral-orange - highlights, sparks */
-  --pf-color-ember-white: #fef3c7;      /* Pale yellow - white-hot intensity */
+  /* Quiet brass accent */
+  --pf-color-ember-rest: #c8ad7f;
+  --pf-color-ember-hover: #f0d5a1;
+  --pf-color-ember-active: #927047;
+  --pf-color-ember-hot: #d8b26c;
+  --pf-color-ember-white: #fff1cc;
 
   /* Primary accent (mapped to ember) */
   --pf-color-accent: var(--pf-color-ember-rest);
@@ -24,25 +31,37 @@
   --pf-color-accent-active: var(--pf-color-ember-active);
 
   /* Borders & Grid */
-  --pf-color-border: #333333;
-  --pf-color-border-warm: rgba(245, 158, 11, 0.3);
-  --pf-color-grid: #2a2a2a;
+  --pf-color-border: rgba(180, 190, 202, 0.16);
+  --pf-color-border-subtle: rgba(180, 190, 202, 0.1);
+  --pf-color-border-strong: rgba(221, 226, 230, 0.28);
+  --pf-color-border-warm: rgba(200, 173, 127, 0.32);
+  --pf-color-grid: rgba(196, 207, 220, 0.08);
 
   /* Interactive states */
   --pf-color-primary: var(--pf-color-ember-rest);
   --pf-color-primary-hover: var(--pf-color-ember-hover);
   --pf-color-primary-active: var(--pf-color-ember-active);
-  --pf-color-primary-transparent: rgba(245, 158, 11, 0.15);
-  --pf-color-bg-hover: #252525;
-  --pf-color-bg-input: #1a1a1a;
-  --pf-color-bg-selected: rgba(234, 88, 12, 0.2);
+  --pf-color-primary-transparent: rgba(200, 173, 127, 0.14);
+  --pf-color-primary-muted: rgba(200, 173, 127, 0.18);
+  --pf-color-bg-selected: rgba(200, 173, 127, 0.16);
+  --pf-color-accent-cyan: #91b8c5;
+  --pf-color-accent-green: #9eb38f;
+  --pf-color-accent-yellow: #c8ad7f;
+  --pf-color-accent-red: #c47c72;
+  --pf-color-warning: #c8ad7f;
+
+  /* Scrollbars */
+  --pf-color-scrollbar-track: rgba(7, 9, 13, 0.9);
+  --pf-color-scrollbar-thumb: rgba(135, 146, 160, 0.26);
+  --pf-color-scrollbar-thumb-hover: rgba(176, 186, 198, 0.38);
 
   /* Border radius */
-  --pf-radius-sm: 4px;
-  --pf-radius-md: 6px;
+  --pf-radius-sm: 2px;
+  --pf-radius-md: 4px;
 
   /* Typography */
-  --pf-font-mono: "JetBrains Mono", "IBM Plex Mono", monospace;
+  --pf-font-mono: "SFMono-Regular", "Menlo", "Monaco", "Consolas", monospace;
+  --pf-font-serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
   --pf-font-size-xs: 10px;
   --pf-font-size-sm: 12px;
   --pf-font-size-md: 14px;
@@ -54,12 +73,18 @@
   --pf-spacing-3: 12px;
   --pf-spacing-4: 16px;
 
-  /* Effects - Forge Glow */
-  --pf-shadow-glow: 0 0 8px rgba(245, 158, 11, 0.3);
-  --pf-shadow-glow-hover: 0 0 12px rgba(251, 191, 36, 0.4);
-  --pf-shadow-glow-active: 0 0 10px rgba(234, 88, 12, 0.5);
-  --pf-shadow-glow-hot: 0 0 16px rgba(249, 115, 22, 0.6);
-  --pf-shadow-glow-white: 0 0 20px rgba(254, 243, 199, 0.8);
+  /* Effects */
+  --pf-shadow-lg: 0 18px 60px rgba(0, 0, 0, 0.48);
+  --pf-shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 18px 50px rgba(0, 0, 0, 0.34);
+  --pf-shadow-glow: 0 0 0 1px rgba(200, 173, 127, 0.22),
+    0 0 16px rgba(200, 173, 127, 0.14);
+  --pf-shadow-glow-hover: 0 0 0 1px rgba(240, 213, 161, 0.3),
+    0 0 18px rgba(240, 213, 161, 0.18);
+  --pf-shadow-glow-active: 0 0 0 1px rgba(146, 112, 71, 0.38),
+    0 0 18px rgba(146, 112, 71, 0.24);
+  --pf-shadow-glow-hot: 0 0 20px rgba(216, 178, 108, 0.32);
+  --pf-shadow-glow-white: 0 0 22px rgba(255, 241, 204, 0.38);
 
   /* Z-Index */
   --pf-z-canvas: 10;

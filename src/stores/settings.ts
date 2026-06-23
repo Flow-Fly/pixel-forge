@@ -9,9 +9,9 @@ import { signal } from "../core/signal";
 export const ACCENT_THEMES = {
   ember: {
     name: "Ember",
-    rest: "#f59e0b",
-    hover: "#fbbf24",
-    active: "#ea580c",
+    rest: "#c8ad7f",
+    hover: "#f0d5a1",
+    active: "#927047",
   },
   ocean: {
     name: "Ocean",
@@ -120,10 +120,11 @@ class SettingsStore {
     const restRgb = this.hexToRgb(colors.rest);
     const activeRgb = this.hexToRgb(colors.active);
     if (restRgb) {
-      root.style.setProperty("--pf-color-primary-transparent", `rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.15)`);
+      root.style.setProperty("--pf-color-primary-transparent", `rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.14)`);
+      root.style.setProperty("--pf-color-primary-muted", `rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.18)`);
       root.style.setProperty("--pf-color-border-warm", `rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.3)`);
-      root.style.setProperty("--pf-shadow-glow", `0 0 8px rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.3)`);
-      root.style.setProperty("--pf-shadow-glow-hover", `0 0 12px rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.4)`);
+      root.style.setProperty("--pf-shadow-glow", `0 0 0 1px rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.22), 0 0 16px rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.14)`);
+      root.style.setProperty("--pf-shadow-glow-hover", `0 0 0 1px rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.3), 0 0 18px rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.18)`);
     }
     if (activeRgb) {
       root.style.setProperty("--pf-color-bg-selected", `rgba(${activeRgb.r}, ${activeRgb.g}, ${activeRgb.b}, 0.2)`);

@@ -46,6 +46,8 @@ export class PFFormField extends BaseComponent {
       font-size: 10px;
       white-space: nowrap;
       user-select: none;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     /* Make label clickable for checkbox layout */

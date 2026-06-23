@@ -17,6 +17,7 @@ export class PFPaletteGrid extends BaseComponent {
       gap: 1px;
       background-color: var(--pf-color-border);
       border: 1px solid var(--pf-color-border);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
     }
 
     .swatch-container {
@@ -46,7 +47,7 @@ export class PFPaletteGrid extends BaseComponent {
       height: 14px;
       background: rgba(197, 48, 48, 0.9);
       border: 1px solid rgba(0, 0, 0, 0.3);
-      border-radius: 50%;
+      border-radius: var(--pf-radius-sm);
       color: white;
       font-size: 10px;
       line-height: 12px;
@@ -129,7 +130,7 @@ export class PFPaletteGrid extends BaseComponent {
     .palette-grid.replace-mode .swatch-container .swatch:hover {
       animation: none;
       transform: scale(1.15);
-      box-shadow: 0 0 8px rgba(74, 158, 255, 0.6);
+      box-shadow: var(--pf-shadow-glow-hover);
     }
 
     .palette-grid.replace-mode .swatch-delete {

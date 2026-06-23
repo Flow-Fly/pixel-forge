@@ -28,13 +28,13 @@ export class PFTimelineLayers extends BaseComponent {
       gap: 2px;
       padding: 4px;
       border-bottom: 1px solid var(--pf-color-border);
-      background: var(--pf-color-bg-surface);
+      background: rgba(255, 255, 255, 0.018);
     }
 
     .toolbar button {
-      background: var(--pf-color-bg-panel);
+      background: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-muted);
       font-size: 12px;
       width: 24px;
@@ -49,6 +49,7 @@ export class PFTimelineLayers extends BaseComponent {
     .toolbar button:hover {
       background: var(--pf-color-bg-hover);
       color: var(--pf-color-text-main);
+      border-color: var(--pf-color-border-strong);
     }
 
     .toolbar button:disabled {
@@ -70,6 +71,8 @@ export class PFTimelineLayers extends BaseComponent {
       color: var(--pf-color-text-muted);
       cursor: pointer;
       gap: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .layer-row:hover {
@@ -79,6 +82,7 @@ export class PFTimelineLayers extends BaseComponent {
     .layer-row.active {
       background-color: var(--pf-color-bg-selected, rgba(74, 158, 255, 0.2));
       color: var(--pf-color-text-main);
+      box-shadow: inset 2px 0 0 var(--pf-color-accent);
     }
 
     .layer-row.dragging {
@@ -136,7 +140,7 @@ export class PFTimelineLayers extends BaseComponent {
       text-overflow: ellipsis;
       white-space: nowrap;
       padding: 2px 4px;
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
     }
 
     .layer-name:hover {
@@ -155,7 +159,7 @@ export class PFTimelineLayers extends BaseComponent {
     .opacity-value {
       cursor: ew-resize;
       padding: 2px 4px;
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       min-width: 32px;
       text-align: right;
       user-select: none;
@@ -199,7 +203,7 @@ export class PFTimelineLayers extends BaseComponent {
       flex: 1;
       background: var(--pf-color-bg-surface);
       border: 1px solid var(--pf-color-accent);
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-main);
       font-size: 12px;
       padding: 2px 4px;

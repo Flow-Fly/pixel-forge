@@ -20,9 +20,9 @@ export class PFPaletteToolbar extends BaseComponent {
     .toolbar-btn {
       width: 28px;
       height: 28px;
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-input, #1e1e1e);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-muted, #808080);
       cursor: pointer;
       display: flex;
@@ -32,8 +32,9 @@ export class PFPaletteToolbar extends BaseComponent {
     }
 
     .toolbar-btn:hover {
-      background: var(--pf-color-bg-panel, #141414);
+      background: var(--pf-color-bg-hover, #141414);
       color: var(--pf-color-accent, #4a9eff);
+      border-color: var(--pf-color-border-strong);
     }
 
     .save-btn {
@@ -71,10 +72,12 @@ export class PFPaletteToolbar extends BaseComponent {
       color: var(--pf-color-text-main, #e0e0e0);
       cursor: pointer;
       transition: background 0.1s ease;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .menu-item:hover:not(.disabled) {
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-primary-transparent, #1e1e1e);
     }
 
     .menu-item.disabled {
@@ -105,9 +108,9 @@ export class PFPaletteToolbar extends BaseComponent {
       flex: 1;
       min-width: 0;
       padding: 4px 6px;
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-input, #1e1e1e);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-main, #e0e0e0);
       font-size: 11px;
       font-family: monospace;
@@ -123,10 +126,10 @@ export class PFPaletteToolbar extends BaseComponent {
     }
 
     .add-hex-btn {
-      background: var(--pf-color-accent, #4a9eff);
-      border: none;
-      border-radius: 3px;
-      color: white;
+      background: var(--pf-color-primary-transparent, #4a9eff);
+      border: 1px solid var(--pf-color-accent);
+      border-radius: var(--pf-radius-sm);
+      color: var(--pf-color-accent-hover);
       font-size: 10px;
       padding: 4px 8px;
       cursor: pointer;
@@ -147,7 +150,7 @@ export class PFPaletteToolbar extends BaseComponent {
       height: 28px;
       padding: 0;
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
       background: none;
     }

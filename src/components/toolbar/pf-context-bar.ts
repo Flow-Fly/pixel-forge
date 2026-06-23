@@ -27,23 +27,29 @@ export class PFContextBar extends BaseComponent {
     :host {
       display: flex;
       align-items: center;
-      height: 1.75rem;
-      padding: 0 var(--pf-spacing-2);
-      gap: var(--pf-spacing-2);
+      height: 100%;
+      padding: 0 18px;
+      gap: 12px;
       font-size: 12px;
-      background-color: var(--pf-color-bg-panel);
+      background:
+        linear-gradient(180deg, rgba(15, 18, 24, 0.86), rgba(10, 12, 17, 0.84));
       border-bottom: 1px solid var(--pf-color-border);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025) inset;
+      color: var(--pf-color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .tool-name {
-      font-weight: bold;
-      color: var(--pf-color-text-muted);
+      font-weight: 700;
+      color: var(--pf-color-text-main);
       white-space: nowrap;
+      min-width: 86px;
     }
 
     .separator {
       width: 1px;
-      height: 16px;
+      height: 20px;
       background-color: var(--pf-color-border);
       flex-shrink: 0;
     }
@@ -68,7 +74,9 @@ export class PFContextBar extends BaseComponent {
 
     .no-options {
       color: var(--pf-color-text-muted);
+      font-family: var(--pf-font-serif);
       font-style: italic;
+      text-transform: none;
       font-size: 11px;
     }
 
@@ -89,6 +97,7 @@ export class PFContextBar extends BaseComponent {
     .angle-control label {
       color: var(--pf-color-text-muted);
       font-size: 12px;
+      text-transform: uppercase;
     }
 
     .angle-control input[type="range"] {
@@ -97,7 +106,7 @@ export class PFContextBar extends BaseComponent {
       -webkit-appearance: none;
       appearance: none;
       background: var(--pf-color-bg-tertiary);
-      border-radius: 2px;
+      border-radius: var(--pf-radius-sm);
       cursor: pointer;
     }
 
@@ -107,7 +116,7 @@ export class PFContextBar extends BaseComponent {
       width: 12px;
       height: 12px;
       background: var(--pf-color-accent);
-      border-radius: 50%;
+      border-radius: 0;
       cursor: pointer;
     }
 
@@ -115,8 +124,8 @@ export class PFContextBar extends BaseComponent {
       width: 50px;
       padding: 2px 4px;
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
-      background: var(--pf-color-bg-tertiary);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-input);
       color: var(--pf-color-text-primary);
       font-size: 11px;
       text-align: right;
@@ -130,18 +139,19 @@ export class PFContextBar extends BaseComponent {
     .toggle-btn {
       padding: 4px 8px;
       border: 1px solid var(--pf-color-border);
-      background: var(--pf-color-bg-tertiary);
+      background: var(--pf-color-bg-input);
       color: var(--pf-color-text-secondary);
       font-size: 11px;
       cursor: pointer;
+      text-transform: uppercase;
     }
 
     .toggle-btn:first-child {
-      border-radius: 3px 0 0 3px;
+      border-radius: var(--pf-radius-sm) 0 0 var(--pf-radius-sm);
     }
 
     .toggle-btn:last-child {
-      border-radius: 0 3px 3px 0;
+      border-radius: 0 var(--pf-radius-sm) var(--pf-radius-sm) 0;
       border-left: none;
     }
 
@@ -163,6 +173,7 @@ export class PFContextBar extends BaseComponent {
     .cel-label {
       color: var(--pf-color-text-muted);
       font-size: 11px;
+      text-transform: uppercase;
     }
 
     .cel-opacity {
@@ -174,8 +185,8 @@ export class PFContextBar extends BaseComponent {
     .opacity-scrubber {
       cursor: ew-resize;
       padding: 2px 6px;
-      border-radius: 3px;
-      background: var(--pf-color-bg-tertiary);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-input);
       color: var(--pf-color-text-primary);
       font-size: 11px;
       min-width: 36px;

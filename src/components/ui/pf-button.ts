@@ -33,20 +33,25 @@ export class PFButton extends BaseComponent {
       align-items: center;
       justify-content: center;
       gap: 4px;
-      padding: 4px 10px;
+      padding: 6px 12px;
       font-size: 11px;
       font-family: inherit;
       border: 1px solid var(--pf-color-border);
-      border-radius: 3px;
-      background: var(--pf-color-bg-tertiary);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-input);
       color: var(--pf-color-text-primary);
       cursor: pointer;
       transition: all 0.1s ease;
       white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
     }
 
     button:hover:not(:disabled) {
       background: var(--pf-color-bg-hover);
+      border-color: var(--pf-color-border-strong);
+      color: var(--pf-color-text-main);
     }
 
     button:disabled {
@@ -62,13 +67,14 @@ export class PFButton extends BaseComponent {
 
     /* Primary variant */
     :host([variant="primary"]) button {
-      background: var(--pf-color-accent, #4a9eff);
+      background: var(--pf-color-primary-transparent);
       border-color: var(--pf-color-accent, #4a9eff);
-      color: white;
+      color: var(--pf-color-accent-hover);
+      box-shadow: var(--pf-shadow-glow);
     }
 
     :host([variant="primary"]) button:hover:not(:disabled) {
-      background: var(--pf-color-accent-hover, #3a8eef);
+      background: var(--pf-color-primary-muted);
       border-color: var(--pf-color-accent-hover, #3a8eef);
     }
 

@@ -20,19 +20,21 @@ export class PfPaletteSelector extends BaseComponent {
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 8px;
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      padding: 6px 9px;
+      background: var(--pf-color-bg-input, #1e1e1e);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-main, #e0e0e0);
       font-size: 11px;
       cursor: pointer;
       transition: all 0.15s ease;
       min-width: 80px;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
 
     .selector-trigger:hover {
-      background: var(--pf-color-bg-panel, #141414);
+      background: var(--pf-color-bg-hover, #141414);
       border-color: var(--pf-color-accent, #4a9eff);
     }
 
@@ -60,7 +62,7 @@ export class PfPaletteSelector extends BaseComponent {
     .search-input {
       width: 100%;
       padding: 8px 10px;
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-input, #1e1e1e);
       border: none;
       border-bottom: 1px solid var(--pf-color-border, #333);
       color: var(--pf-color-text-main, #e0e0e0);
@@ -74,7 +76,7 @@ export class PfPaletteSelector extends BaseComponent {
     }
 
     .search-input:focus {
-      background: var(--pf-color-bg-panel, #141414);
+      background: var(--pf-color-bg-hover, #141414);
     }
 
     .palette-list {
@@ -88,7 +90,7 @@ export class PfPaletteSelector extends BaseComponent {
       font-size: 9px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
       color: var(--pf-color-text-muted, #808080);
     }
 
@@ -100,11 +102,11 @@ export class PfPaletteSelector extends BaseComponent {
     }
 
     .palette-item:hover {
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-hover, #1e1e1e);
     }
 
     .palette-item.selected {
-      background: rgba(74, 158, 255, 0.15);
+      background: var(--pf-color-primary-transparent);
     }
 
     .palette-header {
@@ -135,9 +137,9 @@ export class PfPaletteSelector extends BaseComponent {
       right: 8px;
       top: 50%;
       transform: translateY(-50%);
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-input, #1e1e1e);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 3px;
+      border-radius: var(--pf-radius-sm);
       color: var(--pf-color-text-muted, #808080);
       font-size: 10px;
       padding: 2px 6px;
@@ -186,7 +188,7 @@ export class PfPaletteSelector extends BaseComponent {
     }
 
     .action-item:hover {
-      background: var(--pf-color-bg-surface, #1e1e1e);
+      background: var(--pf-color-bg-hover, #1e1e1e);
       color: var(--pf-color-text-main, #e0e0e0);
     }
 

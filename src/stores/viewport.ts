@@ -1,5 +1,5 @@
-import { signal } from '../core/signal';
-import { projectStore } from './project';
+import { signal } from "../core/signal";
+import { projectStore } from "./project";
 
 // Preset zoom levels used by keyboard shortcuts, menus, and stepped zoom actions.
 export const ZOOM_LEVELS = [1, 2, 4, 8, 16, 32] as const;
@@ -44,11 +44,20 @@ class ViewportStore {
     this.clampPanToBounds();
   }
 
+  formattedZoom(): number {
+    const zoomPercent = this.zoomPercent;
+    if (zoomPercent >= 100) {
+      return Math.round(zoomPercent);
+    }
+    return parseFloat(zoomPercent.toFixed(2));
+  }
+
   /**
    * Zoom in one preset level.
    */
   zoomIn(): void {
-    const next = ZOOM_LEVELS.find((level) => level > this.zoom.value) ?? this.MAX_ZOOM;
+    const next =
+      ZOOM_LEVELS.find((level) => level > this.zoom.value) ?? this.MAX_ZOOM;
     this.setZoom(next);
   }
 
@@ -56,7 +65,9 @@ class ViewportStore {
    * Zoom out one preset level.
    */
   zoomOut(): void {
-    const previous = [...ZOOM_LEVELS].reverse().find((level) => level < this.zoom.value) ?? this.MIN_ZOOM;
+    const previous =
+      [...ZOOM_LEVELS].reverse().find((level) => level < this.zoom.value) ??
+      this.MIN_ZOOM;
     this.setZoom(previous);
   }
 
@@ -64,7 +75,8 @@ class ViewportStore {
    * Zoom in one preset level at a specific screen position.
    */
   zoomInAt(screenX: number, screenY: number): void {
-    const next = ZOOM_LEVELS.find((level) => level > this.zoom.value) ?? this.MAX_ZOOM;
+    const next =
+      ZOOM_LEVELS.find((level) => level > this.zoom.value) ?? this.MAX_ZOOM;
     this.zoomAt(next, screenX, screenY);
   }
 
@@ -72,7 +84,9 @@ class ViewportStore {
    * Zoom out one preset level at a specific screen position.
    */
   zoomOutAt(screenX: number, screenY: number): void {
-    const previous = [...ZOOM_LEVELS].reverse().find((level) => level < this.zoom.value) ?? this.MIN_ZOOM;
+    const previous =
+      [...ZOOM_LEVELS].reverse().find((level) => level < this.zoom.value) ??
+      this.MIN_ZOOM;
     this.zoomAt(previous, screenX, screenY);
   }
 
@@ -136,11 +150,19 @@ class ViewportStore {
     const canvasWidth = projectStore.width.value;
     const canvasHeight = projectStore.height.value;
 
-    if (canvasWidth <= 0 || canvasHeight <= 0 || containerWidth <= 0 || containerHeight <= 0) {
+    if (
+      canvasWidth <= 0 ||
+      canvasHeight <= 0 ||
+      containerWidth <= 0 ||
+      containerHeight <= 0
+    ) {
       return;
     }
 
-    const fitZoom = Math.min(containerWidth / canvasWidth, containerHeight / canvasHeight);
+    const fitZoom = Math.min(
+      containerWidth / canvasWidth,
+      containerHeight / canvasHeight,
+    );
     const bestZoom = this.clampZoom(fitZoom);
 
     this.zoom.value = bestZoom;
@@ -240,6 +262,7 @@ class ViewportStore {
 
   /**
    * Clamp pan to valid bounds (rubber band snap-back).
+   ** I discovered that this does not work when panning with two fingers on a trackpad.
    */
   clampPanToBounds(): void {
     const { minX, maxX, minY, maxY } = this.getPanBounds();

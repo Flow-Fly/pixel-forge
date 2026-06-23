@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { viewportStore } from '../../src/stores/viewport';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { viewportStore } from "../../src/stores/viewport";
 
 const projectStoreMock = vi.hoisted(() => {
   const store = {
@@ -13,11 +13,11 @@ const projectStoreMock = vi.hoisted(() => {
   return store;
 });
 
-vi.mock('../../src/stores/project', () => ({
+vi.mock("../../src/stores/project", () => ({
   projectStore: projectStoreMock,
 }));
 
-describe('viewportStore zoom behavior', () => {
+describe("viewportStore zoom behavior", () => {
   beforeEach(() => {
     projectStoreMock.setSize(100, 50);
     viewportStore.containerWidth.value = 500;
@@ -29,7 +29,17 @@ describe('viewportStore zoom behavior', () => {
     viewportStore.cursorScreenY.value = null;
   });
 
-  it('supports continuous zoom while keeping the focal point stable', () => {
+  it("format zoom as whole percentage for values above 100% and fractional percentage for values below 100%", () => {
+    viewportStore.zoom.value = 1.001; // 100,1%
+    expect(viewportStore.formattedZoom()).toBe(100);
+    viewportStore.zoom.value = 1.006; // 100,6%
+    expect(viewportStore.formattedZoom()).toBe(101);
+    viewportStore.zoom.value = 0.7575; // 75,75%
+    expect(viewportStore.formattedZoom()).toBe(75.75);
+    viewportStore.zoom.value = 1;
+  });
+
+  it("supports continuous zoom while keeping the focal point stable", () => {
     viewportStore.panX.value = 10;
     viewportStore.panY.value = 20;
 
@@ -42,7 +52,7 @@ describe('viewportStore zoom behavior', () => {
     expect(viewportStore.screenToCanvas(110, 70).y).toBeCloseTo(focalBefore.y);
   });
 
-  it('clamps zoom to the supported range', () => {
+  it("clamps zoom to the supported range", () => {
     viewportStore.zoomAt(0.01, 100, 100);
     expect(viewportStore.zoom.value).toBe(0.125);
 
@@ -50,7 +60,7 @@ describe('viewportStore zoom behavior', () => {
     expect(viewportStore.zoom.value).toBe(64);
   });
 
-  it('fits the canvas using the actual available scale', () => {
+  it("fits the canvas using the actual available scale", () => {
     viewportStore.zoomToFit(500, 250);
 
     expect(viewportStore.zoom.value).toBe(5);

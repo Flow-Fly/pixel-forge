@@ -32,7 +32,7 @@ export class PFPanel extends BaseComponent {
 
     /* Header */
     .header {
-      padding: 8px 12px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--pf-color-border, #333);
       display: flex;
       justify-content: space-between;
@@ -40,9 +40,10 @@ export class PFPanel extends BaseComponent {
       font-size: 11px;
       font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
       color: var(--pf-color-text-muted, #808080);
-      background-color: var(--pf-color-bg-surface, #1e1e1e);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
       user-select: none;
     }
 
@@ -53,6 +54,7 @@ export class PFPanel extends BaseComponent {
 
     :host([collapsible]) .header:hover {
       background-color: var(--pf-color-bg-hover, #2a2a2a);
+      color: var(--pf-color-text-secondary);
     }
 
     .header-left {
@@ -71,6 +73,7 @@ export class PFPanel extends BaseComponent {
       font-size: 10px;
       transition: transform 0.2s ease;
       color: var(--pf-color-text-muted, #808080);
+      opacity: 0.8;
     }
 
     :host([collapsed]) .chevron {
@@ -91,7 +94,7 @@ export class PFPanel extends BaseComponent {
     }
 
     .content-inner {
-      padding: var(--pf-panel-content-padding, 8px);
+      padding: var(--pf-panel-content-padding, 12px);
     }
 
     :host([no-padding]) .content-inner {

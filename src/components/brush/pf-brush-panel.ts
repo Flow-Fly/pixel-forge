@@ -24,31 +24,35 @@ export class PFBrushPanel extends BaseComponent {
 
     .brush-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
-      gap: 4px;
+      grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+      gap: 8px;
       overflow-y: auto;
       flex: 1;
     }
 
     .brush-item {
-      width: 48px;
-      height: 48px;
+      width: 56px;
+      height: 56px;
       border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
+      border-radius: var(--pf-radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      background-color: var(--pf-color-bg-hover);
+      background-color: var(--pf-color-bg-input);
       position: relative;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
+      justify-self: center;
     }
 
     .brush-item:hover {
-      background-color: gray;
+      background-color: var(--pf-color-bg-hover);
+      border-color: var(--pf-color-border-strong);
     }
 
     .brush-item.active {
       border-color: var(--pf-color-primary);
+      box-shadow: var(--pf-shadow-glow);
     }
 
     .brush-item.custom::after {
@@ -73,6 +77,8 @@ export class PFBrushPanel extends BaseComponent {
       padding: 16px 8px;
       color: var(--pf-color-text-muted);
       font-size: 11px;
+      font-family: var(--pf-font-serif);
+      font-style: italic;
     }
 
     .actions {
@@ -90,6 +96,7 @@ export class PFBrushPanel extends BaseComponent {
       border-top: 1px solid var(--pf-color-border);
       font-size: 11px;
       color: var(--pf-color-text-primary);
+      text-transform: uppercase;
     }
 
     .brush-options label {

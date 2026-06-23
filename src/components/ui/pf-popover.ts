@@ -25,13 +25,14 @@ export class PFPopover extends BaseComponent {
     }
 
     .popover {
-      background-color: var(--pf-color-bg-panel, #141414);
+      background-color: rgba(13, 16, 21, 0.98);
       border: 1px solid var(--pf-color-border, #333);
-      border-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      border-radius: var(--pf-radius-sm);
+      box-shadow: var(--pf-shadow-lg);
       min-width: 150px;
       max-width: 280px;
       overflow: hidden;
+      backdrop-filter: blur(14px);
     }
 
     .popover-content {
@@ -42,7 +43,7 @@ export class PFPopover extends BaseComponent {
       position: absolute;
       width: 8px;
       height: 8px;
-      background-color: var(--pf-color-bg-panel, #141414);
+      background-color: rgba(13, 16, 21, 0.98);
       border: 1px solid var(--pf-color-border, #333);
       transform: rotate(45deg);
     }

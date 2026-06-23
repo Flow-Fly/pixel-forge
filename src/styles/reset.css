@@ -14,10 +14,13 @@ body {
   color: var(--pf-color-text-main);
   font-family: var(--pf-font-mono);
   font-size: var(--pf-font-size-md);
+  letter-spacing: 0;
   overflow: hidden; /* App-like feel */
   width: 100vw;
   height: 100vh;
-  -webkit-font-smoothing: none; /* Pixel-crisp fonts */
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button {
@@ -32,6 +35,11 @@ canvas {
   image-rendering: pixelated; /* Critical for pixel art */
 }
 
+::selection {
+  background: var(--pf-color-primary-transparent);
+  color: var(--pf-color-text-main);
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
@@ -39,14 +47,14 @@ canvas {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--pf-color-bg-dark);
+  background: var(--pf-color-scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--pf-color-border);
-  border: 1px solid var(--pf-color-bg-dark);
+  background: var(--pf-color-scrollbar-thumb);
+  border: 1px solid var(--pf-color-scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--pf-color-text-muted);
+  background: var(--pf-color-scrollbar-thumb-hover);
 }

@@ -180,10 +180,10 @@ export class PFTagPreview extends BaseComponent {
           top: ${this.computedY}px;
           z-index: 10000;
           pointer-events: none;
-          background: var(--pf-color-bg-panel, #1e1e1e);
+          background: rgba(13, 16, 21, 0.96);
           border: 1px solid var(--pf-color-border, #3e3e3e);
-          border-radius: 4px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+          border-radius: var(--pf-radius-sm);
+          box-shadow: var(--pf-shadow-lg);
           padding: 8px;
           display: flex;
           flex-direction: column;
@@ -200,13 +200,13 @@ export class PFTagPreview extends BaseComponent {
             image-rendering: pixelated;
             width: ${displayW}px;
             height: ${displayH}px;
-            background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
-              linear-gradient(-45deg, #404040 25%, transparent 25%),
-              linear-gradient(45deg, transparent 75%, #404040 75%),
-              linear-gradient(-45deg, transparent 75%, #404040 75%);
+            background-image: linear-gradient(45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
+              linear-gradient(-45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
+              linear-gradient(45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%),
+              linear-gradient(-45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%);
             background-size: 8px 8px;
             background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
-            background-color: #606060;
+            background-color: #151a21;
           "
         ></canvas>
         <span

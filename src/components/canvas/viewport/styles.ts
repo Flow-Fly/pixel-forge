@@ -10,7 +10,11 @@ export const viewportStyles = css`
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background-color: #1a1a1a;
+    background:
+      radial-gradient(circle, rgba(226, 232, 240, 0.14) 0 1px, transparent 1.2px) 19px 23px / 149px 113px,
+      linear-gradient(rgba(220, 228, 236, 0.026) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(90deg, rgba(220, 228, 236, 0.026) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(180deg, rgba(15, 19, 26, 0.62), rgba(7, 9, 13, 0.74));
     position: relative;
     /* Prevent browser back/forward gesture on two-finger horizontal swipe */
     overscroll-behavior: none;
@@ -28,13 +32,14 @@ export const viewportStyles = css`
 
   /* Checkerboard pattern to indicate transparency */
   ::slotted(pf-drawing-canvas) {
-    background-image: linear-gradient(45deg, #404040 25%, transparent 25%),
-      linear-gradient(-45deg, #404040 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #404040 75%),
-      linear-gradient(-45deg, transparent 75%, #404040 75%);
+    background-image: linear-gradient(45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
+      linear-gradient(-45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%),
+      linear-gradient(-45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%);
     background-size: 16px 16px;
     background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-    background-color: #2a2a2a;
+    background-color: #151a21;
+    box-shadow: 0 0 0 1px var(--pf-color-border), 0 22px 70px rgba(0, 0, 0, 0.42);
   }
 
   /* Show grab cursor when spacebar is down */
@@ -79,7 +84,7 @@ export const viewportStyles = css`
     left: 0;
     width: 24px;
     height: 24px;
-    background: var(--color-bg-secondary, #252525);
+    background: var(--pf-color-bg-secondary, #252525);
     z-index: 101;
   }
 `;

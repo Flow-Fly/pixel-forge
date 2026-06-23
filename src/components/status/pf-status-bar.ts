@@ -20,36 +20,47 @@ export class PFStatusBar extends BaseComponent {
     .right {
       display: flex;
       gap: var(--pf-spacing-4);
+      align-items: center;
     }
 
     .center {
       color: var(--pf-color-text-muted);
+      font-family: var(--pf-font-serif);
+      font-style: italic;
+      font-size: 11px;
+      opacity: 0.82;
     }
 
     .saved-indicator {
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-xs);
     }
+
+    .left,
+    .right {
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
   `;
 
   @property({ type: Object }) cursor = { x: 0, y: 0 };
 
   private formatLastSaved(timestamp: number | null): string {
-    if (!timestamp) return '';
+    if (!timestamp) return "";
 
     const now = Date.now();
     const diff = now - timestamp;
 
-    if (diff < 5000) return 'Saved just now';
+    if (diff < 5000) return "Saved just now";
     if (diff < 60000) return `Saved ${Math.floor(diff / 1000)}s ago`;
     if (diff < 3600000) return `Saved ${Math.floor(diff / 60000)}m ago`;
 
     const date = new Date(timestamp);
-    return `Saved at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return `Saved at ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   }
 
   render() {
-    const zoomPercent = viewportStore.zoomPercent;
+    const zoomPercent = viewportStore.formattedZoom();
     const lastSaved = projectStore.lastSaved.value;
 
     return html`
@@ -57,7 +68,11 @@ export class PFStatusBar extends BaseComponent {
         <span>${this.cursor.x + 1}, ${this.cursor.y + 1}</span>
       </div>
       <div class="center">
-        ${lastSaved ? html`<span class="saved-indicator">${this.formatLastSaved(lastSaved)}</span>` : ''}
+        ${lastSaved
+          ? html`<span class="saved-indicator"
+              >${this.formatLastSaved(lastSaved)}</span
+            >`
+          : html`<span>make small light.</span>`}
       </div>
       <div class="right">
         <span>${zoomPercent}%</span>

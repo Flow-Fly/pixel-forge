@@ -44,9 +44,11 @@ export class PFTimelineHeader extends BaseComponent {
       display: flex;
       align-items: flex-end;
       height: 48px;
-      background-color: var(--pf-color-bg-surface);
+      background-color: rgba(255, 255, 255, 0.018);
       border-bottom: 1px solid var(--pf-color-border);
       position: relative;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
   `;
 

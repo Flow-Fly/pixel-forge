@@ -129,7 +129,7 @@ export class PfKeyboardShortcutsDialog extends BaseComponent {
     .group-title {
       font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
       color: var(--pf-color-text-muted, #888);
       margin-bottom: 8px;
       font-weight: 600;

@@ -17,7 +17,7 @@ export class PFToolOptionsPopover extends BaseComponent {
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
       color: var(--pf-color-text-muted, #808080);
       margin-bottom: 8px;
       padding-bottom: 8px;
