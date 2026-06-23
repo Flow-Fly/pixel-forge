@@ -10,20 +10,24 @@ import {
 
 /**
  * Popover menu showing all tools in a group
- * Appears on right-click of a tool button
+ * Appears when a grouped tool button opens its alternatives
  */
 @customElement("pf-tool-group-menu")
 export class PFToolGroupMenu extends BaseComponent {
   static styles = css`
     :host {
       position: fixed;
-      z-index: 1000;
+      z-index: 10000;
+      box-sizing: border-box;
       background: var(--pf-color-bg-panel);
       border: 1px solid var(--pf-color-border);
       border-radius: 4px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       padding: 4px;
       min-width: 120px;
+      max-width: calc(100vw - 16px);
+      max-height: calc(100vh - 16px);
+      overflow-y: auto;
     }
 
     .menu-item {
@@ -43,6 +47,11 @@ export class PFToolGroupMenu extends BaseComponent {
 
     .menu-item:hover {
       background: var(--pf-color-bg-surface);
+    }
+
+    .menu-item:focus-visible {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: -2px;
     }
 
     .menu-item.active {
@@ -91,10 +100,42 @@ export class PFToolGroupMenu extends BaseComponent {
   }
 
   updated(changedProperties: Map<string, unknown>) {
-    if (changedProperties.has("x") || changedProperties.has("y")) {
-      this.style.left = `${this.x}px`;
-      this.style.top = `${this.y}px`;
+    if (
+      changedProperties.has("x") ||
+      changedProperties.has("y") ||
+      changedProperties.has("tools")
+    ) {
+      this.placeMenu();
     }
+  }
+
+  private placeMenu() {
+    this.style.left = `${this.x}px`;
+    this.style.top = `${this.y}px`;
+
+    requestAnimationFrame(() => this.clampToViewport());
+  }
+
+  private clampToViewport() {
+    const margin = 8;
+    const rect = this.getBoundingClientRect();
+
+    let left = this.x;
+    let top = this.y;
+
+    if (rect.right > window.innerWidth - margin) {
+      left = window.innerWidth - rect.width - margin;
+    }
+
+    if (rect.bottom > window.innerHeight - margin) {
+      top = window.innerHeight - rect.height - margin;
+    }
+
+    left = Math.max(margin, left);
+    top = Math.max(margin, top);
+
+    this.style.left = `${left}px`;
+    this.style.top = `${top}px`;
   }
 
   render() {
