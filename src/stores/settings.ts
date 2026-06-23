@@ -48,26 +48,59 @@ export const ACCENT_THEMES = {
 export type AccentTheme = keyof typeof ACCENT_THEMES;
 
 const STORAGE_KEY = "pf-settings";
+export const CHECKER_TILE_SIZE_MIN = 2;
+export const CHECKER_TILE_SIZE_MAX = 64;
+export const DEFAULT_CHECKER_SETTINGS = {
+  lightColor: "#2a3340",
+  darkColor: "#151a21",
+  tileSize: 8,
+} as const;
 
-interface SettingsData {
-  accentTheme: AccentTheme;
+export interface CheckerSettings {
+  lightColor: string;
+  darkColor: string;
+  tileSize: number;
+}
+
+interface SavedSettingsData {
+  accentTheme?: AccentTheme;
+  checkerLightColor?: string;
+  checkerDarkColor?: string;
+  checkerTileSize?: number;
 }
 
 class SettingsStore {
   accentTheme = signal<AccentTheme>("ember");
+  checkerLightColor = signal<string>(DEFAULT_CHECKER_SETTINGS.lightColor);
+  checkerDarkColor = signal<string>(DEFAULT_CHECKER_SETTINGS.darkColor);
+  checkerTileSize = signal<number>(DEFAULT_CHECKER_SETTINGS.tileSize);
 
   constructor() {
     this.load();
     this.applyAccentTheme(this.accentTheme.value);
+    this.applyCheckerSettings();
   }
 
   private load() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const data = JSON.parse(saved) as SettingsData;
+        const data = JSON.parse(saved) as SavedSettingsData | null;
+        if (!data || typeof data !== "object") {
+          return;
+        }
+
         if (data.accentTheme && ACCENT_THEMES[data.accentTheme]) {
           this.accentTheme.value = data.accentTheme;
+        }
+        if (this.isHexColor(data.checkerLightColor)) {
+          this.checkerLightColor.value = data.checkerLightColor.toLowerCase();
+        }
+        if (this.isHexColor(data.checkerDarkColor)) {
+          this.checkerDarkColor.value = data.checkerDarkColor.toLowerCase();
+        }
+        if (this.isCheckerTileSize(data.checkerTileSize)) {
+          this.checkerTileSize.value = data.checkerTileSize;
         }
       }
     } catch (e) {
@@ -77,8 +110,11 @@ class SettingsStore {
 
   private save() {
     try {
-      const data: SettingsData = {
+      const data: SavedSettingsData = {
         accentTheme: this.accentTheme.value,
+        checkerLightColor: this.checkerLightColor.value,
+        checkerDarkColor: this.checkerDarkColor.value,
+        checkerTileSize: this.checkerTileSize.value,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
@@ -92,6 +128,30 @@ class SettingsStore {
       this.applyAccentTheme(theme);
       this.save();
     }
+  }
+
+  setCheckerSettings(settings: CheckerSettings) {
+    if (
+      !this.isHexColor(settings.lightColor) ||
+      !this.isHexColor(settings.darkColor) ||
+      !this.isCheckerTileSize(settings.tileSize)
+    ) {
+      return;
+    }
+
+    this.checkerLightColor.value = settings.lightColor.toLowerCase();
+    this.checkerDarkColor.value = settings.darkColor.toLowerCase();
+    this.checkerTileSize.value = settings.tileSize;
+    this.applyCheckerSettings();
+    this.save();
+  }
+
+  private applyCheckerSettings() {
+    const root = document.documentElement;
+
+    root.style.setProperty("--pf-checker-light-color", this.checkerLightColor.value);
+    root.style.setProperty("--pf-checker-dark-color", this.checkerDarkColor.value);
+    root.style.setProperty("--pf-checker-tile-size", `${this.checkerTileSize.value}px`);
   }
 
   /**
@@ -141,6 +201,19 @@ class SettingsStore {
           b: parseInt(result[3], 16),
         }
       : null;
+  }
+
+  private isHexColor(value: unknown): value is string {
+    return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+  }
+
+  private isCheckerTileSize(value: unknown): value is number {
+    return (
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      value >= CHECKER_TILE_SIZE_MIN &&
+      value <= CHECKER_TILE_SIZE_MAX
+    );
   }
 }
 
