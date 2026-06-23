@@ -1,11 +1,12 @@
 import { html, css } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { toolStore, type ToolType } from "../../stores/tools";
 import { setLastSelectedTool } from "../../stores/tool-groups";
 import { getToolMeta, getToolIcon } from "../../tools/tool-registry";
 import "./pf-tool-options-popover";
 import "./pf-tool-group-menu";
+import type { PFToolGroupMenu } from "./pf-tool-group-menu";
 
 @customElement("pf-tool-button")
 export class PFToolButton extends BaseComponent {
@@ -91,25 +92,45 @@ export class PFToolButton extends BaseComponent {
   @property({ type: Boolean, reflect: true }) active = false;
   @property({ type: Array }) groupTools: ToolType[] = [];
   @property({ type: String }) groupId = "";
-  @property({ type: Boolean, reflect: true, attribute: "has-group" }) hasGroup =
-    false;
 
-  @state() private showGroupMenu = false;
-  @state() private menuX = 0;
-  @state() private menuY = 0;
-  // @state() private anchorRect?: DOMRect;
+  private showGroupMenu = false;
+  private menuElement: PFToolGroupMenu | null = null;
 
-  private documentClickHandler = (e: MouseEvent) => {
-    if (this.showGroupMenu && !this.contains(e.target as Node)) {
-      this.showGroupMenu = false;
-      document.removeEventListener("click", this.documentClickHandler);
+  private documentMouseDownHandler = (e: MouseEvent) => {
+    const target = e.target as Node | null;
+    if (!target) return;
+
+    if (
+      this.showGroupMenu &&
+      !this.contains(target) &&
+      !this.menuElement?.contains(target)
+    ) {
+      this.closeGroupMenu();
     }
+  };
+
+  private documentKeyDownHandler = (e: KeyboardEvent) => {
+    if (this.showGroupMenu && e.key === "Escape") {
+      this.closeGroupMenu();
+    }
+  };
+
+  private menuToolSelectedHandler = (e: Event) => {
+    this.handleToolSelected(e as CustomEvent<{ tool: ToolType }>);
   };
 
   updated(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("groupTools")) {
-      this.hasGroup = this.groupTools.length > 1;
+      if (this.hasGroup) {
+        this.updateOpenMenu();
+      } else {
+        this.closeGroupMenu();
+      }
     }
+  }
+
+  private get hasGroup() {
+    return this.groupTools.length > 1;
   }
 
   render() {
@@ -122,39 +143,58 @@ export class PFToolButton extends BaseComponent {
           title="${toolName} (${this.shortcut})${this.hasGroup
             ? " - Click for more tools"
             : ""}"
-          @click=${this.handleContextMenu}
+          @click=${this.handleButtonClick}
         >
           <img class="icon" src="${getToolIcon(this.tool)}" alt="${toolName}" />
         </button>
         ${this.hasGroup ? html`<div class="group-indicator"></div>` : ""}
       </div>
-
-      ${this.hasGroup && this.showGroupMenu
-        ? html`
-            <pf-tool-group-menu
-              .tools=${this.groupTools}
-              .x=${this.menuX}
-              .y=${this.menuY}
-              @tool-selected=${this.handleToolSelected}
-            ></pf-tool-group-menu>
-          `
-        : ""}
     `;
   }
 
-  private handleContextMenu(e: MouseEvent) {
+  private handleButtonClick(e: MouseEvent) {
+    if (!this.hasGroup) return;
+
     e.preventDefault();
 
-    // Show group menu for tool groups
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    this.menuX = rect.right + 4;
-    this.menuY = rect.top;
-    this.showGroupMenu = true;
+    this.openGroupMenu(rect);
+  }
 
-    // Close on outside click
-    setTimeout(() => {
-      document.addEventListener("click", this.documentClickHandler);
-    }, 0);
+  private openGroupMenu(anchorRect: DOMRect) {
+    this.closeGroupMenu();
+
+    const menu = document.createElement("pf-tool-group-menu") as PFToolGroupMenu;
+    menu.tools = this.groupTools;
+    menu.x = anchorRect.right + 4;
+    menu.y = anchorRect.top;
+    menu.addEventListener("tool-selected", this.menuToolSelectedHandler);
+
+    document.body.append(menu);
+    this.menuElement = menu;
+    this.showGroupMenu = true;
+    document.addEventListener("mousedown", this.documentMouseDownHandler);
+    document.addEventListener("keydown", this.documentKeyDownHandler);
+  }
+
+  private updateOpenMenu() {
+    if (!this.menuElement) return;
+    this.menuElement.tools = this.groupTools;
+  }
+
+  private closeGroupMenu() {
+    if (this.menuElement) {
+      this.menuElement.removeEventListener(
+        "tool-selected",
+        this.menuToolSelectedHandler
+      );
+      this.menuElement.remove();
+      this.menuElement = null;
+    }
+
+    this.showGroupMenu = false;
+    document.removeEventListener("mousedown", this.documentMouseDownHandler);
+    document.removeEventListener("keydown", this.documentKeyDownHandler);
   }
 
   private handleToolSelected(e: CustomEvent<{ tool: ToolType }>) {
@@ -168,9 +208,7 @@ export class PFToolButton extends BaseComponent {
     // Select the tool
     toolStore.setActiveTool(tool);
 
-    // Close menu
-    this.showGroupMenu = false;
-    document.removeEventListener("click", this.documentClickHandler);
+    this.closeGroupMenu();
 
     // Dispatch event for parent to update displayed tool
     this.dispatchEvent(
@@ -184,6 +222,6 @@ export class PFToolButton extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener("click", this.documentClickHandler);
+    this.closeGroupMenu();
   }
 }
