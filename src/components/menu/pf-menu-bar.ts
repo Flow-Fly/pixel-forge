@@ -18,11 +18,19 @@ import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 
 const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
+const MENU_IDS = ["file", "edit", "view", "image"] as const;
+const MENU_MARGIN = 8;
+const MENU_GAP = 4;
+const FALLBACK_MENU_WIDTH = 186;
+const FALLBACK_MENU_HEIGHT = 240;
+
+type MenuId = (typeof MENU_IDS)[number];
 
 @customElement("pf-menu-bar")
 export class PFMenuBar extends BaseComponent {
   @state() private shortcutsVisible = false;
   @state() private isEditingName = false;
+  @state() private activeMenu: MenuId | null = null;
 
   static styles = css`
     :host {
@@ -171,6 +179,9 @@ export class PFMenuBar extends BaseComponent {
     }
 
     [popover] {
+      display: none;
+      position: fixed;
+      inset: auto;
       padding: 6px 0;
       background-color: rgba(13, 16, 21, 0.98);
       border: 1px solid var(--pf-color-border);
@@ -179,7 +190,13 @@ export class PFMenuBar extends BaseComponent {
       color: var(--pf-color-text-main);
       min-width: 186px;
       margin: 0; /* Important for anchor positioning */
+      overflow-y: auto;
       backdrop-filter: blur(14px);
+    }
+
+    [popover]:popover-open,
+    [popover][data-open="true"] {
+      display: block;
     }
 
     [popover]::backdrop {
@@ -213,41 +230,9 @@ export class PFMenuBar extends BaseComponent {
       background: var(--pf-color-border);
     }
 
-    /* Anchor Positioning */
-    #menu-file {
-      position-anchor: --btn-file;
-      top: anchor(bottom);
-      left: anchor(left);
-    }
-    #btn-file {
-      anchor-name: --btn-file;
-    }
-
-    #menu-edit {
-      position-anchor: --btn-edit;
-      top: anchor(bottom);
-      left: anchor(left);
-    }
-    #btn-edit {
-      anchor-name: --btn-edit;
-    }
-
-    #menu-view {
-      position-anchor: --btn-view;
-      top: anchor(bottom);
-      left: anchor(left);
-    }
-    #btn-view {
-      anchor-name: --btn-view;
-    }
-
-    #menu-image {
-      position-anchor: --btn-image;
-      top: anchor(bottom);
-      left: anchor(left);
-    }
-    #btn-image {
-      anchor-name: --btn-image;
+    .menu-btn[aria-expanded="true"] {
+      color: var(--pf-color-text-main);
+      background-color: var(--pf-color-bg-hover);
     }
   `;
 
@@ -261,6 +246,9 @@ export class PFMenuBar extends BaseComponent {
       "shortcuts-visibility-changed",
       this.handleShortcutsVisibilityChanged
     );
+    document.addEventListener("pointerdown", this.handleDocumentPointerDown);
+    document.addEventListener("keydown", this.handleDocumentKeyDown);
+    window.addEventListener("resize", this.positionActiveMenu);
   }
 
   disconnectedCallback() {
@@ -269,12 +257,162 @@ export class PFMenuBar extends BaseComponent {
       "shortcuts-visibility-changed",
       this.handleShortcutsVisibilityChanged
     );
+    document.removeEventListener("pointerdown", this.handleDocumentPointerDown);
+    document.removeEventListener("keydown", this.handleDocumentKeyDown);
+    window.removeEventListener("resize", this.positionActiveMenu);
+    this.closeActiveMenu();
   }
 
   private handleShortcutsVisibilityChanged = (e: Event) => {
     const event = e as CustomEvent<{ visible: boolean }>;
     this.shortcutsVisible = event.detail.visible;
   };
+
+  private handleMenuButtonClick(menuId: MenuId) {
+    if (this.activeMenu === menuId) {
+      this.closeActiveMenu();
+      return;
+    }
+
+    this.openMenu(menuId);
+  }
+
+  private handleMenuButtonPointerEnter(menuId: MenuId) {
+    if (this.activeMenu && this.activeMenu !== menuId) {
+      this.openMenu(menuId);
+    }
+  }
+
+  private handleMenuPanelClick(event: Event) {
+    const target = event.target as Element;
+    if (target.closest(".menu-item")) {
+      this.closeActiveMenu();
+    }
+  }
+
+  private handleDocumentPointerDown = (event: PointerEvent) => {
+    if (!this.activeMenu) return;
+    if (event.composedPath().includes(this)) return;
+
+    this.closeActiveMenu();
+  };
+
+  private handleDocumentKeyDown = (event: KeyboardEvent) => {
+    if (!this.activeMenu || event.key !== "Escape") return;
+
+    event.preventDefault();
+    this.closeActiveMenu();
+  };
+
+  private handlePopoverToggle(event: Event, menuId: MenuId) {
+    const toggleEvent = event as ToggleEvent;
+    const panel = event.currentTarget as HTMLElement;
+
+    if (toggleEvent.newState === "closed") {
+      panel.removeAttribute("data-open");
+      if (this.activeMenu === menuId) {
+        this.activeMenu = null;
+      }
+    }
+  }
+
+  private openMenu(menuId: MenuId) {
+    if (this.activeMenu && this.activeMenu !== menuId) {
+      this.hideMenuPanel(this.activeMenu);
+    }
+
+    const panel = this.getMenuPanel(menuId);
+    if (!panel) return;
+
+    this.activeMenu = menuId;
+    this.showMenuPanel(panel);
+    this.positionMenu(menuId);
+
+    requestAnimationFrame(() => {
+      if (this.activeMenu === menuId) {
+        this.positionMenu(menuId);
+      }
+    });
+  }
+
+  private closeActiveMenu() {
+    if (!this.activeMenu) return;
+
+    const menuId = this.activeMenu;
+    this.activeMenu = null;
+    this.hideMenuPanel(menuId);
+  }
+
+  private hideMenuPanel(menuId: MenuId) {
+    const panel = this.getMenuPanel(menuId);
+    if (!panel) return;
+
+    panel.removeAttribute("data-open");
+
+    try {
+      panel.hidePopover();
+    } catch {
+      // The fallback data attribute already handled the closed state.
+    }
+  }
+
+  private showMenuPanel(panel: HTMLElement) {
+    try {
+      panel.showPopover();
+    } catch {
+      // Older test/browser environments may not implement the Popover API.
+    }
+
+    panel.setAttribute("data-open", "true");
+  }
+
+  private positionActiveMenu = () => {
+    if (this.activeMenu) {
+      this.positionMenu(this.activeMenu);
+    }
+  };
+
+  private positionMenu(menuId: MenuId) {
+    const button = this.getMenuButton(menuId);
+    const panel = this.getMenuPanel(menuId);
+    if (!button || !panel) return;
+
+    const buttonRect = button.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const panelWidth = panelRect.width || panel.offsetWidth || FALLBACK_MENU_WIDTH;
+    const maxPanelHeight = Math.max(0, window.innerHeight - MENU_MARGIN * 2);
+    const measuredPanelHeight =
+      panelRect.height || panel.offsetHeight || FALLBACK_MENU_HEIGHT;
+    const panelHeight = Math.min(measuredPanelHeight, maxPanelHeight);
+
+    let left = buttonRect.left;
+    let top = buttonRect.bottom + MENU_GAP;
+
+    if (left + panelWidth > window.innerWidth - MENU_MARGIN) {
+      left = buttonRect.right - panelWidth;
+    }
+
+    if (top + panelHeight > window.innerHeight - MENU_MARGIN) {
+      top = window.innerHeight - panelHeight - MENU_MARGIN;
+    }
+
+    panel.style.left = `${this.clampToViewport(left, panelWidth, window.innerWidth)}px`;
+    panel.style.top = `${this.clampToViewport(top, panelHeight, window.innerHeight)}px`;
+    panel.style.maxHeight = `${maxPanelHeight}px`;
+  }
+
+  private clampToViewport(value: number, size: number, viewportSize: number) {
+    const maxValue = Math.max(MENU_MARGIN, viewportSize - size - MENU_MARGIN);
+    return Math.max(MENU_MARGIN, Math.min(value, maxValue));
+  }
+
+  private getMenuButton(menuId: MenuId) {
+    return this.shadowRoot?.querySelector<HTMLElement>(`#btn-${menuId}`) ?? null;
+  }
+
+  private getMenuPanel(menuId: MenuId) {
+    return this.shadowRoot?.querySelector<HTMLElement>(`#menu-${menuId}`) ?? null;
+  }
 
   flipLayer(direction: "horizontal" | "vertical") {
     const activeLayerId = layerStore.activeLayerId.value;
@@ -426,10 +564,23 @@ export class PFMenuBar extends BaseComponent {
       <div class="spacer"></div>
 
       <div class="menus">
-        <button id="btn-file" class="menu-btn" popovertarget="menu-file">
+        <button
+          id="btn-file"
+          class="menu-btn"
+          type="button"
+          aria-controls="menu-file"
+          aria-expanded=${String(this.activeMenu === "file")}
+          @click=${() => this.handleMenuButtonClick("file")}
+          @pointerenter=${() => this.handleMenuButtonPointerEnter("file")}
+        >
           File
         </button>
-        <div id="menu-file" popover>
+        <div
+          id="menu-file"
+          popover="manual"
+          @click=${this.handleMenuPanelClick}
+          @toggle=${(event: Event) => this.handlePopoverToggle(event, "file")}
+        >
           <div class="menu-item" @click=${this.showNewProjectDialog}>
             New... <span class="shortcut">${formatShortcut(menuShortcuts.newProject)}</span>
           </div>
@@ -441,10 +592,23 @@ export class PFMenuBar extends BaseComponent {
           </div>
         </div>
 
-        <button id="btn-edit" class="menu-btn" popovertarget="menu-edit">
+        <button
+          id="btn-edit"
+          class="menu-btn"
+          type="button"
+          aria-controls="menu-edit"
+          aria-expanded=${String(this.activeMenu === "edit")}
+          @click=${() => this.handleMenuButtonClick("edit")}
+          @pointerenter=${() => this.handleMenuButtonPointerEnter("edit")}
+        >
           Edit
         </button>
-        <div id="menu-edit" popover>
+        <div
+          id="menu-edit"
+          popover="manual"
+          @click=${this.handleMenuPanelClick}
+          @toggle=${(event: Event) => this.handlePopoverToggle(event, "edit")}
+        >
           <div class="menu-item" @click=${() => historyStore.undo()}>
             Undo <span class="shortcut">${formatShortcut(menuShortcuts.undo)}</span>
           </div>
@@ -458,10 +622,23 @@ export class PFMenuBar extends BaseComponent {
           </div>
         </div>
 
-        <button id="btn-view" class="menu-btn" popovertarget="menu-view">
+        <button
+          id="btn-view"
+          class="menu-btn"
+          type="button"
+          aria-controls="menu-view"
+          aria-expanded=${String(this.activeMenu === "view")}
+          @click=${() => this.handleMenuButtonClick("view")}
+          @pointerenter=${() => this.handleMenuButtonPointerEnter("view")}
+        >
           View
         </button>
-        <div id="menu-view" popover>
+        <div
+          id="menu-view"
+          popover="manual"
+          @click=${this.handleMenuPanelClick}
+          @toggle=${(event: Event) => this.handlePopoverToggle(event, "view")}
+        >
           <div class="menu-item" @click=${() => viewportStore.zoomIn()}>
             Zoom In <span class="shortcut">${formatShortcut(menuShortcuts.zoomIn)}</span>
           </div>
@@ -497,10 +674,23 @@ export class PFMenuBar extends BaseComponent {
           </div>
         </div>
 
-        <button id="btn-image" class="menu-btn" popovertarget="menu-image">
+        <button
+          id="btn-image"
+          class="menu-btn"
+          type="button"
+          aria-controls="menu-image"
+          aria-expanded=${String(this.activeMenu === "image")}
+          @click=${() => this.handleMenuButtonClick("image")}
+          @pointerenter=${() => this.handleMenuButtonPointerEnter("image")}
+        >
           Image
         </button>
-        <div id="menu-image" popover>
+        <div
+          id="menu-image"
+          popover="manual"
+          @click=${this.handleMenuPanelClick}
+          @toggle=${(event: Event) => this.handlePopoverToggle(event, "image")}
+        >
           <div
             class="menu-item"
             @click=${() =>
