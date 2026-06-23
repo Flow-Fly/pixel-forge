@@ -37,6 +37,11 @@
   --pf-color-border-warm: rgba(200, 173, 127, 0.32);
   --pf-color-grid: rgba(196, 207, 220, 0.08);
 
+  /* Transparency checker display */
+  --pf-checker-light-color: #2a3340;
+  --pf-checker-dark-color: #151a21;
+  --pf-checker-tile-size: 8px;
+
   /* Interactive states */
   --pf-color-primary: var(--pf-color-ember-rest);
   --pf-color-primary-hover: var(--pf-color-ember-hover);

@@ -361,6 +361,10 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("show-grid-settings-dialog"));
   }
 
+  showCheckerSettingsDialog() {
+    window.dispatchEvent(new CustomEvent("show-checker-settings-dialog"));
+  }
+
   showAccentColorDialog() {
     window.dispatchEvent(new CustomEvent("show-accent-color-dialog"));
   }
@@ -484,6 +488,9 @@ export class PFMenuBar extends BaseComponent {
           </div>
           <div class="menu-item" @click=${this.showGridSettingsDialog}>
             Grid Settings...
+          </div>
+          <div class="menu-item" @click=${this.showCheckerSettingsDialog}>
+            Transparency Checker...
           </div>
           <div class="menu-item" @click=${this.toggleShortcutsOverlay}>
             ${this.shortcutsVisible ? "✓ " : "   "}Shortcuts Preview
