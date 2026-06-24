@@ -179,6 +179,7 @@ export class PFMenuBar extends BaseComponent {
     }
 
     [popover] {
+      box-sizing: border-box;
       display: none;
       position: fixed;
       inset: auto;

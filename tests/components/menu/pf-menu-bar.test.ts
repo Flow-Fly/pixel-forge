@@ -70,7 +70,7 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
 }
 
 function setRect(element: Element, value: DOMRect) {
-  vi.spyOn(element, "getBoundingClientRect").mockReturnValue(value);
+  return vi.spyOn(element, "getBoundingClientRect").mockReturnValue(value);
 }
 
 function setViewport(width: number, height: number) {
@@ -228,13 +228,25 @@ describe("pf-menu-bar popovers", () => {
     const viewMenu = menu(element, "view");
 
     setRect(viewButton!, rect(20, 0, 40, 24));
-    setRect(viewMenu!, rect(0, 0, 186, 200));
+    const viewMenuRect = setRect(viewMenu!, rect(0, 0, 186, 200));
 
     viewButton?.click();
     await element.updateComplete;
     await nextFrame();
 
+    viewMenuRect.mockReturnValue(
+      rect(
+        Number.parseFloat(viewMenu!.style.left),
+        Number.parseFloat(viewMenu!.style.top),
+        186,
+        Number.parseFloat(viewMenu!.style.maxHeight)
+      )
+    );
+
     expect(viewMenu?.style.top).toBe("8px");
     expect(viewMenu?.style.maxHeight).toBe("104px");
+    expect(viewMenu?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      window.innerHeight
+    );
   });
 });
