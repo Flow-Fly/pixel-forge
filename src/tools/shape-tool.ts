@@ -245,17 +245,17 @@ export class LineTool extends ShapeTool {
 
   protected drawShape(x1: number, y1: number, x2: number, y2: number, _filled: boolean, thickness: number) {
     // Bresenham's Line Algorithm (filled doesn't apply to lines)
-    let dx = Math.abs(x2 - x1);
-    let dy = Math.abs(y2 - y1);
-    let sx = (x1 < x2) ? 1 : -1;
-    let sy = (y1 < y2) ? 1 : -1;
+    const dx = Math.abs(x2 - x1);
+    const dy = Math.abs(y2 - y1);
+    const sx = (x1 < x2) ? 1 : -1;
+    const sy = (y1 < y2) ? 1 : -1;
     let err = dx - dy;
 
     while (true) {
       this.setThickPixel(x1, y1, thickness);
 
       if ((x1 === x2) && (y1 === y2)) break;
-      let e2 = 2 * err;
+      const e2 = 2 * err;
       if (e2 > -dy) { err -= dy; x1 += sx; }
       if (e2 < dx) { err += dx; y1 += sy; }
     }
@@ -293,15 +293,15 @@ export class EllipseTool extends ShapeTool {
   name = 'ellipse';
 
   protected drawShape(x1: number, y1: number, x2: number, y2: number, filled: boolean, thickness: number) {
-    let minX = Math.min(x1, x2);
-    let maxX = Math.max(x1, x2);
-    let minY = Math.min(y1, y2);
-    let maxY = Math.max(y1, y2);
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
 
-    let a = Math.floor((maxX - minX) / 2);
-    let b = Math.floor((maxY - minY) / 2);
-    let xc = minX + a;
-    let yc = minY + b;
+    const a = Math.floor((maxX - minX) / 2);
+    const b = Math.floor((maxY - minY) / 2);
+    const xc = minX + a;
+    const yc = minY + b;
 
     // If width or height is 0, draw line
     if (a === 0) {

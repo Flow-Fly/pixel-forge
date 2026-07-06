@@ -196,7 +196,6 @@ export class PFTransformHandles extends BaseComponent {
 
     // Get bounds based on state
     let screenLeft: number, screenTop: number, screenRight: number, screenBottom: number;
-    let centerX: number, centerY: number;
 
     if (state.type === "transforming") {
       // For transforming, use original bounds + offset + scale
@@ -227,8 +226,8 @@ export class PFTransformHandles extends BaseComponent {
       screenBottom = (bounds.y + bounds.height) * zoom + panY;
     }
 
-    centerX = (screenLeft + screenRight) / 2;
-    centerY = (screenTop + screenBottom) / 2;
+    const centerX = (screenLeft + screenRight) / 2;
+    const centerY = (screenTop + screenBottom) / 2;
 
     const handles: HandleInfo[] = [];
 
