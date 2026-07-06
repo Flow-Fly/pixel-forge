@@ -7,6 +7,7 @@
  */
 
 import { paletteStore } from '../stores/palette';
+import { log } from './log';
 
 /**
  * Parse hex color to RGB components.
@@ -108,7 +109,7 @@ export function rebuildCanvasFromIndices(
 
   // Verify buffer size matches canvas
   if (indexBuffer.length !== width * height) {
-    console.warn('Index buffer size mismatch:', indexBuffer.length, 'vs', width * height);
+    log.warn('Index buffer size mismatch:', indexBuffer.length, 'vs', width * height);
     return;
   }
 

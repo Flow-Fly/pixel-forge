@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { v4 as uuidv4 } from 'uuid';
 import type { ProjectFile } from '../../types/project';
 import type { ProjectMeta, ProjectRepository } from './project-repository';
+import { log } from '../../utils/log';
 
 /** Key of the single-project slot used before multi-project support. */
 const LEGACY_CURRENT_PROJECT_KEY = 'current-project';
@@ -70,7 +71,7 @@ class IndexedDbProjectRepository implements ProjectRepository {
         await db.put('settings', { key: LAST_OPENED_SETTING_KEY, value: id });
       }
     } catch (error) {
-      console.error('Failed to migrate legacy project slot:', error);
+      log.error('Failed to migrate legacy project slot:', error);
     }
     return db;
   }

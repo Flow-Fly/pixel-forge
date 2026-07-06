@@ -31,6 +31,7 @@ import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
+import { log } from "../../utils/log";
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -346,7 +347,7 @@ export class PixelForgeApp extends BaseComponent {
         historyStore.clear();
       }
     } catch (error) {
-      console.warn("Failed to load saved project, starting fresh:", error);
+      log.warn("Failed to load saved project, starting fresh:", error);
     }
   }
 

@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { StoredCustomPalette } from "../../types/palette";
+import { log } from "../../utils/log";
 
 interface PaletteDB extends DBSchema {
   palettes: {
@@ -32,7 +33,7 @@ class PalettePersistenceService {
       const palettes = await db.getAllFromIndex("palettes", "by-updated");
       return palettes.reverse(); // Most recent first
     } catch (error) {
-      console.error("Failed to load palettes from IndexedDB:", error);
+      log.error("Failed to load palettes from IndexedDB:", error);
       return [];
     }
   }
@@ -45,7 +46,7 @@ class PalettePersistenceService {
       const db = await this.dbPromise;
       await db.put("palettes", palette);
     } catch (error) {
-      console.error("Failed to save palette to IndexedDB:", error);
+      log.error("Failed to save palette to IndexedDB:", error);
     }
   }
 
@@ -57,7 +58,7 @@ class PalettePersistenceService {
       const db = await this.dbPromise;
       await db.delete("palettes", id);
     } catch (error) {
-      console.error("Failed to delete palette from IndexedDB:", error);
+      log.error("Failed to delete palette from IndexedDB:", error);
     }
   }
 
@@ -76,7 +77,7 @@ class PalettePersistenceService {
         });
       }
     } catch (error) {
-      console.error("Failed to update palette in IndexedDB:", error);
+      log.error("Failed to update palette in IndexedDB:", error);
     }
   }
 
@@ -88,7 +89,7 @@ class PalettePersistenceService {
       const db = await this.dbPromise;
       return await db.get("palettes", id);
     } catch (error) {
-      console.error("Failed to get palette from IndexedDB:", error);
+      log.error("Failed to get palette from IndexedDB:", error);
       return undefined;
     }
   }
