@@ -2,8 +2,16 @@ import type { FrameTag } from './animation';
 import type { LayerType, BlendMode } from './layer';
 import type { TextLayerData, TextCelData } from './text';
 
-/** Current project file format version */
-export const PROJECT_VERSION = '3.0.0';
+/**
+ * Current project file format version.
+ *
+ * RULE: any change to the ProjectFile schema below must bump this constant
+ * in the same PR, and the field must be annotated with the version that
+ * introduced it (see existing `v2.1+` / `v3.0+` annotations).
+ *
+ * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added `layers[].continuous`.
+ */
+export const PROJECT_VERSION = '3.2.0';
 
 export interface ProjectFile {
   version: string;
