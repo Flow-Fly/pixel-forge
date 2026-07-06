@@ -3,6 +3,11 @@ import { selectionStore } from '../../stores/selection';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { trimTransparentPixels } from './image-data';
+import {
+  clearCanvasSelection,
+  maskPixelsOutsideSelection,
+  pasteImageDataWithAlpha,
+} from './pixels';
 
 /**
  * Command for cutting selected pixels into a floating selection.
@@ -54,12 +59,7 @@ export class CutToFloatCommand implements Command {
       this.fullImageData.height
     );
 
-    // For non-rectangle shapes, mask out pixels outside the selection
-    if (shape === 'ellipse') {
-      this.applyEllipseMaskToData(workingData);
-    } else if (shape === 'freeform' && mask) {
-      this.applyMaskToData(workingData, mask);
-    }
+    maskPixelsOutsideSelection(workingData, shape, mask);
 
     // Trim transparent pixels to get tight bounding box
     const trimResult = trimTransparentPixels(workingData, mask);
@@ -83,15 +83,7 @@ export class CutToFloatCommand implements Command {
 
   execute() {
     const ctx = this.canvas.getContext('2d')!;
-
-    // Clear the pixels from the canvas (cut them) - use ORIGINAL bounds
-    if (this.shape === 'rectangle') {
-      ctx.clearRect(this.originalBounds.x, this.originalBounds.y, this.originalBounds.width, this.originalBounds.height);
-    } else if (this.shape === 'ellipse') {
-      this.clearEllipse(ctx);
-    } else if (this.shape === 'freeform' && this.originalMask) {
-      this.clearWithMask(ctx);
-    }
+    clearCanvasSelection(ctx, this.originalBounds, this.shape, this.originalMask);
 
     // Set selection store to floating state with TRIMMED pixels
     selectionStore.setFloating(this.trimmedImageData, this.trimmedBounds, this.shape, this.trimmedMask);
@@ -105,90 +97,6 @@ export class CutToFloatCommand implements Command {
 
     // Return to selected state with original bounds
     selectionStore.setSelected(this.originalBounds, this.shape, this.originalMask);
-  }
-
-  private applyEllipseMaskToData(imageData: ImageData) {
-    const { width, height } = this.originalBounds;
-    const data = imageData.data;
-    const rx = width / 2;
-    const ry = height / 2;
-
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const dx = (px + 0.5 - width / 2) / rx;
-        const dy = (py + 0.5 - height / 2) / ry;
-        // If OUTSIDE ellipse, make transparent
-        if (dx * dx + dy * dy > 1) {
-          const idx = (py * width + px) * 4;
-          data[idx + 3] = 0;
-        }
-      }
-    }
-  }
-
-  private applyMaskToData(imageData: ImageData, mask: Uint8Array) {
-    const { width, height } = this.originalBounds;
-    const data = imageData.data;
-
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const maskIdx = py * width + px;
-        // If NOT selected in mask, make transparent
-        if (mask[maskIdx] !== 255) {
-          const idx = maskIdx * 4;
-          data[idx + 3] = 0;
-        }
-      }
-    }
-  }
-
-  private clearEllipse(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height } = this.originalBounds;
-    const rx = width / 2;
-    const ry = height / 2;
-
-    // Get current image data
-    const imageData = ctx.getImageData(x, y, width, height);
-    const data = imageData.data;
-
-    // Clear pixels inside ellipse
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const dx = (px + 0.5 - width / 2) / rx;
-        const dy = (py + 0.5 - height / 2) / ry;
-        if (dx * dx + dy * dy <= 1) {
-          const idx = (py * width + px) * 4;
-          data[idx] = 0;
-          data[idx + 1] = 0;
-          data[idx + 2] = 0;
-          data[idx + 3] = 0;
-        }
-      }
-    }
-
-    ctx.putImageData(imageData, x, y);
-  }
-
-  private clearWithMask(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height } = this.originalBounds;
-    const imageData = ctx.getImageData(x, y, width, height);
-    const data = imageData.data;
-
-    // Clear pixels where mask is selected
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const maskIdx = py * width + px;
-        if (this.originalMask![maskIdx] === 255) {
-          const idx = maskIdx * 4;
-          data[idx] = 0;
-          data[idx + 1] = 0;
-          data[idx + 2] = 0;
-          data[idx + 3] = 0;
-        }
-      }
-    }
-
-    ctx.putImageData(imageData, x, y);
   }
 }
 
@@ -245,15 +153,15 @@ export class CommitFloatCommand implements Command {
 
   execute() {
     const ctx = this.canvas.getContext('2d')!;
+    const pasteShape = this.shape === 'ellipse' ? 'ellipse' : 'rectangle';
 
-    // Paste the floating pixels at destination (only non-transparent pixels)
-    if (this.shape === 'rectangle') {
-      this.pasteWithAlpha(ctx);
-    } else if (this.shape === 'ellipse') {
-      this.pasteEllipse(ctx);
-    } else if (this.shape === 'freeform') {
-      this.pasteWithMask(ctx);
-    }
+    pasteImageDataWithAlpha(
+      ctx,
+      this.floatingImageData,
+      this.destinationBounds.x,
+      this.destinationBounds.y,
+      pasteShape
+    );
 
     // Clear selection state
     selectionStore.clearAfterCommit();
@@ -278,87 +186,5 @@ export class CommitFloatCommand implements Command {
       this.mask
     );
     // Reset offset to 0 since we're now at destination
-  }
-
-  private pasteEllipse(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height } = this.destinationBounds;
-
-    // Get destination image data
-    const destData = ctx.getImageData(x, y, width, height);
-    const srcData = this.floatingImageData.data;
-    const dstData = destData.data;
-
-    // Only paste pixels inside ellipse (with alpha)
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const dx = (px + 0.5 - width / 2) / (width / 2);
-        const dy = (py + 0.5 - height / 2) / (height / 2);
-        if (dx * dx + dy * dy <= 1) {
-          const idx = (py * width + px) * 4;
-          const srcAlpha = srcData[idx + 3];
-          if (srcAlpha > 0) {
-            dstData[idx] = srcData[idx];
-            dstData[idx + 1] = srcData[idx + 1];
-            dstData[idx + 2] = srcData[idx + 2];
-            dstData[idx + 3] = srcData[idx + 3];
-          }
-        }
-      }
-    }
-
-    ctx.putImageData(destData, x, y);
-  }
-
-  private pasteWithAlpha(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height } = this.destinationBounds;
-
-    // Get destination image data
-    const destData = ctx.getImageData(x, y, width, height);
-    const srcData = this.floatingImageData.data;
-    const dstData = destData.data;
-
-    // Only paste non-transparent pixels
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const idx = (py * width + px) * 4;
-        const srcAlpha = srcData[idx + 3];
-        if (srcAlpha > 0) {
-          dstData[idx] = srcData[idx];
-          dstData[idx + 1] = srcData[idx + 1];
-          dstData[idx + 2] = srcData[idx + 2];
-          dstData[idx + 3] = srcData[idx + 3];
-        }
-      }
-    }
-
-    ctx.putImageData(destData, x, y);
-  }
-
-  private pasteWithMask(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height } = this.destinationBounds;
-
-    // Get destination image data
-    const destData = ctx.getImageData(x, y, width, height);
-    const srcData = this.floatingImageData.data;
-    const dstData = destData.data;
-
-    // Only paste pixels where mask is selected AND source has alpha
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const maskIdx = py * width + px;
-        const idx = maskIdx * 4;
-        const srcAlpha = srcData[idx + 3];
-
-        // Paste if source has alpha (mask check is implicit - source was cut with mask)
-        if (srcAlpha > 0) {
-          dstData[idx] = srcData[idx];
-          dstData[idx + 1] = srcData[idx + 1];
-          dstData[idx + 2] = srcData[idx + 2];
-          dstData[idx + 3] = srcData[idx + 3];
-        }
-      }
-    }
-
-    ctx.putImageData(destData, x, y);
   }
 }

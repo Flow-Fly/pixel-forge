@@ -2,6 +2,10 @@ import { type Command } from '../../stores/history';
 import { selectionStore } from '../../stores/selection';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
+import {
+  flipSelectedPixels,
+  pasteImageDataWithAlpha,
+} from './pixels';
 
 /**
  * Command for applying a transform (scale and/or rotation) to a selection.
@@ -102,8 +106,7 @@ export class TransformSelectionCommand implements Command {
     // Note: The original location was already cleared when we cut to floating state
     // So we just need to paste the transformed pixels at the new location
 
-    // Paste transformed pixels (respecting alpha)
-    this.pasteWithAlpha(ctx, this.transformedImageData);
+    pasteImageDataWithAlpha(ctx, this.transformedImageData, this.actualDestX, this.actualDestY);
 
     // Clear selection state
     selectionStore.clearAfterTransform();
@@ -134,33 +137,6 @@ export class TransformSelectionCommand implements Command {
     if (this.rotation !== 0) {
       selectionStore.updateRotation(this.rotation);
     }
-  }
-
-  private pasteWithAlpha(ctx: CanvasRenderingContext2D, srcImageData: ImageData) {
-    // Use the pre-calculated destination position and actual image dimensions
-    const srcWidth = srcImageData.width;
-    const srcHeight = srcImageData.height;
-
-    // Get destination image data at the pre-calculated target location
-    const destData = ctx.getImageData(this.actualDestX, this.actualDestY, srcWidth, srcHeight);
-    const srcData = srcImageData.data;
-    const dstData = destData.data;
-
-    // Only paste non-transparent pixels
-    for (let py = 0; py < srcHeight; py++) {
-      for (let px = 0; px < srcWidth; px++) {
-        const idx = (py * srcWidth + px) * 4;
-        const srcAlpha = srcData[idx + 3];
-        if (srcAlpha > 0) {
-          dstData[idx] = srcData[idx];
-          dstData[idx + 1] = srcData[idx + 1];
-          dstData[idx + 2] = srcData[idx + 2];
-          dstData[idx + 3] = srcData[idx + 3];
-        }
-      }
-    }
-
-    ctx.putImageData(destData, this.actualDestX, this.actualDestY);
   }
 }
 
@@ -216,70 +192,9 @@ export class FlipSelectionCommand implements Command {
   private flip() {
     const ctx = this.canvas.getContext('2d')!;
     const { x, y, width, height } = this.bounds;
-
-    // Get current pixels
     const imageData = ctx.getImageData(x, y, width, height);
-    const data = imageData.data;
+    const flippedImageData = flipSelectedPixels(imageData, this.shape, this.direction, this.mask);
 
-    // Create flipped version
-    const flippedData = new Uint8ClampedArray(data.length);
-
-    for (let py = 0; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        const srcIdx = (py * width + px) * 4;
-
-        // Check if this pixel is within the selection mask
-        let inSelection = true;
-        if (this.shape === 'freeform' && this.mask) {
-          inSelection = this.mask[py * width + px] === 255;
-        } else if (this.shape === 'ellipse') {
-          // Check ellipse bounds
-          const cx = width / 2;
-          const cy = height / 2;
-          const rx = width / 2;
-          const ry = height / 2;
-          const dx = (px + 0.5 - cx) / rx;
-          const dy = (py + 0.5 - cy) / ry;
-          inSelection = dx * dx + dy * dy <= 1;
-        }
-
-        let destPx: number, destPy: number;
-
-        if (inSelection) {
-          // Calculate flipped position
-          if (this.direction === 'horizontal') {
-            destPx = width - 1 - px;
-            destPy = py;
-          } else {
-            destPx = px;
-            destPy = height - 1 - py;
-          }
-        } else {
-          // Keep original position for pixels outside selection
-          destPx = px;
-          destPy = py;
-        }
-
-        const destIdx = (destPy * width + destPx) * 4;
-
-        // For pixels inside selection, swap with flipped position
-        // For pixels outside, just copy as-is
-        if (inSelection) {
-          flippedData[destIdx] = data[srcIdx];
-          flippedData[destIdx + 1] = data[srcIdx + 1];
-          flippedData[destIdx + 2] = data[srcIdx + 2];
-          flippedData[destIdx + 3] = data[srcIdx + 3];
-        } else {
-          flippedData[srcIdx] = data[srcIdx];
-          flippedData[srcIdx + 1] = data[srcIdx + 1];
-          flippedData[srcIdx + 2] = data[srcIdx + 2];
-          flippedData[srcIdx + 3] = data[srcIdx + 3];
-        }
-      }
-    }
-
-    // Put flipped pixels back
-    const flippedImageData = new ImageData(flippedData, width, height);
     ctx.putImageData(flippedImageData, x, y);
   }
 }
