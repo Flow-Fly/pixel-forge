@@ -5,10 +5,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // layers, frames, palette, tags — not pixel contents (those need a real
 // canvas and are covered by manual/browser verification).
 vi.mock('../../src/services/persistence/indexed-db', () => ({
-  persistenceService: {
-    saveCurrentProject: vi.fn(async () => {}),
-    loadCurrentProject: vi.fn(async () => null),
-    clearCurrentProject: vi.fn(async () => {}),
+  projectRepository: {
+    list: vi.fn(async () => []),
+    load: vi.fn(async () => null),
+    save: vi.fn(async () => {}),
+    delete: vi.fn(async () => {}),
+    getLastOpenedProjectId: vi.fn(async () => null),
+    setLastOpenedProjectId: vi.fn(async () => {}),
   },
 }));
 

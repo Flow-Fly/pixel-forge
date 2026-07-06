@@ -1,10 +1,11 @@
 import { signal } from "../core/signal";
+import { v4 as uuidv4 } from "uuid";
 import { layerStore } from "./layers";
 import { animationStore, EMPTY_CEL_LINK_ID } from "./animation";
 import { historyStore } from "./history";
 import { paletteStore } from "./palette";
 import { viewportStore } from "./viewport";
-import { persistenceService } from "../services/persistence/indexed-db";
+import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
 import {
   canvasToPngBytes,
@@ -27,6 +28,8 @@ function hasImageData(
 }
 
 class ProjectStore {
+  /** Storage identity of the open project (repository key). */
+  id = signal<string>(uuidv4());
   width = signal(64);
   height = signal(64);
   /** Background color for export. null = transparent (default) */
@@ -395,6 +398,9 @@ class ProjectStore {
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
 
+    // 0. New project = new storage identity (the old project stays stored)
+    this.id.value = uuidv4();
+
     // 1. Set new dimensions and reset name
     this.setSize(width, height);
     this.name.value = "Untitled";
@@ -440,8 +446,13 @@ class ProjectStore {
     }
 
     // 10. Save the fresh state immediately
-    const projectData = await this.saveProject();
-    await persistenceService.saveCurrentProject(projectData);
+    try {
+      const projectData = await this.saveProject();
+      await projectRepository.save(this.id.value, projectData);
+      await projectRepository.setLastOpenedProjectId(this.id.value);
+    } catch (error) {
+      console.error("Failed to save new project:", error);
+    }
   }
 }
 

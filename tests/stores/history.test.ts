@@ -2,10 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // happy-dom has neither IndexedDB nor canvas encoding — mock the boundaries.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
-  persistenceService: {
-    saveCurrentProject: vi.fn(async () => {}),
-    loadCurrentProject: vi.fn(async () => null),
-    clearCurrentProject: vi.fn(async () => {}),
+  projectRepository: {
+    list: vi.fn(async () => []),
+    load: vi.fn(async () => null),
+    save: vi.fn(async () => {}),
+    delete: vi.fn(async () => {}),
+    getLastOpenedProjectId: vi.fn(async () => null),
+    setLastOpenedProjectId: vi.fn(async () => {}),
   },
 }));
 
