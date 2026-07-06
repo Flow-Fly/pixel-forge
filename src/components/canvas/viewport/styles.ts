@@ -32,13 +32,15 @@ export const viewportStyles = css`
 
   /* Checkerboard pattern to indicate transparency */
   ::slotted(pf-drawing-canvas) {
-    background-image: linear-gradient(45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
-      linear-gradient(-45deg, rgba(210, 219, 228, 0.18) 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%),
-      linear-gradient(-45deg, transparent 75%, rgba(210, 219, 228, 0.18) 75%);
-    background-size: 16px 16px;
-    background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-    background-color: #151a21;
+    background-image: linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--pf-checker-light-color) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--pf-checker-light-color) 75%);
+    background-size: calc(var(--pf-checker-tile-size) * 2) calc(var(--pf-checker-tile-size) * 2);
+    background-position: 0 0, 0 var(--pf-checker-tile-size),
+      var(--pf-checker-tile-size) calc(-1 * var(--pf-checker-tile-size)),
+      calc(-1 * var(--pf-checker-tile-size)) 0;
+    background-color: var(--pf-checker-dark-color);
     box-shadow: 0 0 0 1px var(--pf-color-border), 0 22px 70px rgba(0, 0, 0, 0.42);
   }
 
