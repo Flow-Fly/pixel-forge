@@ -5,14 +5,13 @@ import { toolSizes } from '../stores/tool-settings';
 import { guidesStore } from '../stores/guides';
 import { projectStore } from '../stores/project';
 import { paletteStore } from '../stores/palette';
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
 import {
   bresenhamLine,
   constrainWithStickyAngles,
   isLShape,
 } from '../services/drawing/algorithms';
 import { setIndexBufferPixel } from '../utils/indexed-color';
+import { StrokeSession } from './stroke-session';
 
 // Distance threshold as percentage of spacing (0.3 = within 30% of spacing distance)
 const DISTANCE_THRESHOLD = 0.3;
@@ -82,12 +81,14 @@ export class PencilTool extends BaseTool {
   // Track stamp positions for pixel-perfect at stamp level
   private stampPositions: Point[] = [];
 
-  // Snapshot of canvas before current stroke (for pixel-perfect restore)
-  private strokeStartSnapshot: ImageData | null = null;
+  private strokeSession = new StrokeSession();
 
-  // Cached index buffer and palette index for current stroke
-  private currentIndexBuffer: Uint8Array | null = null;
+  // Cached palette index for current stroke
   private currentPaletteIndex: number = 0;
+
+  private get currentIndexBuffer(): Uint8Array | null {
+    return this.strokeSession.indexBuffer;
+  }
 
   constructor(context: CanvasRenderingContext2D) {
     super();
@@ -101,16 +102,9 @@ export class PencilTool extends BaseTool {
     const currentX = Math.floor(x);
     const currentY = Math.floor(y);
 
-    // Capture canvas state before stroke for pixel-perfect restore
-    const canvas = this.context.canvas;
-    this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
+    this.strokeSession.begin(this.context);
 
-    // Initialize indexed color support for this stroke
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
-    if (layerId) {
-      // Ensure cel has an index buffer (creates if needed, migrates from canvas if has content)
-      this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+    if (this.currentIndexBuffer) {
       // Get palette index for drawing - adds to ephemeral if not in main palette
       const color = colorStore.primaryColor.value;
       this.currentPaletteIndex = paletteStore.getOrAddColorForDrawing(color);
@@ -196,8 +190,7 @@ export class PencilTool extends BaseTool {
     this.isDrawing = false;
     this.drawnPoints = [];
     this.stampPositions = [];
-    this.strokeStartSnapshot = null; // Free memory
-    this.currentIndexBuffer = null;
+    this.strokeSession.clear();
     this.currentPaletteIndex = 0;
   }
 
@@ -344,7 +337,7 @@ export class PencilTool extends BaseTool {
    * Restore a stamp area to its pre-stroke state (for pixel-perfect L-shape removal at stamp level)
    */
   private restoreStamp(x: number, y: number) {
-    if (!this.context || !this.strokeStartSnapshot) return;
+    if (!this.context || !this.strokeSession.hasSnapshot) return;
 
     // Restore the original stamp
     this.restoreSingleStamp(x, y);
@@ -363,7 +356,7 @@ export class PencilTool extends BaseTool {
    * Restore a single stamp area at the given position (helper for restoreStamp)
    */
   private restoreSingleStamp(x: number, y: number) {
-    if (!this.context || !this.strokeStartSnapshot) return;
+    if (!this.context || !this.strokeSession.hasSnapshot) return;
 
     const size = toolSizes.pencil.value;
     // x/y is the center of the stamp
@@ -380,30 +373,7 @@ export class PencilTool extends BaseTool {
 
         if (pixelX < 0 || pixelY < 0 || pixelX >= canvas.width || pixelY >= canvas.height) continue;
 
-        // Get original pixel from snapshot
-        const index = (pixelY * this.strokeStartSnapshot.width + pixelX) * 4;
-        const r = this.strokeStartSnapshot.data[index];
-        const g = this.strokeStartSnapshot.data[index + 1];
-        const b = this.strokeStartSnapshot.data[index + 2];
-        const a = this.strokeStartSnapshot.data[index + 3];
-
-        if (a === 0) {
-          this.context.clearRect(pixelX, pixelY, 1, 1);
-          // Also clear index buffer
-          if (this.currentIndexBuffer) {
-            setIndexBufferPixel(this.currentIndexBuffer, canvas.width, pixelX, pixelY, 0);
-          }
-        } else {
-          this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-          this.context.globalAlpha = 1;
-          this.context.fillRect(pixelX, pixelY, 1, 1);
-          // Restore index buffer
-          if (this.currentIndexBuffer) {
-            const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
-            const originalIndex = paletteStore.getColorIndex(hex);
-            setIndexBufferPixel(this.currentIndexBuffer, canvas.width, pixelX, pixelY, originalIndex);
-          }
-        }
+        this.strokeSession.restorePixel(this.context, pixelX, pixelY);
       }
     }
   }
@@ -638,44 +608,13 @@ export class PencilTool extends BaseTool {
     }
 
     // If no snapshot, fall back to clearing
-    if (!this.strokeStartSnapshot) {
+    if (!this.strokeSession.restorePixel(this.context, x, y)) {
       this.context.clearRect(x, y, 1, 1);
       // Also clear index buffer
       if (this.currentIndexBuffer) {
         setIndexBufferPixel(this.currentIndexBuffer, this.context.canvas.width, x, y, 0);
       }
       return;
-    }
-
-    const canvas = this.context.canvas;
-    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
-
-    // Get the original pixel color from the snapshot
-    const index = (y * this.strokeStartSnapshot.width + x) * 4;
-    const r = this.strokeStartSnapshot.data[index];
-    const g = this.strokeStartSnapshot.data[index + 1];
-    const b = this.strokeStartSnapshot.data[index + 2];
-    const a = this.strokeStartSnapshot.data[index + 3];
-
-    // Restore the pixel
-    if (a === 0) {
-      // Original was transparent, clear it
-      this.context.clearRect(x, y, 1, 1);
-      // Also clear index buffer
-      if (this.currentIndexBuffer) {
-        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, 0);
-      }
-    } else {
-      // Restore original color
-      this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-      this.context.globalAlpha = 1;
-      this.context.fillRect(x, y, 1, 1);
-      // Restore index buffer - get the original color's palette index
-      if (this.currentIndexBuffer) {
-        const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
-        const originalIndex = paletteStore.getColorIndex(hex);
-        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, originalIndex);
-      }
     }
   }
 
