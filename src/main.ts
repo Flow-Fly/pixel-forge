@@ -5,6 +5,7 @@ import './components/app/pixel-forge-app';
 // import { registerShortcuts } from './services/keyboard/register-shortcuts';
 import { brushStore } from './stores/brush';
 import './stores/settings'; // Initialize settings (applies saved accent color)
+import { autoSaveService } from './services/auto-save';
 
 // Defer keyboard shortcuts registration after initial render for faster startup
 // Using requestIdleCallback with setTimeout fallback for broader browser support
@@ -20,5 +21,8 @@ if ('requestIdleCallback' in window) {
 
 // Initialize brush store (load custom brushes from IndexedDB)
 brushStore.initialize();
+
+// Persist the project on history changes / window blur
+autoSaveService.start();
 
 
