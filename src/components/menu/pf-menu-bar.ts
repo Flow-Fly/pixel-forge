@@ -13,7 +13,7 @@ import {
 // Dynamic imports for file handling - loaded on demand to reduce initial bundle
 // import { importAseFile } from "../../services/aseprite-service";
 // import pako from "pako";
-import { type ProjectFile } from "../../types/project";
+import { type ProjectFileInput } from "../../types/project";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 
@@ -483,12 +483,12 @@ export class PFMenuBar extends BaseComponent {
           const buffer = await file.arrayBuffer();
           const pako = await import("pako");
           const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
-          const project = JSON.parse(decompressed) as ProjectFile;
+          const project = JSON.parse(decompressed) as ProjectFileInput;
           await projectStore.loadProject(project);
         } else {
           // JSON format (uncompressed)
           const text = await file.text();
-          const project = JSON.parse(text) as ProjectFile;
+          const project = JSON.parse(text) as ProjectFileInput;
           await projectStore.loadProject(project);
         }
       } catch (error) {

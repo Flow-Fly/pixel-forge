@@ -20,7 +20,6 @@ vi.mock('../../src/services/persistence/palette-persistence', () => ({
 vi.mock('../../src/utils/canvas-binary', () => ({
   canvasToPngBytes: vi.fn(async () => new Uint8Array([1])),
   loadImageDataToCanvas: vi.fn(async () => {}),
-  isBinaryData: vi.fn(() => true),
 }));
 
 // happy-dom has no global ImageData constructor — minimal stand-in
