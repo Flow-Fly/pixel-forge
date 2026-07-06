@@ -203,15 +203,21 @@ class ProjectStore {
         layer = layerStore.addLayer(l.name, file.width, file.height);
       }
 
-      layer.id = l.id;
-      layer.visible = l.visible;
-      layer.opacity = l.opacity;
-      layer.blendMode = l.blendMode || "normal";
-      layer.continuous = l.continuous || false;
+      // Restore saved identity/settings through the store API (immutable
+      // update) instead of mutating the object inside the signal — see
+      // src/stores/README.md
+      layerStore.updateLayer(layer.id, {
+        id: l.id,
+        visible: l.visible,
+        opacity: l.opacity,
+        blendMode: l.blendMode || "normal",
+        continuous: l.continuous || false,
+      });
+      const restored = layerStore.layers.value.find((x) => x.id === l.id);
 
       // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
-      if (hasImageData(l.data) && layer.canvas) {
-        await loadImageDataToCanvas(l.data, layer.canvas);
+      if (restored && hasImageData(l.data) && restored.canvas) {
+        await loadImageDataToCanvas(l.data, restored.canvas);
       }
     }
 
@@ -236,7 +242,7 @@ class ProjectStore {
       animationStore.addFrame(false); // false = don't duplicate content
       const newFrame =
         animationStore.frames.value[animationStore.frames.value.length - 1];
-      newFrame.duration = f.duration;
+      animationStore.setFrameDuration(newFrame.id, f.duration);
 
       // Populate cels
       for (const c of f.cels) {
