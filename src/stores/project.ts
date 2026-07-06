@@ -1,20 +1,22 @@
 import { signal } from "../core/signal";
 import { v4 as uuidv4 } from "uuid";
 import { layerStore } from "./layers";
-import { animationStore, EMPTY_CEL_LINK_ID } from "./animation";
+import { animationStore } from "./animation";
 import { historyStore } from "./history";
 import { paletteStore } from "./palette";
 import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
+import { canvasToPngBytes } from "../utils/canvas-binary";
+import { normalizeProjectFileImageData } from "../serialization/project-data";
 import {
-  canvasToPngBytes,
-  loadImageDataToCanvas,
-} from "../utils/canvas-binary";
-import { buildIndexBufferFromCanvas } from "../utils/indexed-color";
-import {
-  hasProjectImageData,
-  normalizeProjectFileImageData,
-} from "../serialization/project-data";
+  hydrateProjectFrames,
+  hydrateProjectLayers,
+  refreshProjectPaletteAfterLoad,
+  restoreProjectAnimationState,
+  restoreProjectFrameTags,
+  restoreProjectPaletteForLoad,
+  selectFirstLoadedLayer,
+} from "../serialization/project-load";
 import {
   PROJECT_VERSION,
   type ProjectFile,
@@ -142,249 +144,16 @@ class ProjectStore {
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
 
-    // 1. Set dimensions and name
     this.setSize(file.width, file.height);
     this.name.value = file.name || "Untitled";
 
-    // 2. Restore Palette (v3.0+)
-    // For auto-save reload: palette is already correct from localStorage, skip
-    // For file import: load palette from file
-    if (
-      !fromAutoSave &&
-      file.palette &&
-      Array.isArray(file.palette) &&
-      file.palette.length > 0
-    ) {
-      paletteStore.setPalette(file.palette);
-    }
-
-    // 2b. Restore Ephemeral Palette (v3.1+)
-    // For auto-save reload: ephemeral will be rebuilt from drawing after all data is loaded
-    // For file import: restore ephemeral from file
-    if (!fromAutoSave) {
-      if (
-        file.ephemeralPalette &&
-        Array.isArray(file.ephemeralPalette) &&
-        file.ephemeralPalette.length > 0
-      ) {
-        paletteStore.ephemeralColors.value = file.ephemeralPalette;
-        paletteStore.rebuildColorMap();
-      } else {
-        // Clear any existing ephemeral colors when loading a project without them
-        // Skip remap since we're loading fresh data
-        paletteStore.clearEphemeralColors(true);
-      }
-    }
-
-    // 3. Restore Layers
-    // Clear all layers (layerStore.removeLayer doesn't have a "last layer" guard)
-    while (layerStore.layers.value.length > 0) {
-      layerStore.removeLayer(layerStore.layers.value[0].id);
-    }
-
-    for (const l of file.layers) {
-      // Check layer type (default to 'image' for backwards compatibility with pre-v2.1 files)
-      const layerType = l.type || "image";
-
-      let layer;
-      if (layerType === "text" && l.textData) {
-        // Create text layer with its metadata
-        layer = layerStore.addTextLayer(
-          l.textData,
-          l.name,
-          file.width,
-          file.height
-        );
-      } else {
-        // Create regular image layer
-        layer = layerStore.addLayer(l.name, file.width, file.height);
-      }
-
-      // Restore saved identity/settings through the store API (immutable
-      // update) instead of mutating the object inside the signal — see
-      // src/stores/README.md
-      layerStore.updateLayer(layer.id, {
-        id: l.id,
-        visible: l.visible,
-        opacity: l.opacity,
-        blendMode: l.blendMode || "normal",
-        continuous: l.continuous || false,
-      });
-      const restored = layerStore.layers.value.find((x) => x.id === l.id);
-
-      // ProjectFileInput image data is normalized before hydration.
-      if (restored && hasProjectImageData(l.data) && restored.canvas) {
-        await loadImageDataToCanvas(l.data, restored.canvas);
-      }
-    }
-
-    // 4. Restore Frames
-    // Delete all frames except the last one (deleteFrame guards against deleting last)
-    while (animationStore.frames.value.length > 1) {
-      animationStore.deleteFrame(animationStore.frames.value[0].id);
-    }
-
-    // Now we have exactly 1 frame left - we'll replace it with loaded frames
-    const placeholderFrameId = animationStore.frames.value[0]?.id;
-
-    // Track linked cel groups for post-processing (v2.2+)
-    // Maps linkedCelId -> { celKeys, linkType }
-    const linkedCelGroups = new Map<
-      string,
-      { celKeys: string[]; linkType: "soft" | "hard" }
-    >();
-
-    // Add frames from file
-    for (const f of file.frames) {
-      animationStore.addFrame(false); // false = don't duplicate content
-      const newFrame =
-        animationStore.frames.value[animationStore.frames.value.length - 1];
-      animationStore.setFrameDuration(newFrame.id, f.duration);
-
-      // Populate cels
-      for (const c of f.cels) {
-        const celKey = animationStore.getCelKey(c.layerId, newFrame.id);
-        const cel = animationStore.cels.value.get(celKey);
-
-        // If cel uses shared transparent canvas and has data to load,
-        // give it its own canvas first (fix for Phase 3 regression)
-        if (
-          cel &&
-          cel.linkedCelId === EMPTY_CEL_LINK_ID &&
-          hasProjectImageData(c.data)
-        ) {
-          const newCanvas = document.createElement("canvas");
-          newCanvas.width = file.width;
-          newCanvas.height = file.height;
-          const ctx = newCanvas.getContext("2d", {
-            alpha: true,
-            willReadFrequently: true,
-          });
-          if (ctx) ctx.imageSmoothingEnabled = false;
-
-          // Update cel to use its own canvas and remove empty marker
-          const cels = new Map(animationStore.cels.value);
-          cels.set(celKey, {
-            ...cel,
-            canvas: newCanvas,
-            linkedCelId: undefined,
-            linkType: undefined,
-          });
-          animationStore.cels.value = cels;
-        }
-
-        // Now load data into the cel's (non-shared) canvas
-        const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
-        // ProjectFileInput image data is normalized before hydration.
-        if (canvas && hasProjectImageData(c.data)) {
-          await loadImageDataToCanvas(c.data, canvas);
-        }
-
-        // Restore index buffer data (v3.0+)
-        // If cel has indexData, restore it directly
-        // If legacy file (no indexData), build index buffer from canvas content
-        const currentCel = animationStore.cels.value.get(celKey);
-        if (currentCel && hasProjectImageData(c.data)) {
-          const cels = new Map(animationStore.cels.value);
-
-          if (c.indexData && Array.isArray(c.indexData)) {
-            // v3.0+ file: restore index buffer from saved data
-            cels.set(celKey, {
-              ...currentCel,
-              indexBuffer: new Uint8Array(c.indexData),
-            });
-          } else if (canvas && !file.palette) {
-            // Legacy file migration: build index buffer from canvas content
-            // This also adds any new colors to the palette
-            const indexBuffer = buildIndexBufferFromCanvas(canvas, true);
-            cels.set(celKey, {
-              ...currentCel,
-              indexBuffer,
-            });
-          }
-
-          animationStore.cels.value = cels;
-        }
-
-        // Restore text cel data if present (v2.1+)
-        if (c.textCelData) {
-          animationStore.setTextCelData(c.layerId, newFrame.id, c.textCelData);
-        }
-
-        // Track linked cels for later linking (v2.2+)
-        if (c.linkedCelId) {
-          const celKey = animationStore.getCelKey(c.layerId, newFrame.id);
-          if (!linkedCelGroups.has(c.linkedCelId)) {
-            linkedCelGroups.set(c.linkedCelId, {
-              celKeys: [],
-              linkType: c.linkType ?? "soft", // Default to soft for backwards compat
-            });
-          }
-          linkedCelGroups.get(c.linkedCelId)!.celKeys.push(celKey);
-        }
-      }
-    }
-
-    // Restore linked cel relationships (v2.2+)
-    // Link cels that share the same linkedCelId, preserving linkType
-    for (const [linkedCelId, { celKeys, linkType }] of linkedCelGroups) {
-      if (celKeys.length >= 2) {
-        animationStore.linkCels(celKeys, linkType);
-      } else if (celKeys.length === 1) {
-        // Single cel with linkedCelId - just set the property (orphaned link)
-        const celKey = celKeys[0];
-        const cels = new Map(animationStore.cels.value);
-        const cel = cels.get(celKey);
-        if (cel) {
-          cels.set(celKey, { ...cel, linkedCelId, linkType });
-          animationStore.cels.value = cels;
-        }
-      }
-    }
-
-    // Delete the placeholder frame (now we have loaded frames)
-    if (placeholderFrameId && animationStore.frames.value.length > 1) {
-      animationStore.deleteFrame(placeholderFrameId);
-    }
-
-    // 5. Animation Settings
-    animationStore.fps.value = file.animation.fps;
-
-    const targetFrame =
-      animationStore.frames.value[file.animation.currentFrameIndex];
-    if (targetFrame) {
-      animationStore.goToFrame(targetFrame.id);
-    }
-
-    // 6. Restore Tags (v2.0+)
-    if (file.tags && Array.isArray(file.tags)) {
-      animationStore.tags.value = file.tags;
-    } else {
-      animationStore.tags.value = [];
-    }
-
-    // 7. Rebuild ephemeral colors from drawing
-    // Scan the drawing for colors not in the palette and add them as ephemeral.
-    // This handles:
-    // - Auto-save reload: palette from localStorage, drawing might have extra colors
-    // - File import: file might have colors in canvas not in saved palette (older formats)
-    paletteStore.rebuildEphemeralFromDrawing();
-
-    // For auto-save, also rebuild index buffers to match the new palette
-    if (fromAutoSave) {
-      animationStore.rebuildAllIndexBuffers();
-    }
-
-    // 8. Update used colors for palette usage indicators
-    paletteStore.refreshUsedColors();
-
-    // 9. Auto-select the first layer (prevents confusing "no layer selected" state)
-    // Note: addLayer sets activeLayerId to a temp UUID, but we then overwrite layer.id
-    // with the saved ID, leaving activeLayerId pointing to a non-existent layer.
-    const layers = layerStore.layers.value;
-    if (layers.length > 0) {
-      layerStore.setActiveLayer(layers[0].id);
-    }
+    restoreProjectPaletteForLoad(file, fromAutoSave);
+    await hydrateProjectLayers(file);
+    await hydrateProjectFrames(file);
+    restoreProjectAnimationState(file);
+    restoreProjectFrameTags(file);
+    refreshProjectPaletteAfterLoad(fromAutoSave);
+    selectFirstLoadedLayer();
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.
     window.dispatchEvent(new CustomEvent("project-loaded"));
