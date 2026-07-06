@@ -1,0 +1,60 @@
+version: 1
+
+docs:
+  specs_dir: specs
+  progress_file: ""
+
+github:
+  bootstrap_label: "status: bootstrap"
+  ready_label: "ready-for-agent"
+  blocked_label: "agent:blocked"
+  complete_label: "agent:complete"
+  tracking_label: "agentic-loop"
+  child_issue_label: "agentic-task"
+  needs_human_label: "needs-human"
+  spec_pr_label: "spec"
+  risk_labels:
+    low: "risk:low"
+    medium: "risk:medium"
+    high: "risk:high"
+  type_labels:
+    bug: "bug"
+    feature: "enhancement"
+    docs: "documentation"
+    test: "type:test"
+    refactor: "type:refactor"
+    chore: "type:chore"
+
+triage:
+  assessment_heading: "Agent Assessment"
+  create_missing_labels: true
+  ready_requires:
+    - "risk:low"
+    - "ready-for-agent"
+  ready_excludes:
+    - "needs-human"
+    - "agent:blocked"
+    - "risk:medium"
+    - "risk:high"
+
+workflow:
+  branch_prefix: "dev-"
+  require_spec_pr: false
+  require_human_merge: true
+  keep_parent_issue_clean: true
+  max_reviewer_attempts: 2
+  max_items_per_automation_run: 1
+
+verification:
+  commands:
+    - "npm run test:run"
+    - "npm run build"
+    - "git diff --check"
+
+human:
+  role: "director-playtester"
+  ask_when:
+    - "scope is ambiguous"
+    - "product tradeoff is required"
+    - "spec approval is needed"
+    - "final merge or playtest is needed"
