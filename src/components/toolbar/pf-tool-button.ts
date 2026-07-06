@@ -4,7 +4,6 @@ import { BaseComponent } from "../../core/base-component";
 import { toolStore, type ToolType } from "../../stores/tools";
 import { setLastSelectedTool } from "../../stores/tool-groups";
 import { getToolMeta, getToolIcon } from "../../tools/tool-registry";
-import "./pf-tool-options-popover";
 import "./pf-tool-group-menu";
 import type { PFToolGroupMenu } from "./pf-tool-group-menu";
 

@@ -8,16 +8,6 @@ import type { Rect } from '../../types/geometry';
 export type { Rect };
 
 /**
- * RGBA color representation.
- */
-export interface RGBA {
-  r: number;
-  g: number;
-  b: number;
-  a: number;
-}
-
-/**
  * Edge priority for tie-breaking when two colors compete at a sliced edge.
  * 'darker' = darker colors win (outlines dominate fills) - default for pixel art
  * 'lighter' = lighter colors win

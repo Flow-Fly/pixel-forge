@@ -89,7 +89,6 @@ export class PFTimelineTooltip extends LitElement {
   private ctx: CanvasRenderingContext2D | null = null;
   private anchorElement: HTMLElement | null = null;
   private hideTimeout: number | null = null;
-  private longPressTimeout: number | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -154,37 +153,6 @@ export class PFTimelineTooltip extends LitElement {
   }
 
   /**
-   * Cancel a pending hide.
-   */
-  cancelHide() {
-    if (this.hideTimeout) {
-      clearTimeout(this.hideTimeout);
-      this.hideTimeout = null;
-    }
-  }
-
-  /**
-   * Start long-press detection for touch devices.
-   */
-  startLongPress(anchor: HTMLElement, callback: () => void) {
-    this.cancelLongPress();
-    this.longPressTimeout = window.setTimeout(() => {
-      callback();
-      this.show(anchor);
-    }, 500);
-  }
-
-  /**
-   * Cancel long-press detection.
-   */
-  cancelLongPress() {
-    if (this.longPressTimeout) {
-      clearTimeout(this.longPressTimeout);
-      this.longPressTimeout = null;
-    }
-  }
-
-  /**
    * Calculate the preview scale to fit within MIN/MAX_PREVIEW_SIZE bounds.
    * Ensures preview is at least MIN_PREVIEW_SIZE and at most MAX_PREVIEW_SIZE.
    */
@@ -202,25 +170,6 @@ export class PFTimelineTooltip extends LitElement {
     }
 
     return 1;
-  }
-
-  /**
-   * Clear the preview canvas.
-   */
-  clear() {
-    if (this.ctx) {
-      this.ctx.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
-    }
-  }
-
-  /**
-   * Draw a source canvas onto the preview.
-   */
-  drawImage(source: HTMLCanvasElement | HTMLImageElement, opacity: number = 1) {
-    if (!this.ctx) return;
-    this.ctx.globalAlpha = opacity;
-    this.ctx.drawImage(source, 0, 0);
-    this.ctx.globalAlpha = 1;
   }
 
   private updatePosition() {
