@@ -27,10 +27,13 @@ import "../ui/pf-panel";
 import "../shape/pf-shape-options";
 import "../layers/pf-layers-panel";
 import { projectStore } from "../../stores/project";
+import { viewportStore } from "../../stores/viewport";
 import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
+
+type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -247,10 +250,8 @@ export class PixelForgeApp extends BaseComponent {
       );
     }
 
-    // Load saved project from IndexedDB
-    this.loadSavedProject();
-
     // Listen for keyboard shortcuts
+    window.addEventListener("project-loaded", this.handleProjectLoaded);
     window.addEventListener(
       "show-new-project-dialog",
       this.handleShowNewProjectDialog
@@ -274,6 +275,9 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+
+    // Load saved project from IndexedDB after listeners are ready.
+    this.loadSavedProject();
   }
 
   private handleShowWarningToast = (e: CustomEvent<{ message: string }>) => {
@@ -289,6 +293,18 @@ export class PixelForgeApp extends BaseComponent {
       this.warningMessage = null;
       this.warningTimer = null;
     }, 2000);
+  };
+
+  private handleProjectLoaded = async () => {
+    await this.updateComplete;
+
+    const viewport =
+      this.shadowRoot?.querySelector<UpdatableElement>("pf-canvas-viewport");
+    const drawingCanvas =
+      this.shadowRoot?.querySelector<UpdatableElement>("pf-drawing-canvas");
+
+    await Promise.all([viewport?.updateComplete, drawingCanvas?.updateComplete]);
+    viewportStore.resetView();
   };
 
   private handleShowNewProjectDialog = () => {
@@ -354,6 +370,7 @@ export class PixelForgeApp extends BaseComponent {
     super.disconnectedCallback();
     document.removeEventListener("mousemove", this.handleTimelineResizeMove);
     document.removeEventListener("mouseup", this.handleTimelineResizeEnd);
+    window.removeEventListener("project-loaded", this.handleProjectLoaded);
     window.removeEventListener(
       "show-new-project-dialog",
       this.handleShowNewProjectDialog

@@ -17,6 +17,16 @@ import * as extraction from './extraction';
 import * as variations from './variations';
 import * as persistence from './persistence';
 
+function waitForNextFrame(): Promise<void> {
+  if (typeof requestAnimationFrame !== 'function') {
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 class PaletteStore {
   // ==========================================
   // State (Signals)
@@ -587,7 +597,7 @@ class PaletteStore {
 
   async extractFromDrawing(): Promise<void> {
     this.isExtracting.value = true;
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await waitForNextFrame();
 
     try {
       const colors = await extraction.extractColorsFromDrawing(
