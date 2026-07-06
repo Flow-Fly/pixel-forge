@@ -12,6 +12,7 @@ import {
 } from "../utils/canvas-binary";
 import { buildIndexBufferFromCanvas } from "../utils/indexed-color";
 import { PROJECT_VERSION, type ProjectFile } from "../types/project";
+import { log } from "../utils/log";
 
 /**
  * Check if image data has content.
@@ -453,7 +454,7 @@ class ProjectStore {
       await projectRepository.save(this.id.value, projectData);
       await projectRepository.setLastOpenedProjectId(this.id.value);
     } catch (error) {
-      console.error("Failed to save new project:", error);
+      log.error("Failed to save new project:", error);
     }
   }
 }

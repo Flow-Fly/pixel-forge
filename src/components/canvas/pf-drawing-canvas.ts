@@ -23,6 +23,7 @@ import {
   getDefaultFont,
 } from "../../utils/pixel-fonts";
 import { TextTool } from "../../tools/text-tool";
+import { log } from "../../utils/log";
 
 /** Tools that paint pixels on the active layer (vs. select/navigate). */
 const DRAWING_TOOLS = [
@@ -192,7 +193,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
     const loadToolClass = TOOL_LOADERS[toolName];
     if (!loadToolClass) {
-      console.warn(`Unknown tool: ${toolName}`);
+      log.warn(`Unknown tool: ${toolName}`);
       return;
     }
     const ToolClass = await loadToolClass();

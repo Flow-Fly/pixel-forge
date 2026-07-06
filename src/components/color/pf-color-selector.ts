@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { colorStore } from '../../stores/colors';
+import { log } from '../../utils/log';
 
 @customElement('pf-color-selector')
 export class PFColorSelector extends BaseComponent {
@@ -64,7 +65,7 @@ export class PFColorSelector extends BaseComponent {
   }
 
   selectColor(type: 'fg' | 'bg') {
-    console.log('Select color:', type);
+    log.debug('Select color:', type);
     // Open color picker dialog or activate picker mode
   }
 

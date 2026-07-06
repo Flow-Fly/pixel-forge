@@ -8,6 +8,7 @@
  */
 
 import type { FrameTag } from '../../types/animation';
+import { log } from '../../utils/log';
 
 /**
  * Check if a range overlaps with any existing tags.
@@ -37,7 +38,7 @@ export function addFrameTag(
   endFrameIndex: number
 ): { tags: FrameTag[]; tagId: string | null } {
   if (hasTagOverlap(tags, startFrameIndex, endFrameIndex)) {
-    console.warn('Cannot create tag: range overlaps with existing tag');
+    log.warn('Cannot create tag: range overlaps with existing tag');
     return { tags, tagId: null };
   }
 
@@ -77,7 +78,7 @@ export function updateFrameTag(
   // Check for overlap with other tags (excluding self)
   if (updates.startFrameIndex !== undefined || updates.endFrameIndex !== undefined) {
     if (hasTagOverlap(tags, newStart, newEnd, tagId)) {
-      console.warn('Cannot update tag: new range overlaps with existing tag');
+      log.warn('Cannot update tag: new range overlaps with existing tag');
       return { tags, success: false };
     }
   }

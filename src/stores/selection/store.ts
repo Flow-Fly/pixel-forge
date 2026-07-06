@@ -11,6 +11,7 @@ import type { Rect } from '../../types/geometry';
 import type { SelectionMode } from './types';
 import { trimBoundsToContent, trimFreeformToContent } from './bounds-utils';
 import { isPointInBounds, isPointInRotatedBounds } from './hit-testing';
+import { log } from '../../utils/log';
 import {
   rotateCleanEdge,
   calculateRotatedBounds,
@@ -199,7 +200,7 @@ class SelectionStore {
   ) {
     // Validate mask size matches bounds
     if (mask.length !== bounds.width * bounds.height) {
-      console.error('Mask size does not match bounds');
+      log.error('Mask size does not match bounds');
       this.clear();
       return;
     }
