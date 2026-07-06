@@ -14,6 +14,7 @@ import { onionSkinCache } from "../../services/onion-skin-cache";
 import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
 import type { ModifierKeys, BaseTool } from "../../tools/base-tool";
 import { rectClamp, type Rect } from "../../types/geometry";
+import { extractIndexRegion } from "../../utils/buffer-region";
 import {
   getFont,
   renderText,
@@ -22,6 +23,17 @@ import {
   getDefaultFont,
 } from "../../utils/pixel-fonts";
 import { TextTool } from "../../tools/text-tool";
+
+/** Tools that paint pixels on the active layer (vs. select/navigate). */
+const DRAWING_TOOLS = [
+  "pencil",
+  "eraser",
+  "fill",
+  "gradient",
+  "line",
+  "rectangle",
+  "ellipse",
+] as const;
 
 type ToolConstructor = new (ctx: CanvasRenderingContext2D) => BaseTool;
 
@@ -102,6 +114,11 @@ export class PFDrawingCanvas extends BaseComponent {
   private activeTool: any; // TODO: Type properly
   private previousImageData: ImageData | null = null;
 
+  // Index-buffer snapshot taken at stroke start, so the resulting command
+  // can undo/redo palette indices along with the pixels
+  private previousIndexSnapshot: Uint8Array | null = null;
+  private strokeFrameId: string = "";
+
   // Document-level event handlers for out-of-canvas tracking
   private boundDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
@@ -151,16 +168,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
   private async loadTool(toolName: ToolType) {
     // Auto-commit floating selection when switching to drawing tools
-    const drawingTools = [
-      "pencil",
-      "eraser",
-      "fill",
-      "gradient",
-      "line",
-      "rectangle",
-      "ellipse",
-    ];
-    if (drawingTools.includes(toolName)) {
+    if ((DRAWING_TOOLS as readonly string[]).includes(toolName)) {
       const state = selectionStore.state.value;
       if (state.type === "floating") {
         const activeLayerId = layerStore.activeLayerId.value;
@@ -563,6 +571,21 @@ export class PFDrawingCanvas extends BaseComponent {
           this.height
         );
 
+        // Capture the index buffer state too, so the stroke command can
+        // undo palette indices along with pixels. Drawing tools are about
+        // to create/ensure the buffer anyway; for other tools only snapshot
+        // an already-existing buffer.
+        this.strokeFrameId = currentFrameId;
+        const toolName = toolStore.activeTool.value;
+        const indexBuffer = (DRAWING_TOOLS as readonly string[]).includes(
+          toolName
+        )
+          ? animationStore.ensureCelIndexBuffer(activeLayerId!, currentFrameId)
+          : animationStore.getCelIndexBuffer(activeLayerId!, currentFrameId);
+        this.previousIndexSnapshot = indexBuffer
+          ? new Uint8Array(indexBuffer)
+          : null;
+
         // Reset stroke dirty region to prevent pollution from previous execute/undo
         dirtyRectStore.resetStroke();
 
@@ -676,6 +699,7 @@ export class PFDrawingCanvas extends BaseComponent {
         // Skip if bounds are empty
         if (bounds.width <= 0 || bounds.height <= 0) {
           this.previousImageData = null;
+          this.previousIndexSnapshot = null;
           return;
         }
 
@@ -692,12 +716,37 @@ export class PFDrawingCanvas extends BaseComponent {
 
         // Only create command if data actually changed
         if (!this.uint8ArrayEquals(prevRegion, newImageData.data)) {
+          // Include index-buffer before/after for the same region, so
+          // undo/redo keeps palette indices in sync with the pixels
+          let indexBufferData;
+          const currentIndexBuffer = animationStore.getCelIndexBuffer(
+            activeLayerId,
+            this.strokeFrameId
+          );
+          if (this.previousIndexSnapshot && currentIndexBuffer) {
+            indexBufferData = {
+              frameId: this.strokeFrameId,
+              canvasWidth: this.width,
+              previousIndexData: extractIndexRegion(
+                this.previousIndexSnapshot,
+                this.width,
+                bounds
+              ),
+              newIndexData: extractIndexRegion(
+                currentIndexBuffer,
+                this.width,
+                bounds
+              ),
+            };
+          }
+
           const command = new OptimizedDrawingCommand(
             activeLayerId,
             bounds,
             prevRegion,
             new Uint8ClampedArray(newImageData.data),
-            this.getCommandNameForTool()
+            this.getCommandNameForTool(),
+            indexBufferData
           );
           historyStore.execute(command);
 
@@ -714,6 +763,7 @@ export class PFDrawingCanvas extends BaseComponent {
         }
 
         this.previousImageData = null;
+        this.previousIndexSnapshot = null;
       }
     }
   }
