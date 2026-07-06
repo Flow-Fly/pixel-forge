@@ -12,7 +12,7 @@ import { viewportStore } from "../../stores/viewport";
 import { renderScheduler } from "../../services/render-scheduler";
 import { onionSkinCache } from "../../services/onion-skin-cache";
 import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
-import type { ModifierKeys } from "../../tools/base-tool";
+import type { ModifierKeys, BaseTool } from "../../tools/base-tool";
 import { rectClamp, type Rect } from "../../types/geometry";
 import { extractIndexRegion } from "../../utils/buffer-region";
 import {
@@ -34,6 +34,41 @@ const DRAWING_TOOLS = [
   "rectangle",
   "ellipse",
 ] as const;
+
+type ToolConstructor = new (ctx: CanvasRenderingContext2D) => BaseTool;
+
+/**
+ * Lazy tool loaders — literal dynamic imports so Vite keeps code-splitting
+ * each tool module out of the initial bundle.
+ */
+const TOOL_LOADERS: Partial<Record<ToolType, () => Promise<ToolConstructor>>> =
+  {
+    pencil: async () => (await import("../../tools/pencil-tool")).PencilTool,
+    eraser: async () => (await import("../../tools/eraser-tool")).EraserTool,
+    eyedropper: async () =>
+      (await import("../../tools/eyedropper-tool")).EyedropperTool,
+    "marquee-rect": async () =>
+      (await import("../../tools/selection/marquee-rect-tool")).MarqueeRectTool,
+    lasso: async () =>
+      (await import("../../tools/selection/lasso-tool")).LassoTool,
+    "polygonal-lasso": async () =>
+      (await import("../../tools/selection/polygonal-lasso-tool"))
+        .PolygonalLassoTool,
+    "magic-wand": async () =>
+      (await import("../../tools/selection/magic-wand-tool")).MagicWandTool,
+    line: async () => (await import("../../tools/shape-tool")).LineTool,
+    rectangle: async () =>
+      (await import("../../tools/shape-tool")).RectangleTool,
+    ellipse: async () => (await import("../../tools/shape-tool")).EllipseTool,
+    fill: async () => (await import("../../tools/fill-tool")).FillTool,
+    gradient: async () =>
+      (await import("../../tools/gradient-tool")).GradientTool,
+    transform: async () =>
+      (await import("../../tools/transform-tool")).TransformTool,
+    text: async () => (await import("../../tools/text-tool")).TextTool,
+    hand: async () => (await import("../../tools/hand-tool")).HandTool,
+    zoom: async () => (await import("../../tools/zoom-tool")).ZoomTool,
+  };
 
 @customElement("pf-drawing-canvas")
 export class PFDrawingCanvas extends BaseComponent {
@@ -155,83 +190,12 @@ export class PFDrawingCanvas extends BaseComponent {
       }
     }
 
-    let ToolClass;
-
-    switch (toolName) {
-      case "pencil":
-        const { PencilTool } = await import("../../tools/pencil-tool");
-        ToolClass = PencilTool;
-        break;
-      case "eraser":
-        const { EraserTool } = await import("../../tools/eraser-tool");
-        ToolClass = EraserTool;
-        break;
-      case "eyedropper":
-        const { EyedropperTool } = await import("../../tools/eyedropper-tool");
-        ToolClass = EyedropperTool;
-        break;
-      case "marquee-rect":
-        const { MarqueeRectTool } = await import(
-          "../../tools/selection/marquee-rect-tool"
-        );
-        ToolClass = MarqueeRectTool;
-        break;
-      case "lasso":
-        const { LassoTool } = await import("../../tools/selection/lasso-tool");
-        ToolClass = LassoTool;
-        break;
-      case "polygonal-lasso":
-        const { PolygonalLassoTool } = await import(
-          "../../tools/selection/polygonal-lasso-tool"
-        );
-        ToolClass = PolygonalLassoTool;
-        break;
-      case "magic-wand":
-        const { MagicWandTool } = await import(
-          "../../tools/selection/magic-wand-tool"
-        );
-        ToolClass = MagicWandTool;
-        break;
-      case "line":
-        const { LineTool } = await import("../../tools/shape-tool");
-        ToolClass = LineTool;
-        break;
-      case "rectangle":
-        const { RectangleTool } = await import("../../tools/shape-tool");
-        ToolClass = RectangleTool;
-        break;
-      case "ellipse":
-        const { EllipseTool } = await import("../../tools/shape-tool");
-        ToolClass = EllipseTool;
-        break;
-      case "fill":
-        const { FillTool } = await import("../../tools/fill-tool");
-        ToolClass = FillTool;
-        break;
-      case "gradient":
-        const { GradientTool } = await import("../../tools/gradient-tool");
-        ToolClass = GradientTool;
-        break;
-      case "transform":
-        const { TransformTool } = await import("../../tools/transform-tool");
-        ToolClass = TransformTool;
-        break;
-      case "text":
-        const { TextTool } = await import("../../tools/text-tool");
-        ToolClass = TextTool;
-        break;
-      case "hand":
-        const { HandTool } = await import("../../tools/hand-tool");
-        ToolClass = HandTool;
-        break;
-      case "zoom":
-        const { ZoomTool } = await import("../../tools/zoom-tool");
-        ToolClass = ZoomTool;
-        break;
-      default:
-        console.warn(`Unknown tool: ${toolName}`);
-        return;
+    const loadToolClass = TOOL_LOADERS[toolName];
+    if (!loadToolClass) {
+      console.warn(`Unknown tool: ${toolName}`);
+      return;
     }
+    const ToolClass = await loadToolClass();
 
     if (ToolClass) {
       this.activeTool = new ToolClass(this.ctx);

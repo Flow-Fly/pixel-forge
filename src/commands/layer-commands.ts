@@ -165,7 +165,7 @@ export class UpdateLayerCommand implements Command {
 
     this.oldUpdates = {};
     for (const key in updates) {
-      // @ts-ignore
+      // @ts-expect-error — keyof mapping between Partial<Layer> and Layer
       this.oldUpdates[key] = layer[key];
     }
   }

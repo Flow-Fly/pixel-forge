@@ -264,7 +264,7 @@ export function sliceDist(
 
   if (!shouldSlice) return NO_SLICE;
 
-  let dist = 1.0;
+  let dist: number;
   let flip = false;
   const center = { x: 0.5, y: 0.5 };
 
@@ -521,7 +521,7 @@ export function sliceDistPacked(
 
   if (!shouldSlice) return NO_SLICE_PACKED;
 
-  let dist = 1.0;
+  let dist: number;
   let flip = false;
   const center = { x: 0.5, y: 0.5 };
 

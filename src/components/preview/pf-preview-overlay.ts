@@ -303,7 +303,9 @@ export class PFPreviewOverlay extends BaseComponent {
         const { x, y } = JSON.parse(savedPos);
         this.posX = x;
         this.posY = y;
-      } catch {}
+      } catch {
+        // Corrupt saved position — ignore and keep defaults
+      }
     }
 
     const savedCollapsed = localStorage.getItem(STORAGE_KEY_COLLAPSED);

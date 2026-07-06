@@ -1,13 +1,10 @@
 import { signal } from '../core/signal';
 import { userStore } from './user';
-import { persistenceService } from '../services/persistence/indexed-db';
-import { projectStore } from './project';
 import { paletteStore } from './palette';
 
 // Configuration constants for history limits
 const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 const MAX_HISTORY_COUNT = 100;
-const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
 export interface Command {
   id: string;
@@ -42,70 +39,9 @@ class HistoryStore {
   // Context stack for isolated editing modes (e.g., brush editing)
   private contextStack: HistoryContext[] = [];
 
-  // Auto-save state
-  private isDirty = false;
-  private saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  constructor() {
-    // Update computed signals when stacks change
-    // Since we don't have true computed signals in our simple implementation yet,
-    // we'll update them manually in the methods.
-
-    // Set up blur listener for immediate save
-    if (typeof window !== 'undefined') {
-      window.addEventListener('blur', () => this.saveOnBlur());
-      window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-          this.saveOnBlur();
-        }
-      });
-    }
-  }
-
-  /**
-   * Schedule a debounced auto-save.
-   */
-  private scheduleAutoSave() {
-    this.isDirty = true;
-
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-    }
-
-    this.saveTimeout = setTimeout(() => {
-      this.performAutoSave();
-    }, AUTO_SAVE_DEBOUNCE_MS);
-  }
-
-  /**
-   * Perform the actual save to IndexedDB.
-   */
-  private async performAutoSave() {
-    if (!this.isDirty) return;
-
-    try {
-      const projectData = await projectStore.saveProject();
-      await persistenceService.saveCurrentProject(projectData);
-      this.isDirty = false;
-      projectStore.lastSaved.value = Date.now();
-    } catch (error) {
-      console.error('Auto-save failed:', error);
-    }
-  }
-
-  /**
-   * Save immediately on blur/visibility change if dirty.
-   */
-  private saveOnBlur() {
-    if (this.isDirty) {
-      // Cancel pending debounced save
-      if (this.saveTimeout) {
-        clearTimeout(this.saveTimeout);
-        this.saveTimeout = null;
-      }
-      this.performAutoSave();
-    }
-  }
+  // NOTE: persistence is intentionally NOT a concern of this store.
+  // AutoSaveService (src/services/auto-save.ts) observes `version` and
+  // saves the project; history only tracks commands.
 
   async execute(command: Command) {
     // Auto-stamp with userId if not provided
@@ -129,7 +65,6 @@ class HistoryStore {
     // Enforce limits
     this.enforceHistoryLimits();
     this.updateComputed();
-    this.scheduleAutoSave();
 
     // Update palette usage indicators
     paletteStore.refreshUsedColors();
@@ -139,7 +74,7 @@ class HistoryStore {
    * Enforce history limits by removing oldest commands when necessary.
    */
   private enforceHistoryLimits() {
-    let stack = [...this.undoStack.value];
+    const stack = [...this.undoStack.value];
 
     // Remove oldest commands if over count limit
     while (stack.length > MAX_HISTORY_COUNT) {
@@ -196,7 +131,6 @@ class HistoryStore {
     this.redoStack.value = [...this.redoStack.value, command];
 
     this.updateComputed();
-    this.scheduleAutoSave();
 
     // Update palette usage indicators
     paletteStore.refreshUsedColors();
@@ -230,7 +164,6 @@ class HistoryStore {
     this.undoStack.value = [...this.undoStack.value, command];
 
     this.updateComputed();
-    this.scheduleAutoSave();
 
     // Update palette usage indicators
     paletteStore.refreshUsedColors();
@@ -245,6 +178,7 @@ class HistoryStore {
   clear() {
     this.undoStack.value = [];
     this.redoStack.value = [];
+    this.memoryUsage = 0;
     this.updateComputed();
   }
 
