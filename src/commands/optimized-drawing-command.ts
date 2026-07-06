@@ -3,6 +3,7 @@ import type { Rect } from "../types/geometry";
 import { layerStore } from "../stores/layers";
 import { dirtyRectStore } from "../stores/dirty-rect";
 import { animationStore } from "../stores/animation";
+import { writeIndexRegion } from "../utils/buffer-region";
 
 /**
  * Memory-efficient drawing command that stores only the dirty region.
@@ -141,17 +142,7 @@ export class OptimizedDrawingCommand implements Command {
     );
     if (!indexBuffer || this.canvasWidth === 0) return;
 
-    // Copy the stored region back to the index buffer
-    let dataIndex = 0;
-    for (let y = this.bounds.y; y < this.bounds.y + this.bounds.height; y++) {
-      for (let x = this.bounds.x; x < this.bounds.x + this.bounds.width; x++) {
-        const bufferIndex = y * this.canvasWidth + x;
-        if (bufferIndex < indexBuffer.length && dataIndex < indexData.length) {
-          indexBuffer[bufferIndex] = indexData[dataIndex];
-        }
-        dataIndex++;
-      }
-    }
+    writeIndexRegion(indexBuffer, this.canvasWidth, this.bounds, indexData);
   }
 }
 
