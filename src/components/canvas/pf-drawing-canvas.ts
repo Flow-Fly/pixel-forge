@@ -12,7 +12,8 @@ import { viewportStore } from "../../stores/viewport";
 import { renderScheduler } from "../../services/render-scheduler";
 import { onionSkinCache } from "../../services/onion-skin-cache";
 import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
-import type { ModifierKeys, BaseTool } from "../../tools/base-tool";
+import type { ModifierKeys } from "../../tools/base-tool";
+import { ToolController } from "../../tools/tool-controller";
 import { rectClamp, type Rect } from "../../types/geometry";
 import { extractIndexRegion } from "../../utils/buffer-region";
 import {
@@ -23,7 +24,6 @@ import {
   getDefaultFont,
 } from "../../utils/pixel-fonts";
 import { TextTool } from "../../tools/text-tool";
-import { log } from "../../utils/log";
 
 /** Tools that paint pixels on the active layer (vs. select/navigate). */
 const DRAWING_TOOLS = [
@@ -35,41 +35,6 @@ const DRAWING_TOOLS = [
   "rectangle",
   "ellipse",
 ] as const;
-
-type ToolConstructor = new (ctx: CanvasRenderingContext2D) => BaseTool;
-
-/**
- * Lazy tool loaders — literal dynamic imports so Vite keeps code-splitting
- * each tool module out of the initial bundle.
- */
-const TOOL_LOADERS: Partial<Record<ToolType, () => Promise<ToolConstructor>>> =
-  {
-    pencil: async () => (await import("../../tools/pencil-tool")).PencilTool,
-    eraser: async () => (await import("../../tools/eraser-tool")).EraserTool,
-    eyedropper: async () =>
-      (await import("../../tools/eyedropper-tool")).EyedropperTool,
-    "marquee-rect": async () =>
-      (await import("../../tools/selection/marquee-rect-tool")).MarqueeRectTool,
-    lasso: async () =>
-      (await import("../../tools/selection/lasso-tool")).LassoTool,
-    "polygonal-lasso": async () =>
-      (await import("../../tools/selection/polygonal-lasso-tool"))
-        .PolygonalLassoTool,
-    "magic-wand": async () =>
-      (await import("../../tools/selection/magic-wand-tool")).MagicWandTool,
-    line: async () => (await import("../../tools/shape-tool")).LineTool,
-    rectangle: async () =>
-      (await import("../../tools/shape-tool")).RectangleTool,
-    ellipse: async () => (await import("../../tools/shape-tool")).EllipseTool,
-    fill: async () => (await import("../../tools/fill-tool")).FillTool,
-    gradient: async () =>
-      (await import("../../tools/gradient-tool")).GradientTool,
-    transform: async () =>
-      (await import("../../tools/transform-tool")).TransformTool,
-    text: async () => (await import("../../tools/text-tool")).TextTool,
-    hand: async () => (await import("../../tools/hand-tool")).HandTool,
-    zoom: async () => (await import("../../tools/zoom-tool")).ZoomTool,
-  };
 
 @customElement("pf-drawing-canvas")
 export class PFDrawingCanvas extends BaseComponent {
@@ -112,7 +77,7 @@ export class PFDrawingCanvas extends BaseComponent {
   `;
 
   private ctx!: CanvasRenderingContext2D;
-  private activeTool: any; // TODO: Type properly
+  private toolController!: ToolController;
   private previousImageData: ImageData | null = null;
 
   // Index-buffer snapshot taken at stroke start, so the resulting command
@@ -139,6 +104,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Explicit setting for pixel art - critical for crisp rendering
     this.ctx.imageSmoothingEnabled = false;
+    this.toolController = new ToolController(this.ctx);
 
     // Initial tool load
     this.loadTool(toolStore.activeTool.value);
@@ -154,7 +120,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Check if tool changed
     const currentTool = toolStore.activeTool.value;
-    if (this.activeTool?.name !== currentTool) {
+    if (!this.toolController.isActive(currentTool)) {
       this.loadTool(currentTool);
     }
 
@@ -191,20 +157,11 @@ export class PFDrawingCanvas extends BaseComponent {
       }
     }
 
-    const loadToolClass = TOOL_LOADERS[toolName];
-    if (!loadToolClass) {
-      log.warn(`Unknown tool: ${toolName}`);
-      return;
-    }
-    const ToolClass = await loadToolClass();
-
-    if (ToolClass) {
-      this.activeTool = new ToolClass(this.ctx);
-
+    const didLoadTool = await this.toolController.load(toolName);
+    const cursor = this.toolController.cursor;
+    if (didLoadTool && this.canvas && cursor) {
       // Set cursor based on tool (brush preview overlay shows alongside cursor)
-      if (this.canvas && this.activeTool.cursor) {
-        this.canvas.style.cursor = this.activeTool.cursor;
-      }
+      this.canvas.style.cursor = cursor;
     }
   }
 
@@ -531,7 +488,7 @@ export class PFDrawingCanvas extends BaseComponent {
       return;
     }
 
-    if (!this.activeTool) return;
+    if (!this.toolController.hasActiveTool) return;
     const { x, y } = this.getCanvasCoordinates(e);
     const modifiers = this.getModifiers(e);
 
@@ -590,10 +547,7 @@ export class PFDrawingCanvas extends BaseComponent {
         // Reset stroke dirty region to prevent pollution from previous execute/undo
         dirtyRectStore.resetStroke();
 
-        // Update tool context to layer context
-        this.activeTool.setContext(layerCtx);
-
-        this.activeTool.onDown(x, y, modifiers);
+        this.toolController.onDown(layerCtx, { x, y }, modifiers);
 
         // Mark stroke as active and attach document-level listeners
         // This allows us to track mouse movement even outside the canvas
@@ -627,7 +581,7 @@ export class PFDrawingCanvas extends BaseComponent {
    * Coordinates are clamped to canvas bounds.
    */
   private handleDocumentMouseMove(e: MouseEvent) {
-    if (!this.isStrokeActive || !this.activeTool) return;
+    if (!this.isStrokeActive || !this.toolController.hasActiveTool) return;
 
     // Skip during pan operations
     if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
@@ -647,7 +601,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.dispatchEvent(cursorEvent);
     window.dispatchEvent(cursorEvent);
 
-    this.activeTool.onDrag(x, y, modifiers);
+    this.toolController.onDrag({ x, y }, modifiers);
     renderScheduler.scheduleRender(() => this.renderCanvas());
   }
 
@@ -661,13 +615,13 @@ export class PFDrawingCanvas extends BaseComponent {
     // Clean up document listeners first
     this.cleanupDocumentListeners();
 
-    if (!this.activeTool) return;
+    if (!this.toolController.hasActiveTool) return;
 
     const rawCoords = this.getCanvasCoordinates(e);
     const { x, y } = this.clampToCanvas(rawCoords.x, rawCoords.y);
     const modifiers = this.getModifiers(e);
 
-    this.activeTool.onUp(x, y, modifiers);
+    this.toolController.onUp({ x, y }, modifiers);
 
     // Get stroke bounds before flushing
     const strokeBounds = dirtyRectStore.flushStroke();
@@ -790,11 +744,11 @@ export class PFDrawingCanvas extends BaseComponent {
       return;
     }
 
-    if (!this.activeTool) return;
+    if (!this.toolController.hasActiveTool) return;
     const modifiers = this.getModifiers(e);
 
     // Only handle hover (onMove) since drag is handled by document listener when stroke is active
-    this.activeTool.onMove(x, y, modifiers);
+    this.toolController.onMove({ x, y }, modifiers);
   }
 
   private handleMouseLeave = (_e: MouseEvent) => {
@@ -854,7 +808,7 @@ export class PFDrawingCanvas extends BaseComponent {
    * Get command name based on active tool.
    */
   private getCommandNameForTool(): string {
-    const toolName = this.activeTool?.name;
+    const toolName = this.toolController.activeName;
     switch (toolName) {
       case "pencil":
         return "Brush Stroke";
