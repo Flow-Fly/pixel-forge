@@ -56,6 +56,8 @@ export class PFLightnessSubpalette extends LitElement {
   @property({ type: Number }) x = 0;
   @property({ type: Number }) y = 0;
 
+  private outsideClickFrame: number | null = null;
+
   private handleClickOutside = (e: MouseEvent) => {
     if (!this.contains(e.target as Node)) {
       this.close();
@@ -64,14 +66,19 @@ export class PFLightnessSubpalette extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    // Delay to prevent immediate close from the triggering right-click
-    setTimeout(() => {
+    // Wait for the trigger event to finish before enabling outside-click close.
+    this.outsideClickFrame = requestAnimationFrame(() => {
+      this.outsideClickFrame = null;
       document.addEventListener('click', this.handleClickOutside);
-    }, 10);
+    });
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.outsideClickFrame !== null) {
+      cancelAnimationFrame(this.outsideClickFrame);
+      this.outsideClickFrame = null;
+    }
     document.removeEventListener('click', this.handleClickOutside);
   }
 

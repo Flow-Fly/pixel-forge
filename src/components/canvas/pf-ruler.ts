@@ -159,6 +159,7 @@ export class PFRuler extends BaseComponent {
     super.connectedCallback();
     // Listen for mouse proximity to expand ruler
     window.addEventListener("mousemove", this.handleWindowMouseMove);
+    this.addEventListener("transitionend", this.handleTransitionEnd);
     // Track if user is drawing/interacting elsewhere (don't expand while drawing)
     window.addEventListener("mousedown", this.handleGlobalMouseDown, true);
     window.addEventListener("mouseup", this.handleGlobalMouseUp, true);
@@ -167,6 +168,7 @@ export class PFRuler extends BaseComponent {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("mousemove", this.handleWindowMouseMove);
+    this.removeEventListener("transitionend", this.handleTransitionEnd);
     window.removeEventListener("mousemove", this.handleDragMove);
     window.removeEventListener("mouseup", this.handleDragEnd);
     window.removeEventListener("mousedown", this.handleGlobalMouseDown, true);
@@ -295,12 +297,15 @@ export class PFRuler extends BaseComponent {
     if (shouldExpand !== this.expanded) {
       this.expanded = shouldExpand;
       this.requestUpdate();
-      // Redraw after transition
-      setTimeout(() => {
-        this.resizeCanvas();
-        this.drawRuler();
-      }, 160);
     }
+  };
+
+  private handleTransitionEnd = (e: TransitionEvent) => {
+    if (e.target !== this) return;
+    if (e.propertyName !== "height" && e.propertyName !== "width") return;
+
+    this.resizeCanvas();
+    this.drawRuler();
   };
 
   private handleGlobalMouseDown = (e: MouseEvent) => {

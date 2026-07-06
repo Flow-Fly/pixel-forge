@@ -4,7 +4,6 @@ import { layerStore } from "./layers";
 import { animationStore, EMPTY_CEL_LINK_ID } from "./animation";
 import { historyStore } from "./history";
 import { paletteStore } from "./palette";
-import { viewportStore } from "./viewport";
 import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
 import {
@@ -389,11 +388,8 @@ class ProjectStore {
       layerStore.setActiveLayer(layers[0].id);
     }
 
-    // 10. Auto-fit canvas to viewport
-    // Use setTimeout to ensure the viewport has rendered with new dimensions
-    setTimeout(() => {
-      viewportStore.resetView();
-    }, 0);
+    // Let the app shell reset the viewport after Lit renders the new dimensions.
+    window.dispatchEvent(new CustomEvent("project-loaded"));
   }
 
   /**

@@ -204,9 +204,7 @@ export class PFTimelineHeader extends BaseComponent {
           type: "item",
           label: `✏️ Edit Tag "${tag.name}"`,
           keepOpen: true,
-          action: () => {
-            setTimeout(() => this.showTagEditMenu(tag.id), 50);
-          },
+          action: () => this.showTagEditMenu(tag.id),
         },
         {
           type: "item",
@@ -231,9 +229,7 @@ export class PFTimelineHeader extends BaseComponent {
         type: "item",
         label: "🏷️ Add Tag",
         keepOpen: true,
-        action: () => {
-          setTimeout(() => this.showAddTagMenu(frameIndex), 50);
-        },
+        action: () => this.showAddTagMenu(frameIndex),
       });
     }
 

@@ -7,8 +7,7 @@ import { brushStore } from './stores/brush';
 import './stores/settings'; // Initialize settings (applies saved accent color)
 import { autoSaveService } from './services/auto-save';
 
-// Defer keyboard shortcuts registration after initial render for faster startup
-// Using requestIdleCallback with setTimeout fallback for broader browser support
+// Defer keyboard shortcuts registration after initial render for faster startup.
 const deferShortcuts = () => {
   import('./services/keyboard/register-shortcuts').then(m => m.registerShortcuts());
 };
@@ -16,7 +15,7 @@ const deferShortcuts = () => {
 if ('requestIdleCallback' in window) {
   requestIdleCallback(deferShortcuts, { timeout: 1000 });
 } else {
-  setTimeout(deferShortcuts, 100);
+  requestAnimationFrame(deferShortcuts);
 }
 
 // Initialize brush store (load custom brushes from IndexedDB)
@@ -24,5 +23,4 @@ brushStore.initialize();
 
 // Persist the project on history changes / window blur
 autoSaveService.start();
-
 
