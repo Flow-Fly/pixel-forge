@@ -40,7 +40,7 @@ export function ensureCelIndexBuffer(
   syncLayerCanvases: () => void
 ): { cels: Map<string, Cel>; indexBuffer: Uint8Array } {
   const key = getCelKey(layerId, frameId);
-  let cel = cels.get(key);
+  const cel = cels.get(key);
 
   if (!cel) {
     // Create the cel first via sync, then recurse

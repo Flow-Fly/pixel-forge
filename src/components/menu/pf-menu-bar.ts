@@ -18,13 +18,12 @@ import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 
 const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
-const MENU_IDS = ["file", "edit", "view", "image"] as const;
 const MENU_MARGIN = 8;
 const MENU_GAP = 4;
 const FALLBACK_MENU_WIDTH = 186;
 const FALLBACK_MENU_HEIGHT = 240;
 
-type MenuId = (typeof MENU_IDS)[number];
+type MenuId = "file" | "edit" | "view" | "image";
 
 @customElement("pf-menu-bar")
 export class PFMenuBar extends BaseComponent {
