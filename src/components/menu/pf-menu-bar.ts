@@ -38,6 +38,8 @@ export class PFMenuBar extends BaseComponent {
       height: 100%;
       align-items: center;
       width: 100%;
+      min-inline-size: 0;
+      overflow: hidden;
       position: relative;
       gap: 16px;
       color: var(--pf-color-text-secondary);
@@ -49,7 +51,8 @@ export class PFMenuBar extends BaseComponent {
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      min-width: 190px;
+      flex: 0 1 190px;
+      min-inline-size: 0;
       color: var(--pf-color-text-main);
       font-size: 12px;
       user-select: none;
@@ -89,6 +92,9 @@ export class PFMenuBar extends BaseComponent {
     .brand-text {
       color: var(--pf-color-text-secondary);
       font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .menus {
@@ -96,10 +102,12 @@ export class PFMenuBar extends BaseComponent {
       align-items: center;
       height: 100%;
       gap: 4px;
+      flex: 0 0 auto;
     }
 
     .spacer {
-      flex: 1;
+      flex: 1 1 auto;
+      min-inline-size: 0;
     }
 
     .project-name {
@@ -234,6 +242,25 @@ export class PFMenuBar extends BaseComponent {
     .menu-btn[aria-expanded="true"] {
       color: var(--pf-color-text-main);
       background-color: var(--pf-color-bg-hover);
+    }
+
+    @media (max-width: 520px) {
+      :host {
+        gap: 8px;
+      }
+
+      .brand {
+        flex: 0 0 auto;
+      }
+
+      .brand-text,
+      .project-name {
+        display: none;
+      }
+
+      .menu-btn {
+        padding-inline: 8px;
+      }
     }
   `;
 
