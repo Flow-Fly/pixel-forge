@@ -4,8 +4,9 @@ import { log } from "../utils/log";
 
 type ToolConstructor = new (ctx: CanvasRenderingContext2D) => BaseTool;
 type ToolLoader = () => Promise<ToolConstructor>;
+type ToolLoaderMap = Partial<Record<ToolType, ToolLoader>>;
 
-const TOOL_LOADERS: Partial<Record<ToolType, ToolLoader>> = {
+const TOOL_LOADERS: ToolLoaderMap = {
   pencil: async () => (await import("./pencil-tool")).PencilTool,
   eraser: async () => (await import("./eraser-tool")).EraserTool,
   eyedropper: async () => (await import("./eyedropper-tool")).EyedropperTool,
@@ -27,17 +28,38 @@ const TOOL_LOADERS: Partial<Record<ToolType, ToolLoader>> = {
   zoom: async () => (await import("./zoom-tool")).ZoomTool,
 };
 
+const COMMAND_NAMES_BY_TOOL: Partial<Record<ToolType, string>> = {
+  pencil: "Brush Stroke",
+  eraser: "Erase",
+  fill: "Fill",
+  gradient: "Gradient",
+  line: "Draw Line",
+  rectangle: "Draw Rectangle",
+  ellipse: "Draw Ellipse",
+};
+
 export class ToolController {
   private activeTool: BaseTool | null = null;
   private activeToolName: ToolType | null = null;
   private readonly fallbackContext: CanvasRenderingContext2D;
+  private readonly toolLoaders: ToolLoaderMap;
 
-  constructor(fallbackContext: CanvasRenderingContext2D) {
+  constructor(
+    fallbackContext: CanvasRenderingContext2D,
+    toolLoaders: ToolLoaderMap = TOOL_LOADERS
+  ) {
     this.fallbackContext = fallbackContext;
+    this.toolLoaders = toolLoaders;
   }
 
   get activeName(): ToolType | null {
     return this.activeToolName;
+  }
+
+  get commandName(): string {
+    return this.activeToolName
+      ? COMMAND_NAMES_BY_TOOL[this.activeToolName] ?? "Drawing"
+      : "Drawing";
   }
 
   get cursor(): string | null {
@@ -53,16 +75,26 @@ export class ToolController {
   }
 
   async load(toolName: ToolType): Promise<boolean> {
-    const loadToolClass = TOOL_LOADERS[toolName];
-    if (!loadToolClass) {
-      log.warn(`Unknown tool: ${toolName}`);
+    const ToolClass = await this.loadToolClass(toolName);
+    if (!ToolClass) {
       return false;
     }
 
-    const ToolClass = await loadToolClass();
     this.activeTool = new ToolClass(this.fallbackContext);
     this.activeToolName = toolName;
     return true;
+  }
+
+  private async loadToolClass(
+    toolName: ToolType
+  ): Promise<ToolConstructor | null> {
+    const loadToolClass = this.toolLoaders[toolName];
+    if (loadToolClass) {
+      return loadToolClass();
+    }
+
+    log.warn(`Unknown tool: ${toolName}`);
+    return null;
   }
 
   onDown(
