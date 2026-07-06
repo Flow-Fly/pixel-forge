@@ -16,6 +16,7 @@ import {
   restoreProjectFrameTags,
   restoreProjectPaletteForLoad,
   selectFirstLoadedLayer,
+  type ProjectLoadStores,
 } from "../serialization/project-load";
 import {
   PROJECT_VERSION,
@@ -23,6 +24,12 @@ import {
   type ProjectFileInput,
 } from "../types/project";
 import { log } from "../utils/log";
+
+const projectLoadStores: ProjectLoadStores = {
+  animation: animationStore,
+  layers: layerStore,
+  palette: paletteStore,
+};
 
 class ProjectStore {
   /** Storage identity of the open project (repository key). */
@@ -147,13 +154,13 @@ class ProjectStore {
     this.setSize(file.width, file.height);
     this.name.value = file.name || "Untitled";
 
-    restoreProjectPaletteForLoad(file, fromAutoSave);
-    await hydrateProjectLayers(file);
-    await hydrateProjectFrames(file);
-    restoreProjectAnimationState(file);
-    restoreProjectFrameTags(file);
-    refreshProjectPaletteAfterLoad(fromAutoSave);
-    selectFirstLoadedLayer();
+    restoreProjectPaletteForLoad(projectLoadStores, file, fromAutoSave);
+    await hydrateProjectLayers(projectLoadStores, file);
+    await hydrateProjectFrames(projectLoadStores, file);
+    restoreProjectAnimationState(projectLoadStores, file);
+    restoreProjectFrameTags(projectLoadStores, file);
+    refreshProjectPaletteAfterLoad(projectLoadStores, fromAutoSave);
+    selectFirstLoadedLayer(projectLoadStores);
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.
     window.dispatchEvent(new CustomEvent("project-loaded"));

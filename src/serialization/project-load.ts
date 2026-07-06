@@ -1,7 +1,5 @@
-import { animationStore, EMPTY_CEL_LINK_ID } from '../stores/animation';
-import { layerStore } from '../stores/layers';
-import { paletteStore } from '../stores/palette';
-import type { CelLinkType, Frame } from '../types/animation';
+import type { Cel, CelLinkType, Frame, FrameTag } from '../types/animation';
+import type { Layer } from '../types/layer';
 import type {
   ProjectCelFile,
   ProjectFile,
@@ -12,22 +10,79 @@ import { loadImageDataToCanvas } from '../utils/canvas-binary';
 import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
 import { hasProjectImageData } from './project-data';
 
+type WritableSignal<T> = {
+  value: T;
+};
+
+export type ProjectLoadStores = {
+  animation: {
+    frames: WritableSignal<Frame[]>;
+    cels: WritableSignal<Map<string, Cel>>;
+    fps: WritableSignal<number>;
+    tags: WritableSignal<FrameTag[]>;
+    addFrame: (duplicate?: boolean) => void;
+    deleteFrame: (frameId: string) => void;
+    getCelCanvas: (
+      frameId: string,
+      layerId: string
+    ) => HTMLCanvasElement | undefined;
+    getCelKey: (layerId: string, frameId: string) => string;
+    goToFrame: (frameId: string) => void;
+    linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
+    rebuildAllIndexBuffers: () => void;
+    setFrameDuration: (frameId: string, duration: number) => void;
+    setTextCelData: (
+      layerId: string,
+      frameId: string,
+      data: NonNullable<ProjectCelFile['textCelData']>
+    ) => void;
+  };
+  layers: {
+    layers: WritableSignal<Layer[]>;
+    addLayer: (name: string, width: number, height: number) => Layer;
+    addTextLayer: (
+      textData: NonNullable<ProjectLayerFile['textData']>,
+      name: string,
+      width: number,
+      height: number
+    ) => Layer;
+    removeLayer: (id: string) => void;
+    setActiveLayer: (id: string) => void;
+    updateLayer: (id: string, updates: Partial<Layer>) => void;
+  };
+  palette: {
+    ephemeralColors: WritableSignal<string[]>;
+    clearEphemeralColors: (skipRemap?: boolean) => void;
+    rebuildColorMap: () => void;
+    rebuildEphemeralFromDrawing: () => void;
+    refreshUsedColors: () => void;
+    setPalette: (colors: string[]) => void;
+  };
+};
+
 type LinkedCelGroup = {
   celKeys: string[];
   linkType: CelLinkType;
 };
 
+// Keep this boundary free of store imports; this mirrors the animation store
+// marker for shared transparent cels.
+const EMPTY_CEL_LINK_ID = '__empty__';
+
 export function restoreProjectPaletteForLoad(
+  stores: ProjectLoadStores,
   file: ProjectFile,
   fromAutoSave: boolean
 ): void {
+  const { palette } = stores;
+
   if (
     !fromAutoSave &&
     file.palette &&
     Array.isArray(file.palette) &&
     file.palette.length > 0
   ) {
-    paletteStore.setPalette(file.palette);
+    palette.setPalette(file.palette);
   }
 
   if (fromAutoSave) return;
@@ -37,85 +92,108 @@ export function restoreProjectPaletteForLoad(
     Array.isArray(file.ephemeralPalette) &&
     file.ephemeralPalette.length > 0
   ) {
-    paletteStore.ephemeralColors.value = file.ephemeralPalette;
-    paletteStore.rebuildColorMap();
+    palette.ephemeralColors.value = file.ephemeralPalette;
+    palette.rebuildColorMap();
     return;
   }
 
-  paletteStore.clearEphemeralColors(true);
+  palette.clearEphemeralColors(true);
 }
 
-export async function hydrateProjectLayers(file: ProjectFile): Promise<void> {
-  clearLoadedLayers();
+export async function hydrateProjectLayers(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): Promise<void> {
+  clearLoadedLayers(stores);
 
   for (const layerFile of file.layers) {
-    await hydrateProjectLayer(layerFile, file.width, file.height);
+    await hydrateProjectLayer(stores, layerFile, file.width, file.height);
   }
 }
 
-export async function hydrateProjectFrames(file: ProjectFile): Promise<void> {
-  const placeholderFrameId = prepareFramesForLoad();
+export async function hydrateProjectFrames(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): Promise<void> {
+  const placeholderFrameId = prepareFramesForLoad(stores);
   const linkedCelGroups = new Map<string, LinkedCelGroup>();
 
   for (const frameFile of file.frames) {
-    const frame = addLoadedFrame(frameFile);
-    await hydrateFrameCels(frameFile, frame.id, file, linkedCelGroups);
+    const frame = addLoadedFrame(stores, frameFile);
+    await hydrateFrameCels(stores, frameFile, frame.id, file, linkedCelGroups);
   }
 
-  restoreLinkedCelGroups(linkedCelGroups);
-  deletePlaceholderFrame(placeholderFrameId);
+  restoreLinkedCelGroups(stores, linkedCelGroups);
+  deletePlaceholderFrame(stores, placeholderFrameId);
 }
 
-export function restoreProjectAnimationState(file: ProjectFile): void {
-  animationStore.fps.value = file.animation.fps;
+export function restoreProjectAnimationState(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): void {
+  const { animation } = stores;
 
-  const targetFrame =
-    animationStore.frames.value[file.animation.currentFrameIndex];
+  animation.fps.value = file.animation.fps;
+
+  const targetFrame = animation.frames.value[file.animation.currentFrameIndex];
   if (targetFrame) {
-    animationStore.goToFrame(targetFrame.id);
+    animation.goToFrame(targetFrame.id);
   }
 }
 
-export function restoreProjectFrameTags(file: ProjectFile): void {
-  animationStore.tags.value =
+export function restoreProjectFrameTags(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): void {
+  stores.animation.tags.value =
     file.tags && Array.isArray(file.tags) ? file.tags : [];
 }
 
-export function refreshProjectPaletteAfterLoad(fromAutoSave: boolean): void {
-  paletteStore.rebuildEphemeralFromDrawing();
+export function refreshProjectPaletteAfterLoad(
+  stores: ProjectLoadStores,
+  fromAutoSave: boolean
+): void {
+  const { animation, palette } = stores;
+
+  palette.rebuildEphemeralFromDrawing();
 
   if (fromAutoSave) {
-    animationStore.rebuildAllIndexBuffers();
+    animation.rebuildAllIndexBuffers();
   }
 
-  paletteStore.refreshUsedColors();
+  palette.refreshUsedColors();
 }
 
-export function selectFirstLoadedLayer(): void {
+export function selectFirstLoadedLayer(stores: ProjectLoadStores): void {
+  const { layers: layerStore } = stores;
   const layers = layerStore.layers.value;
   if (layers.length > 0) {
     layerStore.setActiveLayer(layers[0].id);
   }
 }
 
-function clearLoadedLayers(): void {
-  while (layerStore.layers.value.length > 0) {
-    layerStore.removeLayer(layerStore.layers.value[0].id);
+function clearLoadedLayers(stores: ProjectLoadStores): void {
+  const { layers } = stores;
+
+  while (layers.layers.value.length > 0) {
+    layers.removeLayer(layers.layers.value[0].id);
   }
 }
 
 async function hydrateProjectLayer(
+  stores: ProjectLoadStores,
   layerFile: ProjectLayerFile,
   width: number,
   height: number
 ): Promise<void> {
+  const { layers } = stores;
   const layerType = layerFile.type || 'image';
   const layer =
     layerType === 'text' && layerFile.textData
-      ? layerStore.addTextLayer(layerFile.textData, layerFile.name, width, height)
-      : layerStore.addLayer(layerFile.name, width, height);
+      ? layers.addTextLayer(layerFile.textData, layerFile.name, width, height)
+      : layers.addLayer(layerFile.name, width, height);
 
-  layerStore.updateLayer(layer.id, {
+  layers.updateLayer(layer.id, {
     id: layerFile.id,
     visible: layerFile.visible,
     opacity: layerFile.opacity,
@@ -123,50 +201,61 @@ async function hydrateProjectLayer(
     continuous: layerFile.continuous || false,
   });
 
-  const restored = layerStore.layers.value.find((x) => x.id === layerFile.id);
+  const restored = layers.layers.value.find((x) => x.id === layerFile.id);
   if (restored && hasProjectImageData(layerFile.data) && restored.canvas) {
     await loadImageDataToCanvas(layerFile.data, restored.canvas);
   }
 }
 
-function prepareFramesForLoad(): string | undefined {
-  while (animationStore.frames.value.length > 1) {
-    animationStore.deleteFrame(animationStore.frames.value[0].id);
+function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
+  const { animation } = stores;
+
+  while (animation.frames.value.length > 1) {
+    animation.deleteFrame(animation.frames.value[0].id);
   }
 
-  return animationStore.frames.value[0]?.id;
+  return animation.frames.value[0]?.id;
 }
 
-function addLoadedFrame(frameFile: ProjectFrameFile): Frame {
-  animationStore.addFrame(false);
-  const frame =
-    animationStore.frames.value[animationStore.frames.value.length - 1];
-  animationStore.setFrameDuration(frame.id, frameFile.duration);
+function addLoadedFrame(
+  stores: ProjectLoadStores,
+  frameFile: ProjectFrameFile
+): Frame {
+  const { animation } = stores;
+
+  animation.addFrame(false);
+  const frame = animation.frames.value[animation.frames.value.length - 1];
+  animation.setFrameDuration(frame.id, frameFile.duration);
   return frame;
 }
 
 async function hydrateFrameCels(
+  stores: ProjectLoadStores,
   frameFile: ProjectFrameFile,
   frameId: string,
   file: ProjectFile,
   linkedCelGroups: Map<string, LinkedCelGroup>
 ): Promise<void> {
-  for (const celFile of frameFile.cels) {
-    const celKey = animationStore.getCelKey(celFile.layerId, frameId);
+  const { animation } = stores;
 
-    giveSharedTransparentCelOwnCanvas(celKey, celFile, file);
-    await hydrateCelImage(celKey, frameId, celFile, file);
-    restoreTextCelData(frameId, celFile);
+  for (const celFile of frameFile.cels) {
+    const celKey = animation.getCelKey(celFile.layerId, frameId);
+
+    giveSharedTransparentCelOwnCanvas(stores, celKey, celFile, file);
+    await hydrateCelImage(stores, celKey, frameId, celFile, file);
+    restoreTextCelData(stores, frameId, celFile);
     trackLinkedCelGroup(celKey, celFile, linkedCelGroups);
   }
 }
 
 function giveSharedTransparentCelOwnCanvas(
+  stores: ProjectLoadStores,
   celKey: string,
   celFile: ProjectCelFile,
   file: ProjectFile
 ): void {
-  const cel = animationStore.cels.value.get(celKey);
+  const { animation } = stores;
+  const cel = animation.cels.value.get(celKey);
   if (
     !cel ||
     cel.linkedCelId !== EMPTY_CEL_LINK_ID ||
@@ -184,40 +273,43 @@ function giveSharedTransparentCelOwnCanvas(
   });
   if (ctx) ctx.imageSmoothingEnabled = false;
 
-  const cels = new Map(animationStore.cels.value);
+  const cels = new Map(animation.cels.value);
   cels.set(celKey, {
     ...cel,
     canvas,
     linkedCelId: undefined,
     linkType: undefined,
   });
-  animationStore.cels.value = cels;
+  animation.cels.value = cels;
 }
 
 async function hydrateCelImage(
+  stores: ProjectLoadStores,
   celKey: string,
   frameId: string,
   celFile: ProjectCelFile,
   file: ProjectFile
 ): Promise<void> {
-  const canvas = animationStore.getCelCanvas(frameId, celFile.layerId);
+  const canvas = stores.animation.getCelCanvas(frameId, celFile.layerId);
   if (canvas && hasProjectImageData(celFile.data)) {
     await loadImageDataToCanvas(celFile.data, canvas);
   }
 
-  restoreCelIndexBuffer(celKey, celFile, canvas, file);
+  restoreCelIndexBuffer(stores, celKey, celFile, canvas, file);
 }
 
 function restoreCelIndexBuffer(
+  stores: ProjectLoadStores,
   celKey: string,
   celFile: ProjectCelFile,
   canvas: HTMLCanvasElement | undefined,
   file: ProjectFile
 ): void {
-  const cel = animationStore.cels.value.get(celKey);
+  const { animation } = stores;
+  const cel = animation.cels.value.get(celKey);
   if (!cel || !hasProjectImageData(celFile.data)) return;
 
-  const cels = new Map(animationStore.cels.value);
+  const cels = new Map(animation.cels.value);
 
   if (celFile.indexData && Array.isArray(celFile.indexData)) {
     cels.set(celKey, {
@@ -231,12 +323,20 @@ function restoreCelIndexBuffer(
     });
   }
 
-  animationStore.cels.value = cels;
+  animation.cels.value = cels;
 }
 
-function restoreTextCelData(frameId: string, celFile: ProjectCelFile): void {
+function restoreTextCelData(
+  stores: ProjectLoadStores,
+  frameId: string,
+  celFile: ProjectCelFile
+): void {
   if (celFile.textCelData) {
-    animationStore.setTextCelData(celFile.layerId, frameId, celFile.textCelData);
+    stores.animation.setTextCelData(
+      celFile.layerId,
+      frameId,
+      celFile.textCelData
+    );
   }
 }
 
@@ -258,35 +358,43 @@ function trackLinkedCelGroup(
 }
 
 function restoreLinkedCelGroups(
+  stores: ProjectLoadStores,
   linkedCelGroups: Map<string, LinkedCelGroup>
 ): void {
   for (const [linkedCelId, { celKeys, linkType }] of linkedCelGroups) {
     if (celKeys.length >= 2) {
-      animationStore.linkCels(celKeys, linkType);
+      stores.animation.linkCels(celKeys, linkType);
       continue;
     }
 
     if (celKeys.length === 1) {
-      restoreOrphanedLinkedCel(celKeys[0], linkedCelId, linkType);
+      restoreOrphanedLinkedCel(stores, celKeys[0], linkedCelId, linkType);
     }
   }
 }
 
 function restoreOrphanedLinkedCel(
+  stores: ProjectLoadStores,
   celKey: string,
   linkedCelId: string,
   linkType: CelLinkType
 ): void {
-  const cels = new Map(animationStore.cels.value);
+  const { animation } = stores;
+  const cels = new Map(animation.cels.value);
   const cel = cels.get(celKey);
   if (!cel) return;
 
   cels.set(celKey, { ...cel, linkedCelId, linkType });
-  animationStore.cels.value = cels;
+  animation.cels.value = cels;
 }
 
-function deletePlaceholderFrame(placeholderFrameId: string | undefined): void {
-  if (placeholderFrameId && animationStore.frames.value.length > 1) {
-    animationStore.deleteFrame(placeholderFrameId);
+function deletePlaceholderFrame(
+  stores: ProjectLoadStores,
+  placeholderFrameId: string | undefined
+): void {
+  const { animation } = stores;
+
+  if (placeholderFrameId && animation.frames.value.length > 1) {
+    animation.deleteFrame(placeholderFrameId);
   }
 }
