@@ -100,30 +100,37 @@ export class PFPreviewOverlay extends BaseComponent {
 
     .preview-canvas-wrapper {
       position: relative;
+      background-color: var(--preview-bg-color);
+      background-image: var(--preview-bg-image, none);
+      background-position: var(--preview-bg-position, 0 0);
+      background-size: var(--preview-bg-size, auto);
       box-shadow: 0 0 0 1px var(--pf-color-border), 0 12px 30px rgba(0, 0, 0, 0.36);
     }
 
     canvas {
       display: block;
       image-rendering: pixelated;
+      background: transparent;
     }
 
-    .bg-white canvas {
-      background-color: white;
+    .preview-canvas-wrapper.bg-white {
+      --preview-bg-color: white;
     }
 
-    .bg-black canvas {
-      background-color: black;
+    .preview-canvas-wrapper.bg-black {
+      --preview-bg-color: black;
     }
 
-    .bg-checker canvas {
-      background-image: linear-gradient(45deg, #808080 25%, transparent 25%),
-        linear-gradient(-45deg, #808080 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #808080 75%),
-        linear-gradient(-45deg, transparent 75%, #808080 75%);
-      background-size: 8px 8px;
-      background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
-      background-color: #c0c0c0;
+    .preview-canvas-wrapper.bg-checker {
+      --preview-bg-color: var(--pf-checker-dark-color);
+      --preview-bg-image: linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--pf-checker-light-color) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--pf-checker-light-color) 75%);
+      --preview-bg-size: calc(var(--pf-checker-tile-size) * 2) calc(var(--pf-checker-tile-size) * 2);
+      --preview-bg-position: 0 0, 0 var(--pf-checker-tile-size),
+        var(--pf-checker-tile-size) calc(-1 * var(--pf-checker-tile-size)),
+        calc(-1 * var(--pf-checker-tile-size)) 0;
     }
 
     .viewport-indicator {
@@ -175,13 +182,13 @@ export class PFPreviewOverlay extends BaseComponent {
     }
 
     .bg-btn.checker {
-      background-image: linear-gradient(45deg, #808080 25%, transparent 25%),
-        linear-gradient(-45deg, #808080 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #808080 75%),
-        linear-gradient(-45deg, transparent 75%, #808080 75%);
+      background-image: linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--pf-checker-light-color) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--pf-checker-light-color) 75%);
       background-size: 6px 6px;
       background-position: 0 0, 0 3px, 3px -3px, -3px 0px;
-      background-color: #c0c0c0;
+      background-color: var(--pf-checker-dark-color);
     }
 
     .play-btn {
@@ -581,11 +588,8 @@ export class PFPreviewOverlay extends BaseComponent {
             ? `max-height: ${this.previewSize + 100}px`
             : ""}"
         >
-          <div
-            class="preview-area bg-${this.bgType}"
-            @click=${this.handlePreviewClick}
-          >
-            <div class="preview-canvas-wrapper">
+          <div class="preview-area" @click=${this.handlePreviewClick}>
+            <div class="preview-canvas-wrapper bg-${this.bgType}">
               <canvas
                 width="${actualCanvasW}"
                 height="${actualCanvasH}"
