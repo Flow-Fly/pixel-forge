@@ -3,12 +3,13 @@ import { describe, it, expect, vi } from 'vitest';
 // The store graph touches IndexedDB and canvas encoding at module load /
 // save time; neither exists in happy-dom, so mock them at the boundary.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
-  persistenceService: {
-    saveCurrentProject: vi.fn(async () => {}),
-    loadCurrentProject: vi.fn(async () => null),
-    clearCurrentProject: vi.fn(async () => {}),
-    saveSetting: vi.fn(async () => {}),
-    loadSetting: vi.fn(async () => null),
+  projectRepository: {
+    list: vi.fn(async () => []),
+    load: vi.fn(async () => null),
+    save: vi.fn(async () => {}),
+    delete: vi.fn(async () => {}),
+    getLastOpenedProjectId: vi.fn(async () => null),
+    setLastOpenedProjectId: vi.fn(async () => {}),
   },
 }));
 
