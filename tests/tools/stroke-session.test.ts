@@ -210,7 +210,7 @@ function pixelIndex(x: number, y: number): number {
 
 function setupDrawingState() {
   animationStore.cels.value = new Map();
-  paletteStore.clearEphemeralColors(true);
+  paletteStore.clearAllNewFlags();
   paletteStore.setPalette(['#ff0000', '#00ff00', '#ffffff']);
   projectStore.setSize(width, height);
   guidesStore.clearAllGuides();

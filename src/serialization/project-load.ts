@@ -51,10 +51,6 @@ export type ProjectLoadStores = {
     updateLayer: (id: string, updates: Partial<Layer>) => void;
   };
   palette: {
-    ephemeralColors: WritableSignal<string[]>;
-    clearEphemeralColors: (skipRemap?: boolean) => void;
-    rebuildColorMap: () => void;
-    rebuildEphemeralFromDrawing: () => void;
     refreshUsedColors: () => void;
     setPalette: (colors: string[]) => void;
   };
@@ -76,28 +72,18 @@ export function restoreProjectPaletteForLoad(
 ): void {
   const { palette } = stores;
 
-  if (
-    !fromAutoSave &&
-    file.palette &&
-    Array.isArray(file.palette) &&
-    file.palette.length > 0
-  ) {
-    palette.setPalette(file.palette);
-  }
-
   if (fromAutoSave) return;
 
-  if (
-    file.ephemeralPalette &&
-    Array.isArray(file.ephemeralPalette) &&
-    file.ephemeralPalette.length > 0
-  ) {
-    palette.ephemeralColors.value = file.ephemeralPalette;
-    palette.rebuildColorMap();
-    return;
-  }
+  const filePalette =
+    file.palette && Array.isArray(file.palette) ? file.palette : [];
+  const compatibilityPalette =
+    file.ephemeralPalette && Array.isArray(file.ephemeralPalette)
+      ? file.ephemeralPalette
+      : [];
 
-  palette.clearEphemeralColors(true);
+  if (filePalette.length > 0) {
+    palette.setPalette([...filePalette, ...compatibilityPalette]);
+  }
 }
 
 export async function hydrateProjectLayers(
@@ -154,8 +140,6 @@ export function refreshProjectPaletteAfterLoad(
   fromAutoSave: boolean
 ): void {
   const { animation, palette } = stores;
-
-  palette.rebuildEphemeralFromDrawing();
 
   if (fromAutoSave) {
     animation.rebuildAllIndexBuffers();

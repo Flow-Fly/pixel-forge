@@ -32,7 +32,6 @@ export {
   buildColorMaps,
   getColorIndex,
   isMainPaletteColor,
-  isEphemeralColor,
   findInsertionIndex,
   findClosestColorIndex,
   getColorByIndex,

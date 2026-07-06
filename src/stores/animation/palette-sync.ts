@@ -81,35 +81,6 @@ export function handlePaletteColorRemoved(
 }
 
 /**
- * Handle palette color moved to ephemeral.
- */
-export function handlePaletteColorMovedToEphemeral(
-  cels: Map<string, Cel>,
-  removedIndex: number,
-  newIndex: number
-): Map<string, Cel> {
-  for (const [_key, cel] of cels) {
-    if (!cel.indexBuffer) continue;
-
-    const buffer = cel.indexBuffer;
-    for (let i = 0; i < buffer.length; i++) {
-      const oldIndex = buffer[i];
-      if (oldIndex === 0) continue;
-
-      if (oldIndex === removedIndex) {
-        buffer[i] = newIndex;
-      } else if (oldIndex > removedIndex) {
-        buffer[i] = oldIndex - 1;
-      }
-    }
-  }
-
-  const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
-  return newCels;
-}
-
-/**
  * Handle palette color insertion - shift indices up.
  */
 export function handlePaletteColorInserted(
@@ -136,64 +107,17 @@ export function handlePaletteColorInserted(
 }
 
 /**
- * Handle ephemeral color promoted to main palette.
- * This is a specific transformation:
- * - Pixels using oldEphemeralIndex → newMainIndex
- * - Main indices >= newMainIndex shift up by 1
- * - Ephemeral indices > oldEphemeralIndex shift down by 1
- */
-export function handleEphemeralPromoted(
-  cels: Map<string, Cel>,
-  oldEphemeralIndex: number,
-  newMainIndex: number,
-  oldMainLength: number
-): Map<string, Cel> {
-  for (const [_key, cel] of cels) {
-    if (!cel.indexBuffer) continue;
-    if (cel.textCelData) continue;
-
-    const buffer = cel.indexBuffer;
-    for (let i = 0; i < buffer.length; i++) {
-      const oldIndex = buffer[i];
-      if (oldIndex === 0) continue;
-
-      if (oldIndex === oldEphemeralIndex) {
-        // This pixel was using the promoted ephemeral color
-        buffer[i] = newMainIndex;
-      } else if (oldIndex >= 1 && oldIndex <= oldMainLength) {
-        // Main palette index - shift if >= insertion point
-        if (oldIndex >= newMainIndex) {
-          buffer[i] = oldIndex + 1;
-        }
-      } else if (oldIndex > oldEphemeralIndex) {
-        // Other ephemeral indices shift down by 1
-        buffer[i] = oldIndex - 1;
-      }
-    }
-  }
-
-  const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
-  return newCels;
-}
-
-/**
  * Handle palette replacement with color-based index remapping.
  */
 export function handlePaletteReplacedWithRemap(
   cels: Map<string, Cel>,
-  oldMainColors: string[],
-  oldEphemeralColors: string[]
+  oldMainColors: string[]
 ): Map<string, Cel> {
   // Build lookup: old 1-based index -> hex color (normalized for consistent comparison)
   const oldIndexToColor = new Map<number, string>();
 
   oldMainColors.forEach((color, i) => {
     oldIndexToColor.set(i + 1, normalizeHex(color));
-  });
-
-  oldEphemeralColors.forEach((color, i) => {
-    oldIndexToColor.set(oldMainColors.length + i + 1, normalizeHex(color));
   });
 
   // Remap each pixel by color
@@ -246,8 +170,7 @@ export function setupPaletteListeners(
       } else if (detail?.oldMainColors) {
         const newCels = handlePaletteReplacedWithRemap(
           getCels(),
-          detail.oldMainColors,
-          detail.oldEphemeralColors || []
+          detail.oldMainColors
         );
         setCels(newCels);
       } else {
@@ -271,29 +194,11 @@ export function setupPaletteListeners(
       setCels(newCels);
     },
 
-    'palette-color-moved-to-ephemeral': (event: Event) => {
-      const { removedIndex, newIndex } = (event as CustomEvent).detail;
-      const newCels = handlePaletteColorMovedToEphemeral(getCels(), removedIndex, newIndex);
-      setCels(newCels);
-    },
-
     'palette-color-inserted': (event: Event) => {
       const { insertedIndex } = (event as CustomEvent).detail;
       const newCels = handlePaletteColorInserted(getCels(), insertedIndex);
       setCels(newCels);
     },
-
-    'palette-ephemeral-promoted': (event: Event) => {
-      const { oldEphemeralIndex, newMainIndex, oldMainLength } = (event as CustomEvent).detail;
-      if (oldEphemeralIndex === -1) {
-        // Color wasn't in ephemeral, just do a regular insert shift
-        const newCels = handlePaletteColorInserted(getCels(), newMainIndex);
-        setCels(newCels);
-      } else {
-        const newCels = handleEphemeralPromoted(getCels(), oldEphemeralIndex, newMainIndex, oldMainLength);
-        setCels(newCels);
-      }
-    }
   };
 
   // Add all listeners

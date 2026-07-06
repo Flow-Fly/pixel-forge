@@ -33,7 +33,6 @@ export function rgbToHex(r: number, g: number, b: number): string {
 
 /**
  * Get RGBA values for a palette index using the palette store.
- * Handles both main palette and ephemeral colors automatically.
  * @param index 1-based palette index (0 = transparent)
  * @returns [r, g, b, a] tuple
  */
@@ -66,14 +65,14 @@ export function indexToRgba(index: number, palette?: string[]): [number, number,
     return [0, 0, 0, 0]; // Transparent
   }
 
-  // If no palette provided, use the store (handles ephemeral colors)
+  // If no palette provided, use the store.
   if (!palette) {
     return indexToRgbaFromStore(index);
   }
 
   const arrayIndex = index - 1;
   if (arrayIndex < 0 || arrayIndex >= palette.length) {
-    // Might be an ephemeral color - check store
+    // The store may have newer colors than the passed palette.
     return indexToRgbaFromStore(index);
   }
 

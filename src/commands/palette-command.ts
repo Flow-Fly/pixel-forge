@@ -60,9 +60,16 @@ export class PaletteAddColorCommand implements Command {
   }
 
   execute(): void {
-    // Add the color and track where it was inserted
-    const index = paletteStore.getOrAddColor(this.color);
-    this.insertIndex = index;
+    const existingIndex = paletteStore.getColorIndex(this.color);
+    if (existingIndex !== 0) {
+      this.insertIndex = null;
+      return;
+    }
+
+    const previousLength = paletteStore.mainColors.value.length;
+    const index = paletteStore.addColor(this.color);
+    this.insertIndex =
+      paletteStore.mainColors.value.length > previousLength ? index : null;
   }
 
   undo(): void {

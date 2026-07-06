@@ -174,7 +174,7 @@ export class PFPaletteGrid extends BaseComponent {
 
   private handleDeleteColor(e: Event, index: number) {
     e.stopPropagation();
-    paletteStore.removeColorToEphemeral(index);
+    paletteStore.removeColor(index);
   }
 
   // Drag-drop handlers
@@ -214,7 +214,6 @@ export class PFPaletteGrid extends BaseComponent {
 
     const paletteIndexStr = e.dataTransfer?.getData("application/x-palette-index");
     const color = e.dataTransfer?.getData("application/x-palette-color");
-    const isEphemeral = e.dataTransfer?.getData("application/x-ephemeral-color") === "true";
 
     if (paletteIndexStr !== undefined && paletteIndexStr !== "") {
       const fromIndex = parseInt(paletteIndexStr, 10);
@@ -222,12 +221,8 @@ export class PFPaletteGrid extends BaseComponent {
         const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
         paletteStore.moveColor(fromIndex, adjustedTarget);
       }
-    } else if (color && isEphemeral) {
-      paletteStore.removeFromEphemeral(color);
+    } else if (color) {
       paletteStore.insertColorAt(targetIndex + 1, color);
-      window.dispatchEvent(new CustomEvent("palette-color-inserted", {
-        detail: { insertedIndex: targetIndex + 1, color },
-      }));
     }
 
     this.isDragging = false;
@@ -245,11 +240,9 @@ export class PFPaletteGrid extends BaseComponent {
   private handleGridDrop(e: DragEvent) {
     e.preventDefault();
     const color = e.dataTransfer?.getData("application/x-palette-color");
-    const isEphemeral = e.dataTransfer?.getData("application/x-ephemeral-color") === "true";
     const paletteIndexStr = e.dataTransfer?.getData("application/x-palette-index");
 
-    if (color && isEphemeral && !paletteIndexStr) {
-      paletteStore.removeFromEphemeral(color);
+    if (color && !paletteIndexStr) {
       paletteStore.addColor(color);
     }
 
@@ -290,7 +283,7 @@ export class PFPaletteGrid extends BaseComponent {
               <button
                 class="swatch-delete"
                 @click=${(e: Event) => this.handleDeleteColor(e, index)}
-                title="Remove from palette (move to untracked)"
+                title="Remove from palette"
               >
                 ×
               </button>
