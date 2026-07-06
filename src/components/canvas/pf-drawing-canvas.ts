@@ -12,8 +12,10 @@ import { viewportStore } from "../../stores/viewport";
 import { renderScheduler } from "../../services/render-scheduler";
 import { onionSkinCache } from "../../services/onion-skin-cache";
 import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
-import type { ModifierKeys, BaseTool } from "../../tools/base-tool";
+import type { ModifierKeys, Point } from "../../tools/base-tool";
+import { ToolController } from "../../tools/tool-controller";
 import { rectClamp, type Rect } from "../../types/geometry";
+import type { Layer } from "../../types/layer";
 import { extractIndexRegion } from "../../utils/buffer-region";
 import {
   getFont,
@@ -23,7 +25,6 @@ import {
   getDefaultFont,
 } from "../../utils/pixel-fonts";
 import { TextTool } from "../../tools/text-tool";
-import { log } from "../../utils/log";
 
 /** Tools that paint pixels on the active layer (vs. select/navigate). */
 const DRAWING_TOOLS = [
@@ -36,40 +37,33 @@ const DRAWING_TOOLS = [
   "ellipse",
 ] as const;
 
-type ToolConstructor = new (ctx: CanvasRenderingContext2D) => BaseTool;
+const DRAWING_TOOL_SET = new Set<ToolType>(DRAWING_TOOLS);
+const SELECTION_TOOL_SET = new Set<ToolType>([
+  "marquee-rect",
+  "lasso",
+  "polygonal-lasso",
+  "magic-wand",
+]);
+const VIEWPORT_TOOL_SET = new Set<ToolType>(["hand", "zoom"]);
+const LAYER_WARNING_TOOL_SET = new Set<ToolType>([...DRAWING_TOOLS, "text"]);
 
-/**
- * Lazy tool loaders — literal dynamic imports so Vite keeps code-splitting
- * each tool module out of the initial bundle.
- */
-const TOOL_LOADERS: Partial<Record<ToolType, () => Promise<ToolConstructor>>> =
-  {
-    pencil: async () => (await import("../../tools/pencil-tool")).PencilTool,
-    eraser: async () => (await import("../../tools/eraser-tool")).EraserTool,
-    eyedropper: async () =>
-      (await import("../../tools/eyedropper-tool")).EyedropperTool,
-    "marquee-rect": async () =>
-      (await import("../../tools/selection/marquee-rect-tool")).MarqueeRectTool,
-    lasso: async () =>
-      (await import("../../tools/selection/lasso-tool")).LassoTool,
-    "polygonal-lasso": async () =>
-      (await import("../../tools/selection/polygonal-lasso-tool"))
-        .PolygonalLassoTool,
-    "magic-wand": async () =>
-      (await import("../../tools/selection/magic-wand-tool")).MagicWandTool,
-    line: async () => (await import("../../tools/shape-tool")).LineTool,
-    rectangle: async () =>
-      (await import("../../tools/shape-tool")).RectangleTool,
-    ellipse: async () => (await import("../../tools/shape-tool")).EllipseTool,
-    fill: async () => (await import("../../tools/fill-tool")).FillTool,
-    gradient: async () =>
-      (await import("../../tools/gradient-tool")).GradientTool,
-    transform: async () =>
-      (await import("../../tools/transform-tool")).TransformTool,
-    text: async () => (await import("../../tools/text-tool")).TextTool,
-    hand: async () => (await import("../../tools/hand-tool")).HandTool,
-    zoom: async () => (await import("../../tools/zoom-tool")).ZoomTool,
-  };
+type EditableLayer = Layer & { canvas: HTMLCanvasElement };
+
+interface StrokeTarget {
+  layerId: string;
+  layer: EditableLayer;
+  context: CanvasRenderingContext2D;
+}
+
+interface ActiveLayerLookup {
+  layerId: string | null;
+  layer: Layer | undefined;
+}
+
+interface StrokeChange {
+  previousRegion: Uint8ClampedArray;
+  newRegion: Uint8ClampedArray;
+}
 
 @customElement("pf-drawing-canvas")
 export class PFDrawingCanvas extends BaseComponent {
@@ -112,7 +106,7 @@ export class PFDrawingCanvas extends BaseComponent {
   `;
 
   private ctx!: CanvasRenderingContext2D;
-  private activeTool: any; // TODO: Type properly
+  private toolController!: ToolController;
   private previousImageData: ImageData | null = null;
 
   // Index-buffer snapshot taken at stroke start, so the resulting command
@@ -139,6 +133,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Explicit setting for pixel art - critical for crisp rendering
     this.ctx.imageSmoothingEnabled = false;
+    this.toolController = new ToolController(this.ctx);
 
     // Initial tool load
     this.loadTool(toolStore.activeTool.value);
@@ -154,7 +149,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Check if tool changed
     const currentTool = toolStore.activeTool.value;
-    if (this.activeTool?.name !== currentTool) {
+    if (!this.toolController.isActive(currentTool)) {
       this.loadTool(currentTool);
     }
 
@@ -168,44 +163,41 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private async loadTool(toolName: ToolType) {
-    // Auto-commit floating selection when switching to drawing tools
-    if ((DRAWING_TOOLS as readonly string[]).includes(toolName)) {
-      const state = selectionStore.state.value;
-      if (state.type === "floating") {
-        const activeLayerId = layerStore.activeLayerId.value;
-        const layer = layerStore.layers.value.find(
-          (l) => l.id === activeLayerId
-        );
-        if (layer?.canvas) {
-          const command = new CommitFloatCommand(
-            layer.canvas,
-            layer.id,
-            state.imageData,
-            state.originalBounds,
-            state.currentOffset,
-            state.shape,
-            state.mask
-          );
-          historyStore.execute(command);
-        }
-      }
-    }
+    this.commitFloatingSelectionForDrawingTool(toolName);
 
-    const loadToolClass = TOOL_LOADERS[toolName];
-    if (!loadToolClass) {
-      log.warn(`Unknown tool: ${toolName}`);
-      return;
-    }
-    const ToolClass = await loadToolClass();
-
-    if (ToolClass) {
-      this.activeTool = new ToolClass(this.ctx);
-
+    const didLoadTool = await this.toolController.load(toolName);
+    const cursor = this.toolController.cursor;
+    if (didLoadTool && this.canvas && cursor) {
       // Set cursor based on tool (brush preview overlay shows alongside cursor)
-      if (this.canvas && this.activeTool.cursor) {
-        this.canvas.style.cursor = this.activeTool.cursor;
-      }
+      this.canvas.style.cursor = cursor;
     }
+  }
+
+  private commitFloatingSelectionForDrawingTool(toolName: ToolType) {
+    if (!DRAWING_TOOL_SET.has(toolName)) return;
+
+    const command = this.createCommitFloatCommand();
+    if (command) {
+      historyStore.execute(command);
+    }
+  }
+
+  private createCommitFloatCommand(): CommitFloatCommand | null {
+    const state = selectionStore.state.value;
+    if (state.type !== "floating") return null;
+
+    const activeLayer = this.getActiveLayer().layer;
+    if (!activeLayer?.canvas) return null;
+
+    return new CommitFloatCommand(
+      activeLayer.canvas,
+      activeLayer.id,
+      state.imageData,
+      state.originalBounds,
+      state.currentOffset,
+      state.shape,
+      state.mask
+    );
   }
 
   resizeCanvas() {
@@ -479,6 +471,29 @@ export class PFDrawingCanvas extends BaseComponent {
     };
   }
 
+  private getClampedMousePoint(e: MouseEvent): Point {
+    const point = this.getCanvasCoordinates(e);
+    return this.clampToCanvas(point.x, point.y);
+  }
+
+  private emitCanvasCursor(point: Point) {
+    const cursorEvent = new CustomEvent("canvas-cursor", {
+      detail: { x: Math.floor(point.x), y: Math.floor(point.y) },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(cursorEvent);
+    window.dispatchEvent(cursorEvent);
+  }
+
+  private shouldSkipToolMovement(): boolean {
+    return viewportStore.isSpacebarDown.value || viewportStore.isPanning.value;
+  }
+
+  private scheduleCanvasRender() {
+    renderScheduler.scheduleRender(() => this.renderCanvas());
+  }
+
   /**
    * Clean up document-level listeners.
    */
@@ -501,125 +516,147 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
-    // Check if current tool is a selection tool (needs Alt for subtract mode)
     const currentTool = toolStore.activeTool.value;
-    const isSelectionTool = [
-      "marquee-rect",
-      "lasso",
-      "polygonal-lasso",
-      "magic-wand",
-    ].includes(currentTool);
+    if (!this.shouldHandleCanvasMouseDown(e, currentTool)) return;
 
-    // Skip drawing when:
-    // - Middle mouse button (panning)
-    // - Spacebar pan mode
-    // - Hand or Zoom tool (handled at viewport level)
-    if (e.button === 1 || viewportStore.isSpacebarDown.value) {
+    const target = this.getStrokeTarget();
+    if (!target) {
+      this.showLayerWarningForTool(currentTool);
       return;
     }
 
-    // Hand and Zoom tools are handled at viewport level, not here
-    if (currentTool === "hand" || currentTool === "zoom") {
-      return;
-    }
+    this.startStroke(e, currentTool, target);
+  }
 
-    // For non-selection tools:
-    // - Alt/Cmd+click = quick eyedropper (handled by viewport)
-    // - Ctrl+click = lightness shift (handled by viewport)
-    // For selection tools: allow Alt through for subtract mode, Ctrl for shrink-to-content
-    if (!isSelectionTool && (e.altKey || e.metaKey || e.ctrlKey)) {
-      return;
-    }
+  private shouldHandleCanvasMouseDown(
+    e: MouseEvent,
+    currentTool: ToolType
+  ): boolean {
+    if (this.isPanGesture(e)) return false;
+    if (VIEWPORT_TOOL_SET.has(currentTool)) return false;
+    if (this.isQuickToolGesture(e, currentTool)) return false;
+    return this.toolController.hasActiveTool;
+  }
 
-    if (!this.activeTool) return;
-    const { x, y } = this.getCanvasCoordinates(e);
+  private isPanGesture(e: MouseEvent): boolean {
+    return e.button === 1 || viewportStore.isSpacebarDown.value;
+  }
+
+  private isQuickToolGesture(e: MouseEvent, currentTool: ToolType): boolean {
+    if (SELECTION_TOOL_SET.has(currentTool)) return false;
+    return e.altKey || e.metaKey || e.ctrlKey;
+  }
+
+  private getStrokeTarget(): StrokeTarget | null {
+    const { layerId, layer } = this.getActiveLayer();
+    if (!layerId || !this.isEditableLayer(layer)) return null;
+
+    const currentFrameId = animationStore.currentFrameId.value;
+    const editableLayer = this.getLayerForEdit(layerId, layer, currentFrameId);
+    const context = editableLayer.canvas.getContext("2d");
+    if (!context) return null;
+
+    return { layerId, layer: editableLayer, context };
+  }
+
+  private getActiveLayer(): ActiveLayerLookup {
+    const layerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((item) => item.id === layerId);
+    return { layerId, layer };
+  }
+
+  private isEditableLayer(layer: Layer | undefined): layer is EditableLayer {
+    if (!layer?.canvas) return false;
+    return !layer.locked && layer.visible;
+  }
+
+  private getLayerForEdit(
+    layerId: string,
+    layer: EditableLayer,
+    frameId: string
+  ): EditableLayer {
+    const wasUnlinked = animationStore.ensureUnlinkedForEdit(layerId, frameId);
+    if (!wasUnlinked) return layer;
+
+    const freshLayer = layerStore.layers.value.find(
+      (item) => item.id === layerId
+    );
+    return this.isEditableLayer(freshLayer) ? freshLayer : layer;
+  }
+
+  private startStroke(
+    e: MouseEvent,
+    currentTool: ToolType,
+    target: StrokeTarget
+  ) {
+    const point = this.getCanvasCoordinates(e);
     const modifiers = this.getModifiers(e);
 
-    // Update active tool context to the active layer's canvas
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(
-      (l) => l.id === activeLayerId
+    this.captureStrokeSnapshot(target, currentTool);
+    dirtyRectStore.resetStroke();
+    this.toolController.onDown(target.context, point, modifiers);
+    this.attachDocumentListeners();
+    this.scheduleCanvasRender();
+  }
+
+  private captureStrokeSnapshot(target: StrokeTarget, toolName: ToolType) {
+    this.previousImageData = target.context.getImageData(
+      0,
+      0,
+      this.width,
+      this.height
     );
 
-    if (
-      activeLayer &&
-      activeLayer.canvas &&
-      !activeLayer.locked &&
-      activeLayer.visible
-    ) {
-      // Copy-on-write: unlink cel before editing if it's shared with others
-      const currentFrameId = animationStore.currentFrameId.value;
-      const wasUnlinked = animationStore.ensureUnlinkedForEdit(
-        activeLayerId!,
-        currentFrameId
-      );
+    this.strokeFrameId = animationStore.currentFrameId.value;
+    this.previousIndexSnapshot = this.getPreviousIndexSnapshot(
+      target.layerId,
+      this.strokeFrameId,
+      toolName
+    );
+  }
 
-      // If unlinked, the layer's canvas reference has changed - get fresh reference
-      let targetLayer = activeLayer;
-      if (wasUnlinked) {
-        targetLayer = layerStore.layers.value.find(
-          (l) => l.id === activeLayerId
-        )!;
-      }
+  private getPreviousIndexSnapshot(
+    layerId: string,
+    frameId: string,
+    toolName: ToolType
+  ): Uint8Array | null {
+    const indexBuffer = DRAWING_TOOL_SET.has(toolName)
+      ? animationStore.ensureCelIndexBuffer(layerId, frameId)
+      : animationStore.getCelIndexBuffer(layerId, frameId);
 
-      const layerCtx = targetLayer.canvas!.getContext("2d");
-      if (layerCtx) {
-        // Capture state before drawing
-        this.previousImageData = layerCtx.getImageData(
-          0,
-          0,
-          this.width,
-          this.height
-        );
+    return indexBuffer ? new Uint8Array(indexBuffer) : null;
+  }
 
-        // Capture the index buffer state too, so the stroke command can
-        // undo palette indices along with pixels. Drawing tools are about
-        // to create/ensure the buffer anyway; for other tools only snapshot
-        // an already-existing buffer.
-        this.strokeFrameId = currentFrameId;
-        const toolName = toolStore.activeTool.value;
-        const indexBuffer = (DRAWING_TOOLS as readonly string[]).includes(
-          toolName
-        )
-          ? animationStore.ensureCelIndexBuffer(activeLayerId!, currentFrameId)
-          : animationStore.getCelIndexBuffer(activeLayerId!, currentFrameId);
-        this.previousIndexSnapshot = indexBuffer
-          ? new Uint8Array(indexBuffer)
-          : null;
+  private attachDocumentListeners() {
+    this.isStrokeActive = true;
+    this.boundDocumentMouseMove = this.handleDocumentMouseMove.bind(this);
+    this.boundDocumentMouseUp = this.handleDocumentMouseUp.bind(this);
+    document.addEventListener("mousemove", this.boundDocumentMouseMove);
+    document.addEventListener("mouseup", this.boundDocumentMouseUp);
+  }
 
-        // Reset stroke dirty region to prevent pollution from previous execute/undo
-        dirtyRectStore.resetStroke();
+  private showLayerWarningForTool(toolName: ToolType) {
+    if (!LAYER_WARNING_TOOL_SET.has(toolName)) return;
 
-        // Update tool context to layer context
-        this.activeTool.setContext(layerCtx);
-
-        this.activeTool.onDown(x, y, modifiers);
-
-        // Mark stroke as active and attach document-level listeners
-        // This allows us to track mouse movement even outside the canvas
-        this.isStrokeActive = true;
-        this.boundDocumentMouseMove = this.handleDocumentMouseMove.bind(this);
-        this.boundDocumentMouseUp = this.handleDocumentMouseUp.bind(this);
-        document.addEventListener("mousemove", this.boundDocumentMouseMove);
-        document.addEventListener("mouseup", this.boundDocumentMouseUp);
-
-        // Schedule render instead of immediate call
-        renderScheduler.scheduleRender(() => this.renderCanvas());
-      }
-    } else {
-      // Show warning for drawing tools only (not selection/transform/eyedropper)
-      const drawingTools = ["pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "text"];
-      const currentTool = toolStore.activeTool.value;
-      if (drawingTools.includes(currentTool)) {
-        if (!activeLayerId || !activeLayer) {
-          this.showWarning("No layer selected");
-        } else if (activeLayer.locked) {
-          this.showWarning("Layer is locked");
-        } else if (!activeLayer.visible) {
-          this.showWarning("Layer is hidden");
-        }
-      }
+    const { layerId, layer } = this.getActiveLayer();
+    const warning = this.getLayerWarning(layerId, layer);
+    if (warning) {
+      this.showWarning(warning);
     }
+  }
+
+  private getLayerWarning(
+    layerId: string | null,
+    layer: Layer | undefined
+  ): string | null {
+    if (!layerId || !layer) return "No layer selected";
+    return this.getBlockedLayerWarning(layer);
+  }
+
+  private getBlockedLayerWarning(layer: Layer): string | null {
+    if (layer.locked) return "Layer is locked";
+    if (!layer.visible) return "Layer is hidden";
+    return null;
   }
 
   /**
@@ -627,28 +664,17 @@ export class PFDrawingCanvas extends BaseComponent {
    * Coordinates are clamped to canvas bounds.
    */
   private handleDocumentMouseMove(e: MouseEvent) {
-    if (!this.isStrokeActive || !this.activeTool) return;
+    if (!this.canContinueStroke()) return;
+    if (this.shouldSkipToolMovement()) return;
 
-    // Skip during pan operations
-    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
-      return;
-    }
-
-    const rawCoords = this.getCanvasCoordinates(e);
-    const { x, y } = this.clampToCanvas(rawCoords.x, rawCoords.y);
+    const point = this.getClampedMousePoint(e);
     const modifiers = this.getModifiers(e);
 
     // Emit cursor position (clamped) for brush overlay and status bar
-    const cursorEvent = new CustomEvent("canvas-cursor", {
-      detail: { x: Math.floor(x), y: Math.floor(y) },
-      bubbles: true,
-      composed: true,
-    });
-    this.dispatchEvent(cursorEvent);
-    window.dispatchEvent(cursorEvent);
+    this.emitCanvasCursor(point);
 
-    this.activeTool.onDrag(x, y, modifiers);
-    renderScheduler.scheduleRender(() => this.renderCanvas());
+    this.toolController.onDrag(point, modifiers);
+    this.scheduleCanvasRender();
   }
 
   /**
@@ -661,112 +687,150 @@ export class PFDrawingCanvas extends BaseComponent {
     // Clean up document listeners first
     this.cleanupDocumentListeners();
 
-    if (!this.activeTool) return;
+    if (!this.toolController.hasActiveTool) {
+      this.clearStrokeSnapshots();
+      return;
+    }
 
-    const rawCoords = this.getCanvasCoordinates(e);
-    const { x, y } = this.clampToCanvas(rawCoords.x, rawCoords.y);
+    const point = this.getClampedMousePoint(e);
     const modifiers = this.getModifiers(e);
 
-    this.activeTool.onUp(x, y, modifiers);
+    this.toolController.onUp(point, modifiers);
 
     // Get stroke bounds before flushing
     const strokeBounds = dirtyRectStore.flushStroke();
 
-    // Flush any pending renders before capturing final state
-    renderScheduler.flush();
+    this.renderFinalStrokeState();
+    this.commitStrokeIfChanged(strokeBounds);
+    this.clearStrokeSnapshots();
+  }
 
-    // Request full redraw for final state
+  private canContinueStroke(): boolean {
+    return this.isStrokeActive && this.toolController.hasActiveTool;
+  }
+
+  private renderFinalStrokeState() {
+    renderScheduler.flush();
     dirtyRectStore.requestFullRedraw();
     this.renderCanvas();
+  }
 
-    // Capture state after drawing and create command
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(
-      (l) => l.id === activeLayerId
+  private commitStrokeIfChanged(strokeBounds: Rect | null) {
+    const bounds = this.getUsableStrokeBounds(strokeBounds);
+    if (!bounds) return;
+
+    const target = this.getActiveLayerContext();
+    if (!target) return;
+
+    const strokeChange = this.readStrokeChange(target.context, bounds);
+    if (!strokeChange) return;
+
+    const command = this.createStrokeCommand(
+      target.layerId,
+      bounds,
+      strokeChange
+    );
+    historyStore.execute(command);
+    this.invalidateOnionSkinCel(target.layerId);
+  }
+
+  private getUsableStrokeBounds(strokeBounds: Rect | null): Rect | null {
+    if (!strokeBounds) return null;
+
+    const bounds = rectClamp(strokeBounds, this.width, this.height);
+    return this.isEmptyRect(bounds) ? null : bounds;
+  }
+
+  private isEmptyRect(bounds: Rect): boolean {
+    return bounds.width <= 0 || bounds.height <= 0;
+  }
+
+  private getActiveLayerContext(): Pick<
+    StrokeTarget,
+    "layerId" | "context"
+  > | null {
+    const { layerId, layer } = this.getActiveLayer();
+    if (!layerId || !this.hasCanvas(layer)) return null;
+
+    const context = layer.canvas.getContext("2d");
+    if (!context) return null;
+
+    return { layerId, context };
+  }
+
+  private hasCanvas(layer: Layer | undefined): layer is EditableLayer {
+    return Boolean(layer?.canvas);
+  }
+
+  private readStrokeChange(
+    context: CanvasRenderingContext2D,
+    bounds: Rect
+  ): StrokeChange | null {
+    if (!this.previousImageData) return null;
+
+    const previousRegion = this.extractRegion(this.previousImageData, bounds);
+    const newImageData = context.getImageData(
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height
     );
 
-    if (
-      activeLayer &&
-      activeLayer.canvas &&
-      this.previousImageData &&
-      strokeBounds &&
-      activeLayerId
-    ) {
-      const layerCtx = activeLayer.canvas.getContext("2d");
-      if (layerCtx) {
-        // Clamp bounds to canvas dimensions
-        const bounds = rectClamp(strokeBounds, this.width, this.height);
+    if (this.uint8ArrayEquals(previousRegion, newImageData.data)) return null;
+    return {
+      previousRegion,
+      newRegion: new Uint8ClampedArray(newImageData.data),
+    };
+  }
 
-        // Skip if bounds are empty
-        if (bounds.width <= 0 || bounds.height <= 0) {
-          this.previousImageData = null;
-          this.previousIndexSnapshot = null;
-          return;
-        }
+  private createStrokeCommand(
+    layerId: string,
+    bounds: Rect,
+    strokeChange: StrokeChange
+  ): OptimizedDrawingCommand {
+    return new OptimizedDrawingCommand(
+      layerId,
+      bounds,
+      strokeChange.previousRegion,
+      strokeChange.newRegion,
+      this.toolController.commandName,
+      this.createStrokeIndexBufferData(layerId, bounds)
+    );
+  }
 
-        // Extract only the affected region from previous snapshot
-        const prevRegion = this.extractRegion(this.previousImageData, bounds);
+  private createStrokeIndexBufferData(layerId: string, bounds: Rect) {
+    const currentIndexBuffer = animationStore.getCelIndexBuffer(
+      layerId,
+      this.strokeFrameId
+    );
+    if (!this.previousIndexSnapshot || !currentIndexBuffer) return undefined;
 
-        // Get current state of the affected region
-        const newImageData = layerCtx.getImageData(
-          bounds.x,
-          bounds.y,
-          bounds.width,
-          bounds.height
-        );
+    return {
+      frameId: this.strokeFrameId,
+      canvasWidth: this.width,
+      previousIndexData: extractIndexRegion(
+        this.previousIndexSnapshot,
+        this.width,
+        bounds
+      ),
+      newIndexData: extractIndexRegion(currentIndexBuffer, this.width, bounds),
+    };
+  }
 
-        // Only create command if data actually changed
-        if (!this.uint8ArrayEquals(prevRegion, newImageData.data)) {
-          // Include index-buffer before/after for the same region, so
-          // undo/redo keeps palette indices in sync with the pixels
-          let indexBufferData;
-          const currentIndexBuffer = animationStore.getCelIndexBuffer(
-            activeLayerId,
-            this.strokeFrameId
-          );
-          if (this.previousIndexSnapshot && currentIndexBuffer) {
-            indexBufferData = {
-              frameId: this.strokeFrameId,
-              canvasWidth: this.width,
-              previousIndexData: extractIndexRegion(
-                this.previousIndexSnapshot,
-                this.width,
-                bounds
-              ),
-              newIndexData: extractIndexRegion(
-                currentIndexBuffer,
-                this.width,
-                bounds
-              ),
-            };
-          }
-
-          const command = new OptimizedDrawingCommand(
-            activeLayerId,
-            bounds,
-            prevRegion,
-            new Uint8ClampedArray(newImageData.data),
-            this.getCommandNameForTool(),
-            indexBufferData
-          );
-          historyStore.execute(command);
-
-          // Invalidate onion skin cache for the modified cel
-          const currentFrameId = animationStore.currentFrameId.value;
-          const celKey = animationStore.getCelKey(
-            activeLayerId,
-            currentFrameId
-          );
-          const cel = animationStore.cels.value.get(celKey);
-          if (cel) {
-            onionSkinCache.invalidateCel(cel.id);
-          }
-        }
-
-        this.previousImageData = null;
-        this.previousIndexSnapshot = null;
-      }
+  private invalidateOnionSkinCel(layerId: string) {
+    const celKey = animationStore.getCelKey(
+      layerId,
+      animationStore.currentFrameId.value
+    );
+    const cel = animationStore.cels.value.get(celKey);
+    if (cel) {
+      onionSkinCache.invalidateCel(cel.id);
     }
+  }
+
+  private clearStrokeSnapshots() {
+    this.previousImageData = null;
+    this.previousIndexSnapshot = null;
   }
 
   private handleMouseMove(e: MouseEvent) {
@@ -774,27 +838,19 @@ export class PFDrawingCanvas extends BaseComponent {
     // This avoids duplicate processing
     if (this.isStrokeActive) return;
 
-    const { x, y } = this.getCanvasCoordinates(e);
+    const point = this.getCanvasCoordinates(e);
 
     // Emit cursor position for status bar and brush cursor overlay
-    const cursorEvent = new CustomEvent("canvas-cursor", {
-      detail: { x: Math.floor(x), y: Math.floor(y) },
-      bubbles: true,
-      composed: true,
-    });
-    this.dispatchEvent(cursorEvent);
-    window.dispatchEvent(cursorEvent);
+    this.emitCanvasCursor(point);
 
     // Skip tool interaction during pan operations
-    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) {
-      return;
-    }
+    if (this.shouldSkipToolMovement()) return;
 
-    if (!this.activeTool) return;
+    if (!this.toolController.hasActiveTool) return;
     const modifiers = this.getModifiers(e);
 
     // Only handle hover (onMove) since drag is handled by document listener when stroke is active
-    this.activeTool.onMove(x, y, modifiers);
+    this.toolController.onMove(point, modifiers);
   }
 
   private handleMouseLeave = (_e: MouseEvent) => {
@@ -848,31 +904,6 @@ export class PFDrawingCanvas extends BaseComponent {
       if (a[i] !== b[i]) return false;
     }
     return true;
-  }
-
-  /**
-   * Get command name based on active tool.
-   */
-  private getCommandNameForTool(): string {
-    const toolName = this.activeTool?.name;
-    switch (toolName) {
-      case "pencil":
-        return "Brush Stroke";
-      case "eraser":
-        return "Erase";
-      case "fill":
-        return "Fill";
-      case "gradient":
-        return "Gradient";
-      case "line":
-        return "Draw Line";
-      case "rectangle":
-        return "Draw Rectangle";
-      case "ellipse":
-        return "Draw Ellipse";
-      default:
-        return "Drawing";
-    }
   }
 
   /**
