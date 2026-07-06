@@ -5,6 +5,7 @@ import { layerStore } from '../stores/layers';
 import { animationStore } from '../stores/animation';
 import { TransformSelectionCommand } from '../commands/selection-commands';
 import { MoveTextCommand } from '../commands/text-commands';
+import { log } from '../utils/log';
 
 export class TransformTool extends BaseTool {
   name = 'transform';
@@ -179,7 +180,7 @@ export class TransformTool extends BaseTool {
     const activeLayerId = layerStore.activeLayerId.value;
     const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
     if (!activeLayer?.canvas) {
-      console.error('Active layer canvas not found');
+      log.error('Active layer canvas not found');
       selectionStore.cancelTransform();
       return;
     }

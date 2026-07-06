@@ -4,6 +4,7 @@ import { animationStore } from "../stores/animation";
 import { brushStore } from "../stores/brush";
 import type { Brush, BrushImageData } from "../types/brush";
 import { BRUSH_SIZE_LIMITS } from "../types/brush";
+import { log } from "../utils/log";
 
 /**
  * Check if a brush can be captured from the current selection
@@ -58,7 +59,7 @@ function getSelectionInfo(): {
 export function captureBrushFromSelection(name?: string): Brush | null {
   const info = getSelectionInfo();
   if (!info) {
-    console.warn("No selection to capture brush from");
+    log.warn("No selection to capture brush from");
     return null;
   }
 
@@ -69,7 +70,7 @@ export function captureBrushFromSelection(name?: string): Brush | null {
     bounds.width > BRUSH_SIZE_LIMITS.hardMax ||
     bounds.height > BRUSH_SIZE_LIMITS.hardMax
   ) {
-    console.warn(
+    log.warn(
       `Selection too large. Maximum size is ${BRUSH_SIZE_LIMITS.hardMax}x${BRUSH_SIZE_LIMITS.hardMax}`
     );
     return null;
@@ -79,7 +80,7 @@ export function captureBrushFromSelection(name?: string): Brush | null {
     bounds.width < BRUSH_SIZE_LIMITS.min ||
     bounds.height < BRUSH_SIZE_LIMITS.min
   ) {
-    console.warn("Selection too small");
+    log.warn("Selection too small");
     return null;
   }
 
@@ -95,20 +96,20 @@ export function captureBrushFromSelection(name?: string): Brush | null {
     const currentFrame = animationStore.currentFrameId.value;
 
     if (!activeLayerId) {
-      console.warn("No active layer");
+      log.warn("No active layer");
       return null;
     }
 
     const canvas = animationStore.getCelCanvas(currentFrame, activeLayerId);
 
     if (!canvas) {
-      console.warn("No canvas available to capture brush from");
+      log.warn("No canvas available to capture brush from");
       return null;
     }
 
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      console.warn("Could not get canvas context");
+      log.warn("Could not get canvas context");
       return null;
     }
 
@@ -127,7 +128,7 @@ export function captureBrushFromSelection(name?: string): Brush | null {
 
   // Check if brush has any non-transparent pixels
   if (!hasVisiblePixels(pixelData)) {
-    console.warn("Selection contains no visible pixels");
+    log.warn("Selection contains no visible pixels");
     return null;
   }
 

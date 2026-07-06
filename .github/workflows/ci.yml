@@ -5,11 +5,17 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -26,3 +32,9 @@ jobs:
 
       - name: Tests
         run: npm run test:run
+
+      - name: Fallow audit
+        uses: fallow-rs/fallow@v2
+        with:
+          command: audit
+          artifacts-dir: .fallow/ci

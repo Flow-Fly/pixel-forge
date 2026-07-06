@@ -16,6 +16,17 @@ import * as indexedColor from './indexed-color';
 import * as extraction from './extraction';
 import * as variations from './variations';
 import * as persistence from './persistence';
+import { log } from '../../utils/log';
+
+function waitForNextFrame(): Promise<void> {
+  if (typeof requestAnimationFrame !== 'function') {
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve => {
+    requestAnimationFrame(() => resolve());
+  });
+}
 
 class PaletteStore {
   // ==========================================
@@ -495,7 +506,7 @@ class PaletteStore {
   loadPreset(id: string) {
     const preset = PALETTE_BY_ID.get(id);
     if (!preset) {
-      console.warn(`Unknown palette preset: ${id}`);
+      log.warn(`Unknown palette preset: ${id}`);
       return;
     }
 
@@ -522,7 +533,7 @@ class PaletteStore {
   async loadCustomPalette(id: string) {
     const palette = this.customPalettes.value.find(p => p.id === id);
     if (!palette) {
-      console.warn(`Unknown custom palette: ${id}`);
+      log.warn(`Unknown custom palette: ${id}`);
       return;
     }
 
@@ -587,7 +598,7 @@ class PaletteStore {
 
   async extractFromDrawing(): Promise<void> {
     this.isExtracting.value = true;
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await waitForNextFrame();
 
     try {
       const colors = await extraction.extractColorsFromDrawing(

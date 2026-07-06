@@ -16,6 +16,7 @@ import {
 import { type ProjectFileInput } from "../../types/project";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
+import { log } from "../../utils/log";
 
 const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
 const MENU_MARGIN = 8;
@@ -492,7 +493,7 @@ export class PFMenuBar extends BaseComponent {
           await projectStore.loadProject(project);
         }
       } catch (error) {
-        console.error("Failed to open file:", error);
+        log.error("Failed to open file:", error);
       }
     };
 

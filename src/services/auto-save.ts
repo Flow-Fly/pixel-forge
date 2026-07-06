@@ -2,6 +2,7 @@ import { effect } from '../core/signal';
 import { historyStore } from '../stores/history';
 import { projectStore } from '../stores/project';
 import { projectRepository } from './persistence/indexed-db';
+import { log } from '../utils/log';
 
 const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
@@ -88,7 +89,7 @@ export class AutoSaveService {
       this.isDirty = false;
       projectStore.lastSaved.value = Date.now();
     } catch (error) {
-      console.error('Auto-save failed:', error);
+      log.error('Auto-save failed:', error);
     }
   }
 }

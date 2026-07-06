@@ -4,7 +4,6 @@ import { layerStore } from "./layers";
 import { animationStore, EMPTY_CEL_LINK_ID } from "./animation";
 import { historyStore } from "./history";
 import { paletteStore } from "./palette";
-import { viewportStore } from "./viewport";
 import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
 import {
@@ -21,6 +20,7 @@ import {
   type ProjectFile,
   type ProjectFileInput,
 } from "../types/project";
+import { log } from "../utils/log";
 
 class ProjectStore {
   /** Storage identity of the open project (repository key). */
@@ -212,7 +212,7 @@ class ProjectStore {
       });
       const restored = layerStore.layers.value.find((x) => x.id === l.id);
 
-      // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
+      // ProjectFileInput image data is normalized before hydration.
       if (restored && hasProjectImageData(l.data) && restored.canvas) {
         await loadImageDataToCanvas(l.data, restored.canvas);
       }
@@ -275,7 +275,7 @@ class ProjectStore {
 
         // Now load data into the cel's (non-shared) canvas
         const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
-        // Handle both Base64 (v1.x) and binary (v2.0+) formats
+        // ProjectFileInput image data is normalized before hydration.
         if (canvas && hasProjectImageData(c.data)) {
           await loadImageDataToCanvas(c.data, canvas);
         }
@@ -386,11 +386,8 @@ class ProjectStore {
       layerStore.setActiveLayer(layers[0].id);
     }
 
-    // 10. Auto-fit canvas to viewport
-    // Use setTimeout to ensure the viewport has rendered with new dimensions
-    setTimeout(() => {
-      viewportStore.resetView();
-    }, 0);
+    // Let the app shell reset the viewport after Lit renders the new dimensions.
+    window.dispatchEvent(new CustomEvent("project-loaded"));
   }
 
   /**
@@ -454,7 +451,7 @@ class ProjectStore {
       await projectRepository.save(this.id.value, projectData);
       await projectRepository.setLastOpenedProjectId(this.id.value);
     } catch (error) {
-      console.error("Failed to save new project:", error);
+      log.error("Failed to save new project:", error);
     }
   }
 }

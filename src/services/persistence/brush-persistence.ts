@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { StoredCustomBrush } from "../../types/brush";
+import { log } from "../../utils/log";
 
 interface BrushDB extends DBSchema {
   brushes: {
@@ -32,7 +33,7 @@ class BrushPersistenceService {
       const brushes = await db.getAllFromIndex("brushes", "by-modified");
       return brushes.reverse(); // Most recent first
     } catch (error) {
-      console.error("Failed to load brushes from IndexedDB:", error);
+      log.error("Failed to load brushes from IndexedDB:", error);
       return [];
     }
   }
@@ -45,7 +46,7 @@ class BrushPersistenceService {
       const db = await this.dbPromise;
       await db.put("brushes", brush);
     } catch (error) {
-      console.error("Failed to save brush to IndexedDB:", error);
+      log.error("Failed to save brush to IndexedDB:", error);
     }
   }
 
@@ -57,7 +58,7 @@ class BrushPersistenceService {
       const db = await this.dbPromise;
       await db.delete("brushes", id);
     } catch (error) {
-      console.error("Failed to delete brush from IndexedDB:", error);
+      log.error("Failed to delete brush from IndexedDB:", error);
     }
   }
 
@@ -76,7 +77,7 @@ class BrushPersistenceService {
         });
       }
     } catch (error) {
-      console.error("Failed to update brush in IndexedDB:", error);
+      log.error("Failed to update brush in IndexedDB:", error);
     }
   }
 
@@ -88,7 +89,7 @@ class BrushPersistenceService {
       const db = await this.dbPromise;
       return await db.get("brushes", id);
     } catch (error) {
-      console.error("Failed to get brush from IndexedDB:", error);
+      log.error("Failed to get brush from IndexedDB:", error);
       return undefined;
     }
   }

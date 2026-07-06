@@ -1,6 +1,7 @@
 import { signal } from '../core/signal';
 import { userStore } from './user';
 import { paletteStore } from './palette';
+import { log } from '../utils/log';
 
 // Configuration constants for history limits
 const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
@@ -208,7 +209,7 @@ class HistoryStore {
   popContext() {
     const context = this.contextStack.pop();
     if (!context) {
-      console.warn('No history context to restore');
+      log.warn('No history context to restore');
       return;
     }
 

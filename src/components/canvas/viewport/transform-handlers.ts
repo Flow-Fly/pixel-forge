@@ -8,6 +8,7 @@ import { selectionStore } from '../../../stores/selection';
 import { historyStore } from '../../../stores/history';
 import { layerStore } from '../../../stores/layers';
 import { CutToFloatCommand, TransformSelectionCommand } from '../../../commands/selection-commands';
+import { log } from '../../../utils/log';
 
 /**
  * Transition selection to transforming state if needed.
@@ -104,7 +105,7 @@ export function commitTransform(): void {
   const activeLayerId = layerStore.activeLayerId.value;
   const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
   if (!activeLayer?.canvas) {
-    console.error('Active layer canvas not found');
+    log.error('Active layer canvas not found');
     selectionStore.cancelTransform();
     return;
   }

@@ -1,6 +1,7 @@
 import { html, css, nothing } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
+import { log } from '../../utils/log';
 
 export interface ContextMenuItem {
   type: 'item' | 'divider' | 'slider' | 'input' | 'color-picker';
@@ -468,18 +469,18 @@ export class PFContextMenu extends BaseComponent {
     e.preventDefault();
 
     if (item.disabled) {
-      console.log('Item disabled, skipping');
+      log.debug('Item disabled, skipping');
       return;
     }
 
-    console.log('Menu item clicked:', item.label, 'has action:', !!item.action);
+    log.debug('Menu item clicked:', item.label, 'has action:', !!item.action);
 
     if (item.action) {
       try {
         item.action();
-        console.log('Action executed successfully');
+        log.debug('Action executed successfully');
       } catch (err) {
-        console.error('Action failed:', err);
+        log.error('Action failed:', err);
       }
     }
 

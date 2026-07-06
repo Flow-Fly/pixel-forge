@@ -4,6 +4,7 @@
  * User preferences and UI customization settings.
  */
 import { signal } from "../core/signal";
+import { log } from "../utils/log";
 
 // Predefined accent color themes
 export const ACCENT_THEMES = {
@@ -104,7 +105,7 @@ class SettingsStore {
         }
       }
     } catch (e) {
-      console.warn("Failed to load settings:", e);
+      log.warn("Failed to load settings:", e);
     }
   }
 
@@ -118,7 +119,7 @@ class SettingsStore {
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
-      console.warn("Failed to save settings:", e);
+      log.warn("Failed to save settings:", e);
     }
   }
 

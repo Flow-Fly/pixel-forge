@@ -27,6 +27,7 @@ import { canCaptureBrush, captureBrushAndAdd } from "../brush-capture";
 import { MOD_PRIMARY } from "../../utils/platform";
 import { getToolSize, setToolSize } from "../../stores/tool-settings";
 import { clipboardStore } from "../../stores/clipboard";
+import { log } from "../../utils/log";
 
 export function registerShortcuts() {
   // ============================================
@@ -768,7 +769,7 @@ export function registerShortcuts() {
   // Mod+B = Capture brush from selection
   const captureBrush = async () => {
     if (!canCaptureBrush()) {
-      console.log("No selection to capture as brush");
+      log.debug("No selection to capture as brush");
       return;
     }
     await captureBrushAndAdd();
