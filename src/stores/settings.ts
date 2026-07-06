@@ -57,7 +57,7 @@ export const DEFAULT_CHECKER_SETTINGS = {
   tileSize: 8,
 } as const;
 
-export interface CheckerSettings {
+interface CheckerSettings {
   lightColor: string;
   darkColor: string;
   tileSize: number;

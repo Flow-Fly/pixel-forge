@@ -1,4 +1,12 @@
 /**
+ * A 2D point in canvas coordinates.
+ */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/**
  * Axis-aligned bounding box for dirty rectangle tracking.
  */
 export interface Rect {
@@ -18,18 +26,6 @@ export function rectUnion(a: Rect | null, b: Rect): Rect {
   const maxX = Math.max(a.x + a.width, b.x + b.width);
   const maxY = Math.max(a.y + a.height, b.y + b.height);
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
-/**
- * Compute the intersection of two rectangles (null if no overlap).
- */
-export function rectIntersect(a: Rect, b: Rect): Rect | null {
-  const x = Math.max(a.x, b.x);
-  const y = Math.max(a.y, b.y);
-  const right = Math.min(a.x + a.width, b.x + b.width);
-  const bottom = Math.min(a.y + a.height, b.y + b.height);
-  if (right <= x || bottom <= y) return null;
-  return { x, y, width: right - x, height: bottom - y };
 }
 
 /**

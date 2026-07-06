@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.fallow.tools/schema/fallowrc.json",
+  "entry": [
+    "src/main.ts",
+    "index.html"
+  ],
+  "dynamicallyLoaded": [
+    "src/tools/**"
+  ]
+}

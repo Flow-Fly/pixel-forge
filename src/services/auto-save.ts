@@ -14,7 +14,7 @@ const AUTO_SAVE_DEBOUNCE_MS = 2000;
  * not know how (or where) projects are persisted. This service observes
  * `historyStore.version` instead, which bumps on every execute/undo/redo.
  */
-export class AutoSaveService {
+class AutoSaveService {
   private isDirty = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private dispose: (() => void) | null = null;

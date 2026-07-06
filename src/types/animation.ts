@@ -54,11 +54,3 @@ export interface Cel {
   textCelData?: TextCelData;
 }
 
-export interface AnimationState {
-  frames: Frame[];
-  cels: Map<string, Cel>; // Key: `${layerId}:${frameId}`
-  currentFrameId: string;
-  isPlaying: boolean;
-  fps: number;
-  onionSkin: OnionSkinSettings;
-}

@@ -26,7 +26,6 @@ export function signal<T>(initialValue: T): WritableSignal<T> {
  * Computed signal derived from other signals.
  * Note: @lit-labs/signals 'computed' is currently imported from the same package
  */
-export { computed, SignalWatcher, watch } from '@lit-labs/signals';
 
 /**
  * Run `fn` now and re-run it (batched on a microtask) whenever any signal it

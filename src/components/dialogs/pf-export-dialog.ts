@@ -11,14 +11,14 @@ import { FileService } from "../../services/file-service";
 // import { exportAseFile } from "../../services/aseprite-service";
 import "../ui/pf-dialog";
 
-export type ExportFormat =
+type ExportFormat =
   | "png"
   | "webp"
   | "webp-animated"
   | "spritesheet"
   | "aseprite"
   | "pixelforge";
-export type FrameSelection = "current" | "all" | "range";
+type FrameSelection = "current" | "all" | "range";
 
 @customElement("pf-export-dialog")
 export class PFExportDialog extends BaseComponent {

@@ -3,7 +3,8 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { selectionStore } from '../../stores/selection';
 import { viewportStore } from '../../stores/viewport';
-import { traceMaskOutline, connectSegments, type Point } from '../../utils/mask-utils';
+import { traceMaskOutline, connectSegments } from '../../utils/mask-utils';
+import type { Point } from '../../types/geometry';
 import { type SelectionState } from '../../types/selection';
 import '../../components/common/pf-tooltip';
 

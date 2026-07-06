@@ -66,7 +66,7 @@ export const toolGroups: ToolGroup[] = [
 /**
  * Map from tool to its group for quick lookup
  */
-export const toolToGroup: Map<ToolType, ToolGroup> = new Map();
+const toolToGroup: Map<ToolType, ToolGroup> = new Map();
 toolGroups.forEach((group) => {
   group.tools.forEach((tool) => {
     toolToGroup.set(tool, group);
@@ -84,10 +84,6 @@ export function getToolGroup(tool: ToolType): ToolGroup | undefined {
  * Track the last selected tool per group (for remembering user's preference)
  */
 const lastSelectedInGroup: Map<string, ToolType> = new Map();
-
-export function getLastSelectedTool(groupId: string): ToolType | undefined {
-  return lastSelectedInGroup.get(groupId);
-}
 
 export function setLastSelectedTool(groupId: string, tool: ToolType): void {
   lastSelectedInGroup.set(groupId, tool);

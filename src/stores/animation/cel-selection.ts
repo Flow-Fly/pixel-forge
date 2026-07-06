@@ -57,30 +57,6 @@ export function deselectCel(
 }
 
 /**
- * Clear all cel selection.
- */
-export function clearCelSelection(state: SelectionState): SelectionState {
-  return {
-    ...state,
-    selectedCelKeys: new Set()
-  };
-}
-
-/**
- * Set the selection anchor point.
- */
-export function setSelectionAnchor(
-  state: SelectionState,
-  layerId: string,
-  frameId: string
-): SelectionState {
-  return {
-    ...state,
-    selectionAnchor: { layerId, frameId }
-  };
-}
-
-/**
  * Toggle a cel in/out of selection without affecting anchor.
  */
 export function toggleCel(

@@ -135,24 +135,3 @@ export function constrainWithStickyAngles(
   return { x: newX, y: newY };
 }
 
-/**
- * Constrain a point to the dominant axis (horizontal or vertical) from an origin.
- * Used for Shift+Drag to create straight horizontal/vertical lines without drift.
- */
-export function constrainToAxis(
-  originX: number,
-  originY: number,
-  targetX: number,
-  targetY: number
-): Point {
-  const dx = Math.abs(targetX - originX);
-  const dy = Math.abs(targetY - originY);
-
-  if (dx >= dy) {
-    // Horizontal - keep X movement, lock Y
-    return { x: targetX, y: originY };
-  } else {
-    // Vertical - keep Y movement, lock X
-    return { x: originX, y: targetY };
-  }
-}

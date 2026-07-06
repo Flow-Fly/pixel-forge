@@ -7,7 +7,6 @@ import { floodFillSelect, type FloodFillOptions } from '../../utils/mask-utils';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
 
 // Re-export for backward compatibility
-export { magicWandSettings };
 
 export class MagicWandTool extends BaseTool {
   name = 'magic-wand';

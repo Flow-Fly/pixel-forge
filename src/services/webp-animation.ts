@@ -99,7 +99,7 @@ function writeUint24LE(buffer: Uint8Array, offset: number, value: number) {
 /**
  * Create an animated WebP file from multiple frames.
  */
-export async function createAnimatedWebP(
+async function createAnimatedWebP(
   frames: FrameData[],
   loopCount = 0 // 0 = infinite
 ): Promise<Blob> {

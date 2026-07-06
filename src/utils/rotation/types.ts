@@ -60,12 +60,8 @@ export interface CleanEdgeOptions {
 }
 
 // Sentinel values
-export const TRANSPARENT: RGBA = { r: 0, g: 0, b: 0, a: 0 };
-export const NO_SLICE: RGBA = { r: -1, g: -1, b: -1, a: -1 };
 export const TRANSPARENT_PACKED = 0;
 export const NO_SLICE_PACKED = 0xffffffff;
 
 // Configuration constants
 export const LINE_WIDTH = 1;
-export const SIMILAR_THRESHOLD = 0.0;
-export const HIGHEST_COLOR = { r: 1, g: 1, b: 1 };

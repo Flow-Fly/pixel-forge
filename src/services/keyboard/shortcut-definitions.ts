@@ -26,7 +26,7 @@ export interface ShortcutCategory {
 // ============================================
 // FILE SHORTCUTS
 // ============================================
-export const fileShortcuts: ShortcutCategory = {
+const fileShortcuts: ShortcutCategory = {
   name: "File",
   shortcuts: [
     { key: "ctrl+n", action: "New project" },
@@ -38,7 +38,7 @@ export const fileShortcuts: ShortcutCategory = {
 // ============================================
 // EDIT SHORTCUTS
 // ============================================
-export const editShortcuts: ShortcutCategory = {
+const editShortcuts: ShortcutCategory = {
   name: "Edit",
   shortcuts: [
     { key: "mod+z", action: "Undo" },
@@ -55,7 +55,7 @@ export const editShortcuts: ShortcutCategory = {
 // ============================================
 // SELECTION SHORTCUTS
 // ============================================
-export const selectionShortcuts: ShortcutCategory = {
+const selectionShortcuts: ShortcutCategory = {
   name: "Selection",
   shortcuts: [
     { key: "mod+a", action: "Select all" },
@@ -77,7 +77,7 @@ export const selectionShortcuts: ShortcutCategory = {
 // ============================================
 // VIEW SHORTCUTS
 // ============================================
-export const viewShortcuts: ShortcutCategory = {
+const viewShortcuts: ShortcutCategory = {
   name: "View",
   shortcuts: [
     { key: "0", action: "Fit to window" },
@@ -98,7 +98,7 @@ export const viewShortcuts: ShortcutCategory = {
 // ============================================
 // COLOR & OPACITY SHORTCUTS
 // ============================================
-export const colorShortcuts: ShortcutCategory = {
+const colorShortcuts: ShortcutCategory = {
   name: "Colors & Opacity",
   shortcuts: [
     { key: "x", action: "Swap foreground/background" },
@@ -110,7 +110,7 @@ export const colorShortcuts: ShortcutCategory = {
 // ============================================
 // BRUSH SHORTCUTS
 // ============================================
-export const brushShortcuts: ShortcutCategory = {
+const brushShortcuts: ShortcutCategory = {
   name: "Brush",
   shortcuts: [
     { key: "[", action: "Decrease brush size" },
@@ -124,7 +124,7 @@ export const brushShortcuts: ShortcutCategory = {
 // ============================================
 // QUICK TOOL SHORTCUTS
 // ============================================
-export const quickToolShortcuts: ShortcutCategory = {
+const quickToolShortcuts: ShortcutCategory = {
   name: "Quick Tools",
   shortcuts: [
     { key: "alt (hold)", action: "Eyedropper" },
@@ -135,7 +135,7 @@ export const quickToolShortcuts: ShortcutCategory = {
 // ============================================
 // LAYER SHORTCUTS
 // ============================================
-export const layerShortcuts: ShortcutCategory = {
+const layerShortcuts: ShortcutCategory = {
   name: "Layers",
   shortcuts: [
     { key: "mod+g", action: "Group layers" },
@@ -146,14 +146,14 @@ export const layerShortcuts: ShortcutCategory = {
 // ============================================
 // ANIMATION / FRAME SHORTCUTS
 // ============================================
-export const animationPlaybackShortcuts: ShortcutCategory = {
+const animationPlaybackShortcuts: ShortcutCategory = {
   name: "Playback",
   shortcuts: [
     { key: "enter", action: "Play/Stop" },
   ],
 };
 
-export const animationNavigationShortcuts: ShortcutCategory = {
+const animationNavigationShortcuts: ShortcutCategory = {
   name: "Navigation",
   shortcuts: [
     { key: "left", action: "Previous frame" },
@@ -163,7 +163,7 @@ export const animationNavigationShortcuts: ShortcutCategory = {
   ],
 };
 
-export const animationFrameShortcuts: ShortcutCategory = {
+const animationFrameShortcuts: ShortcutCategory = {
   name: "Frames",
   shortcuts: [
     { key: "alt+n", action: "New frame" },
@@ -173,7 +173,7 @@ export const animationFrameShortcuts: ShortcutCategory = {
 // ============================================
 // CANVAS SHORTCUTS
 // ============================================
-export const canvasShortcuts: ShortcutCategory = {
+const canvasShortcuts: ShortcutCategory = {
   name: "Canvas",
   shortcuts: [
     { key: "c", action: "Canvas resize" },
@@ -243,24 +243,6 @@ export const animationShortcutCategories: ShortcutCategory[] = [
 // ============================================
 // MENU BAR SHORTCUT LOOKUP
 // ============================================
-
-/**
- * Get the shortcut key for a menu item action.
- * Returns the raw key string (e.g., "mod+z") for formatting.
- */
-export function getMenuShortcut(action: string): string | undefined {
-  // Search all categories
-  const allCategories = [...globalShortcutCategories, ...animationShortcutCategories];
-
-  for (const category of allCategories) {
-    const found = category.shortcuts.find(
-      s => s.action.toLowerCase() === action.toLowerCase()
-    );
-    if (found) return found.key;
-  }
-
-  return undefined;
-}
 
 /**
  * Specific menu shortcuts lookup for common menu items

@@ -1,4 +1,4 @@
-import { type Rect } from '../types/geometry';
+import { type Point, type Rect } from '../types/geometry';
 
 /**
  * Mask utilities for selection tools.
@@ -145,11 +145,6 @@ export function floodFillSelect(
 // ============================================
 // Polygon Fill (for Lasso)
 // ============================================
-
-export interface Point {
-  x: number;
-  y: number;
-}
 
 /**
  * Generate a mask from a polygon defined by points.
@@ -402,35 +397,3 @@ export function isPointInMask(x: number, y: number, mask: Uint8Array, bounds: Re
   return mask[idx] === 255;
 }
 
-/**
- * Create a rectangular mask (for consistency with other shapes).
- */
-export function createRectMask(bounds: Rect): Uint8Array {
-  const mask = new Uint8Array(bounds.width * bounds.height);
-  mask.fill(255);
-  return mask;
-}
-
-/**
- * Create an ellipse mask.
- */
-export function createEllipseMask(bounds: Rect): Uint8Array {
-  const { width, height } = bounds;
-  const mask = new Uint8Array(width * height);
-
-  const rx = width / 2;
-  const ry = height / 2;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const dx = (x + 0.5 - rx) / rx;
-      const dy = (y + 0.5 - ry) / ry;
-
-      if (dx * dx + dy * dy <= 1) {
-        mask[y * width + x] = 255;
-      }
-    }
-  }
-
-  return mask;
-}
