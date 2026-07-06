@@ -139,7 +139,7 @@ class HistoryStore {
    * Enforce history limits by removing oldest commands when necessary.
    */
   private enforceHistoryLimits() {
-    let stack = [...this.undoStack.value];
+    const stack = [...this.undoStack.value];
 
     // Remove oldest commands if over count limit
     while (stack.length > MAX_HISTORY_COUNT) {

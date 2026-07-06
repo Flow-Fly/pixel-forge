@@ -86,7 +86,7 @@ export class FillTool extends BaseTool {
       visited.add(pixelIndex);
 
       // Check if matches target (use index buffer if available, otherwise RGBA)
-      let matches = false;
+      let matches: boolean;
       if (indexBuffer) {
         matches = indexBuffer[pixelIndex] === targetPaletteIndex;
       } else {
