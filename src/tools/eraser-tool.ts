@@ -67,44 +67,57 @@ export class EraserTool extends BaseTool {
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
     if (!this.context) return;
 
-    // Set eraser mode based on mouse button: left = transparent, right = background
-    if (modifiers?.button === 2) {
-      EraserTool.setMode('background');
-    } else {
-      EraserTool.setMode('transparent');
-    }
+    this.setModeFromPointer(modifiers);
 
     this.isDrawing = true;
     const currentX = Math.floor(x);
     const currentY = Math.floor(y);
 
-    this.strokeSession.begin(this.context);
-
-    if (this.currentIndexBuffer) {
-      // For background mode, get the palette index of the secondary color
-      if (eraserSettings.mode.value === 'background') {
-        const bgColor = colorStore.secondaryColor.value;
-        this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
-      }
-    }
+    this.beginStrokeSession();
 
     // Shift+Click: erase line from last stroke end to current position
     if (modifiers?.shift && EraserTool.lastStrokeEnd) {
-      const start = EraserTool.lastStrokeEnd;
-      this.erasedPoints = [{ x: start.x, y: start.y }];
-      this.eraseLineBetweenPoints(start.x, start.y, currentX, currentY);
-      this.lastX = currentX;
-      this.lastY = currentY;
-      // Update last stroke end immediately for chained shift-clicks
-      EraserTool.lastStrokeEnd = { x: currentX, y: currentY };
+      this.eraseShiftClickStroke(currentX, currentY);
       return;
     }
 
+    this.startFreehandStroke(currentX, currentY);
+  }
+
+  private setModeFromPointer(modifiers?: ModifierKeys) {
+    EraserTool.setMode(modifiers?.button === 2 ? 'background' : 'transparent');
+  }
+
+  private beginStrokeSession() {
+    if (!this.context) return;
+
+    this.strokeSession.begin(this.context);
+
+    if (!this.currentIndexBuffer || eraserSettings.mode.value !== 'background') {
+      return;
+    }
+
+    const bgColor = colorStore.secondaryColor.value;
+    this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
+  }
+
+  private eraseShiftClickStroke(currentX: number, currentY: number) {
+    const start = EraserTool.lastStrokeEnd;
+    if (!start) return;
+
+    this.erasedPoints = [{ x: start.x, y: start.y }];
+    this.eraseLineBetweenPoints(start.x, start.y, currentX, currentY);
+    this.lastX = currentX;
+    this.lastY = currentY;
+    EraserTool.lastStrokeEnd = { x: currentX, y: currentY };
+  }
+
+  private startFreehandStroke(currentX: number, currentY: number) {
     this.lastX = currentX;
     this.lastY = currentY;
     this.dragStartX = currentX;
     this.dragStartY = currentY;
-    this.lockedAxis = null; // Reset axis lock for new stroke
+    this.lockedAxis = null;
     this.erasedPoints = [{ x: this.lastX, y: this.lastY }];
     this.distanceSinceLastStamp = 0;
     this.erasePoint(this.lastX, this.lastY);

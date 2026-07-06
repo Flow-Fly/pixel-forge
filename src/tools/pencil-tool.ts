@@ -102,46 +102,56 @@ export class PencilTool extends BaseTool {
     const currentX = Math.floor(x);
     const currentY = Math.floor(y);
 
-    this.strokeSession.begin(this.context);
-
-    if (this.currentIndexBuffer) {
-      // Get palette index for drawing - adds to ephemeral if not in main palette
-      const color = colorStore.primaryColor.value;
-      this.currentPaletteIndex = paletteStore.getOrAddColorForDrawing(color);
-    }
+    this.beginStrokeSession();
 
     // Shift+Click: draw line from last stroke end to current position
     // Ctrl+Shift+Click: angle-snapped line (45 degree increments)
     if (modifiers?.shift && PencilTool.lastStrokeEnd) {
-      const start = PencilTool.lastStrokeEnd;
-      let endX = currentX;
-      let endY = currentY;
-
-      // If Ctrl is also held, snap to 15-degree angles with sticky zones
-      if (modifiers?.ctrl) {
-        const snapped = constrainWithStickyAngles(start.x, start.y, currentX, currentY);
-        endX = snapped.x;
-        endY = snapped.y;
-      }
-
-      this.drawnPoints = [{ x: start.x, y: start.y }];
-      this.drawLineBetweenPoints(start.x, start.y, endX, endY);
-      this.lastX = endX;
-      this.lastY = endY;
-      // Update last stroke end immediately for chained shift-clicks
-      PencilTool.lastStrokeEnd = { x: endX, y: endY };
+      this.drawShiftClickStroke(currentX, currentY, modifiers.ctrl);
       return;
     }
 
+    this.startFreehandStroke(currentX, currentY);
+  }
+
+  private beginStrokeSession() {
+    if (!this.context) return;
+
+    this.strokeSession.begin(this.context);
+
+    if (!this.currentIndexBuffer) {
+      return;
+    }
+
+    // Adds generated shades to the ephemeral palette when needed.
+    const color = colorStore.primaryColor.value;
+    this.currentPaletteIndex = paletteStore.getOrAddColorForDrawing(color);
+  }
+
+  private drawShiftClickStroke(currentX: number, currentY: number, snapToAngles?: boolean) {
+    const start = PencilTool.lastStrokeEnd;
+    if (!start) return;
+
+    const end = snapToAngles
+      ? constrainWithStickyAngles(start.x, start.y, currentX, currentY)
+      : { x: currentX, y: currentY };
+
+    this.drawnPoints = [{ x: start.x, y: start.y }];
+    this.drawLineBetweenPoints(start.x, start.y, end.x, end.y);
+    this.lastX = end.x;
+    this.lastY = end.y;
+    PencilTool.lastStrokeEnd = { x: end.x, y: end.y };
+  }
+
+  private startFreehandStroke(currentX: number, currentY: number) {
     this.lastX = currentX;
     this.lastY = currentY;
     this.dragStartX = currentX;
     this.dragStartY = currentY;
-    this.lockedAxis = null; // Reset axis lock for new stroke
+    this.lockedAxis = null;
     this.drawnPoints = [{ x: this.lastX, y: this.lastY }];
-    this.stampPositions = []; // Reset stamp tracking for pixel-perfect at stamp level
+    this.stampPositions = [];
 
-    // Initialize grid-based spacing: first click defines grid origin
     this.strokeOriginX = currentX;
     this.strokeOriginY = currentY;
     this.lastStampX = currentX;
@@ -358,14 +368,23 @@ export class PencilTool extends BaseTool {
   private restoreSingleStamp(x: number, y: number) {
     if (!this.context || !this.strokeSession.hasSnapshot) return;
 
+    for (const pixel of this.getStampPixels(x, y)) {
+      this.strokeSession.restorePixel(this.context, pixel.x, pixel.y);
+    }
+  }
+
+  private getStampPixels(x: number, y: number): Point[] {
     const size = toolSizes.pencil.value;
-    // x/y is the center of the stamp
     const halfSize = Math.floor(size / 2);
     const startX = x - halfSize;
     const startY = y - halfSize;
-    const canvas = this.context.canvas;
+    const canvas = this.context?.canvas;
+    const pixels: Point[] = [];
 
-    // Restore each pixel in the stamp region
+    if (!canvas) {
+      return pixels;
+    }
+
     for (let py = 0; py < size; py++) {
       for (let px = 0; px < size; px++) {
         const pixelX = startX + px;
@@ -373,9 +392,11 @@ export class PencilTool extends BaseTool {
 
         if (pixelX < 0 || pixelY < 0 || pixelX >= canvas.width || pixelY >= canvas.height) continue;
 
-        this.strokeSession.restorePixel(this.context, pixelX, pixelY);
+        pixels.push({ x: pixelX, y: pixelY });
       }
     }
+
+    return pixels;
   }
 
   /**
