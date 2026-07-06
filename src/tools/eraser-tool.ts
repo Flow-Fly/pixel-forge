@@ -5,13 +5,12 @@ import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-setti
 import { guidesStore } from '../stores/guides';
 import { projectStore } from '../stores/project';
 import { paletteStore } from '../stores/palette';
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
 import {
   bresenhamLine,
   isLShape,
 } from '../services/drawing/algorithms';
 import { setIndexBufferPixel } from '../utils/indexed-color';
+import { StrokeSession } from './stroke-session';
 
 // Default spacing multiplier (0.25 = stamp every size/4 pixels)
 const SPACING_MULTIPLIER = 0.25;
@@ -43,12 +42,14 @@ export class EraserTool extends BaseTool {
   // Track distance since last stamp for brush spacing
   private distanceSinceLastStamp = 0;
 
-  // Snapshot of canvas before current stroke (for pixel-perfect restore)
-  private strokeStartSnapshot: ImageData | null = null;
+  private strokeSession = new StrokeSession();
 
-  // Cached index buffer and background palette index for current stroke
-  private currentIndexBuffer: Uint8Array | null = null;
+  // Cached background palette index for current stroke
   private backgroundPaletteIndex: number = 0;
+
+  private get currentIndexBuffer(): Uint8Array | null {
+    return this.strokeSession.indexBuffer;
+  }
 
   constructor(context: CanvasRenderingContext2D) {
     super();
@@ -66,50 +67,57 @@ export class EraserTool extends BaseTool {
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
     if (!this.context) return;
 
-    // Set eraser mode based on mouse button: left = transparent, right = background
-    if (modifiers?.button === 2) {
-      EraserTool.setMode('background');
-    } else {
-      EraserTool.setMode('transparent');
-    }
+    this.setModeFromPointer(modifiers);
 
     this.isDrawing = true;
     const currentX = Math.floor(x);
     const currentY = Math.floor(y);
 
-    // Capture canvas state before stroke for pixel-perfect restore
-    const canvas = this.context.canvas;
-    this.strokeStartSnapshot = this.context.getImageData(0, 0, canvas.width, canvas.height);
-
-    // Initialize indexed color support for this stroke
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
-    if (layerId) {
-      this.currentIndexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
-      // For background mode, get the palette index of the secondary color
-      if (eraserSettings.mode.value === 'background') {
-        const bgColor = colorStore.secondaryColor.value;
-        this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
-      }
-    }
+    this.beginStrokeSession();
 
     // Shift+Click: erase line from last stroke end to current position
     if (modifiers?.shift && EraserTool.lastStrokeEnd) {
-      const start = EraserTool.lastStrokeEnd;
-      this.erasedPoints = [{ x: start.x, y: start.y }];
-      this.eraseLineBetweenPoints(start.x, start.y, currentX, currentY);
-      this.lastX = currentX;
-      this.lastY = currentY;
-      // Update last stroke end immediately for chained shift-clicks
-      EraserTool.lastStrokeEnd = { x: currentX, y: currentY };
+      this.eraseShiftClickStroke(currentX, currentY);
       return;
     }
 
+    this.startFreehandStroke(currentX, currentY);
+  }
+
+  private setModeFromPointer(modifiers?: ModifierKeys) {
+    EraserTool.setMode(modifiers?.button === 2 ? 'background' : 'transparent');
+  }
+
+  private beginStrokeSession() {
+    if (!this.context) return;
+
+    this.strokeSession.begin(this.context);
+
+    if (!this.currentIndexBuffer || eraserSettings.mode.value !== 'background') {
+      return;
+    }
+
+    const bgColor = colorStore.secondaryColor.value;
+    this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
+  }
+
+  private eraseShiftClickStroke(currentX: number, currentY: number) {
+    const start = EraserTool.lastStrokeEnd;
+    if (!start) return;
+
+    this.erasedPoints = [{ x: start.x, y: start.y }];
+    this.eraseLineBetweenPoints(start.x, start.y, currentX, currentY);
+    this.lastX = currentX;
+    this.lastY = currentY;
+    EraserTool.lastStrokeEnd = { x: currentX, y: currentY };
+  }
+
+  private startFreehandStroke(currentX: number, currentY: number) {
     this.lastX = currentX;
     this.lastY = currentY;
     this.dragStartX = currentX;
     this.dragStartY = currentY;
-    this.lockedAxis = null; // Reset axis lock for new stroke
+    this.lockedAxis = null;
     this.erasedPoints = [{ x: this.lastX, y: this.lastY }];
     this.distanceSinceLastStamp = 0;
     this.erasePoint(this.lastX, this.lastY);
@@ -154,8 +162,7 @@ export class EraserTool extends BaseTool {
     }
     this.isDrawing = false;
     this.erasedPoints = [];
-    this.strokeStartSnapshot = null; // Free memory
-    this.currentIndexBuffer = null;
+    this.strokeSession.clear();
     this.backgroundPaletteIndex = 0;
   }
 
@@ -382,41 +389,7 @@ export class EraserTool extends BaseTool {
       return;
     }
 
-    // If no snapshot, we can't restore (shouldn't happen)
-    if (!this.strokeStartSnapshot) {
-      return;
-    }
-
-    const canvas = this.context.canvas;
-    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
-
-    // Get the original pixel color from the snapshot
-    const index = (y * this.strokeStartSnapshot.width + x) * 4;
-    const r = this.strokeStartSnapshot.data[index];
-    const g = this.strokeStartSnapshot.data[index + 1];
-    const b = this.strokeStartSnapshot.data[index + 2];
-    const a = this.strokeStartSnapshot.data[index + 3];
-
-    // Restore the pixel
-    if (a === 0) {
-      // Original was transparent, clear it
-      this.context.clearRect(x, y, 1, 1);
-      // Also clear index buffer
-      if (this.currentIndexBuffer) {
-        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, 0);
-      }
-    } else {
-      // Restore original color
-      this.context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-      this.context.globalAlpha = 1;
-      this.context.fillRect(x, y, 1, 1);
-      // Restore index buffer - get the original color's palette index
-      if (this.currentIndexBuffer) {
-        const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
-        const originalIndex = paletteStore.getColorIndex(hex);
-        setIndexBufferPixel(this.currentIndexBuffer, canvas.width, x, y, originalIndex);
-      }
-    }
+    this.strokeSession.restorePixel(this.context, x, y);
   }
 
   /**
