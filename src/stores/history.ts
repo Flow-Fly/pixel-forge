@@ -245,6 +245,7 @@ class HistoryStore {
   clear() {
     this.undoStack.value = [];
     this.redoStack.value = [];
+    this.memoryUsage = 0;
     this.updateComputed();
   }
 
