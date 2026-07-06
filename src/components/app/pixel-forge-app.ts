@@ -17,6 +17,7 @@ import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
 import "../dialogs/pf-grid-settings-dialog";
+import "../dialogs/pf-checker-settings-dialog";
 import "../dialogs/pf-accent-color-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
@@ -502,6 +503,7 @@ export class PixelForgeApp extends BaseComponent {
       ></pf-resize-dialog>
 
       <pf-grid-settings-dialog></pf-grid-settings-dialog>
+      <pf-checker-settings-dialog></pf-checker-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
 
       ${this.warningMessage

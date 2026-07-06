@@ -39,7 +39,7 @@ export function isClickOnUI(e: MouseEvent | WheelEvent): boolean {
   // Check if click is on toolbar, sidebar, timeline, dialogs, context bar, menu bar, or panels
   return (
     target.closest(
-      'pf-toolbar, pf-sidebar, pf-timeline, pf-layers-panel, [role="dialog"], .context-bar, pf-menu-bar, pf-context-bar, pf-palette-panel, pf-brush-panel'
+      'pf-toolbar, pf-tool-group-menu, pf-sidebar, pf-timeline, pf-layers-panel, [role="dialog"], .context-bar, pf-menu-bar, pf-context-bar, pf-palette-panel, pf-brush-panel'
     ) !== null
   );
 }
