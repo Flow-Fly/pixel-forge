@@ -435,8 +435,8 @@ class SelectionStore {
     const normalizedAngle = normalizeAngle(angleDegrees);
 
     // Generate preview using CleanEdge
-    let previewData: ImageData | null = null;
-    let newBounds = s.originalBounds;
+    let previewData: ImageData;
+    let newBounds: typeof s.originalBounds;
 
     if (normalizedAngle !== 0) {
       previewData = rotateCleanEdge(s.imageData, normalizedAngle, { quality });
@@ -568,7 +568,6 @@ class SelectionStore {
     const rotation = rotationDegrees ?? s.rotation;
     const normalizedAngle = normalizeAngle(rotation);
 
-    let previewData: ImageData;
     let newBounds: Rect;
 
     // Start with original image data
@@ -596,7 +595,7 @@ class SelectionStore {
     newBounds.width = transformedData.width;
     newBounds.height = transformedData.height;
 
-    previewData = transformedData;
+    const previewData = transformedData;
 
     this.state.value = {
       ...s,

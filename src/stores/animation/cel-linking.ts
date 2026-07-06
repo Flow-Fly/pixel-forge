@@ -122,7 +122,7 @@ export function ensureUnlinkedForEdit(
   syncLayerCanvases: () => void
 ): { cels: Map<string, Cel>; wasUnlinked: boolean } {
   const key = getCelKey(layerId, frameId);
-  let cel = cels.get(key);
+  const cel = cels.get(key);
 
   // Cel doesn't exist yet - sync will create it
   if (!cel) {
