@@ -26,7 +26,6 @@ vi.mock('../../src/services/persistence/palette-persistence', () => ({
 vi.mock('../../src/utils/canvas-binary', () => ({
   canvasToPngBytes: vi.fn(async () => new Uint8Array([9, 9, 9])),
   loadImageDataToCanvas: vi.fn(async () => {}),
-  isBinaryData: vi.fn(() => true),
 }));
 
 import { projectStore } from '../../src/stores/project';
@@ -34,8 +33,11 @@ import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
 import { paletteStore } from '../../src/stores/palette';
 import { PROJECT_VERSION } from '../../src/types/project';
+import type { ProjectFileInput } from '../../src/types/project';
+import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
 
 const PALETTE = ['#000000', '#ff0000', '#00ff00', '#0000ff', '#ffffff'];
+const mockedLoadImageDataToCanvas = vi.mocked(loadImageDataToCanvas);
 
 describe('project save -> load -> save round-trip (structural)', () => {
   beforeEach(async () => {
@@ -175,5 +177,22 @@ describe('project save -> load -> save round-trip (structural)', () => {
     vi.useRealTimers();
 
     expect(paletteStore.ephemeralColors.value).toContain('#123456');
+  });
+
+  it('normalizes JSON-mangled project image data before hydrating canvases', async () => {
+    const saved = await buildSampleProject();
+    const imported = JSON.parse(JSON.stringify(saved)) as ProjectFileInput;
+
+    mockedLoadImageDataToCanvas.mockClear();
+
+    vi.useFakeTimers();
+    await projectStore.loadProject(imported, false);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    expect(mockedLoadImageDataToCanvas).toHaveBeenCalled();
+    for (const [data] of mockedLoadImageDataToCanvas.mock.calls) {
+      expect(data).toBeInstanceOf(Uint8Array);
+    }
   });
 });

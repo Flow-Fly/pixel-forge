@@ -23,7 +23,6 @@ vi.mock('../../src/services/persistence/palette-persistence', () => ({
 vi.mock('../../src/utils/canvas-binary', () => ({
   canvasToPngBytes: vi.fn(async () => new Uint8Array([1])),
   loadImageDataToCanvas: vi.fn(async () => {}),
-  isBinaryData: vi.fn(() => true),
 }));
 
 import { projectRepository } from '../../src/services/persistence/indexed-db';

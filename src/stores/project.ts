@@ -11,21 +11,16 @@ import {
   loadImageDataToCanvas,
 } from "../utils/canvas-binary";
 import { buildIndexBufferFromCanvas } from "../utils/indexed-color";
-import { PROJECT_VERSION, type ProjectFile } from "../types/project";
+import {
+  hasProjectImageData,
+  normalizeProjectFileImageData,
+} from "../serialization/project-data";
+import {
+  PROJECT_VERSION,
+  type ProjectFile,
+  type ProjectFileInput,
+} from "../types/project";
 import { log } from "../utils/log";
-
-/**
- * Check if image data has content.
- * Handles string (Base64), Uint8Array, and serialized Uint8Array (object with numeric keys from JSON).
- */
-function hasImageData(
-  data: string | Uint8Array | Record<string, number>
-): boolean {
-  if (typeof data === "string") return data.length > 0;
-  if (data instanceof Uint8Array) return data.length > 0;
-  // Serialized Uint8Array from JSON has numeric keys
-  return Object.keys(data).length > 0;
-}
 
 class ProjectStore {
   /** Storage identity of the open project (repository key). */
@@ -141,7 +136,9 @@ class ProjectStore {
    * @param fromAutoSave If true, palette is preserved from localStorage (auto-save reload).
    *                     If false, palette is loaded from file (explicit file import).
    */
-  async loadProject(file: ProjectFile, fromAutoSave = false) {
+  async loadProject(input: ProjectFileInput, fromAutoSave = false) {
+    const file = normalizeProjectFileImageData(input);
+
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
 
@@ -215,8 +212,8 @@ class ProjectStore {
       });
       const restored = layerStore.layers.value.find((x) => x.id === l.id);
 
-      // Handle both Base64 (v1.x) and binary (v2.0+) formats for raster data
-      if (restored && hasImageData(l.data) && restored.canvas) {
+      // ProjectFileInput image data is normalized before hydration.
+      if (restored && hasProjectImageData(l.data) && restored.canvas) {
         await loadImageDataToCanvas(l.data, restored.canvas);
       }
     }
@@ -254,7 +251,7 @@ class ProjectStore {
         if (
           cel &&
           cel.linkedCelId === EMPTY_CEL_LINK_ID &&
-          hasImageData(c.data)
+          hasProjectImageData(c.data)
         ) {
           const newCanvas = document.createElement("canvas");
           newCanvas.width = file.width;
@@ -278,8 +275,8 @@ class ProjectStore {
 
         // Now load data into the cel's (non-shared) canvas
         const canvas = animationStore.getCelCanvas(newFrame.id, c.layerId);
-        // Handle both Base64 (v1.x) and binary (v2.0+) formats
-        if (canvas && hasImageData(c.data)) {
+        // ProjectFileInput image data is normalized before hydration.
+        if (canvas && hasProjectImageData(c.data)) {
           await loadImageDataToCanvas(c.data, canvas);
         }
 
@@ -287,7 +284,7 @@ class ProjectStore {
         // If cel has indexData, restore it directly
         // If legacy file (no indexData), build index buffer from canvas content
         const currentCel = animationStore.cels.value.get(celKey);
-        if (currentCel && hasImageData(c.data)) {
+        if (currentCel && hasProjectImageData(c.data)) {
           const cels = new Map(animationStore.cels.value);
 
           if (c.indexData && Array.isArray(c.indexData)) {
