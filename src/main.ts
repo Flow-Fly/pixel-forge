@@ -1,3 +1,4 @@
+import './sentry';
 import './styles/reset.css';
 import './styles/tokens.css';
 import './components/app/pixel-forge-app';
@@ -24,5 +25,4 @@ brushStore.initialize();
 
 // Persist the project on history changes / window blur
 autoSaveService.start();
-
 
