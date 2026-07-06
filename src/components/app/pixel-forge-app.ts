@@ -28,7 +28,7 @@ import "../shape/pf-shape-options";
 import "../layers/pf-layers-panel";
 import { projectStore } from "../../stores/project";
 import { historyStore } from "../../stores/history";
-import { persistenceService } from "../../services/persistence/indexed-db";
+import { projectRepository } from "../../services/persistence/indexed-db";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 
@@ -327,11 +327,22 @@ export class PixelForgeApp extends BaseComponent {
 
   private async loadSavedProject() {
     try {
-      const savedProject = await persistenceService.loadCurrentProject();
-      if (savedProject) {
+      let projectId = await projectRepository.getLastOpenedProjectId();
+      if (!projectId) {
+        // No last-opened marker — fall back to the most recent project
+        const all = await projectRepository.list();
+        projectId = all[0]?.id ?? null;
+      }
+
+      const savedProject = projectId
+        ? await projectRepository.load(projectId)
+        : null;
+      if (savedProject && projectId) {
+        projectStore.id.value = projectId;
         // fromAutoSave = true: palette is already loaded from localStorage,
         // don't overwrite with stale palette data from IndexedDB
         await projectStore.loadProject(savedProject, true);
+        await projectRepository.setLastOpenedProjectId(projectId);
         historyStore.clear();
       }
     } catch (error) {

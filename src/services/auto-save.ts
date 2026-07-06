@@ -1,7 +1,7 @@
 import { effect } from '../core/signal';
 import { historyStore } from '../stores/history';
 import { projectStore } from '../stores/project';
-import { persistenceService } from './persistence/indexed-db';
+import { projectRepository } from './persistence/indexed-db';
 
 const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
@@ -84,7 +84,7 @@ export class AutoSaveService {
 
     try {
       const projectData = await projectStore.saveProject();
-      await persistenceService.saveCurrentProject(projectData);
+      await projectRepository.save(projectStore.id.value, projectData);
       this.isDirty = false;
       projectStore.lastSaved.value = Date.now();
     } catch (error) {

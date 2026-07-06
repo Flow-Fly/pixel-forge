@@ -1,12 +1,22 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { v4 as uuidv4 } from 'uuid';
 import type { ProjectFile } from '../../types/project';
+import type { ProjectMeta, ProjectRepository } from './project-repository';
 
-const CURRENT_PROJECT_KEY = 'current-project';
+/** Key of the single-project slot used before multi-project support. */
+const LEGACY_CURRENT_PROJECT_KEY = 'current-project';
+
+const LAST_OPENED_SETTING_KEY = 'last-opened-project-id';
 
 interface StoredProject {
   id: string;
   project: ProjectFile;
   lastModified: number;
+}
+
+interface StoredSetting {
+  key: string;
+  value: unknown;
 }
 
 interface PixelForgeDB extends DBSchema {
@@ -16,11 +26,19 @@ interface PixelForgeDB extends DBSchema {
   };
   settings: {
     key: string;
-    value: unknown;
+    value: StoredSetting;
   };
 }
 
-class PersistenceService {
+/**
+ * IndexedDB-backed ProjectRepository.
+ *
+ * Projects are stored by UUID in the existing `sprites` object store
+ * (which always had `keyPath: 'id'`). The pre-multi-project record stored
+ * under 'current-project' is adopted on first access: re-keyed to a fresh
+ * UUID and marked as the last-opened project.
+ */
+class IndexedDbProjectRepository implements ProjectRepository {
   private dbPromise: Promise<IDBPDatabase<PixelForgeDB>>;
 
   constructor() {
@@ -33,81 +51,75 @@ class PersistenceService {
           db.createObjectStore('settings', { keyPath: 'key' });
         }
       },
+    }).then((db) => this.migrateLegacySlot(db));
+  }
+
+  /**
+   * Adopt the legacy single-slot record ('current-project') as a normal
+   * UUID-keyed project. Runs once; later opens find nothing to migrate.
+   */
+  private async migrateLegacySlot(
+    db: IDBPDatabase<PixelForgeDB>
+  ): Promise<IDBPDatabase<PixelForgeDB>> {
+    try {
+      const legacy = await db.get('sprites', LEGACY_CURRENT_PROJECT_KEY);
+      if (legacy) {
+        const id = uuidv4();
+        await db.put('sprites', { ...legacy, id });
+        await db.delete('sprites', LEGACY_CURRENT_PROJECT_KEY);
+        await db.put('settings', { key: LAST_OPENED_SETTING_KEY, value: id });
+      }
+    } catch (error) {
+      console.error('Failed to migrate legacy project slot:', error);
+    }
+    return db;
+  }
+
+  async list(): Promise<ProjectMeta[]> {
+    const db = await this.dbPromise;
+    const stored = await db.getAll('sprites');
+    return stored
+      .map((s) => ({
+        id: s.id,
+        name: s.project.name || 'Untitled',
+        width: s.project.width,
+        height: s.project.height,
+        lastModified: s.lastModified,
+      }))
+      .sort((a, b) => b.lastModified - a.lastModified);
+  }
+
+  async load(id: string): Promise<ProjectFile | null> {
+    const db = await this.dbPromise;
+    const stored = await db.get('sprites', id);
+    return stored?.project ?? null;
+  }
+
+  async save(id: string, project: ProjectFile): Promise<void> {
+    const db = await this.dbPromise;
+    await db.put('sprites', {
+      id,
+      project,
+      lastModified: Date.now(),
     });
   }
 
-  /**
-   * Save the current project to IndexedDB.
-   */
-  async saveCurrentProject(project: ProjectFile): Promise<void> {
-    try {
-      const db = await this.dbPromise;
-      await db.put('sprites', {
-        id: CURRENT_PROJECT_KEY,
-        project,
-        lastModified: Date.now(),
-      });
-    } catch (error) {
-      console.error('Failed to save project to IndexedDB:', error);
-    }
+  async delete(id: string): Promise<void> {
+    const db = await this.dbPromise;
+    await db.delete('sprites', id);
   }
 
-  /**
-   * Load the current project from IndexedDB.
-   * Returns null if no project exists or on error.
-   */
-  async loadCurrentProject(): Promise<ProjectFile | null> {
-    try {
-      const db = await this.dbPromise;
-      const stored = await db.get('sprites', CURRENT_PROJECT_KEY);
-      return stored?.project ?? null;
-    } catch (error) {
-      console.error('Failed to load project from IndexedDB:', error);
-      return null;
-    }
+  async getLastOpenedProjectId(): Promise<string | null> {
+    const db = await this.dbPromise;
+    const setting = await db.get('settings', LAST_OPENED_SETTING_KEY);
+    return typeof setting?.value === 'string' ? setting.value : null;
   }
 
-  /**
-   * Clear the current project from IndexedDB (for "New Project").
-   */
-  async clearCurrentProject(): Promise<void> {
-    try {
-      const db = await this.dbPromise;
-      await db.delete('sprites', CURRENT_PROJECT_KEY);
-    } catch (error) {
-      console.error('Failed to clear project from IndexedDB:', error);
-    }
-  }
-
-  /**
-   * Check if a saved project exists.
-   */
-  async hasCurrentProject(): Promise<boolean> {
-    try {
-      const db = await this.dbPromise;
-      const stored = await db.get('sprites', CURRENT_PROJECT_KEY);
-      return stored !== undefined;
-    } catch {
-      return false;
-    }
-  }
-
-  // Legacy methods for backwards compatibility
-  async getSprite(id: string) {
-    return (await this.dbPromise).get('sprites', id);
-  }
-
-  async saveSprite(sprite: StoredProject) {
-    return (await this.dbPromise).put('sprites', sprite);
-  }
-
-  async getAllSprites() {
-    return (await this.dbPromise).getAll('sprites');
-  }
-
-  async deleteSprite(id: string) {
-    return (await this.dbPromise).delete('sprites', id);
+  async setLastOpenedProjectId(id: string): Promise<void> {
+    const db = await this.dbPromise;
+    await db.put('settings', { key: LAST_OPENED_SETTING_KEY, value: id });
   }
 }
 
-export const persistenceService = new PersistenceService();
+export const projectRepository: ProjectRepository =
+  new IndexedDbProjectRepository();
