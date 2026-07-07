@@ -33,6 +33,14 @@ vi.mock('../../../src/stores/project', () => ({
 import '../../../src/components/app/pf-project-browser';
 import type { PFProjectBrowser } from '../../../src/components/app/pf-project-browser';
 
+let originalShowModal: HTMLDialogElement['showModal'] | undefined;
+let originalClose: HTMLDialogElement['close'] | undefined;
+
+const dialogPrototype = HTMLDialogElement.prototype as HTMLDialogElement & {
+  showModal?: HTMLDialogElement['showModal'];
+  close?: HTMLDialogElement['close'];
+};
+
 const PROJECTS = [
   {
     id: 'open-project',
@@ -72,12 +80,86 @@ function buttonWithText(root: ShadowRoot, text: string) {
 }
 
 function confirmDeleteButton(root: ShadowRoot) {
-  return root.querySelector<HTMLButtonElement>('pf-dialog button.primary.danger');
+  return root.querySelector<HTMLButtonElement>('.delete-dialog button.primary.danger');
+}
+
+function projectDialog(root: ShadowRoot) {
+  return root.querySelector<HTMLDialogElement>('.browser-dialog');
+}
+
+function installDialogMocks() {
+  originalShowModal = dialogPrototype.showModal;
+  originalClose = dialogPrototype.close;
+
+  dialogPrototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+  });
+
+  dialogPrototype.close = vi.fn(function (this: HTMLDialogElement) {
+    if (!this.open) return;
+
+    this.removeAttribute('open');
+    this.dispatchEvent(new Event('close'));
+  });
+}
+
+function restoreDialogMocks() {
+  if (originalShowModal) {
+    dialogPrototype.showModal = originalShowModal;
+  } else {
+    delete dialogPrototype.showModal;
+  }
+
+  if (originalClose) {
+    dialogPrototype.close = originalClose;
+  } else {
+    delete dialogPrototype.close;
+  }
+}
+
+function requestNativeCancel(dialog: HTMLDialogElement | null | undefined) {
+  if (!dialog) return;
+
+  const cancelEvent = new Event('cancel', { cancelable: true });
+  const shouldClose = dialog.dispatchEvent(cancelEvent);
+
+  if (shouldClose) {
+    dialog.close();
+  }
+}
+
+function closeWithReturnValue(
+  dialog: HTMLDialogElement | null | undefined,
+  returnValue: string
+) {
+  if (!dialog) return;
+
+  dialog.returnValue = returnValue;
+  dialog.removeAttribute('open');
+  dialog.dispatchEvent(new Event('close'));
+}
+
+function clickNativeBackdrop(dialog: HTMLDialogElement | null | undefined) {
+  if (!dialog) return;
+
+  vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({
+    top: 100,
+    right: 300,
+    bottom: 300,
+    left: 100,
+    width: 200,
+    height: 200,
+    x: 100,
+    y: 100,
+    toJSON: () => ({}),
+  });
+  dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 20, clientY: 20 }));
 }
 
 describe('pf-project-browser', () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    installDialogMocks();
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_030_000);
     projectStoreMock.id.value = 'open-project';
     projectStoreMock.name.value = 'Open Project';
@@ -90,6 +172,7 @@ describe('pf-project-browser', () => {
   });
 
   afterEach(() => {
+    restoreDialogMocks();
     document.body.replaceChildren();
     vi.restoreAllMocks();
     vi.clearAllMocks();
@@ -98,10 +181,86 @@ describe('pf-project-browser', () => {
   it('renders saved projects and a new-project action', async () => {
     const element = await createBrowser();
 
+    const dialog = projectDialog(element.shadowRoot!);
+    expect(dialog?.open).toBe(true);
+    expect(dialog?.getAttribute('closedby')).toBe('none');
     expect(element.shadowRoot?.textContent).toContain('Project Library');
     expect(element.shadowRoot?.textContent).toContain('Open Project');
     expect(element.shadowRoot?.textContent).toContain('Second Project');
     expect(buttonWithText(element.shadowRoot!, 'New Project')).toBeTruthy();
+  });
+
+  it('emits show-new-project-dialog from the native dialog return value', async () => {
+    const element = await createBrowser();
+
+    let requested = false;
+    element.addEventListener('show-new-project-dialog', () => {
+      requested = true;
+    });
+
+    closeWithReturnValue(projectDialog(element.shadowRoot!), 'new-project');
+    await settle(element);
+
+    expect(requested).toBe(true);
+  });
+
+  it('emits project-browser-close from the dialog close button when closing is allowed', async () => {
+    const element = await createBrowser();
+    element.canClose = true;
+    await settle(element);
+
+    let closed = false;
+    element.addEventListener('project-browser-close', () => {
+      closed = true;
+    });
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.dialog-header button')?.click();
+    await settle(element);
+
+    expect(closed).toBe(true);
+  });
+
+  it('emits project-browser-close from Escape and backdrop when closing is allowed', async () => {
+    const element = await createBrowser();
+    element.canClose = true;
+    await settle(element);
+
+    let closeCount = 0;
+    element.addEventListener('project-browser-close', () => {
+      closeCount += 1;
+    });
+
+    requestNativeCancel(projectDialog(element.shadowRoot!));
+    await settle(element);
+
+    const dialog = projectDialog(element.shadowRoot!);
+    dialog!.showModal();
+    clickNativeBackdrop(dialog);
+    await settle(element);
+
+    expect(closeCount).toBe(2);
+  });
+
+  it('keeps the browser dialog open and locked when closing is not allowed', async () => {
+    const element = await createBrowser();
+
+    let closed = false;
+    element.addEventListener('project-browser-close', () => {
+      closed = true;
+    });
+
+    const dialog = projectDialog(element.shadowRoot!);
+
+    expect(dialog?.getAttribute('closedby')).toBe('none');
+    expect(element.shadowRoot?.querySelector('.dialog-header button')).toBeNull();
+
+    requestNativeCancel(dialog);
+    clickNativeBackdrop(dialog);
+    dialog?.close();
+    await settle(element);
+
+    expect(closed).toBe(false);
+    expect(dialog?.open).toBe(true);
   });
 
   it('renders project thumbnails from blob URLs and falls back when missing', async () => {
@@ -196,5 +355,32 @@ describe('pf-project-browser', () => {
     await settle(element);
 
     expect(deletedCurrent).toBe(true);
+  });
+
+  it('keeps the browser open when Escape closes the delete confirmation', async () => {
+    const element = await createBrowser();
+    element.canClose = true;
+    await settle(element);
+
+    let browserClosed = false;
+    element.addEventListener('project-browser-close', () => {
+      browserClosed = true;
+    });
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await settle(element);
+
+    const browserDialog = projectDialog(element.shadowRoot!);
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    expect(browserDialog?.open).toBe(true);
+    expect(deleteDialog?.open).toBe(true);
+    expect(browserDialog?.getAttribute('closedby')).toBe('none');
+
+    requestNativeCancel(deleteDialog);
+    await settle(element);
+
+    expect(browserClosed).toBe(false);
+    expect(projectDialog(element.shadowRoot!)?.open).toBe(true);
+    expect(element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog')?.open).toBe(false);
   });
 });

@@ -324,7 +324,16 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleShowNewProjectDialog = () => {
+    this.showProjectBrowser = false;
     this.showNewProjectDialog = true;
+  };
+
+  private handleNewProjectDialogClose = () => {
+    this.showNewProjectDialog = false;
+
+    if (!this.hasLibraryProject) {
+      this.showProjectBrowser = true;
+    }
   };
 
   private handleShowKeyboardShortcutsDialog = () => {
@@ -377,6 +386,7 @@ export class PixelForgeApp extends BaseComponent {
 
   private handleProjectCreated = () => {
     this.hasLibraryProject = true;
+    this.showNewProjectDialog = false;
     this.showProjectBrowser = false;
   };
 
@@ -540,7 +550,7 @@ export class PixelForgeApp extends BaseComponent {
         <pf-menu-bar
           @resize-canvas=${() => (this.showResizeDialog = true)}
           @show-export-dialog=${() => (this.showExportDialog = true)}
-          @show-new-project-dialog=${() => (this.showNewProjectDialog = true)}
+          @show-new-project-dialog=${this.handleShowNewProjectDialog}
           @show-project-browser=${() => (this.showProjectBrowser = true)}
         ></pf-menu-bar>
       </header>
@@ -612,7 +622,7 @@ export class PixelForgeApp extends BaseComponent {
       <pf-new-project-dialog
         ?open=${this.showNewProjectDialog}
         .saveCurrentBeforeCreate=${this.hasLibraryProject}
-        @close=${() => (this.showNewProjectDialog = false)}
+        @close=${this.handleNewProjectDialogClose}
         @project-created=${this.handleProjectCreated}
       ></pf-new-project-dialog>
 
@@ -620,6 +630,7 @@ export class PixelForgeApp extends BaseComponent {
         ? html`
             <pf-project-browser
               .canClose=${this.hasLibraryProject}
+              @show-new-project-dialog=${this.handleShowNewProjectDialog}
               @project-browser-close=${this.handleProjectBrowserClose}
               @project-opened=${this.handleProjectOpened}
               @current-project-deleted=${this.handleCurrentProjectDeleted}
