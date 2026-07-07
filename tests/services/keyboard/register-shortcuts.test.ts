@@ -58,6 +58,7 @@ describe('registerShortcuts', () => {
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+z`)).toBe('Undo');
     expect(descriptionsByCombo.get('ctrl+y')).toBe('Redo');
     expect(descriptionsByCombo.get('ctrl+n')).toBe('New project');
+    expect(descriptionsByCombo.get(`${MOD_PRIMARY}+o`)).toBe('Open project');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+g`)).toBe('Group layers');
     expect(descriptionsByCombo.get('?')).toBe('Keyboard shortcuts');
 
@@ -65,5 +66,21 @@ describe('registerShortcuts', () => {
       .filter((call) => comboFromCall(call) === 'Enter')
       .map((call) => call[3]);
     expect(enterDescriptions).toEqual(['Play/Stop', 'Commit selection']);
+  });
+
+  it('dispatches the project browser event for the open project shortcut', () => {
+    registerShortcuts();
+
+    const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
+    const openProjectCall = calls.find((call) => comboFromCall(call) === `${MOD_PRIMARY}+o`);
+    let browserRequested = false;
+
+    window.addEventListener('show-project-browser', () => {
+      browserRequested = true;
+    }, { once: true });
+
+    openProjectCall?.[2]();
+
+    expect(browserRequested).toBe(true);
   });
 });

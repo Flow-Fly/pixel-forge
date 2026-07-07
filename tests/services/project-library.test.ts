@@ -174,6 +174,21 @@ describe('ProjectLibraryService', () => {
     expect(undo).not.toHaveBeenCalled();
   });
 
+  it('can create the first library project without saving the transient editor project', async () => {
+    const id = await service.createProject(
+      {
+        name: 'First saved project',
+        width: 24,
+        height: 24,
+      },
+      { saveCurrent: false }
+    );
+
+    expect(projectStore.id.value).toBe(id);
+    expect(savedProjects.map((entry) => entry.id)).toEqual([id]);
+    expect(projects.has('current')).toBe(false);
+  });
+
   it('saves edits to the open project before loading another project', async () => {
     projects.set('a', makeProject('Project A'));
     projects.set('b', makeProject('Project B'));

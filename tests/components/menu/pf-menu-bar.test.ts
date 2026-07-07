@@ -25,6 +25,10 @@ const viewportStoreMock = vi.hoisted(() => ({
   resetView: vi.fn(),
 }));
 
+const autoSaveServiceMock = vi.hoisted(() => ({
+  saveNow: vi.fn(),
+}));
+
 vi.mock("../../../src/stores/history", () => ({
   historyStore: historyStoreMock,
 }));
@@ -45,6 +49,10 @@ vi.mock("../../../src/stores/grid", () => ({
 
 vi.mock("../../../src/stores/viewport", () => ({
   viewportStore: viewportStoreMock,
+}));
+
+vi.mock("../../../src/services/auto-save", () => ({
+  autoSaveService: autoSaveServiceMock,
 }));
 
 vi.mock("../../../src/commands/layer-commands", () => ({
@@ -202,6 +210,30 @@ describe("pf-menu-bar popovers", () => {
     expect(exportDialogRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
     expect(fileMenu?.hasAttribute("data-open")).toBe(false);
+  });
+
+  it("opens the project browser from the File menu", async () => {
+    const element = await createMenuBar();
+    const fileButton = button(element, "file");
+    const fileMenu = menu(element, "file");
+    let browserRequested = false;
+
+    element.addEventListener("show-project-browser", () => {
+      browserRequested = true;
+    });
+
+    fileButton?.click();
+    await element.updateComplete;
+
+    expect(menuItem(fileMenu!, "New Project")).toBeTruthy();
+    expect(menuItem(fileMenu!, "Open Project")).toBeTruthy();
+    expect(menuItem(fileMenu!, "Import File")).toBeTruthy();
+
+    menuItem(fileMenu!, "Open Project")?.click();
+    await element.updateComplete;
+
+    expect(browserRequested).toBe(true);
+    expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("clamps right-edge menus inside the viewport", async () => {

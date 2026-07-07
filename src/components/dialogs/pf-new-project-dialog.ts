@@ -1,7 +1,7 @@
 import { html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { projectStore } from '../../stores/project';
+import { projectLibrary } from '../../services/project-library';
 import {
   DEFAULT_PROJECT_HEIGHT,
   DEFAULT_PROJECT_WIDTH,
@@ -103,6 +103,8 @@ export class PFNewProjectDialog extends BaseComponent {
   `;
 
   @property({ type: Boolean, reflect: true }) open = false;
+  @property({ type: Boolean, attribute: 'save-current-before-create' })
+  saveCurrentBeforeCreate = true;
   @state() width = DEFAULT_PROJECT_WIDTH;
   @state() height = DEFAULT_PROJECT_HEIGHT;
   @state() selectedPreset: string | null = '64x64';
@@ -154,7 +156,9 @@ export class PFNewProjectDialog extends BaseComponent {
         </div>
 
         <div class="warning">
-          Current work will be replaced. It's saved automatically.
+          ${this.saveCurrentBeforeCreate
+            ? 'Your current project will be saved before the new one opens.'
+            : 'Your first project will open as soon as it is created.'}
         </div>
 
         <div slot="actions">
@@ -192,11 +196,16 @@ export class PFNewProjectDialog extends BaseComponent {
     const width = clampProjectDimension(this.width, DEFAULT_PROJECT_WIDTH);
     const height = clampProjectDimension(this.height, DEFAULT_PROJECT_HEIGHT);
 
-    await projectStore.newProject(width, height);
+    const id = await projectLibrary.createProject(
+      { width, height },
+      { saveCurrent: this.saveCurrentBeforeCreate }
+    );
     this.close();
 
     this.dispatchEvent(new CustomEvent('project-created', {
-      detail: { width, height }
+      bubbles: true,
+      composed: true,
+      detail: { id, width, height }
     }));
   }
 }
