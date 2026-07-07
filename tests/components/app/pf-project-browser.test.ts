@@ -40,6 +40,7 @@ const PROJECTS = [
     width: 64,
     height: 32,
     lastModified: 1_700_000_000_000,
+    thumbnail: new Uint8Array([137, 80, 78, 71]),
   },
   {
     id: 'second-project',
@@ -101,6 +102,24 @@ describe('pf-project-browser', () => {
     expect(element.shadowRoot?.textContent).toContain('Open Project');
     expect(element.shadowRoot?.textContent).toContain('Second Project');
     expect(buttonWithText(element.shadowRoot!, 'New Project')).toBeTruthy();
+  });
+
+  it('renders project thumbnails from blob URLs and falls back when missing', async () => {
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:thumbnail');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    const element = await createBrowser();
+
+    const image = element.shadowRoot?.querySelector<HTMLImageElement>('.thumbnail img');
+    expect(image?.getAttribute('src')).toBe('blob:thumbnail');
+    expect(element.shadowRoot?.textContent).toContain('16x16');
+
+    element.remove();
+
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:thumbnail');
   });
 
   it('opens a project and emits project-opened', async () => {

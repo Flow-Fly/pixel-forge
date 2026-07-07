@@ -7,6 +7,11 @@ export interface ProjectMeta {
   width: number;
   height: number;
   lastModified: number;
+  thumbnail?: Uint8Array;
+}
+
+export interface SaveProjectOptions {
+  thumbnail?: Uint8Array;
 }
 
 /**
@@ -24,7 +29,11 @@ export interface ProjectRepository {
   load(id: string): Promise<ProjectFile | null>;
 
   /** Create or overwrite a project under the given id. */
-  save(id: string, project: ProjectFile): Promise<void>;
+  save(
+    id: string,
+    project: ProjectFile,
+    options?: SaveProjectOptions
+  ): Promise<void>;
 
   /** Remove a project. Unknown ids are a no-op. */
   delete(id: string): Promise<void>;

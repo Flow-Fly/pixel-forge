@@ -20,6 +20,10 @@ vi.mock('../../src/services/persistence/palette-persistence', () => ({
   },
 }));
 
+vi.mock('../../src/services/project-thumbnail', () => ({
+  createProjectThumbnail: vi.fn(async () => new Uint8Array([9, 9])),
+}));
+
 vi.mock('../../src/utils/canvas-binary', () => ({
   canvasToPngBytes: vi.fn(async () => new Uint8Array([1])),
   loadImageDataToCanvas: vi.fn(async () => {}),
@@ -27,6 +31,7 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 
 import { projectRepository } from '../../src/services/persistence/indexed-db';
 import { autoSaveService } from '../../src/services/auto-save';
+import { createProjectThumbnail } from '../../src/services/project-thumbnail';
 import { historyStore, type Command } from '../../src/stores/history';
 
 function makeCommand(): Command {
@@ -68,6 +73,12 @@ describe('AutoSaveService', () => {
 
     await vi.advanceTimersByTimeAsync(2500);
     expect(projectRepository.save).toHaveBeenCalledTimes(1);
+    expect(projectRepository.save).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      { thumbnail: new Uint8Array([9, 9]) }
+    );
+    expect(createProjectThumbnail).toHaveBeenCalled();
   });
 
   it('coalesces rapid commands into a single save', async () => {

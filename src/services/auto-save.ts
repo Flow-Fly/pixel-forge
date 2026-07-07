@@ -1,7 +1,9 @@
 import { effect } from '../core/signal';
+import { animationStore } from '../stores/animation';
 import { historyStore } from '../stores/history';
 import { projectStore } from '../stores/project';
 import { projectRepository } from './persistence/indexed-db';
+import { createProjectThumbnail } from './project-thumbnail';
 import { log } from '../utils/log';
 
 const AUTO_SAVE_DEBOUNCE_MS = 2000;
@@ -111,7 +113,10 @@ class AutoSaveService {
 
     try {
       const projectData = await projectStore.saveProject();
-      await projectRepository.save(projectStore.id.value, projectData);
+      const thumbnail = await createThumbnailSafely();
+      await projectRepository.save(projectStore.id.value, projectData, {
+        thumbnail,
+      });
       this.isDirty = false;
       projectStore.lastSaved.value = Date.now();
     } catch (error) {
@@ -128,3 +133,19 @@ class AutoSaveService {
 }
 
 export const autoSaveService = new AutoSaveService();
+
+async function createThumbnailSafely(): Promise<Uint8Array | undefined> {
+  const frame = animationStore.frames.value[0];
+  if (!frame) return undefined;
+
+  try {
+    return await createProjectThumbnail({
+      frameId: frame.id,
+      width: projectStore.width.value,
+      height: projectStore.height.value,
+    });
+  } catch (error) {
+    log.error('Thumbnail generation failed:', error);
+    return undefined;
+  }
+}
