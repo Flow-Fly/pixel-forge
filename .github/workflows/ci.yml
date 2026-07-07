@@ -38,3 +38,4 @@ jobs:
         with:
           command: audit
           artifacts-dir: .fallow/ci
+          no-cache: true
