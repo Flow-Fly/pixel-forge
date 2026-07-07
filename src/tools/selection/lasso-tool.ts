@@ -4,7 +4,6 @@ import { selectionStore } from '../../stores/selection';
 import { projectStore } from '../../stores/project';
 import { layerStore } from '../../stores/layers';
 import { polygonToMask, simplifyPath } from '../../utils/mask-utils';
-import type { SelectionShape } from '../../types/selection';
 
 /**
  * Freeform Lasso Tool
@@ -17,12 +16,6 @@ export class LassoTool extends BaseSelectionTool {
 
   private points: Point[] = [];
 
-  // Store previous selection for add/subtract operations
-  private previousSelection: {
-    bounds: { x: number; y: number; width: number; height: number };
-    shape: SelectionShape;
-    mask?: Uint8Array;
-  } | null = null;
 
   constructor(_context: CanvasRenderingContext2D) {
     super();
@@ -46,37 +39,9 @@ export class LassoTool extends BaseSelectionTool {
       return;
     }
 
-    // Set selection mode based on modifiers
-    // Shift+Alt = intersect, Shift = add, Alt = subtract
-    if (modifiers?.shift && modifiers?.alt) {
-      selectionStore.setMode('intersect');
-    } else if (modifiers?.shift) {
-      selectionStore.setMode('add');
-    } else if (modifiers?.alt) {
-      selectionStore.setMode('subtract');
-    } else {
-      selectionStore.setMode('replace');
-    }
+    this.applySelectionModeFromModifiers(modifiers);
 
-    // Save previous selection for add/subtract operations
-    const currentState = selectionStore.state.value;
-    const mode = selectionStore.mode.value;
-    if (currentState.type === 'selected') {
-      this.previousSelection = {
-        bounds: { ...currentState.bounds },
-        shape: currentState.shape,
-        mask: currentState.shape === 'freeform'
-          ? (currentState as { mask: Uint8Array }).mask
-          : undefined,
-      };
-      // Set visual signal for marching ants overlay (only in add/subtract mode)
-      if (mode !== 'replace') {
-        selectionStore.previousSelectionForVisual.value = this.previousSelection;
-      }
-    } else {
-      this.previousSelection = null;
-      selectionStore.previousSelectionForVisual.value = null;
-    }
+    this.capturePreviousSelection();
 
     this.mode = 'selecting';
     this.points = [{ x: canvasX, y: canvasY }];
@@ -193,8 +158,7 @@ export class LassoTool extends BaseSelectionTool {
     }
 
     selectionStore.resetMode();
-    selectionStore.previousSelectionForVisual.value = null;
-    this.previousSelection = null;
+    this.clearPreviousSelection();
     this.points = [];
   }
 

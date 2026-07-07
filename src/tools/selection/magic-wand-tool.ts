@@ -34,17 +34,7 @@ export class MagicWandTool extends BaseSelectionTool {
       return;
     }
 
-    // Determine selection mode based on modifiers
-    // Shift+Alt = intersect, Shift = add, Alt = subtract
-    if (modifiers?.shift && modifiers?.alt) {
-      selectionStore.setMode('intersect');
-    } else if (modifiers?.shift) {
-      selectionStore.setMode('add');
-    } else if (modifiers?.alt) {
-      selectionStore.setMode('subtract');
-    } else {
-      selectionStore.setMode('replace');
-    }
+    this.applySelectionModeFromModifiers(modifiers);
 
     // Shrink to content only if Ctrl is held
     const shrinkToContent = modifiers?.ctrl ?? false;

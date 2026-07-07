@@ -4,7 +4,6 @@ import { selectionStore } from '../../stores/selection';
 import { projectStore } from '../../stores/project';
 import { layerStore } from '../../stores/layers';
 import { polygonToMask } from '../../utils/mask-utils';
-import type { SelectionShape } from '../../types/selection';
 
 /**
  * Polygonal Lasso Tool
@@ -20,104 +19,77 @@ export class PolygonalLassoTool extends BaseSelectionTool {
   private isActive = false;
   private lastClickTime = 0;
 
-  // Store previous selection for add/subtract operations
-  private previousSelection: {
-    bounds: { x: number; y: number; width: number; height: number };
-    shape: SelectionShape;
-    mask?: Uint8Array;
-  } | null = null;
 
   constructor(_context: CanvasRenderingContext2D) {
     super();
   }
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
-    const canvasX = Math.floor(x);
-    const canvasY = Math.floor(y);
-    const point = { x: canvasX, y: canvasY };
-    const now = Date.now();
+    const point = { x: Math.floor(x), y: Math.floor(y) };
 
     // If not actively drawing a polygon, check if clicking inside selection (for dragging)
     // Only drag if no add/subtract modifiers are pressed
     const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
-    if (!this.isActive && !isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
-      this.startDragging(canvasX, canvasY);
+    if (!this.isActive && !isAddOrSubtract && selectionStore.isPointInSelection(point.x, point.y)) {
+      this.startDragging(point.x, point.y);
       return;
     }
 
-    // Check for double-click (< 300ms between clicks)
-    if (now - this.lastClickTime < 300 && this.vertices.length >= 3) {
+    if (this.isDoubleClick()) {
       this.closePolygon();
-      this.lastClickTime = 0;
       return;
+    }
+
+    if (this.isActive) {
+      this.addVertex(point, modifiers);
+    } else {
+      this.beginPolygon(point, modifiers);
+    }
+  }
+
+  /** Detect a double-click (< 300ms between clicks) on a closable polygon. */
+  private isDoubleClick(): boolean {
+    const now = Date.now();
+    if (now - this.lastClickTime < 300 && this.vertices.length >= 3) {
+      this.lastClickTime = 0;
+      return true;
     }
     this.lastClickTime = now;
+    return false;
+  }
 
-    if (!this.isActive) {
-      // Clicking outside - commit any transform/floating selection first
-      // If we committed, don't immediately start a new selection
-      if (this.commitIfTransforming() || this.commitIfFloating()) {
+  private beginPolygon(point: Point, modifiers?: ModifierKeys) {
+    // Clicking outside - commit any transform/floating selection first
+    // If we committed, don't immediately start a new selection
+    if (this.commitIfTransforming() || this.commitIfFloating()) {
+      return;
+    }
+
+    this.applySelectionModeFromModifiers(modifiers);
+    this.capturePreviousSelection();
+
+    // Start new polygon
+    this.isActive = true;
+    this.mode = 'selecting';
+    this.vertices = [point];
+
+    this.updateSelectingState();
+  }
+
+  private addVertex(point: Point, modifiers?: ModifierKeys) {
+    // Clicking near the start point (< 5px) closes the polygon
+    if (this.vertices.length >= 3) {
+      const start = this.vertices[0];
+      const dist = Math.hypot(point.x - start.x, point.y - start.y);
+      if (dist < 5) {
+        // Shrink to content only if Ctrl is held
+        this.closePolygon(modifiers?.ctrl ?? false);
         return;
       }
-
-      // Set selection mode based on modifiers
-      // Shift+Alt = intersect, Shift = add, Alt = subtract
-      if (modifiers?.shift && modifiers?.alt) {
-        selectionStore.setMode('intersect');
-      } else if (modifiers?.shift) {
-        selectionStore.setMode('add');
-      } else if (modifiers?.alt) {
-        selectionStore.setMode('subtract');
-      } else {
-        selectionStore.setMode('replace');
-      }
-
-      // Save previous selection for add/subtract operations
-      const currentState = selectionStore.state.value;
-      const mode = selectionStore.mode.value;
-      if (currentState.type === 'selected') {
-        this.previousSelection = {
-          bounds: { ...currentState.bounds },
-          shape: currentState.shape,
-          mask: currentState.shape === 'freeform'
-            ? (currentState as { mask: Uint8Array }).mask
-            : undefined,
-        };
-        // Set visual signal for marching ants overlay (only in add/subtract mode)
-        if (mode !== 'replace') {
-          selectionStore.previousSelectionForVisual.value = this.previousSelection;
-        }
-      } else {
-        this.previousSelection = null;
-        selectionStore.previousSelectionForVisual.value = null;
-      }
-
-      // Start new polygon
-      this.isActive = true;
-      this.mode = 'selecting';
-      this.vertices = [point];
-
-      this.updateSelectingState();
-    } else {
-      // Check if clicking near start point to close
-      if (this.vertices.length >= 3) {
-        const start = this.vertices[0];
-        const dx = point.x - start.x;
-        const dy = point.y - start.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < 5) {
-          // Shrink to content only if Ctrl is held
-          const shrinkToContent = modifiers?.ctrl ?? false;
-          this.closePolygon(shrinkToContent);
-          return;
-        }
-      }
-
-      // Add new vertex
-      this.vertices.push(point);
-      this.updateSelectingState();
     }
+
+    this.vertices.push(point);
+    this.updateSelectingState();
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
@@ -197,8 +169,7 @@ export class PolygonalLassoTool extends BaseSelectionTool {
     this.mode = 'idle';
     this.vertices = [];
     this.currentMousePos = null;
-    selectionStore.previousSelectionForVisual.value = null;
-    this.previousSelection = null;
+    this.clearPreviousSelection();
     selectionStore.clear();
     selectionStore.resetMode();
   }

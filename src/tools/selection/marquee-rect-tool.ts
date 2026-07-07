@@ -2,18 +2,11 @@ import type { ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
 import { selectionStore } from '../../stores/selection';
 import { layerStore } from '../../stores/layers';
-import type { SelectionShape } from '../../types/selection';
 
 export class MarqueeRectTool extends BaseSelectionTool {
   name = 'marquee-rect';
   cursor = 'crosshair';
 
-  // Store previous selection for add/subtract operations
-  private previousSelection: {
-    bounds: { x: number; y: number; width: number; height: number };
-    shape: SelectionShape;
-    mask?: Uint8Array;
-  } | null = null;
 
   constructor(_context: CanvasRenderingContext2D) {
     super();
@@ -37,17 +30,7 @@ export class MarqueeRectTool extends BaseSelectionTool {
       return;
     }
 
-    // Set selection mode based on modifiers
-    // Shift+Alt = intersect, Shift = add, Alt = subtract
-    if (modifiers?.shift && modifiers?.alt) {
-      selectionStore.setMode('intersect');
-    } else if (modifiers?.shift) {
-      selectionStore.setMode('add');
-    } else if (modifiers?.alt) {
-      selectionStore.setMode('subtract');
-    } else {
-      selectionStore.setMode('replace');
-    }
+    this.applySelectionModeFromModifiers(modifiers);
 
     this.startNewSelection(canvasX, canvasY);
   }
@@ -138,29 +121,10 @@ export class MarqueeRectTool extends BaseSelectionTool {
     }
 
     selectionStore.resetMode();
-    selectionStore.previousSelectionForVisual.value = null;
-    this.previousSelection = null;
+    this.clearPreviousSelection();
   }
   private startNewSelection(x: number, y: number) {
-    // Save previous selection for add/subtract operations
-    const currentState = selectionStore.state.value;
-    const mode = selectionStore.mode.value;
-    if (currentState.type === 'selected') {
-      this.previousSelection = {
-        bounds: { ...currentState.bounds },
-        shape: currentState.shape,
-        mask: currentState.shape === 'freeform'
-          ? (currentState as { mask: Uint8Array }).mask
-          : undefined,
-      };
-      // Set visual signal for marching ants overlay (only in add/subtract mode)
-      if (mode !== 'replace') {
-        selectionStore.previousSelectionForVisual.value = this.previousSelection;
-      }
-    } else {
-      this.previousSelection = null;
-      selectionStore.previousSelectionForVisual.value = null;
-    }
+    this.capturePreviousSelection();
 
     this.mode = 'selecting';
     selectionStore.startSelection('rectangle', { x, y });
