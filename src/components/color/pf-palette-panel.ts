@@ -1,4 +1,4 @@
-import { html, css } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { paletteStore } from "../../stores/palette";
@@ -11,7 +11,6 @@ import "./pf-save-palette-dialog";
 import "./pf-unsaved-changes-dialog";
 import "./palette-panel/pf-palette-toolbar";
 import "./palette-panel/pf-palette-grid";
-import "./palette-panel/pf-untracked-colors";
 import "./palette-panel/pf-extraction-section";
 
 @customElement("pf-palette-panel")
@@ -25,6 +24,34 @@ export class PFPalettePanel extends BaseComponent {
 
     .toolbar {
       margin-bottom: 8px;
+    }
+
+    .new-marks {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 8px;
+    }
+
+    .clear-new-marks {
+      min-block-size: 24px;
+      padding: 4px 8px;
+      background: var(--pf-color-bg-input, #1e1e1e);
+      border: 1px solid var(--pf-color-border, #333);
+      border-radius: var(--pf-radius-sm);
+      color: var(--pf-color-text-muted, #808080);
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .clear-new-marks:hover {
+      background: var(--pf-color-bg-hover, #141414);
+      border-color: var(--pf-color-border-strong);
+      color: var(--pf-color-accent, #4a9eff);
+    }
+
+    .clear-new-marks:focus-visible {
+      outline: 2px solid var(--pf-color-accent, #4a9eff);
+      outline-offset: 2px;
     }
   `;
 
@@ -184,7 +211,13 @@ export class PFPalettePanel extends BaseComponent {
     this.showColorPicker = false;
   }
 
+  private handleClearAllNewMarks() {
+    paletteStore.clearAllNewFlags();
+  }
+
   render() {
+    const hasNewMarks = paletteStore.newColorFlags.value.size > 0;
+
     return html`
       <pf-palette-toolbar
         class="toolbar"
@@ -202,7 +235,18 @@ export class PFPalettePanel extends BaseComponent {
         @swatch-edit=${this.handleSwatchEdit}
       ></pf-palette-grid>
 
-      <pf-untracked-colors></pf-untracked-colors>
+      ${hasNewMarks
+        ? html`
+            <div class="new-marks">
+              <button
+                class="clear-new-marks"
+                @click=${this.handleClearAllNewMarks}
+              >
+                Clear all new marks
+              </button>
+            </div>
+          `
+        : nothing}
 
       <pf-extraction-section></pf-extraction-section>
 

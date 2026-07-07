@@ -39,6 +39,46 @@ export class PFPaletteGrid extends BaseComponent {
       box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
     }
 
+    .new-color-badge {
+      position: absolute;
+      inset-block-start: 0;
+      inset-inline-start: 0;
+      z-index: 12;
+      display: block;
+      min-inline-size: 24px;
+      min-block-size: 24px;
+      padding: 0;
+      background: transparent;
+      border: 0;
+      color: var(--pf-color-accent, #4a9eff);
+      cursor: pointer;
+    }
+
+    .new-color-badge::before {
+      content: "";
+      position: absolute;
+      inset-block-start: 3px;
+      inset-inline-start: 3px;
+      inline-size: 7px;
+      block-size: 7px;
+      background: currentColor;
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.55),
+        0 0 0 2px rgba(255, 255, 255, 0.35);
+      transition: transform 0.1s ease;
+    }
+
+    .new-color-badge:hover::before,
+    .new-color-badge:focus-visible::before {
+      transform: scale(1.2);
+    }
+
+    .new-color-badge:focus-visible {
+      outline: 2px solid var(--pf-color-accent, #4a9eff);
+      outline-offset: -2px;
+    }
+
     .swatch-delete {
       position: absolute;
       top: -4px;
@@ -177,6 +217,11 @@ export class PFPaletteGrid extends BaseComponent {
     paletteStore.removeColor(index);
   }
 
+  private handleMarkAsKept(e: Event, color: string) {
+    e.stopPropagation();
+    paletteStore.clearNewFlag(color);
+  }
+
   // Drag-drop handlers
   private handleDragStart(index: number, color: string, e: DragEvent) {
     if (e.dataTransfer) {
@@ -271,10 +316,11 @@ export class PFPaletteGrid extends BaseComponent {
 
   private renderSwatch(color: string, index: number, usedColors: Set<string>) {
     const isUsed = usedColors.has(color.toLowerCase());
+    const isNew = paletteStore.isNewColor(color);
 
     return html`
       <div
-        class="swatch-container ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
+        class="swatch-container ${isNew ? "new-color" : ""} ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
         @dragover=${(e: DragEvent) => this.handleDragOver(index, e)}
         @dragleave=${this.handleDragLeave}
         @drop=${(e: DragEvent) => this.handleDrop(index, e)}
@@ -296,6 +342,16 @@ export class PFPaletteGrid extends BaseComponent {
         >
           ×
         </button>
+        ${isNew
+          ? html`
+              <button
+                class="new-color-badge"
+                @click=${(e: Event) => this.handleMarkAsKept(e, color)}
+                title="Mark as kept"
+                aria-label="Mark ${color} as kept"
+              ></button>
+            `
+          : ""}
       </div>
     `;
   }
