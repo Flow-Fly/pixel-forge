@@ -11,45 +11,38 @@ import '../ui/pf-dialog';
 export class PFProjectBrowser extends BaseComponent {
   static styles = css`
     :host {
-      position: fixed;
-      inset: 0;
-      z-index: 900;
       display: block;
       color: var(--pf-color-text-main);
-      background:
-        radial-gradient(circle at 20% 20%, rgba(200, 173, 127, 0.1), transparent 28%),
-        linear-gradient(180deg, rgba(14, 18, 25, 0.98), rgba(5, 7, 10, 0.98));
-      overflow: auto;
     }
 
     .shell {
-      min-height: 100%;
       box-sizing: border-box;
-      padding: 36px;
       display: flex;
       flex-direction: column;
-      gap: 24px;
+      gap: 18px;
+      max-height: min(720px, calc(100vh - 140px));
+      min-height: 0;
     }
 
-    header {
+    .toolbar {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
     }
 
-    h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: 0;
-    }
-
     .subtitle {
-      margin: 6px 0 0;
+      margin: 0;
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-sm);
       text-transform: none;
+    }
+
+    .project-list {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 2px;
     }
 
     .header-actions,
@@ -220,10 +213,10 @@ export class PFProjectBrowser extends BaseComponent {
 
     @media (max-width: 640px) {
       .shell {
-        padding: 18px;
+        max-height: calc(100vh - 120px);
       }
 
-      header {
+      .toolbar {
         flex-direction: column;
       }
     }
@@ -249,37 +242,47 @@ export class PFProjectBrowser extends BaseComponent {
   }
 
   render() {
+    const canDismissBrowser = this.canDismissBrowser();
+
     return html`
-      <section class="shell" aria-label="Project library">
-        <header>
-          <div>
-            <h1>Project Library</h1>
+      <pf-dialog
+        open
+        .width=${'min(960px, calc(100vw - 32px))'}
+        .closeOnBackdrop=${canDismissBrowser}
+        .closeOnEscape=${canDismissBrowser}
+        .showCloseButton=${this.canClose}
+        @pf-close=${this.handleBrowserDialogClose}
+      >
+        <span slot="title">Project Library</span>
+        <section class="shell" aria-label="Project library">
+          <div class="toolbar">
             <p class="subtitle">Open a saved sprite or start a fresh canvas.</p>
+            <div class="header-actions">
+              <button class="primary" type="button" @click=${this.requestNewProject}>
+                New Project
+              </button>
+              ${this.canClose
+                ? html`
+                    <button type="button" @click=${this.closeBrowser}>
+                      Back to Editor
+                    </button>
+                  `
+                : nothing}
+            </div>
           </div>
-          <div class="header-actions">
-            <button class="primary" type="button" @click=${this.requestNewProject}>
-              New Project
-            </button>
-            ${this.canClose
-              ? html`
-                  <button type="button" @click=${this.closeBrowser}>
-                    Back to Editor
-                  </button>
-                `
-              : nothing}
+
+          ${this.errorMessage
+            ? html`<div class="error" role="alert">${this.errorMessage}</div>`
+            : nothing}
+
+          <div class="project-list">
+            ${this.isLoading
+              ? html`<div class="loading">Loading projects...</div>`
+              : this.renderProjectGrid()}
           </div>
-        </header>
-
-        ${this.errorMessage
-          ? html`<div class="error" role="alert">${this.errorMessage}</div>`
-          : nothing}
-
-        ${this.isLoading
-          ? html`<div class="loading">Loading projects...</div>`
-          : this.renderProjectGrid()}
-
-        ${this.renderDeleteDialog()}
-      </section>
+        </section>
+      </pf-dialog>
+      ${this.renderDeleteDialog()}
     `;
   }
 
@@ -510,6 +513,20 @@ export class PFProjectBrowser extends BaseComponent {
     this.dispatchEvent(
       new CustomEvent('project-browser-close', { bubbles: true, composed: true })
     );
+  };
+
+  private canDismissBrowser() {
+    return this.canClose && !this.deleteTarget;
+  }
+
+  private handleBrowserDialogClose = (event: Event) => {
+    if (!this.canDismissBrowser()) {
+      event.stopPropagation();
+      (event.currentTarget as HTMLElement & { open: boolean }).open = true;
+      return;
+    }
+
+    this.closeBrowser();
   };
 
   private formatLastEdited(lastModified: number) {

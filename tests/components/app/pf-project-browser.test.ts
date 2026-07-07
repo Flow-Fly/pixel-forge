@@ -32,6 +32,7 @@ vi.mock('../../../src/stores/project', () => ({
 
 import '../../../src/components/app/pf-project-browser';
 import type { PFProjectBrowser } from '../../../src/components/app/pf-project-browser';
+import type { PFDialog } from '../../../src/components/ui/pf-dialog';
 
 const PROJECTS = [
   {
@@ -75,6 +76,14 @@ function confirmDeleteButton(root: ShadowRoot) {
   return root.querySelector<HTMLButtonElement>('pf-dialog button.primary.danger');
 }
 
+function projectDialog(root: ShadowRoot) {
+  return root.querySelector<PFDialog>('pf-dialog');
+}
+
+async function settleDialog(dialog: PFDialog | null | undefined) {
+  await dialog?.updateComplete;
+}
+
 describe('pf-project-browser', () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -98,10 +107,85 @@ describe('pf-project-browser', () => {
   it('renders saved projects and a new-project action', async () => {
     const element = await createBrowser();
 
+    const dialog = projectDialog(element.shadowRoot!);
+    expect(dialog?.open).toBe(true);
+    expect(dialog?.width).toBe('min(960px, calc(100vw - 32px))');
     expect(element.shadowRoot?.textContent).toContain('Project Library');
     expect(element.shadowRoot?.textContent).toContain('Open Project');
     expect(element.shadowRoot?.textContent).toContain('Second Project');
     expect(buttonWithText(element.shadowRoot!, 'New Project')).toBeTruthy();
+  });
+
+  it('emits project-browser-close from the dialog close button when closing is allowed', async () => {
+    const element = await createBrowser();
+    element.canClose = true;
+    await settle(element);
+
+    let closed = false;
+    element.addEventListener('project-browser-close', () => {
+      closed = true;
+    });
+
+    const dialog = projectDialog(element.shadowRoot!);
+    await settleDialog(dialog);
+    dialog?.shadowRoot?.querySelector<HTMLButtonElement>('.close-btn')?.click();
+    await settle(element);
+
+    expect(closed).toBe(true);
+  });
+
+  it('emits project-browser-close from Escape and backdrop when closing is allowed', async () => {
+    const element = await createBrowser();
+    element.canClose = true;
+    await settle(element);
+
+    let closeCount = 0;
+    element.addEventListener('project-browser-close', () => {
+      closeCount += 1;
+    });
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await settle(element);
+
+    const dialog = projectDialog(element.shadowRoot!);
+    dialog!.open = true;
+    await settleDialog(dialog);
+    dialog
+      ?.shadowRoot
+      ?.querySelector<HTMLElement>('.overlay')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle(element);
+
+    expect(closeCount).toBe(2);
+  });
+
+  it('keeps the browser dialog open and locked when closing is not allowed', async () => {
+    const element = await createBrowser();
+
+    let closed = false;
+    element.addEventListener('project-browser-close', () => {
+      closed = true;
+    });
+
+    const dialog = projectDialog(element.shadowRoot!);
+    await settleDialog(dialog);
+
+    expect(dialog?.closeOnBackdrop).toBe(false);
+    expect(dialog?.closeOnEscape).toBe(false);
+    expect(dialog?.showCloseButton).toBe(false);
+    expect(dialog?.shadowRoot?.querySelector('.close-btn')).toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    dialog
+      ?.shadowRoot
+      ?.querySelector<HTMLElement>('.overlay')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dialog?.close();
+    await settle(element);
+    await settleDialog(dialog);
+
+    expect(closed).toBe(false);
+    expect(dialog?.open).toBe(true);
   });
 
   it('renders project thumbnails from blob URLs and falls back when missing', async () => {
@@ -196,5 +280,30 @@ describe('pf-project-browser', () => {
     await settle(element);
 
     expect(deletedCurrent).toBe(true);
+  });
+
+  it('keeps the browser open when Escape closes the delete confirmation', async () => {
+    const element = await createBrowser();
+    element.canClose = true;
+    await settle(element);
+
+    let browserClosed = false;
+    element.addEventListener('project-browser-close', () => {
+      browserClosed = true;
+    });
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await settle(element);
+
+    const dialogs = element.shadowRoot!.querySelectorAll<PFDialog>('pf-dialog');
+    expect(dialogs).toHaveLength(2);
+    expect(dialogs[0].closeOnEscape).toBe(false);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await settle(element);
+
+    expect(browserClosed).toBe(false);
+    expect(projectDialog(element.shadowRoot!)?.open).toBe(true);
+    expect(element.shadowRoot!.querySelectorAll('pf-dialog')).toHaveLength(1);
   });
 });
