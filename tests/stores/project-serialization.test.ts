@@ -164,19 +164,31 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(normalize(twice)).toEqual(normalize(once));
   });
 
-  it('preserves the ephemeral palette across save/load', async () => {
+  it('writes the compatibility palette empty after drawing adds a color', async () => {
     await buildSampleProject();
     paletteStore.getOrAddColorForDrawing('#123456');
 
     const saved = await projectStore.saveProject();
-    expect(saved.ephemeralPalette).toEqual(['#123456']);
+    expect(saved.palette).toContain('#123456');
+    expect(saved.ephemeralPalette).toEqual([]);
+  });
+
+  it('loads compatibility palette colors into the main palette', async () => {
+    const saved = await buildSampleProject();
+    const legacy = {
+      ...structuredClone(saved),
+      palette: [...PALETTE],
+      ephemeralPalette: ['#123456'],
+    };
 
     vi.useFakeTimers();
-    await projectStore.loadProject(structuredClone(saved), false);
+    await projectStore.loadProject(legacy, false);
     await vi.runAllTimersAsync();
     vi.useRealTimers();
 
-    expect(paletteStore.ephemeralColors.value).toContain('#123456');
+    expect(paletteStore.mainColors.value).toEqual([...PALETTE, '#123456']);
+    expect(paletteStore.getColorByIndex(PALETTE.length + 1)).toBe('#123456');
+    expect(paletteStore.isNewColor('#123456')).toBe(false);
   });
 
   it('normalizes JSON-mangled project image data before hydrating canvases', async () => {

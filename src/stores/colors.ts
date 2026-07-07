@@ -8,35 +8,17 @@ class ColorStore {
   lightnessIndex = signal(3); // Default to middle (50%)
   lightnessVariations = signal<string[]>([]);
 
-  /**
-   * True when primaryColor came from shade generation (not direct palette selection).
-   * When true, drawing will use ephemeral color indexing instead of adding to main palette.
-   */
-  isEphemeralColor = signal(false);
-
   constructor() {
     // Initialize variations for the default color
     this.updateLightnessVariations(this.primaryColor.value);
   }
 
-  /**
-   * Set primary color from main palette selection.
-   * This marks the color as non-ephemeral (direct palette pick).
-   */
   setPrimaryColor(color: string) {
     this.primaryColor.value = color;
-    // Check if this color is in the main palette
-    this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(color);
   }
 
-  /**
-   * Set primary color from shade/variation selection.
-   * This marks the color as ephemeral (generated shade).
-   */
   setPrimaryColorFromShade(color: string) {
     this.primaryColor.value = color;
-    // Mark as ephemeral unless it happens to be in main palette
-    this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(color);
   }
 
   setSecondaryColor(color: string) {
@@ -47,8 +29,6 @@ class ColorStore {
     const temp = this.primaryColor.value;
     this.primaryColor.value = this.secondaryColor.value;
     this.secondaryColor.value = temp;
-    // Update ephemeral status based on new primary color
-    this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(this.primaryColor.value);
   }
 
   /**
@@ -69,8 +49,6 @@ class ColorStore {
     this.lightnessIndex.value = (this.lightnessIndex.value - 1 + 7) % 7;
     const color = this.lightnessVariations.value[this.lightnessIndex.value];
     this.primaryColor.value = color;
-    // Mark as ephemeral unless this shade happens to be in main palette
-    this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(color);
   }
 
   /**
@@ -81,8 +59,6 @@ class ColorStore {
     this.lightnessIndex.value = (this.lightnessIndex.value + 1) % 7;
     const color = this.lightnessVariations.value[this.lightnessIndex.value];
     this.primaryColor.value = color;
-    // Mark as ephemeral unless this shade happens to be in main palette
-    this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(color);
   }
 
   /**
@@ -93,8 +69,6 @@ class ColorStore {
       this.lightnessIndex.value = index;
       const color = this.lightnessVariations.value[index];
       this.primaryColor.value = color;
-      // Mark as ephemeral unless this shade happens to be in main palette
-      this.isEphemeralColor.value = !paletteStore.isMainPaletteColor(color);
     }
   }
 

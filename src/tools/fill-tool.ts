@@ -30,7 +30,7 @@ export class FillTool extends BaseTool {
 
     if (layerId) {
       indexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
-      // Get palette index for drawing - adds to ephemeral if not in main palette
+      // Get palette index for drawing - adds to the palette if needed
       fillPaletteIndex = paletteStore.getOrAddColorForDrawing(hex);
     }
 

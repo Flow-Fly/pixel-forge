@@ -31,7 +31,7 @@ const BASE = ['#000000', '#ff0000', '#00ff00', '#0000ff'];
 
 describe('PaletteStore invariants', () => {
   beforeEach(() => {
-    paletteStore.clearEphemeralColors(true);
+    paletteStore.clearAllNewFlags();
     paletteStore.setPalette([...BASE]);
   });
 
@@ -49,61 +49,68 @@ describe('PaletteStore invariants', () => {
     );
   });
 
-  it('drawing with a main-palette color does not create ephemeral colors', () => {
-    const before = paletteStore.ephemeralColors.value.length;
+  it('drawing with a main-palette color returns its existing index', () => {
+    const before = paletteStore.mainColors.value.length;
     const index = paletteStore.getOrAddColorForDrawing('#ff0000');
 
     expect(index).toBe(paletteStore.getColorIndex('#ff0000'));
-    expect(paletteStore.ephemeralColors.value).toHaveLength(before);
+    expect(paletteStore.mainColors.value).toHaveLength(before);
+    expect(paletteStore.isNewColor('#ff0000')).toBe(false);
   });
 
-  it('drawing with an unknown color adds it as ephemeral, resolvable by index', () => {
+  it('drawing with an unknown color appends it to the palette and flags it new', () => {
     const index = paletteStore.getOrAddColorForDrawing('#123456');
 
-    expect(paletteStore.ephemeralColors.value).toContain('#123456');
-    expect(paletteStore.isEphemeralColor('#123456')).toBe(true);
-    expect(paletteStore.isMainPaletteColor('#123456')).toBe(false);
+    expect(index).toBe(BASE.length + 1);
+    expect(paletteStore.mainColors.value).toEqual([...BASE, '#123456']);
+    expect(paletteStore.isNewColor('#123456')).toBe(true);
+    expect(paletteStore.isMainPaletteColor('#123456')).toBe(true);
     expect(paletteStore.getColorByIndex(index)).toBe('#123456');
   });
 
-  it('drawing twice with the same unknown color reuses the ephemeral entry', () => {
+  it('adding an existing color is a no-op and returns the existing index', () => {
+    const existingIndex = paletteStore.getColorIndex('#ff0000');
+
+    const addedIndex = paletteStore.addColor('#FF0000', { flagNew: true });
+
+    expect(addedIndex).toBe(existingIndex);
+    expect(paletteStore.mainColors.value).toEqual(BASE);
+    expect(paletteStore.isNewColor('#ff0000')).toBe(false);
+  });
+
+  it('drawing twice with the same unknown color reuses the palette entry', () => {
     const first = paletteStore.getOrAddColorForDrawing('#123456');
     const second = paletteStore.getOrAddColorForDrawing('#123456');
 
     expect(second).toBe(first);
     expect(
-      paletteStore.ephemeralColors.value.filter((c) => c === '#123456')
+      paletteStore.mainColors.value.filter((c) => c === '#123456')
     ).toHaveLength(1);
   });
 
-  it('promoting an ephemeral color moves it into the main palette', () => {
-    paletteStore.getOrAddColorForDrawing('#123456');
-    const newIndex = paletteStore.promoteEphemeralColor('#123456');
+  it('appending a drawing color keeps existing palette indices stable', () => {
+    const redIndex = paletteStore.getColorIndex('#ff0000');
+    const greenIndex = paletteStore.getColorIndex('#00ff00');
 
-    expect(paletteStore.ephemeralColors.value).not.toContain('#123456');
+    paletteStore.getOrAddColorForDrawing('#123456');
+
+    expect(paletteStore.getColorIndex('#ff0000')).toBe(redIndex);
+    expect(paletteStore.getColorIndex('#00ff00')).toBe(greenIndex);
+    expect(paletteStore.getColorByIndex(redIndex)).toBe('#ff0000');
+    expect(paletteStore.getColorByIndex(greenIndex)).toBe('#00ff00');
+  });
+
+  it('new color flags are session UI state cleared explicitly, not by drawing undo', () => {
+    paletteStore.getOrAddColorForDrawing('#123456');
+
+    // Drawing undo restores pixels through drawing commands only. The palette
+    // entry remains real, so the UI badge stays attached until the UI clears it.
+    expect(paletteStore.isNewColor('#123456')).toBe(true);
+
+    paletteStore.clearNewFlag('#123456');
+
+    expect(paletteStore.isNewColor('#123456')).toBe(false);
     expect(paletteStore.mainColors.value).toContain('#123456');
-    expect(paletteStore.isMainPaletteColor('#123456')).toBe(true);
-    expect(paletteStore.getColorByIndex(newIndex)).toBe('#123456');
-  });
-
-  it('promoteAllEphemeralColors empties the ephemeral stack into main', () => {
-    paletteStore.getOrAddColorForDrawing('#111111');
-    paletteStore.getOrAddColorForDrawing('#222222');
-
-    paletteStore.promoteAllEphemeralColors();
-
-    expect(paletteStore.ephemeralColors.value).toHaveLength(0);
-    expect(paletteStore.mainColors.value).toEqual(
-      expect.arrayContaining([...BASE, '#111111', '#222222'])
-    );
-  });
-
-  it('clearEphemeralColors leaves the main palette untouched', () => {
-    paletteStore.getOrAddColorForDrawing('#123456');
-    paletteStore.clearEphemeralColors(true);
-
-    expect(paletteStore.ephemeralColors.value).toHaveLength(0);
-    expect(paletteStore.mainColors.value).toEqual(BASE);
   });
 
   it('setPalette rebuilds the color map (stale indices do not survive)', () => {

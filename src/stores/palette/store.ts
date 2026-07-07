@@ -28,6 +28,10 @@ function waitForNextFrame(): Promise<void> {
   });
 }
 
+type AddColorOptions = {
+  flagNew?: boolean;
+};
+
 class PaletteStore {
   // ==========================================
   // State (Signals)
@@ -36,8 +40,8 @@ class PaletteStore {
   /** Main palette colors (user-managed, visible in palette panel) */
   mainColors = signal<string[]>([...DB32_COLORS]);
 
-  /** Ephemeral colors (auto-generated shades, not in main palette) */
-  ephemeralColors = signal<string[]>([]);
+  /** Colors added by drawing during this session and awaiting user acknowledgement. */
+  newColorFlags = signal<Set<string>>(new Set());
 
   /** Current preset palette ID (null when using custom palette) */
   currentPresetId = signal<string | null>('db32');
@@ -63,7 +67,6 @@ class PaletteStore {
   // ==========================================
 
   private colorToIndex = new Map<string, number>();
-  private ephemeralColorToIndex = new Map<string, number>();
   private cachedPaletteName: string | null = null;
 
   // ==========================================
@@ -95,43 +98,35 @@ class PaletteStore {
   // ==========================================
 
   rebuildColorMap() {
-    const maps = indexedColor.buildColorMaps(
-      this.mainColors.value,
-      this.ephemeralColors.value
-    );
+    const maps = indexedColor.buildColorMaps(this.mainColors.value);
     this.colorToIndex = maps.colorToIndex;
-    this.ephemeralColorToIndex = maps.ephemeralColorToIndex;
   }
 
   getColorIndex(color: string): number {
-    return indexedColor.getColorIndex(
-      color,
-      this.colorToIndex,
-      this.ephemeralColorToIndex
-    );
+    return indexedColor.getColorIndex(color, this.colorToIndex);
   }
 
   isMainPaletteColor(color: string): boolean {
     return indexedColor.isMainPaletteColor(color, this.colorToIndex);
   }
 
-  isEphemeralColor(color: string): boolean {
-    return indexedColor.isEphemeralColor(color, this.ephemeralColorToIndex);
-  }
-
   getColorByIndex(index: number): string | null {
-    return indexedColor.getColorByIndex(
-      index,
-      this.mainColors.value,
-      this.ephemeralColors.value
-    );
+    return indexedColor.getColorByIndex(index, this.mainColors.value);
   }
 
   // ==========================================
   // Color Addition
   // ==========================================
 
-  getOrAddColor(color: string): number {
+  getOrAddColor(color: string, options: AddColorOptions = {}): number {
+    return this.addColor(color, options);
+  }
+
+  getOrAddColorForDrawing(color: string): number {
+    return this.addColor(color, { flagNew: true });
+  }
+
+  addColor(color: string, options: AddColorOptions = {}): number {
     const normalized = normalizeHex(color);
     const existing = this.colorToIndex.get(normalized);
     if (existing !== undefined) return existing;
@@ -140,48 +135,16 @@ class PaletteStore {
       return indexedColor.findClosestColorIndex(normalized, this.colors.value);
     }
 
-    const insertionIndex = indexedColor.findInsertionIndex(normalized, this.colors.value);
-    const newColors = [...this.colors.value];
-    newColors.splice(insertionIndex, 0, normalized);
-    this.colors.value = newColors;
+    const newIndex = this.colors.value.length + 1;
+    this.colors.value = [...this.colors.value, normalized];
+    if (options.flagNew) {
+      this.addNewFlag(normalized);
+    }
     this.markDirty();
     this.rebuildColorMap();
     this.saveToStorage();
 
-    // Dispatch event to shift indices in index buffers
-    window.dispatchEvent(
-      new CustomEvent('palette-color-inserted', {
-        detail: { insertedIndex: insertionIndex + 1 },
-      })
-    );
-
-    return insertionIndex + 1;
-  }
-
-  getOrAddColorForDrawing(color: string): number {
-    const normalized = normalizeHex(color);
-
-    const mainIndex = this.colorToIndex.get(normalized);
-    if (mainIndex !== undefined) return mainIndex;
-
-    const ephemeralIndex = this.ephemeralColorToIndex.get(normalized);
-    if (ephemeralIndex !== undefined) return ephemeralIndex;
-
-    const totalColors = this.mainColors.value.length + this.ephemeralColors.value.length;
-    if (totalColors >= MAX_PALETTE_SIZE) {
-      return indexedColor.findClosestColorIndex(normalized, this.colors.value);
-    }
-
-    const newEphemeral = [...this.ephemeralColors.value, normalized];
-    this.ephemeralColors.value = newEphemeral;
-    this.rebuildColorMap();
-
-    return this.mainColors.value.length + newEphemeral.length;
-  }
-
-  /** @deprecated Use getOrAddColorForDrawing instead */
-  getOrAddEphemeralColor(color: string): number {
-    return this.getOrAddColorForDrawing(color);
+    return newIndex;
   }
 
   findClosestColorIndex(hex: string): number {
@@ -189,129 +152,41 @@ class PaletteStore {
   }
 
   // ==========================================
-  // Ephemeral Color Management
+  // New Color Flags
   // ==========================================
 
-  promoteEphemeralColor(color: string): number {
+  clearNewFlag(color: string): void {
     const normalized = normalizeHex(color);
+    if (!this.newColorFlags.value.has(normalized)) return;
 
-    const mainIndex = this.colorToIndex.get(normalized);
-    if (mainIndex !== undefined) return mainIndex;
-
-    const ephemeralIdx = this.ephemeralColors.value.indexOf(normalized);
-    // Calculate old ephemeral 1-based index before any changes
-    const oldEphemeralIndex = ephemeralIdx !== -1
-      ? this.mainColors.value.length + ephemeralIdx + 1
-      : -1;
-
-    if (ephemeralIdx !== -1) {
-      const newEphemeral = [...this.ephemeralColors.value];
-      newEphemeral.splice(ephemeralIdx, 1);
-      this.ephemeralColors.value = newEphemeral;
-    }
-
-    const insertionIndex = indexedColor.findInsertionIndex(normalized, this.mainColors.value);
-    const newColors = [...this.mainColors.value];
-    newColors.splice(insertionIndex, 0, normalized);
-    this.mainColors.value = newColors;
-    this.markDirty();
-    this.rebuildColorMap();
-    this.saveToStorage();
-
-    const newMainIndex = insertionIndex + 1;
-
-    // Dispatch event to remap index buffers
-    // This tells the handler: oldEphemeralIndex should become newMainIndex,
-    // and main indices >= newMainIndex need to shift up by 1
-    window.dispatchEvent(
-      new CustomEvent('palette-ephemeral-promoted', {
-        detail: {
-          oldEphemeralIndex,
-          newMainIndex,
-          oldMainLength: newColors.length - 1 // length before insertion
-        },
-      })
-    );
-
-    return newMainIndex;
+    const flags = new Set(this.newColorFlags.value);
+    flags.delete(normalized);
+    this.newColorFlags.value = flags;
   }
 
-  promoteAllEphemeralColors() {
-    if (this.ephemeralColors.value.length === 0) return;
-
-    // Capture old state for remapping
-    const oldMainColors = [...this.mainColors.value];
-    const oldEphemeralColors = [...this.ephemeralColors.value];
-
-    // Add all ephemeral colors to main palette (append at end for batch)
-    const newColors = [...this.mainColors.value, ...this.ephemeralColors.value];
-    this.mainColors.value = newColors;
-    this.ephemeralColors.value = [];
-    this.markDirty();
-    this.rebuildColorMap();
-    this.saveToStorage();
-
-    // Single event to remap all index buffers
-    window.dispatchEvent(
-      new CustomEvent('palette-replaced', {
-        detail: { oldMainColors, oldEphemeralColors },
-      })
-    );
+  clearAllNewFlags(): void {
+    if (this.newColorFlags.value.size === 0) return;
+    this.newColorFlags.value = new Set();
   }
 
-  clearEphemeralColors(skipRemap = false) {
-    if (this.ephemeralColors.value.length === 0) return;
-
-    const oldMainColors = [...this.mainColors.value];
-    const oldEphemeralColors = [...this.ephemeralColors.value];
-
-    this.ephemeralColors.value = [];
-    this.rebuildColorMap();
-
-    // Dispatch event to remap orphaned ephemeral indices to closest main color
-    if (!skipRemap) {
-      window.dispatchEvent(
-        new CustomEvent('palette-replaced', {
-          detail: { oldMainColors, oldEphemeralColors },
-        })
-      );
-    }
+  isNewColor(color: string): boolean {
+    return this.newColorFlags.value.has(normalizeHex(color));
   }
 
-  removeFromEphemeral(color: string): void {
-    const normalized = normalizeHex(color);
-    const index = this.ephemeralColors.value.findIndex(
-      c => normalizeHex(c) === normalized
-    );
-    if (index !== -1) {
-      // Calculate 1-based palette index (ephemeral indices start after main colors)
-      const paletteIndex = this.mainColors.value.length + index + 1;
-
-      const newEphemeral = [...this.ephemeralColors.value];
-      newEphemeral.splice(index, 1);
-      this.ephemeralColors.value = newEphemeral;
-      this.rebuildColorMap();
-
-      // Dispatch event to shift indices in index buffers
-      window.dispatchEvent(
-        new CustomEvent('palette-color-removed', {
-          detail: { removedIndex: paletteIndex },
-        })
-      );
-    }
+  private addNewFlag(normalizedColor: string): void {
+    const flags = new Set(this.newColorFlags.value);
+    flags.add(normalizedColor);
+    this.newColorFlags.value = flags;
   }
 
-  deduplicateEphemeral(): void {
-    const mainPaletteSet = new Set(
-      this.mainColors.value.map(c => normalizeHex(c))
-    );
-    const dedupedEphemeral = this.ephemeralColors.value.filter(
-      c => !mainPaletteSet.has(normalizeHex(c))
+  private pruneNewFlags(): void {
+    const paletteColors = new Set(this.mainColors.value.map(c => normalizeHex(c)));
+    const flags = new Set(
+      [...this.newColorFlags.value].filter(color => paletteColors.has(color))
     );
 
-    if (dedupedEphemeral.length !== this.ephemeralColors.value.length) {
-      this.ephemeralColors.value = dedupedEphemeral;
-      this.rebuildColorMap();
+    if (flags.size !== this.newColorFlags.value.size) {
+      this.newColorFlags.value = flags;
     }
   }
 
@@ -319,26 +194,11 @@ class PaletteStore {
   // Color CRUD
   // ==========================================
 
-  addColor(color: string) {
-    if (!this.colors.value.includes(color)) {
-      this.colors.value = [...this.colors.value, color];
-      this.markDirty();
-      this.rebuildColorMap();
-      this.saveToStorage();
-    }
-  }
-
   updateColor(index: number, newColor: string) {
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
-
-    const normalized = normalizeHex(newColor);
-    const colors = [...this.colors.value];
-    colors[arrayIndex] = normalized;
-    this.colors.value = colors;
-    this.markDirty();
-    this.rebuildColorMap();
-    this.saveToStorage();
+    const normalized = this.setColorAtArrayIndex(index - 1, newColor, {
+      markDirty: true,
+    });
+    if (!normalized) return;
 
     window.dispatchEvent(
       new CustomEvent('palette-color-changed', {
@@ -348,25 +208,11 @@ class PaletteStore {
   }
 
   updateColorDirect(index: number, newColor: string) {
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
-
-    const normalized = normalizeHex(newColor);
-    const colors = [...this.colors.value];
-    colors[arrayIndex] = normalized;
-    this.colors.value = colors;
-    this.rebuildColorMap();
-    this.saveToStorage();
+    this.setColorAtArrayIndex(index - 1, newColor);
   }
 
   removeColor(index: number) {
-    if (index >= 0 && index < this.colors.value.length) {
-      const newColors = [...this.colors.value];
-      newColors.splice(index, 1);
-      this.colors.value = newColors;
-      this.markDirty();
-      this.rebuildColorMap();
-      this.saveToStorage();
+    if (this.removeColorAtArrayIndex(index)) {
 
       window.dispatchEvent(
         new CustomEvent('palette-color-removed', {
@@ -377,15 +223,7 @@ class PaletteStore {
   }
 
   removeColorByIndex(index: number) {
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
-
-    const newColors = [...this.colors.value];
-    newColors.splice(arrayIndex, 1);
-    this.colors.value = newColors;
-    this.markDirty();
-    this.rebuildColorMap();
-    this.saveToStorage();
+    if (!this.removeColorAtArrayIndex(index - 1)) return;
 
     window.dispatchEvent(
       new CustomEvent('palette-color-removed', {
@@ -403,6 +241,7 @@ class PaletteStore {
     newColors.splice(arrayIndex, 0, normalized);
     this.colors.value = newColors;
     this.markDirty();
+    this.pruneNewFlags();
     this.rebuildColorMap();
     this.saveToStorage();
 
@@ -433,68 +272,6 @@ class PaletteStore {
     );
   }
 
-  removeColorToEphemeral(arrayIndex: number): void {
-    if (arrayIndex < 0 || arrayIndex >= this.mainColors.value.length) return;
-
-    const color = this.mainColors.value[arrayIndex];
-    const oneBasedIndex = arrayIndex + 1;
-
-    const newColors = [...this.mainColors.value];
-    newColors.splice(arrayIndex, 1);
-    this.mainColors.value = newColors;
-
-    const normalizedColor = normalizeHex(color);
-    if (!this.ephemeralColors.value.some(c => normalizeHex(c) === normalizedColor)) {
-      this.ephemeralColors.value = [...this.ephemeralColors.value, normalizedColor];
-    }
-
-    this.markDirty();
-    this.rebuildColorMap();
-    this.saveToStorage();
-
-    const newEphemeralIndex = this.getColorIndex(normalizedColor);
-    window.dispatchEvent(
-      new CustomEvent('palette-color-moved-to-ephemeral', {
-        detail: {
-          removedIndex: oneBasedIndex,
-          newIndex: newEphemeralIndex,
-          color: normalizedColor,
-        },
-      })
-    );
-  }
-
-  swapMainWithEphemeral(mainArrayIndex: number, ephemeralColor: string): void {
-    if (mainArrayIndex < 0 || mainArrayIndex >= this.mainColors.value.length) return;
-
-    const normalizedEphemeral = normalizeHex(ephemeralColor);
-    const mainColor = this.mainColors.value[mainArrayIndex];
-
-    const newMainColors = [...this.mainColors.value];
-    newMainColors[mainArrayIndex] = normalizedEphemeral;
-    this.mainColors.value = newMainColors;
-
-    const ephemeralIdx = this.ephemeralColors.value.findIndex(
-      c => normalizeHex(c) === normalizedEphemeral
-    );
-    if (ephemeralIdx !== -1) {
-      const newEphemeral = [...this.ephemeralColors.value];
-      newEphemeral.splice(ephemeralIdx, 1);
-      newEphemeral.push(mainColor);
-      this.ephemeralColors.value = newEphemeral;
-    }
-
-    this.markDirty();
-    this.rebuildColorMap();
-    this.saveToStorage();
-
-    window.dispatchEvent(
-      new CustomEvent('palette-color-changed', {
-        detail: { index: mainArrayIndex + 1, color: normalizedEphemeral },
-      })
-    );
-  }
-
   // ==========================================
   // Palette Loading
   // ==========================================
@@ -511,21 +288,17 @@ class PaletteStore {
     }
 
     const oldMainColors = [...this.mainColors.value];
-    const oldEphemeralColors = [...this.ephemeralColors.value];
-
-    this.preserveColorsOnSwitch(preset.colors);
-
-    this.mainColors.value = [...preset.colors];
+    this.mainColors.value = this.withUsedColorsPreserved(preset.colors);
     this.currentPresetId.value = id;
     this.currentCustomPaletteId.value = null;
     this.isDirty.value = false;
+    this.clearAllNewFlags();
     this.rebuildColorMap();
-    this.deduplicateEphemeral();
     this.saveToStorage();
 
     window.dispatchEvent(
       new CustomEvent('palette-replaced', {
-        detail: { oldMainColors, oldEphemeralColors },
+        detail: { oldMainColors },
       })
     );
   }
@@ -538,31 +311,27 @@ class PaletteStore {
     }
 
     const oldMainColors = [...this.mainColors.value];
-    const oldEphemeralColors = [...this.ephemeralColors.value];
-
-    this.preserveColorsOnSwitch(palette.colors);
-
-    this.mainColors.value = [...palette.colors];
+    this.mainColors.value = this.withUsedColorsPreserved(palette.colors);
     this.currentPresetId.value = null;
     this.currentCustomPaletteId.value = id;
     this.isDirty.value = false;
+    this.clearAllNewFlags();
     this.rebuildColorMap();
-    this.deduplicateEphemeral();
     this.saveToStorage();
 
     window.dispatchEvent(
       new CustomEvent('palette-replaced', {
-        detail: { oldMainColors, oldEphemeralColors },
+        detail: { oldMainColors },
       })
     );
   }
 
   createEmpty() {
     this.mainColors.value = [];
-    this.ephemeralColors.value = [];
     this.currentPresetId.value = null;
     this.currentCustomPaletteId.value = null;
     this.isDirty.value = true;
+    this.clearAllNewFlags();
     this.rebuildColorMap();
     this.saveToStorage();
 
@@ -575,6 +344,7 @@ class PaletteStore {
 
   setPalette(colors: string[], preserveSelection = false) {
     this.colors.value = colors.map(c => normalizeHex(c));
+    this.clearAllNewFlags();
 
     if (!preserveSelection) {
       this.currentPresetId.value = null;
@@ -612,19 +382,25 @@ class PaletteStore {
   }
 
   addExtractedColor(color: string) {
-    if (!this.colors.value.includes(color)) {
-      this.colors.value = [...this.colors.value, color];
-      this.markDirty();
-      this.rebuildColorMap();
-      this.saveToStorage();
-    }
-    this.extractedColors.value = this.extractedColors.value.filter(c => c !== color);
+    const normalized = normalizeHex(color);
+    this.addColor(normalized);
+    this.extractedColors.value = this.extractedColors.value.filter(
+      c => normalizeHex(c) !== normalized
+    );
   }
 
   addAllExtracted() {
-    const newColors = this.extractedColors.value.filter(
-      c => !this.colors.value.includes(c)
-    );
+    const existingColors = new Set(this.colors.value.map(c => normalizeHex(c)));
+    const newColors: string[] = [];
+
+    for (const color of this.extractedColors.value) {
+      const normalized = normalizeHex(color);
+      if (existingColors.has(normalized)) continue;
+
+      existingColors.add(normalized);
+      newColors.push(normalized);
+    }
+
     if (newColors.length > 0) {
       this.colors.value = [...this.colors.value, ...newColors];
       this.markDirty();
@@ -637,18 +413,18 @@ class PaletteStore {
   replaceWithExtracted() {
     if (this.extractedColors.value.length > 0) {
       const oldMainColors = [...this.mainColors.value];
-      const oldEphemeralColors = [...this.ephemeralColors.value];
 
-      this.colors.value = [...this.extractedColors.value];
+      this.colors.value = this.extractedColors.value.map(c => normalizeHex(c));
       this.extractedColors.value = [];
       this.markDirty();
+      this.clearAllNewFlags();
       this.rebuildColorMap();
       this.saveToStorage();
 
       // Dispatch event to remap index buffers by color
       window.dispatchEvent(
         new CustomEvent('palette-replaced', {
-          detail: { oldMainColors, oldEphemeralColors },
+          detail: { oldMainColors },
         })
       );
     }
@@ -704,6 +480,43 @@ class PaletteStore {
 
   private markDirty() {
     this.isDirty.value = true;
+  }
+
+  private setColorAtArrayIndex(
+    arrayIndex: number,
+    newColor: string,
+    options: { markDirty?: boolean } = {}
+  ): string | null {
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return null;
+
+    const normalized = normalizeHex(newColor);
+    const colors = [...this.colors.value];
+    colors[arrayIndex] = normalized;
+    this.colors.value = colors;
+
+    if (options.markDirty) {
+      this.markDirty();
+    }
+
+    this.pruneNewFlags();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    return normalized;
+  }
+
+  private removeColorAtArrayIndex(arrayIndex: number): boolean {
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return false;
+
+    const colors = [...this.colors.value];
+    colors.splice(arrayIndex, 1);
+    this.colors.value = colors;
+    this.markDirty();
+    this.pruneNewFlags();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    return true;
   }
 
   // ==========================================
@@ -789,59 +602,23 @@ class PaletteStore {
   // Color Preservation
   // ==========================================
 
-  preserveColorsOnSwitch(newPaletteColors: string[]): void {
+  private withUsedColorsPreserved(newPaletteColors: string[]): string[] {
+    const normalizedPalette = newPaletteColors.map(c => normalizeHex(c));
     const usedColors = getAnimationSource()?.scanUsedColors() ?? new Set<string>();
-    if (usedColors.size === 0) return;
+    if (usedColors.size === 0) return normalizedPalette;
 
-    const newPaletteSet = new Set(newPaletteColors.map(c => normalizeHex(c)));
-    const orphanedColors: string[] = [];
+    const paletteSet = new Set(normalizedPalette);
+    const colors = [...normalizedPalette];
 
     for (const color of usedColors) {
       const normalized = normalizeHex(color);
-      if (!newPaletteSet.has(normalized)) {
-        orphanedColors.push(normalized);
-      }
+      if (paletteSet.has(normalized)) continue;
+
+      paletteSet.add(normalized);
+      colors.push(normalized);
     }
 
-    if (orphanedColors.length > 0) {
-      const currentEphemeral = new Set(
-        this.ephemeralColors.value.map(c => normalizeHex(c))
-      );
-      const newEphemeral = [...this.ephemeralColors.value];
-
-      for (const color of orphanedColors) {
-        if (!currentEphemeral.has(color)) {
-          newEphemeral.push(color);
-        }
-      }
-
-      this.ephemeralColors.value = newEphemeral;
-    }
-  }
-
-  rebuildEphemeralFromDrawing(): void {
-    const usedColors = getAnimationSource()?.scanUsedColorsFromCanvas() ?? new Set<string>();
-    if (usedColors.size === 0) return;
-
-    const mainPaletteSet = new Set(
-      this.mainColors.value.map(c => normalizeHex(c))
-    );
-
-    const ephemeralNeeded: string[] = [];
-    for (const color of usedColors) {
-      const normalized = normalizeHex(color);
-      if (!mainPaletteSet.has(normalized)) {
-        ephemeralNeeded.push(normalized);
-      }
-    }
-
-    if (ephemeralNeeded.length > 0) {
-      this.ephemeralColors.value = ephemeralNeeded;
-      this.rebuildColorMap();
-    } else {
-      this.ephemeralColors.value = [];
-      this.rebuildColorMap();
-    }
+    return colors;
   }
 
   refreshUsedColors(): void {

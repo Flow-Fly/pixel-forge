@@ -123,7 +123,7 @@ export class PencilTool extends BaseTool {
       return;
     }
 
-    // Adds generated shades to the ephemeral palette when needed.
+    // Adds generated shades to the palette when needed.
     const color = colorStore.primaryColor.value;
     this.currentPaletteIndex = paletteStore.getOrAddColorForDrawing(color);
   }

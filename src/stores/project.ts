@@ -117,19 +117,15 @@ class ProjectStore {
       (f) => f.id === animationStore.currentFrameId.value
     );
 
-    // Only include ephemeral palette if there are ephemeral colors
-    const ephemeralPalette =
-      paletteStore.ephemeralColors.value.length > 0
-        ? paletteStore.ephemeralColors.value
-        : undefined;
-
     return {
       version: PROJECT_VERSION,
       name: this.name.value,
       width: this.width.value,
       height: this.height.value,
       palette: paletteStore.mainColors.value, // v3.0+: Save the main palette
-      ephemeralPalette, // v3.1+: Save ephemeral colors if any
+      // v3.1 compatibility field. Runtime colors now share the main palette;
+      // v4/schema cleanup owns removing this from ProjectFile.
+      ephemeralPalette: [],
       layers,
       frames,
       animation: {
@@ -208,9 +204,8 @@ class ProjectStore {
     // 8. Clear tags
     animationStore.tags.value = [];
 
-    // 8b. Clear ephemeral colors (fresh start - no preserved colors needed)
-    // Skip remap since we're starting fresh
-    paletteStore.clearEphemeralColors(true);
+    // 8b. Clear session-only palette badges.
+    paletteStore.clearAllNewFlags();
 
     // 8c. Reset palette to default (DB32)
     paletteStore.loadPreset("db32");

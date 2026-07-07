@@ -38,4 +38,3 @@ export class PaletteChangeCommand implements Command {
     animationStore.rebuildAllCelCanvases();
   }
 }
-
