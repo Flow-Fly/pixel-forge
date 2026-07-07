@@ -1,9 +1,10 @@
 export const DEFAULT_PROJECT_NAME = 'Untitled';
 export const DEFAULT_PROJECT_WIDTH = 64;
 export const DEFAULT_PROJECT_HEIGHT = 64;
-export const MIN_PROJECT_DIMENSION = 1;
-export const MAX_PROJECT_DIMENSION = 2048;
 export const DEFAULT_PROJECT_PALETTE_ID = 'db32';
+
+const MIN_PROJECT_DIMENSION = 1;
+const MAX_PROJECT_DIMENSION = 2048;
 
 export const NEW_PROJECT_PRESETS = [
   { label: '16x16', width: 16, height: 16 },

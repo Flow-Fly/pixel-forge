@@ -7,7 +7,6 @@ import { historyStore } from "./history";
 import { dirtyRectStore } from "./dirty-rect";
 import { paletteStore } from "./palette";
 import { selectionStore } from "./selection";
-import { viewportStore } from "./viewport";
 import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
 import {
@@ -81,7 +80,6 @@ function resetProjectLocalState() {
   selectionStore.resetForProject();
   animationStore.clearCelSelection();
   animationStore.selectionAnchor.value = null;
-  viewportStore.resetView();
   dirtyRectStore.reset();
   // Clipboard is intentionally global so users can copy from one project and
   // paste into another.

@@ -1,10 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { autoSaveService } from './auto-save';
-import { projectRepository } from './persistence/indexed-db';
-import type {
-  ProjectMeta,
-  ProjectRepository,
-} from './persistence/project-repository';
+import type { ProjectRepository } from './persistence/project-repository';
 import {
   DEFAULT_PROJECT_HEIGHT,
   DEFAULT_PROJECT_PALETTE_ID,
@@ -14,6 +10,7 @@ import {
 } from './project-defaults';
 import { projectStore } from '../stores/project';
 import { DB32_COLORS, PALETTE_BY_ID } from '../stores/palette/types';
+import { viewportStore } from '../stores/viewport';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 
 export type CreateProjectOptions = {
@@ -27,10 +24,6 @@ export class ProjectLibraryService {
 
   constructor(repository: ProjectRepository) {
     this.repository = repository;
-  }
-
-  listProjects(): Promise<ProjectMeta[]> {
-    return this.repository.list();
   }
 
   async openProject(id: string): Promise<ProjectFile> {
@@ -82,6 +75,7 @@ export class ProjectLibraryService {
       projectStore.id.value = id;
       await projectStore.loadProject(project);
       projectStore.lastSaved.value = Date.now();
+      viewportStore.resetView();
     });
 
     await this.repository.setLastOpenedProjectId(id);
@@ -96,10 +90,6 @@ export class ProjectLibraryService {
     return project;
   }
 }
-
-export const projectLibraryService = new ProjectLibraryService(
-  projectRepository
-);
 
 function createBlankProjectFile(options: CreateProjectOptions): ProjectFile {
   const layerId = uuidv4();

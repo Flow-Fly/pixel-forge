@@ -32,6 +32,7 @@ import { ProjectLibraryService } from '../../src/services/project-library';
 import { projectRepository } from '../../src/services/persistence/indexed-db';
 import { historyStore, type Command } from '../../src/stores/history';
 import { projectStore } from '../../src/stores/project';
+import { viewportStore } from '../../src/stores/viewport';
 import { PROJECT_VERSION } from '../../src/types/project';
 
 const repository = vi.mocked(projectRepository);
@@ -177,6 +178,9 @@ describe('ProjectLibraryService', () => {
     projects.set('a', makeProject('Project A'));
     projects.set('b', makeProject('Project B'));
     await openProjectInStore('a', makeProject('Project A'));
+    viewportStore.zoom.value = 16;
+    viewportStore.panX.value = 123;
+    viewportStore.panY.value = 456;
 
     await historyStore.execute(
       makeCommand(() => {
@@ -189,6 +193,9 @@ describe('ProjectLibraryService', () => {
     expect(projects.get('a')?.name).toBe('Project A edited');
     expect(projectStore.id.value).toBe('b');
     expect(projectStore.name.value).toBe('Project B');
+    expect(viewportStore.zoom.value).toBe(8);
+    expect(viewportStore.panX.value).toBe(0);
+    expect(viewportStore.panY.value).toBe(0);
     expect(repository.setLastOpenedProjectId).toHaveBeenCalledWith('b');
   });
 
