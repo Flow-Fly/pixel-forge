@@ -18,6 +18,7 @@ class AutoSaveService {
   private isDirty = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private dispose: (() => void) | null = null;
+  private suppressSaveCount = 0;
 
   /** Start observing history changes. Idempotent. */
   start() {
@@ -53,6 +54,8 @@ class AutoSaveService {
 
   /** Mark the project dirty and (re)schedule a debounced save. */
   markDirty() {
+    if (this.suppressSaveCount > 0) return;
+
     this.isDirty = true;
 
     if (this.saveTimeout) {
@@ -67,12 +70,33 @@ class AutoSaveService {
   /** Save immediately if there are unsaved changes (blur/tab-hidden). */
   flushIfDirty = () => {
     if (!this.isDirty) return;
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-      this.saveTimeout = null;
-    }
+    this.clearSaveTimeout();
     void this.performSave();
   };
+
+  /** Save the open project now, even if no edit debounce is pending. */
+  async saveNow() {
+    this.clearSaveTimeout();
+    await this.performSave({ force: true, rethrow: true });
+  }
+
+  /** Drop a pending debounce without writing. Used when the open project is deleted. */
+  clearPendingSave() {
+    this.clearSaveTimeout();
+    this.isDirty = false;
+  }
+
+  /** Run project load/reset work without treating reset signals as user edits. */
+  async runWithoutSaving<T>(work: () => Promise<T>): Promise<T> {
+    this.suppressSaveCount++;
+    try {
+      const result = await work();
+      await Promise.resolve();
+      return result;
+    } finally {
+      this.suppressSaveCount--;
+    }
+  }
 
   private onVisibilityChange = () => {
     if (document.visibilityState === 'hidden') {
@@ -80,8 +104,10 @@ class AutoSaveService {
     }
   };
 
-  private async performSave() {
-    if (!this.isDirty) return;
+  private async performSave(
+    options: { force?: boolean; rethrow?: boolean } = {}
+  ) {
+    if (!this.isDirty && !options.force) return;
 
     try {
       const projectData = await projectStore.saveProject();
@@ -90,7 +116,14 @@ class AutoSaveService {
       projectStore.lastSaved.value = Date.now();
     } catch (error) {
       log.error('Auto-save failed:', error);
+      if (options.rethrow) throw error;
     }
+  }
+
+  private clearSaveTimeout() {
+    if (!this.saveTimeout) return;
+    clearTimeout(this.saveTimeout);
+    this.saveTimeout = null;
   }
 }
 
