@@ -1,6 +1,6 @@
 import { html, css } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
+import { customElement, state } from 'lit/decorators.js';
+import { AnimatedCanvasOverlay } from './animated-canvas-overlay';
 import { selectionStore } from '../../stores/selection';
 import { viewportStore } from '../../stores/viewport';
 import { traceMaskOutline, connectSegments } from '../../utils/mask-utils';
@@ -14,7 +14,7 @@ import '../../components/common/pf-tooltip';
  * - Floating selection pixels during move
  */
 @customElement('pf-selection-overlay')
-export class PFSelectionOverlay extends BaseComponent {
+export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   static styles = css`
     :host {
       position: absolute;
@@ -32,11 +32,6 @@ export class PFSelectionOverlay extends BaseComponent {
     }
   `;
 
-  @query('canvas') canvas!: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D | null = null;
-  private animationFrameId = 0;
-  private dashOffset = 0;
-  private lastTimestamp = 0;
 
   // Tooltip state for dimension display
   @state() private widthTooltipX = 0;
@@ -50,77 +45,10 @@ export class PFSelectionOverlay extends BaseComponent {
   // Cache for freeform outline paths
   private cachedOutlinePaths: Point[][] | null = null;
   private cachedStateId: string | null = null;
-  private resizeObserver: ResizeObserver | null = null;
 
-  connectedCallback() {
-    super.connectedCallback();
-    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
-    this.resizeObserver = new ResizeObserver(() => {
-      this.handleResize();
-    });
-    this.resizeObserver.observe(this);
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    // Clean up ResizeObserver
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = 0;
-    }
-  }
-
-  firstUpdated() {
-    this.initCanvas();
-    this.startAnimationLoop();
-  }
-
-  private initCanvas() {
-    if (!this.canvas) return;
-    this.ctx = this.canvas.getContext('2d');
-    this.resizeCanvas();
-  }
-
-  private handleResize = () => {
-    this.resizeCanvas();
-  };
-
-  private resizeCanvas() {
-    if (!this.canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = this.clientWidth * dpr;
-    this.canvas.height = this.clientHeight * dpr;
-  }
-
-  private startAnimationLoop() {
-    const animate = (timestamp: number) => {
-      const delta = timestamp - this.lastTimestamp;
-      this.lastTimestamp = timestamp;
-
-      // Update dash offset for marching ants animation
-      this.dashOffset = (this.dashOffset + delta * 0.06) % 16;
-
-      this.draw();
-      this.animationFrameId = requestAnimationFrame(animate);
-    };
-
-    this.animationFrameId = requestAnimationFrame(animate);
-  }
-
-  private draw() {
-    if (!this.ctx || !this.canvas) return;
-
-    const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
-
-    // Clear
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.scale(dpr, dpr);
+  protected draw() {
+    const ctx = this.prepareFrame();
+    if (!ctx) return;
 
     const state = selectionStore.state.value;
     if (state.type === 'none') {
@@ -309,31 +237,7 @@ export class PFSelectionOverlay extends BaseComponent {
     const screenWidth = bounds.width * zoom;
     const screenHeight = bounds.height * zoom;
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.strokeRect(
-      Math.round(screenX) + 0.5,
-      Math.round(screenY) + 0.5,
-      Math.round(screenWidth) - 1,
-      Math.round(screenHeight) - 1
-    );
-
-    // Black dashes (offset to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.strokeRect(
-      Math.round(screenX) + 0.5,
-      Math.round(screenY) + 0.5,
-      Math.round(screenWidth) - 1,
-      Math.round(screenHeight) - 1
-    );
-
-    ctx.restore();
+    this.strokeMarchingAntsRect(ctx, screenX, screenY, screenWidth, screenHeight);
   }
 
   private drawEllipseMarchingAnts(
