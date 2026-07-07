@@ -1,6 +1,6 @@
 import { html, css } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
+import { customElement, state } from 'lit/decorators.js';
+import { CanvasOverlay } from './canvas-overlay';
 import { brushStore } from '../../stores/brush';
 import { colorStore } from '../../stores/colors';
 import { toolStore } from '../../stores/tools';
@@ -11,7 +11,7 @@ import { EraserTool } from '../../tools/eraser-tool';
 import type { BrushImageData } from '../../types/brush';
 
 @customElement('pf-brush-cursor-overlay')
-export class PFBrushCursorOverlay extends BaseComponent {
+export class PFBrushCursorOverlay extends CanvasOverlay {
   static styles = css`
     :host {
       position: absolute;
@@ -29,22 +29,13 @@ export class PFBrushCursorOverlay extends BaseComponent {
     }
   `;
 
-  @query('canvas') canvas!: HTMLCanvasElement;
   @state() private cursorPos: { x: number; y: number } | null = null;
   @state() private linePreview: { start: { x: number; y: number }; end: { x: number; y: number } } | null = null;
 
-  private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId = 0;
-  private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-
-    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
-    this.resizeObserver = new ResizeObserver(() => {
-      this.handleResize();
-    });
-    this.resizeObserver.observe(this);
 
     // Listen for cursor position from drawing canvas
     window.addEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
@@ -62,12 +53,6 @@ export class PFBrushCursorOverlay extends BaseComponent {
   disconnectedCallback() {
     super.disconnectedCallback();
 
-    // Clean up ResizeObserver
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-
     window.removeEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
     window.removeEventListener('canvas-cursor-leave', this.handleCanvasCursorLeave);
     window.removeEventListener('line-preview', this.handleLinePreview as EventListener);
@@ -81,32 +66,11 @@ export class PFBrushCursorOverlay extends BaseComponent {
     }
   }
 
-  firstUpdated() {
-    this.initCanvas();
-  }
-
   updated() {
     // Redraw cursor when signals change (brush size, color, tool, zoom, etc.)
     if (this.cursorPos) {
       this.scheduleDraw();
     }
-  }
-
-  private initCanvas() {
-    if (!this.canvas) return;
-    this.ctx = this.canvas.getContext('2d');
-    this.resizeCanvas();
-  }
-
-  private handleResize = () => {
-    this.resizeCanvas();
-  };
-
-  private resizeCanvas() {
-    if (!this.canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = this.clientWidth * dpr;
-    this.canvas.height = this.clientHeight * dpr;
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -182,16 +146,10 @@ export class PFBrushCursorOverlay extends BaseComponent {
   }
 
   private draw() {
-    if (!this.ctx || !this.canvas) return;
     if (!this.cursorPos && !this.linePreview) return;
 
-    const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
-
-    // Clear canvas
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.scale(dpr, dpr);
+    const ctx = this.prepareFrame();
+    if (!ctx) return;
 
     // Check if we should show preview (only pencil/eraser)
     const tool = toolStore.activeTool.value;

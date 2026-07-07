@@ -2,7 +2,6 @@ import type { Point, ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
 import { selectionStore } from '../../stores/selection';
 import { projectStore } from '../../stores/project';
-import { layerStore } from '../../stores/layers';
 import { polygonToMask, simplifyPath } from '../../utils/mask-utils';
 
 /**
@@ -17,30 +16,7 @@ export class LassoTool extends BaseSelectionTool {
   private points: Point[] = [];
 
 
-  constructor(_context: CanvasRenderingContext2D) {
-    super();
-  }
-
-  onDown(x: number, y: number, modifiers?: ModifierKeys) {
-    const canvasX = Math.floor(x);
-    const canvasY = Math.floor(y);
-
-    // Check if clicking inside existing selection (for dragging)
-    // Only drag if no add/subtract modifiers are pressed
-    const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
-    if (!isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
-      this.startDragging(canvasX, canvasY);
-      return;
-    }
-
-    // Clicking outside - commit any transform/floating selection first
-    // If we committed, don't immediately start a new selection
-    if (this.commitIfTransforming() || this.commitIfFloating()) {
-      return;
-    }
-
-    this.applySelectionModeFromModifiers(modifiers);
-
+  protected beginSelection(canvasX: number, canvasY: number) {
     this.capturePreviousSelection();
 
     this.mode = 'selecting';
@@ -137,28 +113,7 @@ export class LassoTool extends BaseSelectionTool {
 
     const { mask, bounds } = result;
 
-    // Get active layer canvas for content-aware trimming
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    const canvas = layer?.canvas;
-
-    // Handle selection modes
-    const mode = selectionStore.mode.value;
-
-    // For add/subtract, we need to combine with saved previous selection
-    if (mode !== 'replace' && this.previousSelection) {
-      const combined = this.combineMasks(this.previousSelection, bounds, mask, mode);
-      if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
-      } else {
-        selectionStore.clear();
-      }
-    } else {
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
-    }
-
-    selectionStore.resetMode();
-    this.clearPreviousSelection();
+    this.finalizeMaskSelection(bounds, mask, shrinkToContent);
     this.points = [];
   }
 

@@ -4,6 +4,10 @@ import { BaseComponent } from "../../core/base-component";
 import { toolStore } from "../../stores/tools";
 import { colorStore } from "../../stores/colors";
 
+function isPixelInCanvas(canvas: HTMLCanvasElement, x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x < canvas.width && y < canvas.height;
+}
+
 /**
  * Calculate optimal zoom level for brush editing
  */
@@ -197,16 +201,6 @@ export abstract class BaseBrushOverlay extends BaseComponent {
     return { x, y };
   }
 
-  private isInBounds(x: number, y: number): boolean {
-    if (!this.brushCanvas) return false;
-    return (
-      x >= 0 &&
-      x < this.brushCanvas.width &&
-      y >= 0 &&
-      y < this.brushCanvas.height
-    );
-  }
-
   protected handleCanvasMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return; // Left click only
 
@@ -232,37 +226,43 @@ export abstract class BaseBrushOverlay extends BaseComponent {
   };
 
   private drawAtPosition(e: MouseEvent) {
-    if (!this.brushCanvas) return;
-
     const { x, y } = this.getBrushCoordinates(e);
-
-    // Skip if same pixel as last drawn (avoid duplicate draws)
-    if (
-      this.lastDrawnPixel &&
-      this.lastDrawnPixel.x === x &&
-      this.lastDrawnPixel.y === y
-    ) {
-      return;
-    }
-
-    if (!this.isInBounds(x, y)) return;
-
-    const ctx = this.brushCanvas.getContext("2d");
+    const ctx = this.paintTargetAt(x, y);
     if (!ctx) return;
 
-    const activeTool = toolStore.activeTool.value;
+    this.paintPixel(ctx, x, y);
+    this.lastDrawnPixel = { x, y };
+    this.onPixelDrawn();
+    this.redrawDisplayCanvas();
+  }
 
-    // Draw or erase based on active tool
-    if (activeTool === "eraser") {
+  /**
+   * Context to paint (x, y) into, or null when the pixel repeats the last
+   * drawn one or lies outside the brush canvas.
+   */
+  private paintTargetAt(x: number, y: number): CanvasRenderingContext2D | null {
+    if (this.isRepeatPixel(x, y)) return null;
+
+    const canvas = this.brushCanvas;
+    if (!canvas || !isPixelInCanvas(canvas, x, y)) return null;
+
+    return canvas.getContext("2d");
+  }
+
+  /** Same pixel as last drawn (avoid duplicate draws). */
+  private isRepeatPixel(x: number, y: number): boolean {
+    const last = this.lastDrawnPixel;
+    return last !== null && last.x === x && last.y === y;
+  }
+
+  /** Draw or erase one pixel based on the active tool. */
+  private paintPixel(ctx: CanvasRenderingContext2D, x: number, y: number) {
+    if (toolStore.activeTool.value === "eraser") {
       ctx.clearRect(x, y, 1, 1);
     } else {
       // Use primary color for drawing
       ctx.fillStyle = colorStore.primaryColor.value;
       ctx.fillRect(x, y, 1, 1);
     }
-
-    this.lastDrawnPixel = { x, y };
-    this.onPixelDrawn();
-    this.redrawDisplayCanvas();
   }
 }

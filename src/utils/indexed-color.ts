@@ -7,29 +7,10 @@
  */
 
 import { paletteStore } from '../stores/palette';
+import { hexToRgb, rgbToHex } from '../stores/palette/color-utils';
 import { log } from './log';
 
-/**
- * Parse hex color to RGB components.
- */
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : null;
-}
-
-/**
- * Convert RGB to hex string.
- */
-export function rgbToHex(r: number, g: number, b: number): string {
-  return '#' + [r, g, b].map(x => {
-    const hex = Math.round(x).toString(16);
-    return hex.length === 1 ? '0' + hex : hex;
-  }).join('');
-}
+export { rgbToHex };
 
 /**
  * Get RGBA values for a palette index using the palette store.

@@ -9,19 +9,14 @@
   ],
   "usedClassMembers": [
     "styles",
-    {
-      "extends": "BaseComponent",
-      "members": [
-        "render",
-        "willUpdate",
-        "updated",
-        "firstUpdated",
-        "connectedCallback",
-        "disconnectedCallback",
-        "createRenderRoot",
-        "shouldUpdate",
-        "update"
-      ]
-    }
+    "render",
+    "willUpdate",
+    "updated",
+    "firstUpdated",
+    "connectedCallback",
+    "disconnectedCallback",
+    "createRenderRoot",
+    "shouldUpdate",
+    "update"
   ]
 }

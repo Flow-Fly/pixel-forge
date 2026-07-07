@@ -68,10 +68,8 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
       if (prevSelection) {
         if (prevSelection.shape === 'freeform' && prevSelection.mask) {
           this.drawFreeformMarchingAnts(ctx, prevSelection.bounds, prevSelection.mask, zoom, panX, panY);
-        } else if (prevSelection.shape === 'ellipse') {
-          this.drawEllipseMarchingAnts(ctx, prevSelection.bounds, zoom, panX, panY);
         } else {
-          this.drawRectMarchingAnts(ctx, prevSelection.bounds, zoom, panX, panY);
+          this.drawShapeMarchingAnts(ctx, prevSelection.bounds, prevSelection.shape, zoom, panX, panY);
         }
       }
 
@@ -80,7 +78,7 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
         this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
         this.hideDimensionTooltips(); // No tooltips for freeform/lasso
       } else {
-        this.drawRectMarchingAnts(ctx, state.currentBounds, zoom, panX, panY);
+        this.drawShapeMarchingAnts(ctx, state.currentBounds, 'rectangle', zoom, panX, panY);
         // Show dimension tooltips for rectangular selection during drag
         this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
       }
@@ -161,10 +159,8 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   ) {
     if (state.shape === 'freeform' && 'mask' in state) {
       this.drawFreeformMarchingAnts(ctx, state.bounds, state.mask, zoom, panX, panY);
-    } else if (state.shape === 'ellipse') {
-      this.drawEllipseMarchingAnts(ctx, state.bounds, zoom, panX, panY);
     } else {
-      this.drawRectMarchingAnts(ctx, state.bounds, zoom, panX, panY);
+      this.drawShapeMarchingAnts(ctx, state.bounds, state.shape, zoom, panX, panY);
     }
   }
 
@@ -184,10 +180,8 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
 
     if (state.shape === 'freeform' && state.mask) {
       this.drawFreeformMarchingAnts(ctx, floatBounds, state.mask, zoom, panX, panY);
-    } else if (state.shape === 'ellipse') {
-      this.drawEllipseMarchingAnts(ctx, floatBounds, zoom, panX, panY);
     } else {
-      this.drawRectMarchingAnts(ctx, floatBounds, zoom, panX, panY);
+      this.drawShapeMarchingAnts(ctx, floatBounds, state.shape, zoom, panX, panY);
     }
   }
 
@@ -222,25 +216,21 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     this.showDimensionTooltips = false;
   }
 
-  private drawRectMarchingAnts(
+  /** Draw marching ants for a rectangle or ellipse selection. */
+  private drawShapeMarchingAnts(
     ctx: CanvasRenderingContext2D,
     bounds: { x: number; y: number; width: number; height: number },
+    shape: string,
     zoom: number,
     panX: number,
     panY: number
   ) {
     const screen = this.toScreenRect(bounds, zoom, panX, panY);
-    this.strokeMarchingAntsRect(ctx, screen.x, screen.y, screen.width, screen.height);
-  }
+    if (shape !== 'ellipse') {
+      this.strokeMarchingAntsRect(ctx, screen.x, screen.y, screen.width, screen.height);
+      return;
+    }
 
-  private drawEllipseMarchingAnts(
-    ctx: CanvasRenderingContext2D,
-    bounds: { x: number; y: number; width: number; height: number },
-    zoom: number,
-    panX: number,
-    panY: number
-  ) {
-    const screen = this.toScreenRect(bounds, zoom, panX, panY);
     const cx = screen.x + screen.width / 2;
     const cy = screen.y + screen.height / 2;
     const rx = screen.width / 2 - 0.5;
@@ -312,7 +302,7 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
 
     if (!this.cachedOutlinePaths || this.cachedOutlinePaths.length === 0) {
       // Fallback to rectangle if no paths
-      this.drawRectMarchingAnts(ctx, bounds, zoom, panX, panY);
+      this.drawShapeMarchingAnts(ctx, bounds, 'rectangle', zoom, panX, panY);
       return;
     }
 

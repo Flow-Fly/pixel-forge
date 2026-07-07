@@ -43,3 +43,17 @@ export function compositeFrame(
   targetCtx.globalCompositeOperation = 'source-over';
 }
 
+
+/**
+ * Reset the transform, clear the whole canvas, and re-apply the
+ * device-pixel-ratio scale so subsequent drawing uses CSS pixels.
+ */
+export function clearCanvasForDpr(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement
+): void {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(dpr, dpr);
+}

@@ -1,3 +1,6 @@
+// fallow-ignore-file code-duplication -- faithful port of torcado's CleanEdge
+// algorithm; the per-slant-case blocks are intentionally kept structurally
+// aligned with the upstream reference implementation.
 /**
  * CleanEdge Algorithm Core (by torcado, MIT license)
  *

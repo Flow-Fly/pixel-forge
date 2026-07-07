@@ -8,30 +8,7 @@ export class MarqueeRectTool extends BaseSelectionTool {
   cursor = 'crosshair';
 
 
-  constructor(_context: CanvasRenderingContext2D) {
-    super();
-  }
-
-  onDown(x: number, y: number, modifiers?: ModifierKeys) {
-    const canvasX = Math.floor(x);
-    const canvasY = Math.floor(y);
-
-    // Check if clicking inside existing selection (for dragging)
-    // Only drag if no add/subtract modifiers are pressed
-    const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
-    if (!isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
-      this.startDragging(canvasX, canvasY);
-      return;
-    }
-
-    // Clicking outside - commit any transform/floating selection first
-    // If we committed, don't immediately start a new selection
-    if (this.commitIfTransforming() || this.commitIfFloating()) {
-      return;
-    }
-
-    this.applySelectionModeFromModifiers(modifiers);
-
+  protected beginSelection(canvasX: number, canvasY: number) {
     this.startNewSelection(canvasX, canvasY);
   }
 
@@ -82,44 +59,22 @@ export class MarqueeRectTool extends BaseSelectionTool {
       return;
     }
 
-    // Get active layer canvas for content-aware trimming
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    const canvas = layer?.canvas;
-
-    // Check selection mode
-    const mode = selectionStore.mode.value;
-
     // For add/subtract, combine with previous selection
+    const mode = selectionStore.mode.value;
     if (mode !== 'replace' && this.previousSelection) {
       // Create a mask for the new rectangle (all 255s within bounds)
       const newBounds = s.currentBounds;
       const newMask = new Uint8Array(newBounds.width * newBounds.height);
       newMask.fill(255);
-
-      // Combine with previous selection
-      const combined = this.combineMasks(
-        this.previousSelection,
-        newBounds,
-        newMask,
-        mode
-      );
-
-      if (combined) {
-        selectionStore.finalizeFreeformSelection(
-          combined.bounds,
-          combined.mask,
-          canvas,
-          shrinkToContent
-        );
-      } else {
-        selectionStore.clear();
-      }
-    } else {
-      // Standard finalization (replace mode or no previous selection)
-      selectionStore.finalizeSelection(canvas, shrinkToContent);
+      this.finalizeMaskSelection(newBounds, newMask, shrinkToContent);
+      return;
     }
 
+    // Standard finalization (replace mode or no previous selection);
+    // pass the active layer canvas for content-aware trimming
+    const activeLayerId = layerStore.activeLayerId.value;
+    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    selectionStore.finalizeSelection(layer?.canvas, shrinkToContent);
     selectionStore.resetMode();
     this.clearPreviousSelection();
   }

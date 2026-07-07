@@ -65,12 +65,6 @@ export function floodFillSelect(
   // Track which pixels are selected (full canvas size for easy indexing)
   const selected = new Uint8Array(width * height);
 
-  // Track bounds
-  let minX = width,
-    minY = height,
-    maxX = -1,
-    maxY = -1;
-
   if (contiguous) {
     // Flood fill using stack
     const stack: [number, number][] = [[startX, startY]];
@@ -92,12 +86,6 @@ export function floodFillSelect(
       // Mark as selected
       selected[idx] = 255;
 
-      // Update bounds
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-
       // Add neighbors (4-way or 8-way)
       stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
       if (diagonal) {
@@ -110,36 +98,13 @@ export function floodFillSelect(
       for (let x = 0; x < width; x++) {
         if (matchesTarget(x, y)) {
           selected[y * width + x] = 255;
-          minX = Math.min(minX, x);
-          minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x);
-          maxY = Math.max(maxY, y);
         }
       }
     }
   }
 
-  // No pixels selected
-  if (maxX < 0) return null;
-
-  // Create bounds-relative mask
-  const bounds: Rect = {
-    x: minX,
-    y: minY,
-    width: maxX - minX + 1,
-    height: maxY - minY + 1,
-  };
-
-  const mask = new Uint8Array(bounds.width * bounds.height);
-  for (let y = bounds.y; y < bounds.y + bounds.height; y++) {
-    for (let x = bounds.x; x < bounds.x + bounds.width; x++) {
-      const srcIdx = y * width + x;
-      const dstIdx = (y - bounds.y) * bounds.width + (x - bounds.x);
-      mask[dstIdx] = selected[srcIdx];
-    }
-  }
-
-  return { mask, bounds };
+  // Trim the full-canvas mask to the tight bounds of the selection
+  return trimMaskToTightBounds(selected, { x: 0, y: 0, width, height });
 }
 
 // ============================================
@@ -304,21 +269,7 @@ export function traceMaskOutline(mask: Uint8Array, bounds: Rect): LineSegment[] 
 export function connectSegments(segments: LineSegment[]): Point[][] {
   if (segments.length === 0) return [];
 
-  // Build adjacency map: point -> segments that touch it
-  const pointKey = (x: number, y: number) => `${x},${y}`;
-  const segmentsByPoint = new Map<string, LineSegment[]>();
-
-  for (const seg of segments) {
-    const k1 = pointKey(seg.x1, seg.y1);
-    const k2 = pointKey(seg.x2, seg.y2);
-
-    if (!segmentsByPoint.has(k1)) segmentsByPoint.set(k1, []);
-    if (!segmentsByPoint.has(k2)) segmentsByPoint.set(k2, []);
-
-    segmentsByPoint.get(k1)!.push(seg);
-    segmentsByPoint.get(k2)!.push(seg);
-  }
-
+  const segmentsByPoint = buildSegmentAdjacency(segments);
   const used = new Set<LineSegment>();
   const paths: Point[][] = [];
 
@@ -331,51 +282,64 @@ export function connectSegments(segments: LineSegment[]): Point[][] {
     // Extend path in both directions
     let extended = true;
     while (extended) {
-      extended = false;
-
-      // Try to extend from end
-      const endKey = pointKey(path[path.length - 1].x, path[path.length - 1].y);
-      const endSegs = segmentsByPoint.get(endKey) || [];
-
-      for (const seg of endSegs) {
-        if (used.has(seg)) continue;
-
-        used.add(seg);
-        extended = true;
-
-        // Add the other endpoint
-        if (seg.x1 === path[path.length - 1].x && seg.y1 === path[path.length - 1].y) {
-          path.push({ x: seg.x2, y: seg.y2 });
-        } else {
-          path.push({ x: seg.x1, y: seg.y1 });
-        }
-        break;
-      }
-
-      // Try to extend from start
-      const startKey = pointKey(path[0].x, path[0].y);
-      const startSegs = segmentsByPoint.get(startKey) || [];
-
-      for (const seg of startSegs) {
-        if (used.has(seg)) continue;
-
-        used.add(seg);
-        extended = true;
-
-        // Add the other endpoint at start
-        if (seg.x1 === path[0].x && seg.y1 === path[0].y) {
-          path.unshift({ x: seg.x2, y: seg.y2 });
-        } else {
-          path.unshift({ x: seg.x1, y: seg.y1 });
-        }
-        break;
-      }
+      const fromEnd = extendPath(path, segmentsByPoint, used, 'end');
+      const fromStart = extendPath(path, segmentsByPoint, used, 'start');
+      extended = fromEnd || fromStart;
     }
 
     paths.push(path);
   }
 
   return paths;
+}
+
+const pointKey = (x: number, y: number) => `${x},${y}`;
+
+/** Build adjacency map: point -> segments that touch it. */
+function buildSegmentAdjacency(segments: LineSegment[]): Map<string, LineSegment[]> {
+  const segmentsByPoint = new Map<string, LineSegment[]>();
+  for (const seg of segments) {
+    const k1 = pointKey(seg.x1, seg.y1);
+    const k2 = pointKey(seg.x2, seg.y2);
+    if (!segmentsByPoint.has(k1)) segmentsByPoint.set(k1, []);
+    if (!segmentsByPoint.has(k2)) segmentsByPoint.set(k2, []);
+    segmentsByPoint.get(k1)!.push(seg);
+    segmentsByPoint.get(k2)!.push(seg);
+  }
+  return segmentsByPoint;
+}
+
+/**
+ * Extend the path by one unused segment touching its start or end.
+ * Marks the consumed segment used. Returns true when the path grew.
+ */
+function extendPath(
+  path: Point[],
+  segmentsByPoint: Map<string, LineSegment[]>,
+  used: Set<LineSegment>,
+  side: 'start' | 'end'
+): boolean {
+  const tip = side === 'end' ? path[path.length - 1] : path[0];
+  const candidates = segmentsByPoint.get(pointKey(tip.x, tip.y)) || [];
+
+  for (const seg of candidates) {
+    if (used.has(seg)) continue;
+
+    used.add(seg);
+    // Add the other endpoint
+    const other =
+      seg.x1 === tip.x && seg.y1 === tip.y
+        ? { x: seg.x2, y: seg.y2 }
+        : { x: seg.x1, y: seg.y1 };
+    if (side === 'end') {
+      path.push(other);
+    } else {
+      path.unshift(other);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 // ============================================
@@ -404,6 +368,44 @@ export function isPointInMask(x: number, y: number, mask: Uint8Array, bounds: Re
 
 export type MaskCombineOperation = 'add' | 'subtract' | 'replace' | 'intersect';
 
+/**
+ * Test whether a canvas point falls inside a shaped selection region:
+ * everything inside the bounds for rectangles, the inscribed ellipse for
+ * ellipses, and the mask contents for freeform selections.
+ */
+export function isPointInShape(
+  x: number,
+  y: number,
+  bounds: Rect,
+  shape: string,
+  mask?: Uint8Array
+): boolean {
+  if (x < bounds.x || x >= bounds.x + bounds.width || y < bounds.y || y >= bounds.y + bounds.height) {
+    return false;
+  }
+
+  if (shape === 'rectangle') {
+    return true;
+  }
+
+  if (shape === 'ellipse') {
+    const cx = bounds.x + bounds.width / 2;
+    const cy = bounds.y + bounds.height / 2;
+    const rx = bounds.width / 2;
+    const ry = bounds.height / 2;
+    const dx = (x - cx) / rx;
+    const dy = (y - cy) / ry;
+    return dx * dx + dy * dy <= 1;
+  }
+
+  if (mask) {
+    const idx = (y - bounds.y) * bounds.width + (x - bounds.x);
+    return mask[idx] === 255;
+  }
+
+  return false;
+}
+
 export interface MaskSelectionState {
   bounds: Rect;
   shape: string;
@@ -425,103 +427,36 @@ export function combineMasks(
     return { mask: newMask, bounds: newBounds };
   }
 
-  const oldBounds = currentState.bounds;
+  const combinedBounds = combineBounds(currentState.bounds, newBounds, operation);
+  if (!combinedBounds) return null;
 
-  // Calculate combined bounds based on operation
-  let minX: number, minY: number, maxX: number, maxY: number;
+  const combinedMask = fillCombinedMask(currentState, newBounds, newMask, operation, combinedBounds);
+  if (!combinedMask) return null;
 
-  if (operation === 'add') {
-    // Union of bounds
-    minX = Math.min(oldBounds.x, newBounds.x);
-    minY = Math.min(oldBounds.y, newBounds.y);
-    maxX = Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
-    maxY = Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
-  } else if (operation === 'intersect') {
-    // Intersection of bounds
-    minX = Math.max(oldBounds.x, newBounds.x);
-    minY = Math.max(oldBounds.y, newBounds.y);
-    maxX = Math.min(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
-    maxY = Math.min(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+  return trimMaskToTightBounds(combinedMask, combinedBounds);
+}
 
-    // If no overlap, return null
-    if (minX >= maxX || minY >= maxY) {
-      return null;
-    }
-  } else {
-    // Subtract - use old bounds
-    minX = oldBounds.x;
-    minY = oldBounds.y;
-    maxX = oldBounds.x + oldBounds.width;
-    maxY = oldBounds.y + oldBounds.height;
-  }
-
-  const combinedBounds = {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY,
-  };
-
+/**
+ * Evaluate the boolean mask operation over the combined bounds.
+ * Returns null when no pixel survives the operation.
+ */
+function fillCombinedMask(
+  currentState: MaskSelectionState,
+  newBounds: Rect,
+  newMask: Uint8Array,
+  operation: MaskCombineOperation,
+  combinedBounds: Rect
+): Uint8Array | null {
+  const oldMask = currentState.shape === 'freeform' ? currentState.mask : undefined;
   const combinedMask = new Uint8Array(combinedBounds.width * combinedBounds.height);
-
-  // Helper to get value from a mask
-  const getMaskValue = (
-    mask: Uint8Array | undefined,
-    bounds: Rect,
-    x: number,
-    y: number,
-    shape: string
-  ): boolean => {
-    if (x < bounds.x || x >= bounds.x + bounds.width || y < bounds.y || y >= bounds.y + bounds.height) {
-      return false;
-    }
-
-    if (shape === 'rectangle') {
-      return true;
-    }
-
-    if (shape === 'ellipse') {
-      const cx = bounds.x + bounds.width / 2;
-      const cy = bounds.y + bounds.height / 2;
-      const rx = bounds.width / 2;
-      const ry = bounds.height / 2;
-      const dx = (x - cx) / rx;
-      const dy = (y - cy) / ry;
-      return dx * dx + dy * dy <= 1;
-    }
-
-    if (mask) {
-      const idx = (y - bounds.y) * bounds.width + (x - bounds.x);
-      return mask[idx] === 255;
-    }
-
-    return false;
-  };
-
-  // Fill combined mask
   let hasAnyPixel = false;
+
   for (let y = combinedBounds.y; y < combinedBounds.y + combinedBounds.height; y++) {
     for (let x = combinedBounds.x; x < combinedBounds.x + combinedBounds.width; x++) {
-      const oldValue = getMaskValue(
-        currentState.shape === 'freeform' ? currentState.mask : undefined,
-        oldBounds,
-        x,
-        y,
-        currentState.shape
-      );
-      const newValue = getMaskValue(newMask, newBounds, x, y, 'freeform');
+      const oldValue = isPointInShape(x, y, currentState.bounds, currentState.shape, oldMask);
+      const newValue = isPointInShape(x, y, newBounds, 'freeform', newMask);
 
-      let finalValue: boolean;
-      if (operation === 'add') {
-        finalValue = oldValue || newValue;
-      } else if (operation === 'intersect') {
-        finalValue = oldValue && newValue;
-      } else {
-        // subtract
-        finalValue = oldValue && !newValue;
-      }
-
-      if (finalValue) {
+      if (combineValues(oldValue, newValue, operation)) {
         const idx = (y - combinedBounds.y) * combinedBounds.width + (x - combinedBounds.x);
         combinedMask[idx] = 255;
         hasAnyPixel = true;
@@ -529,39 +464,83 @@ export function combineMasks(
     }
   }
 
-  if (!hasAnyPixel) return null;
+  return hasAnyPixel ? combinedMask : null;
+}
 
-  // Shrink bounds to fit actual selection
-  let actualMinX = combinedBounds.width, actualMinY = combinedBounds.height;
-  let actualMaxX = -1, actualMaxY = -1;
+/** Boolean combination of old/new membership for one pixel. */
+function combineValues(oldValue: boolean, newValue: boolean, operation: MaskCombineOperation): boolean {
+  if (operation === 'add') return oldValue || newValue;
+  if (operation === 'intersect') return oldValue && newValue;
+  // subtract
+  return oldValue && !newValue;
+}
 
-  for (let y = 0; y < combinedBounds.height; y++) {
-    for (let x = 0; x < combinedBounds.width; x++) {
-      if (combinedMask[y * combinedBounds.width + x] === 255) {
-        actualMinX = Math.min(actualMinX, x);
-        actualMinY = Math.min(actualMinY, y);
-        actualMaxX = Math.max(actualMaxX, x);
-        actualMaxY = Math.max(actualMaxY, y);
+/**
+ * Combined bounds for a mask operation: union for add, intersection for
+ * intersect (null when disjoint), the old bounds for subtract.
+ */
+function combineBounds(
+  oldBounds: Rect,
+  newBounds: Rect,
+  operation: MaskCombineOperation
+): Rect | null {
+  if (operation === 'add') {
+    const minX = Math.min(oldBounds.x, newBounds.x);
+    const minY = Math.min(oldBounds.y, newBounds.y);
+    const maxX = Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+    const maxY = Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  if (operation === 'intersect') {
+    const minX = Math.max(oldBounds.x, newBounds.x);
+    const minY = Math.max(oldBounds.y, newBounds.y);
+    const maxX = Math.min(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+    const maxY = Math.min(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+    if (minX >= maxX || minY >= maxY) return null;
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  // Subtract - use old bounds
+  return { ...oldBounds };
+}
+
+/**
+ * Shrink a mask to the tight bounds of its selected pixels.
+ * Returns null when the mask is empty.
+ */
+export function trimMaskToTightBounds(
+  mask: Uint8Array,
+  bounds: Rect
+): { mask: Uint8Array; bounds: Rect } | null {
+  let minX = bounds.width, minY = bounds.height;
+  let maxX = -1, maxY = -1;
+
+  for (let y = 0; y < bounds.height; y++) {
+    for (let x = 0; x < bounds.width; x++) {
+      if (mask[y * bounds.width + x] === 255) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
       }
     }
   }
 
-  if (actualMaxX < 0) return null;
+  if (maxX < 0) return null;
 
-  // Create tight bounds mask
   const tightBounds = {
-    x: combinedBounds.x + actualMinX,
-    y: combinedBounds.y + actualMinY,
-    width: actualMaxX - actualMinX + 1,
-    height: actualMaxY - actualMinY + 1,
+    x: bounds.x + minX,
+    y: bounds.y + minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
   };
 
   const tightMask = new Uint8Array(tightBounds.width * tightBounds.height);
   for (let y = 0; y < tightBounds.height; y++) {
     for (let x = 0; x < tightBounds.width; x++) {
-      const srcIdx = (actualMinY + y) * combinedBounds.width + (actualMinX + x);
-      const dstIdx = y * tightBounds.width + x;
-      tightMask[dstIdx] = combinedMask[srcIdx];
+      const srcIdx = (minY + y) * bounds.width + (minX + x);
+      tightMask[y * tightBounds.width + x] = mask[srcIdx];
     }
   }
 

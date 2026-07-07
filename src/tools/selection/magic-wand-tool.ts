@@ -16,29 +16,10 @@ export class MagicWandTool extends BaseSelectionTool {
     this.setContext(context);
   }
 
-  onDown(x: number, y: number, modifiers?: ModifierKeys) {
-    const canvasX = Math.floor(x);
-    const canvasY = Math.floor(y);
-
-    // Check if clicking inside existing selection (for dragging)
-    // Only drag if no add/subtract modifiers are pressed
-    const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
-    if (!isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
-      this.startDragging(canvasX, canvasY);
-      return;
-    }
-
-    // Clicking outside - commit any transform/floating selection first
-    // If we committed, don't immediately make a new selection
-    if (this.commitIfTransforming() || this.commitIfFloating()) {
-      return;
-    }
-
-    this.applySelectionModeFromModifiers(modifiers);
-
+  protected beginSelection(canvasX: number, canvasY: number, modifiers?: ModifierKeys) {
     // Shrink to content only if Ctrl is held
     const shrinkToContent = modifiers?.ctrl ?? false;
-    this.selectRegion(x, y, shrinkToContent);
+    this.selectRegion(canvasX, canvasY, shrinkToContent);
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {

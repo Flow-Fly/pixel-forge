@@ -53,24 +53,48 @@ function isBrushBacked(store: StoreType): store is "brush" | "eraser" {
   return store === "brush" || store === "eraser";
 }
 
+function readActiveBrushValue(storeKey: string): unknown {
+  return brushStore.activeBrush.value[storeKey as keyof typeof brushStore.activeBrush.value];
+}
+
 function getBrushBackedValue(store: "brush" | "eraser", storeKey: string): unknown {
-  if (store === "eraser" && storeKey === "mode") {
-    return eraserSettings.mode.value;
-  }
-  if (store === "brush" && storeKey === "spacing") {
+  return store === "eraser"
+    ? getEraserBackedValue(storeKey)
+    : getBrushOptionValue(storeKey);
+}
+
+function getEraserBackedValue(storeKey: string): unknown {
+  // Eraser mode has its own signal; size/pixelPerfect are brush-backed
+  return storeKey === "mode" ? eraserSettings.mode.value : readActiveBrushValue(storeKey);
+}
+
+function getBrushOptionValue(storeKey: string): unknown {
+  if (storeKey === "spacing") {
     // Convert BrushSpacing to string for select component
     const spacing = brushStore.activeBrush.value.spacing;
     return spacing === "match" ? "match" : String(spacing);
   }
-  return brushStore.activeBrush.value[storeKey as keyof typeof brushStore.activeBrush.value];
+  return readActiveBrushValue(storeKey);
 }
 
 function setBrushBackedValue(store: "brush" | "eraser", storeKey: string, value: unknown): void {
-  if (store === "eraser" && storeKey === "mode") {
+  if (store === "eraser") {
+    setEraserBackedValue(storeKey, value);
+    return;
+  }
+  setBrushOptionValue(storeKey, value);
+}
+
+function setEraserBackedValue(storeKey: string, value: unknown): void {
+  if (storeKey === "mode") {
     eraserSettings.mode.value = value as typeof eraserSettings.mode.value;
     return;
   }
-  if (store === "brush" && storeKey === "spacing") {
+  brushStore.updateActiveBrushSettings({ [storeKey]: value });
+}
+
+function setBrushOptionValue(storeKey: string, value: unknown): void {
+  if (storeKey === "spacing") {
     // Convert string to BrushSpacing
     const spacing = value === "match" ? "match" : parseInt(value as string, 10);
     brushStore.updateActiveBrushSettings({ spacing });

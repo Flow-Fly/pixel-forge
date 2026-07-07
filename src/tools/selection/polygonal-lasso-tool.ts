@@ -2,7 +2,6 @@ import type { Point, ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
 import { selectionStore } from '../../stores/selection';
 import { projectStore } from '../../stores/project';
-import { layerStore } from '../../stores/layers';
 import { polygonToMask } from '../../utils/mask-utils';
 
 /**
@@ -19,10 +18,6 @@ export class PolygonalLassoTool extends BaseSelectionTool {
   private isActive = false;
   private lastClickTime = 0;
 
-
-  constructor(_context: CanvasRenderingContext2D) {
-    super();
-  }
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
     const point = { x: Math.floor(x), y: Math.floor(y) };
@@ -194,28 +189,7 @@ export class PolygonalLassoTool extends BaseSelectionTool {
 
     const { mask, bounds } = result;
 
-    // Get active layer canvas for content-aware trimming
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    const canvas = layer?.canvas;
-
-    // Handle selection modes
-    const mode = selectionStore.mode.value;
-
-    // For add/subtract, we need to combine with saved previous selection
-    if (mode !== 'replace' && this.previousSelection) {
-      const combined = this.combineMasks(this.previousSelection, bounds, mask, mode);
-      if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
-      } else {
-        selectionStore.clear();
-      }
-    } else {
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
-    }
-
-    selectionStore.resetMode();
-    selectionStore.previousSelectionForVisual.value = null;
+    this.finalizeMaskSelection(bounds, mask, shrinkToContent);
 
     // Reset state
     this.isActive = false;

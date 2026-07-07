@@ -1,4 +1,5 @@
 import { html, css, type PropertyValues } from 'lit';
+import { hexToRgb } from '../../stores/palette/color-utils';
 import { customElement, state, property, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 
@@ -342,7 +343,7 @@ export class PFColorPickerPopup extends BaseComponent {
   }
 
   private setFromHex(hex: string) {
-    const rgb = this.hexToRgb(hex);
+    const rgb = hexToRgb(hex);
     if (rgb) {
       const hsv = this.rgbToHsv(rgb.r, rgb.g, rgb.b);
       this.h = hsv.h;
@@ -352,14 +353,6 @@ export class PFColorPickerPopup extends BaseComponent {
     }
   }
 
-  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16)
-    } : null;
-  }
 
   private rgbToHsv(r: number, g: number, b: number): { h: number; s: number; v: number } {
     r /= 255; g /= 255; b /= 255;

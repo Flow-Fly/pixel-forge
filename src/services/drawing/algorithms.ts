@@ -169,27 +169,67 @@ export function floodFill(
     return null;
   }
 
-  // Target color at the start pixel
+  const matches = makeTargetMatcher(data, startX, startY, width, fill, indexBuffer);
+  // Don't fill if target is same as fill color
+  if (!matches) return null;
+
+  return fillMatchingRegion(data, width, height, startX, startY, fill, matches, indexBuffer);
+}
+
+/**
+ * Build a predicate matching the fill region's target color (palette index
+ * in indexed mode, exact RGBA otherwise). Returns null when the target
+ * already has the fill color.
+ */
+function makeTargetMatcher(
+  data: Uint8ClampedArray,
+  startX: number,
+  startY: number,
+  width: number,
+  fill: FloodFillColor,
+  indexBuffer?: Uint8Array
+): ((pixelIndex: number) => boolean) | null {
+  if (indexBuffer) {
+    // In indexed mode, compare palette indices
+    const targetPaletteIndex = indexBuffer[startY * width + startX];
+    if (targetPaletteIndex === fill.paletteIndex) return null;
+    return (pixelIndex) => indexBuffer[pixelIndex] === targetPaletteIndex;
+  }
+
   const targetPos = (startY * width + startX) * 4;
   const targetR = data[targetPos];
   const targetG = data[targetPos + 1];
   const targetB = data[targetPos + 2];
   const targetA = data[targetPos + 3];
-  const targetPaletteIndex = indexBuffer ? indexBuffer[startY * width + startX] : 0;
-
-  // Don't fill if target is same as fill color
-  if (indexBuffer) {
-    // In indexed mode, compare palette indices
-    if (targetPaletteIndex === fill.paletteIndex) return null;
-  } else if (
-    targetR === fill.r &&
-    targetG === fill.g &&
-    targetB === fill.b &&
-    targetA === fill.a
-  ) {
+  if (targetR === fill.r && targetG === fill.g && targetB === fill.b && targetA === fill.a) {
     return null;
   }
+  return (pixelIndex) => {
+    const pos = pixelIndex * 4;
+    return (
+      data[pos] === targetR &&
+      data[pos + 1] === targetG &&
+      data[pos + 2] === targetB &&
+      data[pos + 3] === targetA
+    );
+  };
+}
 
+function inBounds(x: number, y: number, width: number, height: number): boolean {
+  return x >= 0 && x < width && y >= 0 && y < height;
+}
+
+/** Stack-based 4-way scan writing the fill color over matching pixels. */
+function fillMatchingRegion(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  fill: FloodFillColor,
+  matches: (pixelIndex: number) => boolean,
+  indexBuffer?: Uint8Array
+): { x: number; y: number; width: number; height: number } | null {
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
@@ -200,22 +240,15 @@ export function floodFill(
 
   while (stack.length) {
     const [cx, cy] = stack.pop()!;
-    if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+    if (!inBounds(cx, cy, width, height)) continue;
 
     const pixelIndex = cy * width + cx;
     if (visited.has(pixelIndex)) continue;
     visited.add(pixelIndex);
 
-    // Check if matches target (use index buffer if available, otherwise RGBA)
-    const pos = pixelIndex * 4;
-    const matches = indexBuffer
-      ? indexBuffer[pixelIndex] === targetPaletteIndex
-      : data[pos] === targetR &&
-        data[pos + 1] === targetG &&
-        data[pos + 2] === targetB &&
-        data[pos + 3] === targetA;
-    if (!matches) continue;
+    if (!matches(pixelIndex)) continue;
 
+    const pos = pixelIndex * 4;
     data[pos] = fill.r;
     data[pos + 1] = fill.g;
     data[pos + 2] = fill.b;

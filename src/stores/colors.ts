@@ -1,4 +1,5 @@
 import { signal } from '../core/signal';
+import { hexToRgb } from './palette/color-utils';
 import { paletteStore } from './palette';
 
 class ColorStore {
@@ -104,7 +105,7 @@ class ColorStore {
     if (exactIndex !== -1) return exactIndex;
 
     // Calculate lightness of the input color and find closest
-    const rgb = this.hexToRgb(color);
+    const rgb = hexToRgb(color);
     if (!rgb) return 3; // Default to middle
 
     const inputLightness = this.rgbToLightness(rgb.r, rgb.g, rgb.b);
@@ -124,14 +125,6 @@ class ColorStore {
     return closestIndex;
   }
 
-  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16)
-    } : null;
-  }
 
   private rgbToLightness(r: number, g: number, b: number): number {
     r /= 255; g /= 255; b /= 255;

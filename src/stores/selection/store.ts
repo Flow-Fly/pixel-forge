@@ -11,6 +11,7 @@ import type { Rect } from '../../types/geometry';
 import type { SelectionMode } from './types';
 import { trimBoundsToContent, trimFreeformToContent } from './bounds-utils';
 import { isPointInBounds, isPointInRotatedBounds } from './hit-testing';
+import { isPointInShape, trimMaskToTightBounds } from '../../utils/mask-utils';
 import { log } from '../../utils/log';
 import {
   rotateCleanEdge,
@@ -839,27 +840,7 @@ class SelectionStore {
         const idx = y * canvasWidth + x;
 
         // Check if point is in current selection
-        let inSelection = false;
-
-        if (x >= bounds.x && x < bounds.x + bounds.width &&
-            y >= bounds.y && y < bounds.y + bounds.height) {
-          if (shape === 'rectangle') {
-            inSelection = true;
-          } else if (shape === 'ellipse') {
-            const cx = bounds.x + bounds.width / 2;
-            const cy = bounds.y + bounds.height / 2;
-            const rx = bounds.width / 2;
-            const ry = bounds.height / 2;
-            const dx = (x - cx) / rx;
-            const dy = (y - cy) / ry;
-            inSelection = dx * dx + dy * dy <= 1;
-          } else if (shape === 'freeform' && currentMask) {
-            const localX = x - bounds.x;
-            const localY = y - bounds.y;
-            const maskIdx = localY * bounds.width + localX;
-            inSelection = currentMask[maskIdx] === 255;
-          }
-        }
+        const inSelection = isPointInShape(x, y, bounds, shape, currentMask ?? undefined);
 
         // Invert: if in selection, clear; if not, keep selected
         if (inSelection) {
@@ -868,50 +849,26 @@ class SelectionStore {
       }
     }
 
-    // Find the bounds of the inverted selection
-    let minX = canvasWidth, minY = canvasHeight;
-    let maxX = -1, maxY = -1;
-
-    for (let y = 0; y < canvasHeight; y++) {
-      for (let x = 0; x < canvasWidth; x++) {
-        if (fullMask[y * canvasWidth + x] === 255) {
-          minX = Math.min(minX, x);
-          minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x);
-          maxY = Math.max(maxY, y);
-        }
-      }
-    }
+    // Trim to the tight bounds of the inverted selection
+    const trimmed = trimMaskToTightBounds(fullMask, {
+      x: 0,
+      y: 0,
+      width: canvasWidth,
+      height: canvasHeight,
+    });
 
     // If nothing selected after inversion, clear
-    if (maxX < 0) {
+    if (!trimmed) {
       this.clear();
       return;
-    }
-
-    // Create tight bounds and mask
-    const newBounds = {
-      x: minX,
-      y: minY,
-      width: maxX - minX + 1,
-      height: maxY - minY + 1,
-    };
-
-    const newMask = new Uint8Array(newBounds.width * newBounds.height);
-    for (let y = 0; y < newBounds.height; y++) {
-      for (let x = 0; x < newBounds.width; x++) {
-        const srcIdx = (minY + y) * canvasWidth + (minX + x);
-        const dstIdx = y * newBounds.width + x;
-        newMask[dstIdx] = fullMask[srcIdx];
-      }
     }
 
     // Set the inverted selection
     this.state.value = {
       type: 'selected',
       shape: 'freeform',
-      bounds: newBounds,
-      mask: newMask,
+      bounds: trimmed.bounds,
+      mask: trimmed.mask,
     };
   }
 
