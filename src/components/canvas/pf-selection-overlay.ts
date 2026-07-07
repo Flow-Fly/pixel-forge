@@ -341,24 +341,39 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     panX: number,
     panY: number
   ) {
-    // Generate state ID for caching
+    const outlinePaths = this.getFreeformOutlinePaths(bounds, mask);
+
+    if (outlinePaths.length === 0) {
+      this.drawShapeMarchingAnts(ctx, bounds, 'rectangle', zoom, panX, panY);
+      return;
+    }
+
+    this.drawFreeformOutlinePaths(ctx, outlinePaths, zoom, panX, panY);
+  }
+
+  private getFreeformOutlinePaths(
+    bounds: { x: number; y: number; width: number; height: number },
+    mask: Uint8Array
+  ) {
     const stateId = `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${mask.length}`;
 
-    // Check if we need to regenerate outline paths
     if (this.cachedStateId !== stateId) {
       const segments = traceMaskOutline(mask, bounds);
       this.cachedOutlinePaths = connectSegments(segments);
       this.cachedStateId = stateId;
     }
 
-    if (!this.cachedOutlinePaths || this.cachedOutlinePaths.length === 0) {
-      // Fallback to rectangle if no paths
-      this.drawShapeMarchingAnts(ctx, bounds, 'rectangle', zoom, panX, panY);
-      return;
-    }
+    return this.cachedOutlinePaths ?? [];
+  }
 
-    // Draw each path
-    for (const path of this.cachedOutlinePaths) {
+  private drawFreeformOutlinePaths(
+    ctx: CanvasRenderingContext2D,
+    outlinePaths: Point[][],
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    for (const path of outlinePaths) {
       if (path.length < 2) continue;
       this.strokeMarchingAnts(ctx, (c) =>
         this.strokePath(c, path, zoom, panX, panY)
