@@ -1,237 +1,113 @@
 import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
 import type { BrushImageData } from "../../types/brush";
 import { brushStore } from "../../stores/brush";
-import { toolStore } from "../../stores/tools";
-import { colorStore } from "../../stores/colors";
-
-/**
- * Calculate optimal zoom level for brush editing
- */
-function calculateBrushZoom(brushWidth: number, brushHeight: number): number {
-  const maxDisplaySize = 280;
-  const maxBrushDimension = Math.max(brushWidth, brushHeight);
-  const idealZoom = maxDisplaySize / maxBrushDimension;
-  return Math.min(32, Math.max(4, Math.floor(idealZoom)));
-}
+import {
+  BaseBrushOverlay,
+  brushOverlayStyles,
+  calculateBrushZoom,
+} from "./base-brush-overlay";
 
 @customElement("pf-brush-create-overlay")
-export class PFBrushCreateOverlay extends BaseComponent {
-  static styles = css`
-    :host {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 100;
-      pointer-events: none;
-    }
+export class PFBrushCreateOverlay extends BaseBrushOverlay {
+  static styles = [
+    brushOverlayStyles,
+    css`
+      .size-section {
+        margin-bottom: 12px;
+      }
 
-    .editor-card {
-      position: relative;
-      background-color: var(--pf-color-bg-panel);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 8px;
-      padding: 16px;
-      min-width: 320px;
-      max-width: 500px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      pointer-events: auto;
-    }
+      .size-label {
+        font-size: 12px;
+        color: var(--pf-color-text-muted);
+        margin-bottom: 8px;
+      }
 
-    .header {
-      margin-bottom: 12px;
-    }
+      .size-presets {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
 
-    .name-input {
-      width: 100%;
-      padding: 8px 12px;
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      background: var(--pf-color-bg-dark);
-      color: var(--pf-color-text-primary);
-      font-size: 14px;
-      box-sizing: border-box;
-    }
+      .preset-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+        background: var(--pf-color-bg-tertiary);
+        border: 1px solid var(--pf-color-border);
+        border-radius: 4px;
+        color: var(--pf-color-text-primary);
+        cursor: pointer;
+      }
 
-    .name-input:focus {
-      outline: none;
-      border-color: var(--pf-color-primary);
-    }
+      .preset-btn:hover {
+        background: var(--pf-color-bg-hover);
+      }
 
-    .size-section {
-      margin-bottom: 12px;
-    }
+      .preset-btn.active {
+        border-color: var(--pf-color-primary);
+        background: var(--pf-color-primary);
+        color: white;
+      }
 
-    .size-label {
-      font-size: 12px;
-      color: var(--pf-color-text-muted);
-      margin-bottom: 8px;
-    }
+      .custom-size {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
 
-    .size-presets {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
+      .size-input {
+        width: 60px;
+        padding: 4px 8px;
+        border: 1px solid var(--pf-color-border);
+        border-radius: 4px;
+        background: var(--pf-color-bg-dark);
+        color: var(--pf-color-text-primary);
+        font-size: 12px;
+      }
 
-    .preset-btn {
-      padding: 6px 12px;
-      font-size: 12px;
-      background: var(--pf-color-bg-tertiary);
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      color: var(--pf-color-text-primary);
-      cursor: pointer;
-    }
+      .size-input:focus {
+        outline: none;
+        border-color: var(--pf-color-primary);
+      }
 
-    .preset-btn:hover {
-      background: var(--pf-color-bg-hover);
-    }
+      .size-separator {
+        color: var(--pf-color-text-muted);
+      }
 
-    .preset-btn.active {
-      border-color: var(--pf-color-primary);
-      background: var(--pf-color-primary);
-      color: white;
-    }
+      .tool-hint {
+        font-size: 10px;
+        color: var(--pf-color-text-muted);
+        margin-bottom: 8px;
+      }
 
-    .custom-size {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+      .btn-create {
+        background: var(--pf-color-primary);
+        border: 1px solid var(--pf-color-primary);
+        color: white;
+      }
 
-    .size-input {
-      width: 60px;
-      padding: 4px 8px;
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      background: var(--pf-color-bg-dark);
-      color: var(--pf-color-text-primary);
-      font-size: 12px;
-    }
+      .btn-create:hover:not(:disabled) {
+        opacity: 0.9;
+      }
 
-    .size-input:focus {
-      outline: none;
-      border-color: var(--pf-color-primary);
-    }
-
-    .size-separator {
-      color: var(--pf-color-text-muted);
-    }
-
-    .canvas-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background-color: var(--pf-color-bg-dark);
-      background-image: linear-gradient(45deg, #333 25%, transparent 25%),
-        linear-gradient(-45deg, #333 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #333 75%),
-        linear-gradient(-45deg, transparent 75%, #333 75%);
-      background-size: 16px 16px;
-      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-      border: 1px solid var(--pf-color-border);
-      border-radius: 4px;
-      padding: 24px;
-      margin-bottom: 12px;
-      min-height: 200px;
-    }
-
-    .brush-canvas {
-      image-rendering: pixelated;
-      cursor: crosshair;
-    }
-
-    .info {
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      color: var(--pf-color-text-muted);
-      margin-bottom: 12px;
-    }
-
-    .tool-hint {
-      font-size: 10px;
-      color: var(--pf-color-text-muted);
-      margin-bottom: 8px;
-    }
-
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      padding-top: 12px;
-      border-top: 1px solid var(--pf-color-border);
-    }
-
-    .actions button {
-      padding: 8px 20px;
-      border-radius: 4px;
-      font-size: 13px;
-      cursor: pointer;
-    }
-
-    .btn-cancel {
-      background: var(--pf-color-bg-tertiary);
-      border: 1px solid var(--pf-color-border);
-      color: var(--pf-color-text-primary);
-    }
-
-    .btn-cancel:hover {
-      background: var(--pf-color-bg-hover);
-    }
-
-    .btn-create {
-      background: var(--pf-color-primary);
-      border: 1px solid var(--pf-color-primary);
-      color: white;
-    }
-
-    .btn-create:hover:not(:disabled) {
-      opacity: 0.9;
-    }
-
-    .btn-create:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  `;
+      .btn-create:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    `,
+  ];
 
   @state() private name: string = "New Brush";
   @state() private width: number = 8;
   @state() private height: number = 8;
-  @state() private zoom: number = 16;
-  @state() private isDrawing: boolean = false;
   @state() private hasContent: boolean = false;
 
-  private brushCanvas: HTMLCanvasElement | null = null;
-  private lastDrawnPixel: { x: number; y: number } | null = null;
-
-  connectedCallback() {
-    super.connectedCallback();
-    window.addEventListener("keydown", this.handleKeyDown);
+  constructor() {
+    super();
+    this.zoom = 16;
   }
 
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    window.removeEventListener("keydown", this.handleKeyDown);
-    document.removeEventListener("mousemove", this.handleDocumentMouseMove);
-    document.removeEventListener("mouseup", this.handleDocumentMouseUp);
-  }
-
-  firstUpdated() {
-    this.initializeBrushCanvas();
-  }
-
-  private handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      this.cancel();
-    }
-  };
-
-  private initializeBrushCanvas() {
+  protected initializeBrushCanvas() {
     const canvas = document.createElement("canvas");
     canvas.width = this.width;
     canvas.height = this.height;
@@ -286,101 +162,8 @@ export class PFBrushCreateOverlay extends BaseComponent {
     }
   }
 
-  updated() {
-    this.redrawDisplayCanvas();
-  }
-
-  private redrawDisplayCanvas() {
-    if (!this.brushCanvas) return;
-
-    const displayCanvas = this.shadowRoot?.querySelector(
-      ".brush-canvas"
-    ) as HTMLCanvasElement;
-    if (!displayCanvas) return;
-
-    const ctx = displayCanvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
-    ctx.drawImage(
-      this.brushCanvas,
-      0,
-      0,
-      displayCanvas.width,
-      displayCanvas.height
-    );
-  }
-
-  private getBrushCoordinates(e: MouseEvent): { x: number; y: number } {
-    const displayCanvas = this.shadowRoot?.querySelector(
-      ".brush-canvas"
-    ) as HTMLCanvasElement;
-    if (!displayCanvas) return { x: -1, y: -1 };
-
-    const rect = displayCanvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / this.zoom);
-    const y = Math.floor((e.clientY - rect.top) / this.zoom);
-    return { x, y };
-  }
-
-  private isInBounds(x: number, y: number): boolean {
-    return x >= 0 && x < this.width && y >= 0 && y < this.height;
-  }
-
-  private handleCanvasMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return;
-
-    this.isDrawing = true;
-    this.lastDrawnPixel = null;
-    this.drawAtPosition(e);
-
-    document.addEventListener("mousemove", this.handleDocumentMouseMove);
-    document.addEventListener("mouseup", this.handleDocumentMouseUp);
-  };
-
-  private handleDocumentMouseMove = (e: MouseEvent) => {
-    if (!this.isDrawing) return;
-    this.drawAtPosition(e);
-  };
-
-  private handleDocumentMouseUp = () => {
-    this.isDrawing = false;
-    this.lastDrawnPixel = null;
-    document.removeEventListener("mousemove", this.handleDocumentMouseMove);
-    document.removeEventListener("mouseup", this.handleDocumentMouseUp);
-  };
-
-  private drawAtPosition(e: MouseEvent) {
-    if (!this.brushCanvas) return;
-
-    const { x, y } = this.getBrushCoordinates(e);
-
-    if (
-      this.lastDrawnPixel &&
-      this.lastDrawnPixel.x === x &&
-      this.lastDrawnPixel.y === y
-    ) {
-      return;
-    }
-
-    if (!this.isInBounds(x, y)) return;
-
-    const ctx = this.brushCanvas.getContext("2d");
-    if (!ctx) return;
-
-    const activeTool = toolStore.activeTool.value;
-
-    if (activeTool === "eraser") {
-      ctx.clearRect(x, y, 1, 1);
-    } else {
-      ctx.fillStyle = colorStore.primaryColor.value;
-      ctx.fillRect(x, y, 1, 1);
-    }
-
-    this.lastDrawnPixel = { x, y };
+  protected onPixelDrawn() {
     this.checkForContent();
-    this.redrawDisplayCanvas();
   }
 
   private checkForContent() {
@@ -440,7 +223,7 @@ export class PFBrushCreateOverlay extends BaseComponent {
     this.dispatchEvent(new CustomEvent("close"));
   }
 
-  private cancel() {
+  protected cancel() {
     this.dispatchEvent(new CustomEvent("close"));
   }
 
