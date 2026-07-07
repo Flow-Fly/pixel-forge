@@ -14,7 +14,7 @@ import {
   buildIndexBufferFromCanvas
 } from '../../utils/indexed-color';
 import { paletteStore } from '../palette';
-import { projectStore } from '../project';
+import { getCanvasSize } from '../store-refs';
 import { getCelKey } from './types';
 
 /**
@@ -46,8 +46,7 @@ export function ensureCelIndexBuffer(
     // Create the cel first via sync, then recurse
     syncLayerCanvases();
     // Return empty result - caller should retry after sync
-    const width = projectStore.width.value;
-    const height = projectStore.height.value;
+    const { width, height } = getCanvasSize();
     return { cels, indexBuffer: createIndexBuffer(width, height) };
   }
 
