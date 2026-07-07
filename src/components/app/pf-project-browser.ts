@@ -1,11 +1,10 @@
 import { html, css, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
 import { projectLibrary } from '../../services/project-library';
 import type { ProjectMeta } from '../../services/persistence/project-repository';
 import { projectStore } from '../../stores/project';
-import '../ui/pf-dialog';
 
 @customElement('pf-project-browser')
 export class PFProjectBrowser extends BaseComponent {
@@ -13,6 +12,49 @@ export class PFProjectBrowser extends BaseComponent {
     :host {
       display: block;
       color: var(--pf-color-text-main);
+    }
+
+    dialog {
+      box-sizing: border-box;
+      max-width: calc(100vw - 32px);
+      max-height: 90vh;
+      overflow: auto;
+      padding: 16px;
+      color: var(--pf-color-text-main);
+      background: rgba(13, 16, 21, 0.96);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-md);
+      box-shadow: var(--pf-shadow-lg);
+    }
+
+    dialog::backdrop {
+      background-color: rgba(0, 0, 0, 0.64);
+      backdrop-filter: blur(8px);
+    }
+
+    .browser-dialog {
+      width: min(960px, calc(100vw - 32px));
+    }
+
+    .delete-dialog {
+      width: min(360px, calc(100vw - 32px));
+    }
+
+    .dialog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .dialog-title {
+      margin: 0;
+      color: var(--pf-color-text-main);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
     }
 
     .shell {
@@ -211,6 +253,13 @@ export class PFProjectBrowser extends BaseComponent {
       background: rgba(196, 124, 114, 0.08);
     }
 
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
     @media (max-width: 640px) {
       .shell {
         max-height: calc(100vh - 120px);
@@ -229,31 +278,52 @@ export class PFProjectBrowser extends BaseComponent {
   @state() private renamingProjectId: string | null = null;
   @state() private renameValue = '';
   @state() private deleteTarget: ProjectMeta | null = null;
+  @query('.browser-dialog') private browserDialog?: HTMLDialogElement;
+  @query('.delete-dialog') private deleteDialog?: HTMLDialogElement;
   private thumbnailUrls = new Map<string, string>();
+  private isDisconnecting = false;
 
   connectedCallback() {
     super.connectedCallback();
+    this.isDisconnecting = false;
     void this.loadProjects();
   }
 
   disconnectedCallback() {
+    this.isDisconnecting = true;
+    this.closeNativeDialog(this.deleteDialog);
+    this.closeNativeDialog(this.browserDialog);
     this.clearThumbnailUrls();
     super.disconnectedCallback();
+  }
+
+  protected updated() {
+    this.showNativeDialog(this.browserDialog);
+    this.syncDeleteDialog();
   }
 
   render() {
     const canDismissBrowser = this.canDismissBrowser();
 
     return html`
-      <pf-dialog
-        open
-        .width=${'min(960px, calc(100vw - 32px))'}
-        .closeOnBackdrop=${canDismissBrowser}
-        .closeOnEscape=${canDismissBrowser}
-        .showCloseButton=${this.canClose}
-        @pf-close=${this.handleBrowserDialogClose}
+      <dialog
+        aria-labelledby="project-browser-title"
+        class="browser-dialog"
+        closedby=${canDismissBrowser ? 'any' : 'none'}
+        @cancel=${this.handleBrowserDialogCancel}
+        @click=${this.handleBrowserBackdropClick}
+        @close=${this.handleBrowserDialogClose}
       >
-        <span slot="title">Project Library</span>
+        <div class="dialog-header">
+          <h2 class="dialog-title" id="project-browser-title">Project Library</h2>
+          ${this.canClose
+            ? html`
+                <button type="button" @click=${this.requestBrowserClose}>
+                  Close
+                </button>
+              `
+            : nothing}
+        </div>
         <section class="shell" aria-label="Project library">
           <div class="toolbar">
             <p class="subtitle">Open a saved sprite or start a fresh canvas.</p>
@@ -281,7 +351,7 @@ export class PFProjectBrowser extends BaseComponent {
               : this.renderProjectGrid()}
           </div>
         </section>
-      </pf-dialog>
+      </dialog>
       ${this.renderDeleteDialog()}
     `;
   }
@@ -352,27 +422,34 @@ export class PFProjectBrowser extends BaseComponent {
 
   private renderDeleteDialog() {
     const project = this.deleteTarget;
-    if (!project) return nothing;
 
     return html`
-      <pf-dialog
-        open
-        width="360px"
-        @pf-close=${() => (this.deleteTarget = null)}
+      <dialog
+        aria-labelledby="delete-project-title"
+        class="delete-dialog"
+        closedby="any"
+        @click=${this.handleDeleteBackdropClick}
+        @close=${this.handleDeleteDialogClose}
       >
-        <span slot="title">Delete Project</span>
-        <p>
-          Delete "${project.name}" from this browser?
-        </p>
-        <div slot="actions">
-          <button type="button" class="secondary" @click=${() => (this.deleteTarget = null)}>
-            Cancel
-          </button>
-          <button type="button" class="primary danger" @click=${this.confirmDelete}>
-            Delete
-          </button>
-        </div>
-      </pf-dialog>
+        ${project
+          ? html`
+              <div class="dialog-header">
+                <h2 class="dialog-title" id="delete-project-title">Delete Project</h2>
+              </div>
+              <p>
+                Delete "${project.name}" from this browser?
+              </p>
+              <div class="dialog-actions">
+                <button type="button" class="secondary" @click=${this.cancelDelete}>
+                  Cancel
+                </button>
+                <button type="button" class="primary danger" @click=${this.confirmDelete}>
+                  Delete
+                </button>
+              </div>
+            `
+          : nothing}
+      </dialog>
     `;
   }
 
@@ -509,6 +586,12 @@ export class PFProjectBrowser extends BaseComponent {
     );
   };
 
+  private requestBrowserClose = () => {
+    if (this.canDismissBrowser()) {
+      this.closeNativeDialog(this.browserDialog);
+    }
+  };
+
   private closeBrowser = () => {
     this.dispatchEvent(
       new CustomEvent('project-browser-close', { bubbles: true, composed: true })
@@ -519,14 +602,89 @@ export class PFProjectBrowser extends BaseComponent {
     return this.canClose && !this.deleteTarget;
   }
 
-  private handleBrowserDialogClose = (event: Event) => {
-    if (!this.canDismissBrowser()) {
-      event.stopPropagation();
-      (event.currentTarget as HTMLElement & { open: boolean }).open = true;
+  private syncDeleteDialog() {
+    if (this.deleteTarget) {
+      this.showNativeDialog(this.deleteDialog);
       return;
     }
 
+    this.closeNativeDialog(this.deleteDialog);
+  }
+
+  private showNativeDialog(dialog: HTMLDialogElement | undefined) {
+    if (!dialog || dialog.open || !dialog.isConnected) return;
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+      return;
+    }
+
+    dialog.setAttribute('open', '');
+  }
+
+  private closeNativeDialog(dialog: HTMLDialogElement | undefined) {
+    if (!dialog?.open) return;
+
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+      return;
+    }
+
+    dialog.removeAttribute('open');
+    dialog.dispatchEvent(new Event('close'));
+  }
+
+  private clickIsInsideDialog(dialog: HTMLDialogElement, event: MouseEvent) {
+    const rect = dialog.getBoundingClientRect();
+    return (
+      rect.top <= event.clientY &&
+      event.clientY <= rect.top + rect.height &&
+      rect.left <= event.clientX &&
+      event.clientX <= rect.left + rect.width
+    );
+  }
+
+  private handleBrowserDialogCancel = (event: Event) => {
+    if (!this.canDismissBrowser()) {
+      event.preventDefault();
+    }
+  };
+
+  private handleBrowserBackdropClick = (event: MouseEvent) => {
+    if (!this.canDismissBrowser() || event.target !== event.currentTarget) return;
+
+    const dialog = event.currentTarget as HTMLDialogElement;
+    if (!this.clickIsInsideDialog(dialog, event)) {
+      this.closeNativeDialog(dialog);
+    }
+  };
+
+  private handleBrowserDialogClose = () => {
+    if (this.isDisconnecting) return;
+    if (!this.canDismissBrowser()) {
+      this.showNativeDialog(this.browserDialog);
+      return;
+    }
     this.closeBrowser();
+  };
+
+  private cancelDelete = () => {
+    this.closeNativeDialog(this.deleteDialog);
+  };
+
+  private handleDeleteBackdropClick = (event: MouseEvent) => {
+    if (event.target !== event.currentTarget) return;
+
+    const dialog = event.currentTarget as HTMLDialogElement;
+    if (!this.clickIsInsideDialog(dialog, event)) {
+      this.closeNativeDialog(dialog);
+    }
+  };
+
+  private handleDeleteDialogClose = () => {
+    if (!this.isDisconnecting) {
+      this.deleteTarget = null;
+    }
   };
 
   private formatLastEdited(lastModified: number) {
