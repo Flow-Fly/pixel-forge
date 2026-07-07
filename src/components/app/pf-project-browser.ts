@@ -96,6 +96,21 @@ export class PFProjectBrowser extends BaseComponent {
       flex-wrap: wrap;
     }
 
+    form.header-actions,
+    .empty-action,
+    .new-card-form,
+    .dialog-close-form {
+      margin: 0;
+    }
+
+    .new-card-form {
+      display: flex;
+    }
+
+    .new-card-form .new-card {
+      width: 100%;
+    }
+
     button {
       border: 1px solid var(--pf-color-border);
       border-radius: var(--pf-radius-sm);
@@ -318,27 +333,29 @@ export class PFProjectBrowser extends BaseComponent {
           <h2 class="dialog-title" id="project-browser-title">Project Library</h2>
           ${this.canClose
             ? html`
-                <button type="button" @click=${this.requestBrowserClose}>
-                  Close
-                </button>
+                <form method="dialog" class="dialog-close-form">
+                  <button type="submit" value="close">
+                    Close
+                  </button>
+                </form>
               `
             : nothing}
         </div>
         <section class="shell" aria-label="Project library">
           <div class="toolbar">
             <p class="subtitle">Open a saved sprite or start a fresh canvas.</p>
-            <div class="header-actions">
-              <button class="primary" type="button" @click=${this.requestNewProject}>
+            <form method="dialog" class="header-actions">
+              <button class="primary" type="submit" value="new-project">
                 New Project
               </button>
               ${this.canClose
                 ? html`
-                    <button type="button" @click=${this.closeBrowser}>
+                    <button type="submit" value="close">
                       Back to Editor
                     </button>
                   `
                 : nothing}
-            </div>
+            </form>
           </div>
 
           ${this.errorMessage
@@ -361,19 +378,23 @@ export class PFProjectBrowser extends BaseComponent {
       return html`
         <div class="empty">
           <p>No projects saved yet.</p>
-          <button class="primary" type="button" @click=${this.requestNewProject}>
-            Create First Project
-          </button>
+          <form method="dialog" class="empty-action">
+            <button class="primary" type="submit" value="new-project">
+              Create First Project
+            </button>
+          </form>
         </div>
       `;
     }
 
     return html`
       <div class="grid">
-        <button class="new-card" type="button" @click=${this.requestNewProject}>
-          <strong>New Project</strong>
-          <span class="meta">Choose a size and start drawing.</span>
-        </button>
+        <form method="dialog" class="new-card-form">
+          <button class="new-card" type="submit" value="new-project">
+            <strong>New Project</strong>
+            <span class="meta">Choose a size and start drawing.</span>
+          </button>
+        </form>
         ${this.projects.map((project) => this.renderProject(project))}
       </div>
     `;
@@ -580,18 +601,6 @@ export class PFProjectBrowser extends BaseComponent {
     }
   };
 
-  private requestNewProject = () => {
-    this.dispatchEvent(
-      new CustomEvent('show-new-project-dialog', { bubbles: true, composed: true })
-    );
-  };
-
-  private requestBrowserClose = () => {
-    if (this.canDismissBrowser()) {
-      this.closeNativeDialog(this.browserDialog);
-    }
-  };
-
   private closeBrowser = () => {
     this.dispatchEvent(
       new CustomEvent('project-browser-close', { bubbles: true, composed: true })
@@ -661,6 +670,19 @@ export class PFProjectBrowser extends BaseComponent {
 
   private handleBrowserDialogClose = () => {
     if (this.isDisconnecting) return;
+
+    const returnValue = this.browserDialog?.returnValue ?? '';
+    if (this.browserDialog) {
+      this.browserDialog.returnValue = '';
+    }
+
+    if (returnValue === 'new-project') {
+      this.dispatchEvent(
+        new CustomEvent('show-new-project-dialog', { bubbles: true, composed: true })
+      );
+      return;
+    }
+
     if (!this.canDismissBrowser()) {
       this.showNativeDialog(this.browserDialog);
       return;

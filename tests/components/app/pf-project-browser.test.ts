@@ -128,6 +128,17 @@ function requestNativeCancel(dialog: HTMLDialogElement | null | undefined) {
   }
 }
 
+function closeWithReturnValue(
+  dialog: HTMLDialogElement | null | undefined,
+  returnValue: string
+) {
+  if (!dialog) return;
+
+  dialog.returnValue = returnValue;
+  dialog.removeAttribute('open');
+  dialog.dispatchEvent(new Event('close'));
+}
+
 function clickNativeBackdrop(dialog: HTMLDialogElement | null | undefined) {
   if (!dialog) return;
 
@@ -179,7 +190,7 @@ describe('pf-project-browser', () => {
     expect(buttonWithText(element.shadowRoot!, 'New Project')).toBeTruthy();
   });
 
-  it('emits show-new-project-dialog from the native dialog action', async () => {
+  it('emits show-new-project-dialog from the native dialog return value', async () => {
     const element = await createBrowser();
 
     let requested = false;
@@ -187,7 +198,7 @@ describe('pf-project-browser', () => {
       requested = true;
     });
 
-    buttonWithText(element.shadowRoot!, 'New Project')?.click();
+    closeWithReturnValue(projectDialog(element.shadowRoot!), 'new-project');
     await settle(element);
 
     expect(requested).toBe(true);
