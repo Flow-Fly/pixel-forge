@@ -12,6 +12,7 @@ import { normalizeProjectFileImageData } from "../serialization/project-data";
 import {
   hydrateProjectFrames,
   hydrateProjectLayers,
+  migrateProjectFileForLoad,
   refreshProjectPaletteAfterLoad,
   restoreProjectAnimationState,
   restoreProjectFrameTags,
@@ -21,10 +22,46 @@ import {
 } from "../serialization/project-load";
 import {
   PROJECT_VERSION,
+  type ProjectCelFile,
   type ProjectFile,
   type ProjectFileInput,
 } from "../types/project";
 import { log } from "../utils/log";
+import type { Frame } from "../types/animation";
+import type { Layer } from "../types/layer";
+
+function layerSerializesCels(layer: Layer): boolean {
+  return layer.type !== 'reference';
+}
+
+async function serializeCelForLayer(
+  layer: Layer,
+  frame: Frame
+): Promise<ProjectCelFile> {
+  const celKey = animationStore.getCelKey(layer.id, frame.id);
+  const cel = animationStore.cels.value.get(celKey);
+
+  if (!cel) {
+    return {
+      layerId: layer.id,
+      data: new Uint8Array(0),
+    };
+  }
+
+  const celFile: ProjectCelFile = {
+    layerId: layer.id,
+    data: await canvasToPngBytes(cel.canvas),
+  };
+
+  if (cel.linkedCelId) celFile.linkedCelId = cel.linkedCelId;
+  if (cel.linkType) celFile.linkType = cel.linkType;
+  if (cel.indexBuffer) celFile.indexData = Array.from(cel.indexBuffer);
+
+  const textCelData = animationStore.getTextCelData(layer.id, frame.id);
+  if (textCelData) celFile.textCelData = textCelData;
+
+  return celFile;
+}
 
 const projectLoadStores: ProjectLoadStores = {
   animation: animationStore,
@@ -70,6 +107,9 @@ class ProjectStore {
           : new Uint8Array(0),
         // Include text layer metadata if present
         ...(layer.textData && { textData: layer.textData }),
+        // Include reference layer metadata if present. Reference layers keep
+        // original source bytes and do not serialize animation cels.
+        ...(layer.referenceData && { referenceData: layer.referenceData }),
       }))
     );
 
@@ -77,32 +117,9 @@ class ProjectStore {
     const frames = await Promise.all(
       animationStore.frames.value.map(async (frame) => {
         const cels = await Promise.all(
-          layerStore.layers.value.map(async (layer) => {
-            const celKey = animationStore.getCelKey(layer.id, frame.id);
-            const cel = animationStore.cels.value.get(celKey);
-            const canvas = cel?.canvas;
-            const textCelData = animationStore.getTextCelData(
-              layer.id,
-              frame.id
-            );
-
-            // Serialize index buffer to array if present
-            const indexData = cel?.indexBuffer
-              ? Array.from(cel.indexBuffer)
-              : undefined;
-
-            return {
-              layerId: layer.id,
-              data: canvas ? await canvasToPngBytes(canvas) : new Uint8Array(0),
-              // Include linked cel ID and type if present (v2.2+)
-              ...(cel?.linkedCelId && { linkedCelId: cel.linkedCelId }),
-              ...(cel?.linkType && { linkType: cel.linkType }),
-              // Include text cel data if present
-              ...(textCelData && { textCelData }),
-              // Include index buffer data if present (v3.0+)
-              ...(indexData && { indexData }),
-            };
-          })
+          layerStore.layers.value
+            .filter(layerSerializesCels)
+            .map((layer) => serializeCelForLayer(layer, frame))
         );
 
         return {
@@ -123,9 +140,6 @@ class ProjectStore {
       width: this.width.value,
       height: this.height.value,
       palette: paletteStore.mainColors.value, // v3.0+: Save the main palette
-      // v3.1 compatibility field. Runtime colors now share the main palette;
-      // v4/schema cleanup owns removing this from ProjectFile.
-      ephemeralPalette: [],
       layers,
       frames,
       animation: {
@@ -139,11 +153,11 @@ class ProjectStore {
   /**
    * Load a project from file data.
    * @param file The project file data
-   * @param fromAutoSave If true, palette is preserved from localStorage (auto-save reload).
-   *                     If false, palette is loaded from file (explicit file import).
+   * @param _fromAutoSave Kept for call-site compatibility. All load paths now
+   *                      restore the palette from the file.
    */
-  async loadProject(input: ProjectFileInput, fromAutoSave = false) {
-    const file = normalizeProjectFileImageData(input);
+  async loadProject(input: ProjectFileInput, _fromAutoSave = false) {
+    const file = migrateProjectFileForLoad(normalizeProjectFileImageData(input));
 
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
@@ -151,12 +165,12 @@ class ProjectStore {
     this.setSize(file.width, file.height);
     this.name.value = file.name || "Untitled";
 
-    restoreProjectPaletteForLoad(projectLoadStores, file, fromAutoSave);
+    restoreProjectPaletteForLoad(projectLoadStores, file);
     await hydrateProjectLayers(projectLoadStores, file);
     await hydrateProjectFrames(projectLoadStores, file);
     restoreProjectAnimationState(projectLoadStores, file);
     restoreProjectFrameTags(projectLoadStores, file);
-    refreshProjectPaletteAfterLoad(projectLoadStores, fromAutoSave);
+    refreshProjectPaletteAfterLoad(projectLoadStores);
     selectFirstLoadedLayer(projectLoadStores);
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.

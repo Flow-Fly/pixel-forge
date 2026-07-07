@@ -31,10 +31,10 @@ import { projectStore } from '../../src/stores/project';
 import { layerStore } from '../../src/stores/layers';
 
 describe('project file format version', () => {
-  it('is in sync with the newest schema fields (3.2.0 = continuous layers)', () => {
+  it('is in sync with the newest schema fields (4.0.0 = reference layer data)', () => {
     // If this fails, the ProjectFile schema changed without bumping
     // PROJECT_VERSION — bump it in the same PR (see src/types/project.ts).
-    expect(PROJECT_VERSION).toBe('3.2.0');
+    expect(PROJECT_VERSION).toBe('4.0.0');
   });
 
   it('stamps saved projects with PROJECT_VERSION and serializes current-format fields', async () => {
@@ -47,6 +47,8 @@ describe('project file format version', () => {
     expect(file.version).toBe(PROJECT_VERSION);
     // v3.0+: palette is always serialized
     expect(Array.isArray(file.palette)).toBe(true);
+    // v4.0+: ephemeralPalette is removed from saved files
+    expect('ephemeralPalette' in file).toBe(false);
     // v3.2+: continuous flag is always serialized on layers
     expect(file.layers.length).toBeGreaterThan(0);
     for (const layer of file.layers) {

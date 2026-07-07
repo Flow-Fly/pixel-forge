@@ -33,11 +33,34 @@ import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
 import { paletteStore } from '../../src/stores/palette';
 import { PROJECT_VERSION } from '../../src/types/project';
-import type { ProjectFileInput } from '../../src/types/project';
+import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
 
 const PALETTE = ['#000000', '#ff0000', '#00ff00', '#0000ff', '#ffffff'];
 const mockedLoadImageDataToCanvas = vi.mocked(loadImageDataToCanvas);
+
+function expectReferenceLayer(file: ProjectFile, layerId: string): void {
+  const referenceLayer = file.layers.find((layer) => layer.id === layerId);
+
+  expect(referenceLayer?.type).toBe('reference');
+  expect(Array.from(referenceLayer?.referenceData?.bytes ?? [])).toEqual([
+    1, 2, 3, 4,
+  ]);
+  expect(referenceLayer?.referenceData).toMatchObject({
+    mimeType: 'image/png',
+    x: 1.5,
+    y: 2.5,
+    scale: 0.75,
+    desaturate: true,
+    position: 'above',
+  });
+}
+
+function expectNoFrameCelsForLayer(file: ProjectFile, layerId: string): void {
+  for (const frame of file.frames) {
+    expect(frame.cels.some((cel) => cel.layerId === layerId)).toBe(false);
+  }
+}
 
 describe('project save -> load -> save round-trip (structural)', () => {
   beforeEach(async () => {
@@ -164,22 +187,25 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(normalize(twice)).toEqual(normalize(once));
   });
 
-  it('writes the compatibility palette empty after drawing adds a color', async () => {
+  it('does not write the legacy compatibility palette after drawing adds a color', async () => {
     await buildSampleProject();
     paletteStore.getOrAddColorForDrawing('#123456');
 
     const saved = await projectStore.saveProject();
     expect(saved.palette).toContain('#123456');
-    expect(saved.ephemeralPalette).toEqual([]);
+    expect('ephemeralPalette' in saved).toBe(false);
   });
 
-  it('loads compatibility palette colors into the main palette', async () => {
+  it('folds legacy compatibility palette colors into the main palette', async () => {
     const saved = await buildSampleProject();
+    const legacyIndex = PALETTE.length + 1;
     const legacy = {
       ...structuredClone(saved),
+      version: '3.2.0',
       palette: [...PALETTE],
       ephemeralPalette: ['#123456'],
     };
+    legacy.frames[0].cels[0].indexData = [legacyIndex, 2, 0];
 
     vi.useFakeTimers();
     await projectStore.loadProject(legacy, false);
@@ -189,6 +215,85 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(paletteStore.mainColors.value).toEqual([...PALETTE, '#123456']);
     expect(paletteStore.getColorByIndex(PALETTE.length + 1)).toBe('#123456');
     expect(paletteStore.isNewColor('#123456')).toBe(false);
+
+    const frameId = animationStore.frames.value[0].id;
+    const layerId = legacy.frames[0].cels[0].layerId;
+    expect(Array.from(animationStore.getCelIndexBuffer(layerId, frameId) ?? [])).toEqual([
+      PALETTE.length + 1,
+      2,
+      0,
+    ]);
+  });
+
+  it('deduplicates legacy compatibility colors and remaps old indices', async () => {
+    const saved = await buildSampleProject();
+    const legacy = {
+      ...structuredClone(saved),
+      version: '3.2.0',
+      palette: [...PALETTE],
+      ephemeralPalette: ['#ff0000', '#123456'],
+    };
+    legacy.frames[0].cels[0].indexData = [PALETTE.length + 1, PALETTE.length + 2];
+
+    vi.useFakeTimers();
+    await projectStore.loadProject(legacy, false);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    expect(paletteStore.mainColors.value).toEqual([...PALETTE, '#123456']);
+
+    const frameId = animationStore.frames.value[0].id;
+    const layerId = legacy.frames[0].cels[0].layerId;
+    expect(Array.from(animationStore.getCelIndexBuffer(layerId, frameId) ?? [])).toEqual([
+      2,
+      PALETTE.length + 1,
+    ]);
+  });
+
+  it('loads the file palette for auto-save restores too', async () => {
+    const saved = await buildSampleProject();
+    paletteStore.setPalette(['#abcdef']);
+
+    vi.useFakeTimers();
+    await projectStore.loadProject(structuredClone(saved), true);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    expect(paletteStore.mainColors.value).toEqual(PALETTE);
+  });
+
+  it('round-trips reference layer metadata without animation cels', async () => {
+    await buildSampleProject();
+    const referenceBytes = new Uint8Array([1, 2, 3, 4]);
+    const referenceLayer = layerStore.addReferenceLayer(
+      {
+        bytes: referenceBytes,
+        mimeType: 'image/png',
+        x: 1.5,
+        y: 2.5,
+        scale: 0.75,
+        desaturate: true,
+        position: 'above',
+      },
+      'Reference'
+    );
+
+    const saved = await projectStore.saveProject();
+    expectReferenceLayer(saved, referenceLayer.id);
+    expectNoFrameCelsForLayer(saved, referenceLayer.id);
+
+    vi.useFakeTimers();
+    await projectStore.loadProject(structuredClone(saved), false);
+    await vi.runAllTimersAsync();
+    const resaved = await projectStore.saveProject();
+    vi.useRealTimers();
+
+    const resavedReference = resaved.layers.find(
+      (layer) => layer.id === referenceLayer.id
+    );
+    expect(resavedReference?.id).toBe(referenceLayer.id);
+    expectReferenceLayer(resaved, referenceLayer.id);
+    expectNoFrameCelsForLayer(resaved, referenceLayer.id);
   });
 
   it('normalizes JSON-mangled project image data before hydrating canvases', async () => {

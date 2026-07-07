@@ -2,6 +2,7 @@ import pako from 'pako';
 import { animationStore } from '../stores/animation';
 import { layerStore } from '../stores/layers';
 import { projectStore } from '../stores/project';
+import type { Layer } from '../types/layer';
 
 /**
  * Aseprite (.ase/.aseprite) file writer
@@ -156,11 +157,38 @@ function createCelChunk(
   return new Uint8Array(buffer);
 }
 
+function createCelChunkForLayer(
+  layer: Layer,
+  layerIndex: number,
+  frameId: string,
+  width: number,
+  height: number
+): Uint8Array | null {
+  const celCanvas = animationStore.getCelCanvas(frameId, layer.id);
+  if (!celCanvas) return null;
+
+  const ctx = celCanvas.getContext('2d');
+  if (!ctx) return null;
+
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  if (!hasVisiblePixels(pixels)) return null;
+
+  return createCelChunk(layerIndex, 0, 0, width, height, new Uint8Array(pixels));
+}
+
+function hasVisiblePixels(pixels: Uint8ClampedArray): boolean {
+  for (let i = 3; i < pixels.length; i += 4) {
+    if (pixels[i] > 0) return true;
+  }
+
+  return false;
+}
+
 /**
  * Export current project as Aseprite file.
  */
 function writeAseFile(): ArrayBuffer {
-  const layers = layerStore.layers.value;
+  const layers = layerStore.layers.value.filter(layer => layer.type !== 'reference');
   const frames = animationStore.frames.value;
   const width = projectStore.width.value;
   const height = projectStore.height.value;
@@ -193,19 +221,8 @@ function writeAseFile(): ArrayBuffer {
 
     // Cel chunks
     layers.forEach((layer, layerIdx) => {
-      const celCanvas = animationStore.getCelCanvas(frame.id, layer.id);
-      if (celCanvas) {
-        const ctx = celCanvas.getContext('2d')!;
-        const imageData = ctx.getImageData(0, 0, width, height);
-
-        // Check if cel has any non-transparent pixels
-        const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0);
-        if (hasContent) {
-          // Convert Uint8ClampedArray to Uint8Array for pako compression
-          const pixelData = new Uint8Array(imageData.data);
-          chunks.push(createCelChunk(layerIdx, 0, 0, width, height, pixelData));
-        }
-      }
+      const chunk = createCelChunkForLayer(layer, layerIdx, frame.id, width, height);
+      if (chunk) chunks.push(chunk);
     });
 
     frameData.push({ duration: frame.duration, chunks });

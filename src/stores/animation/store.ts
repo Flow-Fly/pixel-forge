@@ -144,7 +144,7 @@ class AnimationStore {
     const height = firstLayer?.canvas?.height ?? 64;
     const sharedCanvas = this.getSharedTransparentCanvas(width, height);
 
-    layers.forEach(layer => {
+    layers.filter(layer => layer.type !== 'reference').forEach(layer => {
       const key = getCelKey(layer.id, frameId);
       if (!newCels.has(key)) {
         newCels.set(key, {
@@ -172,7 +172,7 @@ class AnimationStore {
     const cels = new Map(this.cels.value);
     let celsUpdated = false;
 
-    layers.forEach(layer => {
+    layers.filter(layer => layer.type !== 'reference').forEach(layer => {
       const key = getCelKey(layer.id, frameId);
       let cel = cels.get(key);
 
@@ -243,7 +243,7 @@ class AnimationStore {
     const { width, height } = getCanvasSize();
     const sharedCanvas = this.getSharedTransparentCanvas(width, height);
 
-    layers.forEach(layer => {
+    layers.filter(layer => layer.type !== 'reference').forEach(layer => {
       const sourceKey = getCelKey(layer.id, frameIdToUse);
       const targetKey = getCelKey(layer.id, newFrame.id);
       const sourceCel = cels.get(sourceKey);
@@ -303,7 +303,7 @@ class AnimationStore {
 
     const cels = new Map(this.cels.value);
     const layers = layerStore.layers.value;
-    layers.forEach(layer => {
+    layers.filter(layer => layer.type !== 'reference').forEach(layer => {
       const key = getCelKey(layer.id, frameId);
       cels.delete(key);
     });
