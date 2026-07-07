@@ -397,3 +397,173 @@ export function isPointInMask(x: number, y: number, mask: Uint8Array, bounds: Re
   return mask[idx] === 255;
 }
 
+
+// ============================================
+// Mask Combination (add / subtract / intersect)
+// ============================================
+
+export type MaskCombineOperation = 'add' | 'subtract' | 'replace' | 'intersect';
+
+export interface MaskSelectionState {
+  bounds: Rect;
+  shape: string;
+  mask?: Uint8Array;
+}
+
+/**
+ * Combine an existing selection with a new mask using add, subtract, or
+ * intersect. Returns the combined mask trimmed to tight bounds, or null
+ * when the result is empty.
+ */
+export function combineMasks(
+  currentState: MaskSelectionState,
+  newBounds: Rect,
+  newMask: Uint8Array,
+  operation: MaskCombineOperation
+): { mask: Uint8Array; bounds: Rect } | null {
+  if (operation === 'replace') {
+    return { mask: newMask, bounds: newBounds };
+  }
+
+  const oldBounds = currentState.bounds;
+
+  // Calculate combined bounds based on operation
+  let minX: number, minY: number, maxX: number, maxY: number;
+
+  if (operation === 'add') {
+    // Union of bounds
+    minX = Math.min(oldBounds.x, newBounds.x);
+    minY = Math.min(oldBounds.y, newBounds.y);
+    maxX = Math.max(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+    maxY = Math.max(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+  } else if (operation === 'intersect') {
+    // Intersection of bounds
+    minX = Math.max(oldBounds.x, newBounds.x);
+    minY = Math.max(oldBounds.y, newBounds.y);
+    maxX = Math.min(oldBounds.x + oldBounds.width, newBounds.x + newBounds.width);
+    maxY = Math.min(oldBounds.y + oldBounds.height, newBounds.y + newBounds.height);
+
+    // If no overlap, return null
+    if (minX >= maxX || minY >= maxY) {
+      return null;
+    }
+  } else {
+    // Subtract - use old bounds
+    minX = oldBounds.x;
+    minY = oldBounds.y;
+    maxX = oldBounds.x + oldBounds.width;
+    maxY = oldBounds.y + oldBounds.height;
+  }
+
+  const combinedBounds = {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+
+  const combinedMask = new Uint8Array(combinedBounds.width * combinedBounds.height);
+
+  // Helper to get value from a mask
+  const getMaskValue = (
+    mask: Uint8Array | undefined,
+    bounds: Rect,
+    x: number,
+    y: number,
+    shape: string
+  ): boolean => {
+    if (x < bounds.x || x >= bounds.x + bounds.width || y < bounds.y || y >= bounds.y + bounds.height) {
+      return false;
+    }
+
+    if (shape === 'rectangle') {
+      return true;
+    }
+
+    if (shape === 'ellipse') {
+      const cx = bounds.x + bounds.width / 2;
+      const cy = bounds.y + bounds.height / 2;
+      const rx = bounds.width / 2;
+      const ry = bounds.height / 2;
+      const dx = (x - cx) / rx;
+      const dy = (y - cy) / ry;
+      return dx * dx + dy * dy <= 1;
+    }
+
+    if (mask) {
+      const idx = (y - bounds.y) * bounds.width + (x - bounds.x);
+      return mask[idx] === 255;
+    }
+
+    return false;
+  };
+
+  // Fill combined mask
+  let hasAnyPixel = false;
+  for (let y = combinedBounds.y; y < combinedBounds.y + combinedBounds.height; y++) {
+    for (let x = combinedBounds.x; x < combinedBounds.x + combinedBounds.width; x++) {
+      const oldValue = getMaskValue(
+        currentState.shape === 'freeform' ? currentState.mask : undefined,
+        oldBounds,
+        x,
+        y,
+        currentState.shape
+      );
+      const newValue = getMaskValue(newMask, newBounds, x, y, 'freeform');
+
+      let finalValue: boolean;
+      if (operation === 'add') {
+        finalValue = oldValue || newValue;
+      } else if (operation === 'intersect') {
+        finalValue = oldValue && newValue;
+      } else {
+        // subtract
+        finalValue = oldValue && !newValue;
+      }
+
+      if (finalValue) {
+        const idx = (y - combinedBounds.y) * combinedBounds.width + (x - combinedBounds.x);
+        combinedMask[idx] = 255;
+        hasAnyPixel = true;
+      }
+    }
+  }
+
+  if (!hasAnyPixel) return null;
+
+  // Shrink bounds to fit actual selection
+  let actualMinX = combinedBounds.width, actualMinY = combinedBounds.height;
+  let actualMaxX = -1, actualMaxY = -1;
+
+  for (let y = 0; y < combinedBounds.height; y++) {
+    for (let x = 0; x < combinedBounds.width; x++) {
+      if (combinedMask[y * combinedBounds.width + x] === 255) {
+        actualMinX = Math.min(actualMinX, x);
+        actualMinY = Math.min(actualMinY, y);
+        actualMaxX = Math.max(actualMaxX, x);
+        actualMaxY = Math.max(actualMaxY, y);
+      }
+    }
+  }
+
+  if (actualMaxX < 0) return null;
+
+  // Create tight bounds mask
+  const tightBounds = {
+    x: combinedBounds.x + actualMinX,
+    y: combinedBounds.y + actualMinY,
+    width: actualMaxX - actualMinX + 1,
+    height: actualMaxY - actualMinY + 1,
+  };
+
+  const tightMask = new Uint8Array(tightBounds.width * tightBounds.height);
+  for (let y = 0; y < tightBounds.height; y++) {
+    for (let x = 0; x < tightBounds.width; x++) {
+      const srcIdx = (actualMinY + y) * combinedBounds.width + (actualMinX + x);
+      const dstIdx = y * tightBounds.width + x;
+      tightMask[dstIdx] = combinedMask[srcIdx];
+    }
+  }
+
+  return { mask: tightMask, bounds: tightBounds };
+}
