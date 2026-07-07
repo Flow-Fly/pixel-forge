@@ -696,6 +696,27 @@ class SelectionStore {
     this.state.value = { type: 'none' };
   }
 
+  resetForProject() {
+    if (this.rotationRafId !== null) {
+      cancelAnimationFrame(this.rotationRafId);
+      this.rotationRafId = null;
+    }
+    if (this.scaleRafId !== null) {
+      cancelAnimationFrame(this.scaleRafId);
+      this.scaleRafId = null;
+    }
+
+    this.state.value = { type: 'none' };
+    this.mode.value = 'replace';
+    this.previousSelectionForVisual.value = null;
+    this.lastSelection.value = null;
+    this.activeLayerId = null;
+    this.pendingRotation = null;
+    this.pendingScale = null;
+    this.isRotationDragging = false;
+    this.isScaleDragging = false;
+  }
+
   /**
    * Reselect the last cleared selection.
    * Used by Mod+Shift+D shortcut.

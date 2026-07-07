@@ -2,15 +2,13 @@ import { html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { projectStore } from '../../stores/project';
+import {
+  DEFAULT_PROJECT_HEIGHT,
+  DEFAULT_PROJECT_WIDTH,
+  NEW_PROJECT_PRESETS,
+  clampProjectDimension,
+} from '../../services/project-defaults';
 import '../ui/pf-dialog';
-
-const PRESETS = [
-  { label: '16x16', width: 16, height: 16 },
-  { label: '32x32', width: 32, height: 32 },
-  { label: '64x64', width: 64, height: 64 },
-  { label: '128x128', width: 128, height: 128 },
-  { label: '256x256', width: 256, height: 256 },
-];
 
 @customElement('pf-new-project-dialog')
 export class PFNewProjectDialog extends BaseComponent {
@@ -105,8 +103,8 @@ export class PFNewProjectDialog extends BaseComponent {
   `;
 
   @property({ type: Boolean, reflect: true }) open = false;
-  @state() width = 64;
-  @state() height = 64;
+  @state() width = DEFAULT_PROJECT_WIDTH;
+  @state() height = DEFAULT_PROJECT_HEIGHT;
   @state() selectedPreset: string | null = '64x64';
 
   render() {
@@ -121,7 +119,7 @@ export class PFNewProjectDialog extends BaseComponent {
         <div>
           <label>Presets</label>
           <div class="presets">
-            ${PRESETS.map(preset => html`
+            ${NEW_PROJECT_PRESETS.map(preset => html`
               <button
                 class="preset-btn ${this.selectedPreset === preset.label ? 'selected' : ''}"
                 @click=${() => this.selectPreset(preset)}
@@ -174,12 +172,14 @@ export class PFNewProjectDialog extends BaseComponent {
   }
 
   private handleWidthInput(e: Event) {
-    this.width = parseInt((e.target as HTMLInputElement).value) || 64;
+    this.width =
+      parseInt((e.target as HTMLInputElement).value) || DEFAULT_PROJECT_WIDTH;
     this.selectedPreset = null;
   }
 
   private handleHeightInput(e: Event) {
-    this.height = parseInt((e.target as HTMLInputElement).value) || 64;
+    this.height =
+      parseInt((e.target as HTMLInputElement).value) || DEFAULT_PROJECT_HEIGHT;
     this.selectedPreset = null;
   }
 
@@ -189,8 +189,8 @@ export class PFNewProjectDialog extends BaseComponent {
   }
 
   async create() {
-    const width = Math.max(1, Math.min(2048, this.width));
-    const height = Math.max(1, Math.min(2048, this.height));
+    const width = clampProjectDimension(this.width, DEFAULT_PROJECT_WIDTH);
+    const height = clampProjectDimension(this.height, DEFAULT_PROJECT_HEIGHT);
 
     await projectStore.newProject(width, height);
     this.close();

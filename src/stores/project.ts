@@ -4,9 +4,16 @@ import { v4 as uuidv4 } from "uuid";
 import { layerStore } from "./layers";
 import { animationStore } from "./animation";
 import { historyStore } from "./history";
+import { dirtyRectStore } from "./dirty-rect";
 import { paletteStore } from "./palette";
+import { selectionStore } from "./selection";
+import { viewportStore } from "./viewport";
 import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
+import {
+  DEFAULT_PROJECT_NAME,
+  DEFAULT_PROJECT_PALETTE_ID,
+} from "../services/project-defaults";
 import { canvasToPngBytes } from "../utils/canvas-binary";
 import { normalizeProjectFileImageData } from "../serialization/project-data";
 import {
@@ -68,6 +75,17 @@ const projectLoadStores: ProjectLoadStores = {
   layers: layerStore,
   palette: paletteStore,
 };
+
+function resetProjectLocalState() {
+  historyStore.clear();
+  selectionStore.resetForProject();
+  animationStore.clearCelSelection();
+  animationStore.selectionAnchor.value = null;
+  viewportStore.resetView();
+  dirtyRectStore.reset();
+  // Clipboard is intentionally global so users can copy from one project and
+  // paste into another.
+}
 
 class ProjectStore {
   /** Storage identity of the open project (repository key). */
@@ -163,7 +181,7 @@ class ProjectStore {
     onionSkinCache.clear();
 
     this.setSize(file.width, file.height);
-    this.name.value = file.name || "Untitled";
+    this.name.value = file.name || DEFAULT_PROJECT_NAME;
 
     restoreProjectPaletteForLoad(projectLoadStores, file);
     await hydrateProjectLayers(projectLoadStores, file);
@@ -172,6 +190,7 @@ class ProjectStore {
     restoreProjectFrameTags(projectLoadStores, file);
     refreshProjectPaletteAfterLoad(projectLoadStores);
     selectFirstLoadedLayer(projectLoadStores);
+    resetProjectLocalState();
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.
     window.dispatchEvent(new CustomEvent("project-loaded"));
@@ -190,7 +209,7 @@ class ProjectStore {
 
     // 1. Set new dimensions and reset name
     this.setSize(width, height);
-    this.name.value = "Untitled";
+    this.name.value = DEFAULT_PROJECT_NAME;
     this.lastSaved.value = null;
 
     // 2. Clear all layers
@@ -222,7 +241,7 @@ class ProjectStore {
     paletteStore.clearAllNewFlags();
 
     // 8c. Reset palette to default (DB32)
-    paletteStore.loadPreset("db32");
+    paletteStore.loadPreset(DEFAULT_PROJECT_PALETTE_ID);
 
     // 9. Reset animation settings
     animationStore.fps.value = 12;
