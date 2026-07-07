@@ -16,6 +16,15 @@ export interface FloodFillOptions {
   diagonal?: boolean; // true = 8-way connectivity (includes diagonals), false = 4-way (default)
 }
 
+type PixelColor = {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+};
+
+type PixelMatcher = (x: number, y: number) => boolean;
+
 /**
  * Flood fill to find matching pixels from a starting point.
  * Returns mask and bounds of the selected region.
@@ -34,77 +43,134 @@ export function floodFillSelect(
     return null;
   }
 
-  // Get target color at start point
-  const targetIdx = (startY * width + startX) * 4;
-  const targetR = data[targetIdx];
-  const targetG = data[targetIdx + 1];
-  const targetB = data[targetIdx + 2];
-  const targetA = data[targetIdx + 3];
-
-  // Color matching function
-  const matchesTarget = (x: number, y: number): boolean => {
-    const idx = (y * width + x) * 4;
-    if (tolerance === 0) {
-      // Exact match
-      return (
-        data[idx] === targetR &&
-        data[idx + 1] === targetG &&
-        data[idx + 2] === targetB &&
-        data[idx + 3] === targetA
-      );
-    }
-    // Tolerance-based match (Euclidean distance in RGBA space)
-    const dr = data[idx] - targetR;
-    const dg = data[idx + 1] - targetG;
-    const db = data[idx + 2] - targetB;
-    const da = data[idx + 3] - targetA;
-    const distance = Math.sqrt(dr * dr + dg * dg + db * db + da * da);
-    return distance <= tolerance * 2;
-  };
-
-  // Track which pixels are selected (full canvas size for easy indexing)
+  const targetColor = getPixelColor(data, width, startX, startY);
+  const matchesTarget = createPixelMatcher(data, width, targetColor, tolerance);
   const selected = new Uint8Array(width * height);
 
   if (contiguous) {
-    // Flood fill using stack
-    const stack: [number, number][] = [[startX, startY]];
-
-    while (stack.length > 0) {
-      const [x, y] = stack.pop()!;
-
-      // Bounds check
-      if (x < 0 || x >= width || y < 0 || y >= height) continue;
-
-      const idx = y * width + x;
-
-      // Already visited
-      if (selected[idx]) continue;
-
-      // Check if matches
-      if (!matchesTarget(x, y)) continue;
-
-      // Mark as selected
-      selected[idx] = 255;
-
-      // Add neighbors (4-way or 8-way)
-      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-      if (diagonal) {
-        stack.push([x + 1, y + 1], [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1]);
-      }
-    }
+    selectContiguousPixels(selected, width, height, startX, startY, diagonal, matchesTarget);
   } else {
-    // Non-contiguous: scan all pixels
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (matchesTarget(x, y)) {
-          selected[y * width + x] = 255;
-        }
-      }
-    }
+    selectMatchingPixels(selected, width, height, matchesTarget);
   }
 
   // Trim the full-canvas mask to the tight bounds of the selection
   return trimMaskToTightBounds(selected, { x: 0, y: 0, width, height });
+}
+
+function getPixelColor(data: Uint8ClampedArray, width: number, x: number, y: number): PixelColor {
+  const idx = getPixelIndex(width, x, y);
+  return {
+    r: data[idx],
+    g: data[idx + 1],
+    b: data[idx + 2],
+    a: data[idx + 3],
+  };
+}
+
+function createPixelMatcher(
+  data: Uint8ClampedArray,
+  width: number,
+  targetColor: PixelColor,
+  tolerance: number
+): PixelMatcher {
+  if (tolerance === 0) {
+    return (x, y) => matchesPixelExactly(data, width, x, y, targetColor);
+  }
+
+  return (x, y) => isPixelWithinTolerance(data, width, x, y, targetColor, tolerance);
+}
+
+function matchesPixelExactly(
+  data: Uint8ClampedArray,
+  width: number,
+  x: number,
+  y: number,
+  targetColor: PixelColor
+): boolean {
+  const idx = getPixelIndex(width, x, y);
+  return (
+    data[idx] === targetColor.r &&
+    data[idx + 1] === targetColor.g &&
+    data[idx + 2] === targetColor.b &&
+    data[idx + 3] === targetColor.a
+  );
+}
+
+function isPixelWithinTolerance(
+  data: Uint8ClampedArray,
+  width: number,
+  x: number,
+  y: number,
+  targetColor: PixelColor,
+  tolerance: number
+): boolean {
+  const idx = getPixelIndex(width, x, y);
+  const dr = data[idx] - targetColor.r;
+  const dg = data[idx + 1] - targetColor.g;
+  const db = data[idx + 2] - targetColor.b;
+  const da = data[idx + 3] - targetColor.a;
+  const distance = Math.sqrt(dr * dr + dg * dg + db * db + da * da);
+  return distance <= tolerance * 2;
+}
+
+function selectContiguousPixels(
+  selected: Uint8Array,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  diagonal: boolean,
+  matchesTarget: PixelMatcher
+) {
+  const stack: [number, number][] = [[startX, startY]];
+
+  while (stack.length > 0) {
+    const [x, y] = stack.pop()!;
+    if (shouldSkipFloodFillPixel(selected, width, height, x, y, matchesTarget)) {
+      continue;
+    }
+
+    selected[y * width + x] = 255;
+    addFloodFillNeighbors(stack, x, y, diagonal);
+  }
+}
+
+function shouldSkipFloodFillPixel(
+  selected: Uint8Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  matchesTarget: PixelMatcher
+): boolean {
+  if (x < 0 || x >= width || y < 0 || y >= height) {
+    return true;
+  }
+
+  const idx = y * width + x;
+  return selected[idx] === 255 || !matchesTarget(x, y);
+}
+
+function addFloodFillNeighbors(stack: [number, number][], x: number, y: number, diagonal: boolean) {
+  stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+
+  if (diagonal) {
+    stack.push([x + 1, y + 1], [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1]);
+  }
+}
+
+function selectMatchingPixels(selected: Uint8Array, width: number, height: number, matchesTarget: PixelMatcher) {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (matchesTarget(x, y)) {
+        selected[y * width + x] = 255;
+      }
+    }
+  }
+}
+
+function getPixelIndex(width: number, x: number, y: number): number {
+  return (y * width + x) * 4;
 }
 
 // ============================================
