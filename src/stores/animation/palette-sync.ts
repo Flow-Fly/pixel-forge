@@ -78,15 +78,20 @@ function getReorderedIndex(
  */
 function handlePaletteColorRemoved(
   cels: Map<string, Cel>,
-  removedIndex: number
+  removedIndex: number,
+  replacementIndex = 0
 ): Map<string, Cel> {
   return remapCelBuffers(cels, oldIndex =>
-    getIndexAfterRemoval(oldIndex, removedIndex)
+    getIndexAfterRemoval(oldIndex, removedIndex, replacementIndex)
   );
 }
 
-function getIndexAfterRemoval(oldIndex: number, removedIndex: number): number {
-  if (oldIndex === removedIndex) return 1;
+function getIndexAfterRemoval(
+  oldIndex: number,
+  removedIndex: number,
+  replacementIndex: number
+): number {
+  if (oldIndex === removedIndex) return replacementIndex;
   if (oldIndex > removedIndex) return oldIndex - 1;
   return oldIndex;
 }
@@ -183,8 +188,12 @@ export function setupPaletteListeners(
     },
 
     'palette-color-removed': (event: Event) => {
-      const { removedIndex } = (event as CustomEvent).detail;
-      const newCels = handlePaletteColorRemoved(getCels(), removedIndex);
+      const { removedIndex, replacementIndex } = (event as CustomEvent).detail;
+      const newCels = handlePaletteColorRemoved(
+        getCels(),
+        removedIndex,
+        replacementIndex
+      );
       setCels(newCels);
     },
 

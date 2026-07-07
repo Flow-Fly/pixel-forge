@@ -46,7 +46,7 @@ export function isMainPaletteColor(
 
 /**
  * Find the closest existing color index for a given hex color.
- * Used when palette is full.
+ * Uses the same HSL distance as palette extraction.
  */
 export function findClosestColorIndex(hex: string, colors: string[]): number {
   const rgb = hexToRgb(hex);
