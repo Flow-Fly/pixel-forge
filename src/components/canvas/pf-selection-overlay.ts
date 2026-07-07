@@ -8,6 +8,22 @@ import type { Point } from '../../types/geometry';
 import { type SelectionState } from '../../types/selection';
 import '../../components/common/pf-tooltip';
 
+type SelectionFrame = {
+  ctx: CanvasRenderingContext2D;
+  state: SelectionState;
+  zoom: number;
+  panX: number;
+  panY: number;
+};
+
+type SelectionVisual = {
+  bounds: { x: number; y: number; width: number; height: number };
+  shape: 'rectangle' | 'ellipse' | 'freeform';
+  mask?: Uint8Array;
+};
+
+type SelectionFrameDrawer = () => void;
+
 /**
  * Transparent canvas overlay that renders:
  * - Marching ants for active selections
@@ -47,68 +63,103 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   private cachedStateId: string | null = null;
 
   protected draw() {
-    const ctx = this.prepareFrame();
-    if (!ctx) return;
+    const frame = this.getSelectionFrame();
+    if (!frame) return;
 
-    const state = selectionStore.state.value;
-    if (state.type === 'none') {
-      this.cachedOutlinePaths = null;
-      this.cachedStateId = null;
+    this.drawSelectionFrame(frame);
+  }
+
+  private drawSelectionFrame(frame: SelectionFrame) {
+    this.getSelectionFrameDrawers(frame)[frame.state.type]();
+  }
+
+  private getSelectionFrameDrawers(frame: SelectionFrame): Record<SelectionState['type'], SelectionFrameDrawer> {
+    return {
+      none: () => this.clearSelectionVisualState(),
+      selecting: () => this.drawSelectingFrame(frame, frame.state as Extract<SelectionState, { type: 'selecting' }>),
+      selected: () => this.drawSelectedFrame(frame, frame.state as Extract<SelectionState, { type: 'selected' }>),
+      floating: () => this.drawFloatingFrame(frame, frame.state as Extract<SelectionState, { type: 'floating' }>),
+      transforming: () =>
+        this.drawTransformingFrame(frame, frame.state as Extract<SelectionState, { type: 'transforming' }>),
+    };
+  }
+
+  private getSelectionFrame(): SelectionFrame | null {
+    const ctx = this.prepareFrame();
+    if (!ctx) return null;
+
+    return {
+      ctx,
+      state: selectionStore.state.value,
+      zoom: viewportStore.zoom.value,
+      panX: viewportStore.panX.value,
+      panY: viewportStore.panY.value,
+    };
+  }
+
+  private clearSelectionVisualState() {
+    this.cachedOutlinePaths = null;
+    this.cachedStateId = null;
+    this.hideDimensionTooltips();
+  }
+
+  private drawSelectingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'selecting' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    const prevSelection = selectionStore.previousSelectionForVisual.value;
+
+    if (prevSelection) {
+      this.drawSelectionOutline(ctx, prevSelection, zoom, panX, panY);
+    }
+
+    if (state.previewPath && state.previewPath.length >= 2) {
+      this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
       this.hideDimensionTooltips();
       return;
     }
 
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    this.drawShapeMarchingAnts(ctx, state.currentBounds, 'rectangle', zoom, panX, panY);
+    this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
+  }
 
-    if (state.type === 'selecting') {
-      // Draw previous selection if in add/subtract mode
-      const prevSelection = selectionStore.previousSelectionForVisual.value;
-      if (prevSelection) {
-        if (prevSelection.shape === 'freeform' && prevSelection.mask) {
-          this.drawFreeformMarchingAnts(ctx, prevSelection.bounds, prevSelection.mask, zoom, panX, panY);
-        } else {
-          this.drawShapeMarchingAnts(ctx, prevSelection.bounds, prevSelection.shape, zoom, panX, panY);
-        }
-      }
+  private drawSelectedFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'selected' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    this.drawSelectedState(ctx, state, zoom, panX, panY);
 
-      // Draw preview path if available (lasso tools), otherwise fall back to bounding box
-      if (state.previewPath && state.previewPath.length >= 2) {
-        this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
-        this.hideDimensionTooltips(); // No tooltips for freeform/lasso
-      } else {
-        this.drawShapeMarchingAnts(ctx, state.currentBounds, 'rectangle', zoom, panX, panY);
-        // Show dimension tooltips for rectangular selection during drag
-        this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
-      }
-    } else if (state.type === 'selected') {
-      this.drawSelectedState(ctx, state, zoom, panX, panY);
-      // Show dimension tooltips only for rectangle shape
-      if (state.shape === 'rectangle') {
-        this.updateDimensionTooltips(state.bounds, zoom, panX, panY);
-      } else {
-        this.hideDimensionTooltips();
-      }
-    } else if (state.type === 'floating') {
-      // Draw floating pixels
-      this.drawFloatingPixels(ctx, state, zoom, panX, panY);
-
-      // Draw marching ants around floating selection
-      this.drawFloatingState(ctx, state, zoom, panX, panY);
-      this.hideDimensionTooltips(); // No tooltips when floating
-    } else if (state.type === 'transforming') {
-      // Draw the preview pixels (scaled + rotated)
-      this.drawTransformingPixels(ctx, state, zoom, panX, panY);
-
-      // Draw scaled and rotated marching ants
-      this.drawScaledRotatedMarchingAnts(ctx, state, zoom, panX, panY);
-
-      // Note: Rotation angle is shown as tooltip on the rotation handle
-      // Scale info is shown in the context bar
-
-      this.hideDimensionTooltips(); // No tooltips when transforming
+    if (state.shape === 'rectangle') {
+      this.updateDimensionTooltips(state.bounds, zoom, panX, panY);
+      return;
     }
+
+    this.hideDimensionTooltips();
+  }
+
+  private drawFloatingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'floating' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    this.drawFloatingPixels(ctx, state, zoom, panX, panY);
+    this.drawFloatingState(ctx, state, zoom, panX, panY);
+    this.hideDimensionTooltips();
+  }
+
+  private drawTransformingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'transforming' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    this.drawTransformingPixels(ctx, state, zoom, panX, panY);
+    this.drawScaledRotatedMarchingAnts(ctx, state, zoom, panX, panY);
+    this.hideDimensionTooltips();
+  }
+
+  private drawSelectionOutline(
+    ctx: CanvasRenderingContext2D,
+    selection: SelectionVisual,
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    if (selection.shape === 'freeform' && selection.mask) {
+      this.drawFreeformMarchingAnts(ctx, selection.bounds, selection.mask, zoom, panX, panY);
+      return;
+    }
+
+    this.drawShapeMarchingAnts(ctx, selection.bounds, selection.shape, zoom, panX, panY);
   }
 
   private drawTransformingPixels(

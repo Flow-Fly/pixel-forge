@@ -10,6 +10,15 @@ import { PencilTool } from '../../tools/pencil-tool';
 import { EraserTool } from '../../tools/eraser-tool';
 import type { BrushImageData } from '../../types/brush';
 
+type BrushCursorFrame = {
+  ctx: CanvasRenderingContext2D;
+  tool: 'pencil' | 'eraser';
+  zoom: number;
+  panX: number;
+  panY: number;
+  color: string;
+};
+
 @customElement('pf-brush-cursor-overlay')
 export class PFBrushCursorOverlay extends CanvasOverlay {
   static styles = css`
@@ -146,58 +155,114 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
   }
 
   private draw() {
-    if (!this.cursorPos && !this.linePreview) return;
+    const frame = this.getBrushCursorFrame();
+    if (!frame) return;
 
-    const ctx = this.prepareFrame();
-    if (!ctx) return;
+    this.drawLinePreviewFrame(frame);
+    this.drawCursorPreviewFrame(frame);
+  }
 
-    // Check if we should show preview (only pencil/eraser)
+  private getBrushCursorFrame(): BrushCursorFrame | null {
+    const ctx = this.getCursorFrameContext();
+    const tool = this.getDrawableTool();
+    if (!ctx || !tool) return null;
+
+    return this.createBrushCursorFrame(ctx, tool);
+  }
+
+  private getCursorFrameContext(): CanvasRenderingContext2D | null {
+    if (!this.hasCursorFrameContent()) return null;
+    if (this.isViewportPanning()) return null;
+
+    return this.prepareFrame();
+  }
+
+  private hasCursorFrameContent(): boolean {
+    return Boolean(this.cursorPos || this.linePreview);
+  }
+
+  private isViewportPanning(): boolean {
+    return viewportStore.isSpacebarDown.value || viewportStore.isPanning.value;
+  }
+
+  private getDrawableTool(): 'pencil' | 'eraser' | null {
     const tool = toolStore.activeTool.value;
-    if (tool !== 'pencil' && tool !== 'eraser') return;
+    return tool === 'pencil' || tool === 'eraser' ? tool : null;
+  }
 
-    // Check if in pan mode
-    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) return;
+  private createBrushCursorFrame(ctx: CanvasRenderingContext2D, tool: 'pencil' | 'eraser'): BrushCursorFrame {
+    return {
+      ctx,
+      tool,
+      zoom: viewportStore.zoom.value,
+      panX: viewportStore.panX.value,
+      panY: viewportStore.panY.value,
+      color: tool === 'eraser' ? colorStore.secondaryColor.value : colorStore.primaryColor.value,
+    };
+  }
 
-    // Get viewport transform
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+  private drawLinePreviewFrame(frame: BrushCursorFrame) {
+    if (!this.linePreview) return;
 
-    // Get color based on tool
-    const color = tool === 'eraser'
-      ? colorStore.secondaryColor.value
-      : colorStore.primaryColor.value;
+    this.drawLinePreview(
+      frame.ctx,
+      this.linePreview.start,
+      this.linePreview.end,
+      frame.zoom,
+      frame.panX,
+      frame.panY,
+      frame.color
+    );
+  }
 
-    // Draw ghost line preview for shift+click
-    if (this.linePreview) {
-      this.drawLinePreview(ctx, this.linePreview.start, this.linePreview.end, zoom, panX, panY, color);
+  private drawCursorPreviewFrame(frame: BrushCursorFrame) {
+    if (!this.cursorPos) return;
+
+    const customBrushImage = this.getCustomBrushImage(frame.tool);
+    if (customBrushImage) {
+      this.drawCustomBrushAtCursor(frame, customBrushImage);
+      return;
     }
 
-    // Draw brush cursor if we have cursor position
-    if (this.cursorPos) {
-      const brush = brushStore.activeBrush.value;
+    this.drawSquareBrushAtCursor(frame);
+  }
 
-      // Check if using a custom brush with image data (only for pencil tool)
-      if (tool === 'pencil' && brush.type === 'custom' && brush.imageData) {
-        this.drawCustomBrush(ctx, this.cursorPos.x, this.cursorPos.y, brush.imageData, zoom, panX, panY, color);
-      } else {
-        // Standard square brush preview
-        // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore
-        const size = tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
+  private getCustomBrushImage(tool: 'pencil' | 'eraser'): BrushImageData | null {
+    if (tool !== 'pencil') return null;
 
-        // Calculate screen position - always center brush on cursor
-        const halfSize = Math.floor(size / 2);
-        const screenX = (this.cursorPos.x - halfSize) * zoom + panX;
-        const screenY = (this.cursorPos.y - halfSize) * zoom + panY;
-        const screenSize = size * zoom;
+    const brush = brushStore.activeBrush.value;
+    if (brush.type !== 'custom') return null;
 
-        // Minimum visible size for outline
-        const minOutlineSize = Math.max(screenSize, 3);
+    return brush.imageData ?? null;
+  }
 
-        // Draw the brush preview (always square)
-        this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
-      }
-    }
+  private drawCustomBrushAtCursor(frame: BrushCursorFrame, imageData: BrushImageData) {
+    if (!this.cursorPos) return;
+
+    this.drawCustomBrush(
+      frame.ctx,
+      this.cursorPos.x,
+      this.cursorPos.y,
+      imageData,
+      frame.zoom,
+      frame.panX,
+      frame.panY,
+      frame.color
+    );
+  }
+
+  private drawSquareBrushAtCursor(frame: BrushCursorFrame) {
+    if (!this.cursorPos) return;
+
+    // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore.
+    const size = frame.tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
+    const halfSize = Math.floor(size / 2);
+    const screenX = (this.cursorPos.x - halfSize) * frame.zoom + frame.panX;
+    const screenY = (this.cursorPos.y - halfSize) * frame.zoom + frame.panY;
+    const screenSize = size * frame.zoom;
+    const minOutlineSize = Math.max(screenSize, 3);
+
+    this.drawSquareBrush(frame.ctx, screenX, screenY, screenSize, minOutlineSize, frame.color);
   }
 
   private drawLinePreview(
