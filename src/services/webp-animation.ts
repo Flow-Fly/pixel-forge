@@ -13,6 +13,11 @@ interface FrameData {
   duration: number; // milliseconds
 }
 
+interface FrameChunk {
+  data: Uint8Array;
+  duration: number;
+}
+
 /**
  * Convert canvas to WebP blob.
  */
@@ -96,29 +101,17 @@ function writeUint24LE(buffer: Uint8Array, offset: number, value: number) {
   buffer[offset + 2] = (value >> 16) & 0xff;
 }
 
-/**
- * Create an animated WebP file from multiple frames.
- */
-async function createAnimatedWebP(
-  frames: FrameData[],
-  loopCount = 0 // 0 = infinite
-): Promise<Blob> {
-  if (frames.length === 0) {
-    throw new Error('No frames provided');
-  }
-
-  const width = frames[0].canvas.width;
-  const height = frames[0].canvas.height;
-
-  // Convert all frames to WebP and extract bitstreams
-  const frameChunks: Array<{ data: Uint8Array; duration: number }> = [];
-
+async function createFrameChunks(frames: FrameData[]): Promise<FrameChunk[]> {
+  const frameChunks: FrameChunk[] = [];
   for (const frame of frames) {
     const blob = await canvasToWebP(frame.canvas);
     const { data } = await extractWebPBitstream(blob);
     frameChunks.push({ data, duration: frame.duration });
   }
+  return frameChunks;
+}
 
+function getAnimatedWebPSize(frameChunks: FrameChunk[]) {
   // Calculate total size
   // RIFF header: 12 bytes
   // VP8X chunk: 18 bytes (8 header + 10 data)
@@ -129,18 +122,20 @@ async function createAnimatedWebP(
     totalSize += 24 + chunk.data.length;
     if (chunk.data.length % 2 !== 0) totalSize++; // Padding
   }
+  return totalSize;
+}
 
-  const buffer = new Uint8Array(totalSize);
-  let offset = 0;
-
+function writeRiffHeader(buffer: Uint8Array, offset: number, totalSize: number) {
   // RIFF header
   buffer.set([0x52, 0x49, 0x46, 0x46], offset); // "RIFF"
   offset += 4;
   writeUint32LE(buffer, offset, totalSize - 8); // File size minus 8
   offset += 4;
   buffer.set([0x57, 0x45, 0x42, 0x50], offset); // "WEBP"
-  offset += 4;
+  return offset + 4;
+}
 
+function writeVp8xChunk(buffer: Uint8Array, offset: number, width: number, height: number) {
   // VP8X chunk (extended features)
   buffer.set([0x56, 0x50, 0x38, 0x58], offset); // "VP8X"
   offset += 4;
@@ -158,7 +153,10 @@ async function createAnimatedWebP(
   // Canvas height - 1 (24-bit)
   writeUint24LE(buffer, offset, height - 1);
   offset += 3;
+  return offset;
+}
 
+function writeAnimChunk(buffer: Uint8Array, offset: number, loopCount: number) {
   // ANIM chunk (animation parameters)
   buffer.set([0x41, 0x4e, 0x49, 0x4d], offset); // "ANIM"
   offset += 4;
@@ -173,51 +171,82 @@ async function createAnimatedWebP(
   buffer[offset] = loopCount & 0xff;
   buffer[offset + 1] = (loopCount >> 8) & 0xff;
   offset += 2;
+  return offset;
+}
 
-  // ANMF chunks (one per frame)
-  for (const chunk of frameChunks) {
-    buffer.set([0x41, 0x4e, 0x4d, 0x46], offset); // "ANMF"
-    offset += 4;
+function writeAnmfHeader(buffer: Uint8Array, offset: number, chunk: FrameChunk, width: number, height: number) {
+  buffer.set([0x41, 0x4e, 0x4d, 0x46], offset); // "ANMF"
+  offset += 4;
 
-    // Chunk size: 16 bytes header + frame data
-    const anmfDataSize = 16 + chunk.data.length;
-    writeUint32LE(buffer, offset, anmfDataSize);
-    offset += 4;
+  // Chunk size: 16 bytes header + frame data
+  const anmfDataSize = 16 + chunk.data.length;
+  writeUint32LE(buffer, offset, anmfDataSize);
+  offset += 4;
 
-    // Frame X position (24-bit, divided by 2)
-    writeUint24LE(buffer, offset, 0);
-    offset += 3;
+  // Frame X/Y positions are 24-bit integers divided by 2.
+  writeUint24LE(buffer, offset, 0);
+  offset += 3;
+  writeUint24LE(buffer, offset, 0);
+  offset += 3;
 
-    // Frame Y position (24-bit, divided by 2)
-    writeUint24LE(buffer, offset, 0);
-    offset += 3;
+  writeUint24LE(buffer, offset, width - 1);
+  offset += 3;
+  writeUint24LE(buffer, offset, height - 1);
+  offset += 3;
 
-    // Frame width - 1 (24-bit)
-    writeUint24LE(buffer, offset, width - 1);
-    offset += 3;
+  // Duration (24-bit, in milliseconds)
+  writeUint24LE(buffer, offset, chunk.duration);
+  offset += 3;
 
-    // Frame height - 1 (24-bit)
-    writeUint24LE(buffer, offset, height - 1);
-    offset += 3;
+  // Flags: bit 1 = blending (0 = use alpha), bit 0 = disposal (0 = don't dispose)
+  buffer[offset] = 0x02; // Blend with alpha
+  return offset + 1;
+}
 
-    // Duration (24-bit, in milliseconds)
-    writeUint24LE(buffer, offset, chunk.duration);
-    offset += 3;
+function writeFrameChunk(buffer: Uint8Array, offset: number, chunk: FrameChunk, width: number, height: number) {
+  offset = writeAnmfHeader(buffer, offset, chunk, width, height);
 
-    // Flags: bit 1 = blending (0 = use alpha), bit 0 = disposal (0 = don't dispose)
-    buffer[offset] = 0x02; // Blend with alpha
-    offset += 1;
+  // Frame data (VP8/VP8L chunk including header)
+  buffer.set(chunk.data, offset);
+  offset += chunk.data.length;
 
-    // Frame data (VP8/VP8L chunk including header)
-    buffer.set(chunk.data, offset);
-    offset += chunk.data.length;
-
-    // Padding if odd size
-    if (chunk.data.length % 2 !== 0) {
-      buffer[offset] = 0;
-      offset++;
-    }
+  // Padding if odd size
+  if (chunk.data.length % 2 !== 0) {
+    buffer[offset] = 0;
+    offset++;
   }
+
+  return offset;
+}
+
+function writeFrameChunks(buffer: Uint8Array, offset: number, frameChunks: FrameChunk[], width: number, height: number) {
+  for (const chunk of frameChunks) {
+    offset = writeFrameChunk(buffer, offset, chunk, width, height);
+  }
+  return offset;
+}
+
+/**
+ * Create an animated WebP file from multiple frames.
+ */
+async function createAnimatedWebP(
+  frames: FrameData[],
+  loopCount = 0 // 0 = infinite
+): Promise<Blob> {
+  if (frames.length === 0) {
+    throw new Error('No frames provided');
+  }
+
+  const width = frames[0].canvas.width;
+  const height = frames[0].canvas.height;
+  const frameChunks = await createFrameChunks(frames);
+  const totalSize = getAnimatedWebPSize(frameChunks);
+
+  const buffer = new Uint8Array(totalSize);
+  let offset = writeRiffHeader(buffer, 0, totalSize);
+  offset = writeVp8xChunk(buffer, offset, width, height);
+  offset = writeAnimChunk(buffer, offset, loopCount);
+  writeFrameChunks(buffer, offset, frameChunks, width, height);
 
   return new Blob([buffer], { type: 'image/webp' });
 }
