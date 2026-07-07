@@ -61,9 +61,52 @@ export abstract class AnimatedCanvasOverlay extends BaseComponent {
     return ctx;
   }
 
+  /** Convert canvas-space bounds to screen-space pixels. */
+  protected toScreenRect(
+    bounds: { x: number; y: number; width: number; height: number },
+    zoom: number,
+    panX: number,
+    panY: number
+  ): { x: number; y: number; width: number; height: number } {
+    return {
+      x: bounds.x * zoom + panX,
+      y: bounds.y * zoom + panY,
+      width: bounds.width * zoom,
+      height: bounds.height * zoom,
+    };
+  }
+
   /**
-   * Stroke an animated dashed rectangle (white dashes with black
-   * offset dashes) at screen coordinates.
+   * Stroke the same geometry twice — white dashes, then black dashes
+   * offset by half the dash period — producing the marching-ants effect.
+   * Handles save/restore and dash setup. `setup` runs after save so extra
+   * transforms (e.g. rotation) apply to both strokes and are restored.
+   */
+  protected strokeMarchingAnts(
+    ctx: CanvasRenderingContext2D,
+    strokeGeometry: (ctx: CanvasRenderingContext2D) => void,
+    setup?: (ctx: CanvasRenderingContext2D) => void
+  ) {
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    setup?.(ctx);
+
+    // White dashes
+    ctx.strokeStyle = 'white';
+    ctx.lineDashOffset = -this.dashOffset;
+    strokeGeometry(ctx);
+
+    // Black dashes (offset by 4 to fill gaps)
+    ctx.strokeStyle = 'black';
+    ctx.lineDashOffset = -this.dashOffset + 4;
+    strokeGeometry(ctx);
+
+    ctx.restore();
+  }
+
+  /**
+   * Stroke an animated dashed rectangle at screen coordinates.
    */
   protected strokeMarchingAntsRect(
     ctx: CanvasRenderingContext2D,
@@ -72,31 +115,14 @@ export abstract class AnimatedCanvasOverlay extends BaseComponent {
     screenWidth: number,
     screenHeight: number
   ) {
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.strokeRect(
-      Math.round(screenX) + 0.5,
-      Math.round(screenY) + 0.5,
-      Math.round(screenWidth) - 1,
-      Math.round(screenHeight) - 1
+    this.strokeMarchingAnts(ctx, (c) =>
+      c.strokeRect(
+        Math.round(screenX) + 0.5,
+        Math.round(screenY) + 0.5,
+        Math.round(screenWidth) - 1,
+        Math.round(screenHeight) - 1
+      )
     );
-
-    // Black dashes (offset by 4 to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.strokeRect(
-      Math.round(screenX) + 0.5,
-      Math.round(screenY) + 0.5,
-      Math.round(screenWidth) - 1,
-      Math.round(screenHeight) - 1
-    );
-
-    ctx.restore();
   }
 
   private initCanvas() {

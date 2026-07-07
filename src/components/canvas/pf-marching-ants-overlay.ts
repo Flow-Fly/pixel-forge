@@ -41,13 +41,10 @@ export class PFMarchingAntsOverlay extends AnimatedCanvasOverlay {
     const panX = viewportStore.panX.value;
     const panY = viewportStore.panY.value;
 
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
+    const screen = this.toScreenRect(bounds, zoom, panX, panY);
 
     // Draw marching ants (white dashes with black offset dashes)
-    this.strokeMarchingAntsRect(ctx, screenX, screenY, screenWidth, screenHeight);
+    this.strokeMarchingAntsRect(ctx, screen.x, screen.y, screen.width, screen.height);
   }
 
   render() {

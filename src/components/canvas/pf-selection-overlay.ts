@@ -200,18 +200,15 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     panX: number,
     panY: number
   ) {
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
+    const screen = this.toScreenRect(bounds, zoom, panX, panY);
 
     // Width tooltip: centered on top edge, offset above
-    this.widthTooltipX = screenX + screenWidth / 2;
-    this.widthTooltipY = screenY - 8;
+    this.widthTooltipX = screen.x + screen.width / 2;
+    this.widthTooltipY = screen.y - 8;
 
     // Height tooltip: centered on left edge, offset to the left
-    this.heightTooltipX = screenX - 8;
-    this.heightTooltipY = screenY + screenHeight / 2;
+    this.heightTooltipX = screen.x - 8;
+    this.heightTooltipY = screen.y + screen.height / 2;
 
     this.selectionWidth = bounds.width;
     this.selectionHeight = bounds.height;
@@ -232,12 +229,8 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     panX: number,
     panY: number
   ) {
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
-
-    this.strokeMarchingAntsRect(ctx, screenX, screenY, screenWidth, screenHeight);
+    const screen = this.toScreenRect(bounds, zoom, panX, panY);
+    this.strokeMarchingAntsRect(ctx, screen.x, screen.y, screen.width, screen.height);
   }
 
   private drawEllipseMarchingAnts(
@@ -247,35 +240,17 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     panX: number,
     panY: number
   ) {
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
+    const screen = this.toScreenRect(bounds, zoom, panX, panY);
+    const cx = screen.x + screen.width / 2;
+    const cy = screen.y + screen.height / 2;
+    const rx = screen.width / 2 - 0.5;
+    const ry = screen.height / 2 - 0.5;
 
-    const cx = screenX + screenWidth / 2;
-    const cy = screenY + screenHeight / 2;
-    const rx = screenWidth / 2 - 0.5;
-    const ry = screenHeight / 2 - 0.5;
-
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Black dashes
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.restore();
+    this.strokeMarchingAnts(ctx, (c) => {
+      c.beginPath();
+      c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      c.stroke();
+    });
   }
 
   /**
@@ -306,25 +281,15 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     const halfW = screenWidth / 2 - 0.5;
     const halfH = screenHeight / 2 - 0.5;
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // Translate to center and rotate
-    ctx.translate(centerX, centerY);
-    ctx.rotate((rotation * Math.PI) / 180);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1);
-
-    // Black dashes (offset to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1);
-
-    ctx.restore();
+    this.strokeMarchingAnts(
+      ctx,
+      (c) => c.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1),
+      (c) => {
+        // Translate to center and rotate
+        c.translate(centerX, centerY);
+        c.rotate((rotation * Math.PI) / 180);
+      }
+    );
   }
 
   private drawFreeformMarchingAnts(
@@ -351,48 +316,35 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
       return;
     }
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
     // Draw each path
     for (const path of this.cachedOutlinePaths) {
       if (path.length < 2) continue;
-
-      // White dashes
-      ctx.strokeStyle = 'white';
-      ctx.lineDashOffset = -this.dashOffset;
-      ctx.beginPath();
-      ctx.moveTo(
-        Math.round(path[0].x * zoom + panX) + 0.5,
-        Math.round(path[0].y * zoom + panY) + 0.5
+      this.strokeMarchingAnts(ctx, (c) =>
+        this.strokePath(c, path, zoom, panX, panY)
       );
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(
-          Math.round(path[i].x * zoom + panX) + 0.5,
-          Math.round(path[i].y * zoom + panY) + 0.5
-        );
-      }
-      ctx.stroke();
-
-      // Black dashes
-      ctx.strokeStyle = 'black';
-      ctx.lineDashOffset = -this.dashOffset + 4;
-      ctx.beginPath();
-      ctx.moveTo(
-        Math.round(path[0].x * zoom + panX) + 0.5,
-        Math.round(path[0].y * zoom + panY) + 0.5
-      );
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(
-          Math.round(path[i].x * zoom + panX) + 0.5,
-          Math.round(path[i].y * zoom + panY) + 0.5
-        );
-      }
-      ctx.stroke();
     }
+  }
 
-    ctx.restore();
+  /** Stroke a polyline in screen space with pixel-aligned coordinates. */
+  private strokePath(
+    ctx: CanvasRenderingContext2D,
+    path: { x: number; y: number }[],
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    ctx.beginPath();
+    ctx.moveTo(
+      Math.round(path[0].x * zoom + panX) + 0.5,
+      Math.round(path[0].y * zoom + panY) + 0.5
+    );
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(
+        Math.round(path[i].x * zoom + panX) + 0.5,
+        Math.round(path[i].y * zoom + panY) + 0.5
+      );
+    }
+    ctx.stroke();
   }
 
   /**
@@ -408,43 +360,9 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   ) {
     if (path.length < 2) return;
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.beginPath();
-    ctx.moveTo(
-      Math.round(path[0].x * zoom + panX) + 0.5,
-      Math.round(path[0].y * zoom + panY) + 0.5
+    this.strokeMarchingAnts(ctx, (c) =>
+      this.strokePath(c, path, zoom, panX, panY)
     );
-    for (let i = 1; i < path.length; i++) {
-      ctx.lineTo(
-        Math.round(path[i].x * zoom + panX) + 0.5,
-        Math.round(path[i].y * zoom + panY) + 0.5
-      );
-    }
-    ctx.stroke();
-
-    // Black dashes (offset to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.beginPath();
-    ctx.moveTo(
-      Math.round(path[0].x * zoom + panX) + 0.5,
-      Math.round(path[0].y * zoom + panY) + 0.5
-    );
-    for (let i = 1; i < path.length; i++) {
-      ctx.lineTo(
-        Math.round(path[i].x * zoom + panX) + 0.5,
-        Math.round(path[i].y * zoom + panY) + 0.5
-      );
-    }
-    ctx.stroke();
-
-    ctx.restore();
   }
 
   private drawFloatingPixels(
