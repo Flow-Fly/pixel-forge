@@ -7,7 +7,7 @@
 /**
  * Detect if the user is on macOS
  */
-export const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC");
+const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC");
 
 /**
  * Primary modifier key for the platform
@@ -19,7 +19,7 @@ export const MOD_PRIMARY = isMac ? "meta" : "ctrl";
 /**
  * Platform-specific key labels
  */
-export const keyLabels = {
+const keyLabels = {
   mod: isMac ? "\u2318" : "Ctrl",
   alt: isMac ? "\u2325" : "Alt",
   shift: "\u21e7",
@@ -98,14 +98,3 @@ export function formatShortcut(shortcut: string): string {
   return formatted.join("+");
 }
 
-/**
- * Format a shortcut for display with the action
- *
- * @param key - The shortcut key
- * @param action - The action description
- * @returns Formatted string like '⇧ Line' or 'Shift: Line'
- */
-export function formatShortcutWithAction(key: string, action: string): string {
-  const formattedKey = formatShortcut(key);
-  return `${formattedKey}: ${action}`;
-}

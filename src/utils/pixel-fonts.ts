@@ -211,7 +211,7 @@ const font5x7: PixelFont = {
 /**
  * All built-in pixel fonts.
  */
-export const builtInFonts: PixelFont[] = [font3x5, font5x7];
+const builtInFonts: PixelFont[] = [font3x5, font5x7];
 
 /**
  * Default font ID.

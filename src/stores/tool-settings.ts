@@ -68,7 +68,7 @@ export const magicWandSettings = {
 /**
  * Shape tool settings
  */
-export type ShapeFillColor = "foreground" | "background";
+type ShapeFillColor = "foreground" | "background";
 
 export const shapeSettings = {
   fill: signal(false),

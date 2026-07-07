@@ -233,57 +233,6 @@ function downscaleToSize(
 }
 
 /**
- * Scale a selection mask using nearest-neighbor interpolation.
- *
- * @param mask - Source mask (Uint8Array, 0 = not selected, 255 = selected)
- * @param width - Original mask width
- * @param height - Original mask height
- * @param scaleX - Horizontal scale factor
- * @param scaleY - Vertical scale factor
- * @returns Object with scaled mask and new dimensions
- */
-export function scaleMask(
-  mask: Uint8Array,
-  width: number,
-  height: number,
-  scaleX: number,
-  scaleY: number
-): { mask: Uint8Array; width: number; height: number } {
-  const dstWidth = Math.max(1, Math.round(width * scaleX));
-  const dstHeight = Math.max(1, Math.round(height * scaleY));
-
-  // If no change, return copy
-  if (dstWidth === width && dstHeight === height) {
-    return {
-      mask: new Uint8Array(mask),
-      width,
-      height,
-    };
-  }
-
-  const result = new Uint8Array(dstWidth * dstHeight);
-
-  const invScaleX = width / dstWidth;
-  const invScaleY = height / dstHeight;
-
-  for (let dstY = 0; dstY < dstHeight; dstY++) {
-    const srcY = Math.min(Math.floor(dstY * invScaleY), height - 1);
-
-    for (let dstX = 0; dstX < dstWidth; dstX++) {
-      const srcX = Math.min(Math.floor(dstX * invScaleX), width - 1);
-
-      result[dstY * dstWidth + dstX] = mask[srcY * width + srcX];
-    }
-  }
-
-  return {
-    mask: result,
-    width: dstWidth,
-    height: dstHeight,
-  };
-}
-
-/**
  * Calculate scaled bounds, keeping the center position fixed.
  *
  * @param originalBounds - Original selection bounds
@@ -311,42 +260,3 @@ export function calculateScaledBounds(
   };
 }
 
-/**
- * Calculate scale factors from original and target dimensions.
- *
- * @param originalWidth - Original width
- * @param originalHeight - Original height
- * @param targetWidth - Desired width
- * @param targetHeight - Desired height
- * @returns Scale factors { x, y }
- */
-export function calculateScaleFactors(
-  originalWidth: number,
-  originalHeight: number,
-  targetWidth: number,
-  targetHeight: number
-): { x: number; y: number } {
-  return {
-    x: targetWidth / originalWidth,
-    y: targetHeight / originalHeight,
-  };
-}
-
-/**
- * Calculate uniform scale factor to maintain aspect ratio.
- * Returns the scale factor that fits both dimensions.
- *
- * @param scaleX - Desired X scale
- * @param scaleY - Desired Y scale
- * @param mode - 'max' uses larger scale, 'min' uses smaller scale
- * @returns Uniform scale factor
- */
-export function uniformScale(
-  scaleX: number,
-  scaleY: number,
-  mode: 'max' | 'min' = 'max'
-): number {
-  return mode === 'max'
-    ? Math.max(scaleX, scaleY)
-    : Math.min(scaleX, scaleY);
-}

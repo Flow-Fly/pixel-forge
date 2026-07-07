@@ -13,115 +13,116 @@ import {
   gradientSettings,
   textSettings,
   toolSizes,
-  type EraserMode,
 } from "../../../stores/tool-settings";
 import type { ToolOption } from "../../../types/tool-meta";
 
 export type StoreType = ToolOption["store"];
 
 /**
+ * Options backed by a plain signal, keyed by store and option key.
+ * The brush and eraser stores need special handling and are not listed here.
+ */
+const signalOptions: Partial<Record<StoreType, Record<string, { value: unknown }>>> = {
+  magicWand: {
+    tolerance: magicWandSettings.tolerance,
+    contiguous: magicWandSettings.contiguous,
+    diagonal: magicWandSettings.diagonal,
+  },
+  shape: {
+    fill: shapeSettings.fill,
+    thickness: shapeSettings.thickness,
+  },
+  fill: {
+    contiguous: fillSettings.contiguous,
+  },
+  gradient: {
+    type: gradientSettings.type,
+  },
+  toolSizes: {
+    pencil: toolSizes.pencil,
+    eraser: toolSizes.eraser,
+  },
+  text: {
+    font: textSettings.font,
+    color: textSettings.color,
+  },
+};
+
+/** Eraser mode lives in eraserSettings; everything else brush-backed. */
+function isBrushBacked(store: StoreType): store is "brush" | "eraser" {
+  return store === "brush" || store === "eraser";
+}
+
+function readActiveBrushValue(storeKey: string): unknown {
+  return brushStore.activeBrush.value[storeKey as keyof typeof brushStore.activeBrush.value];
+}
+
+function getBrushBackedValue(store: "brush" | "eraser", storeKey: string): unknown {
+  return store === "eraser"
+    ? getEraserBackedValue(storeKey)
+    : getBrushOptionValue(storeKey);
+}
+
+function getEraserBackedValue(storeKey: string): unknown {
+  // Eraser mode has its own signal; size/pixelPerfect are brush-backed
+  return storeKey === "mode" ? eraserSettings.mode.value : readActiveBrushValue(storeKey);
+}
+
+function getBrushOptionValue(storeKey: string): unknown {
+  if (storeKey === "spacing") {
+    // Convert BrushSpacing to string for select component
+    const spacing = brushStore.activeBrush.value.spacing;
+    return spacing === "match" ? "match" : String(spacing);
+  }
+  return readActiveBrushValue(storeKey);
+}
+
+function setBrushBackedValue(store: "brush" | "eraser", storeKey: string, value: unknown): void {
+  if (store === "eraser") {
+    setEraserBackedValue(storeKey, value);
+    return;
+  }
+  setBrushOptionValue(storeKey, value);
+}
+
+function setEraserBackedValue(storeKey: string, value: unknown): void {
+  if (storeKey === "mode") {
+    eraserSettings.mode.value = value as typeof eraserSettings.mode.value;
+    return;
+  }
+  brushStore.updateActiveBrushSettings({ [storeKey]: value });
+}
+
+function setBrushOptionValue(storeKey: string, value: unknown): void {
+  if (storeKey === "spacing") {
+    // Convert string to BrushSpacing
+    const spacing = value === "match" ? "match" : parseInt(value as string, 10);
+    brushStore.updateActiveBrushSettings({ spacing });
+    return;
+  }
+  brushStore.updateActiveBrushSettings({ [storeKey]: value });
+}
+
+/**
  * Get the current value for a tool option from its store
  */
 export function getOptionValue(store: StoreType, storeKey: string): unknown {
-  switch (store) {
-    case "brush":
-      if (storeKey === "spacing") {
-        // Convert BrushSpacing to string for select component
-        const spacing = brushStore.activeBrush.value.spacing;
-        return spacing === "match" ? "match" : String(spacing);
-      }
-      return brushStore.activeBrush.value[storeKey as keyof typeof brushStore.activeBrush.value];
-
-    case "magicWand":
-      if (storeKey === "tolerance") return magicWandSettings.tolerance.value;
-      if (storeKey === "contiguous") return magicWandSettings.contiguous.value;
-      if (storeKey === "diagonal") return magicWandSettings.diagonal.value;
-      return undefined;
-
-    case "eraser":
-      if (storeKey === "mode") return eraserSettings.mode.value;
-      // Eraser also uses brush store for size/pixelPerfect
-      return brushStore.activeBrush.value[storeKey as keyof typeof brushStore.activeBrush.value];
-
-    case "shape":
-      if (storeKey === "fill") return shapeSettings.fill.value;
-      if (storeKey === "thickness") return shapeSettings.thickness.value;
-      return undefined;
-
-    case "fill":
-      if (storeKey === "contiguous") return fillSettings.contiguous.value;
-      return undefined;
-
-    case "gradient":
-      if (storeKey === "type") return gradientSettings.type.value;
-      return undefined;
-
-    case "toolSizes":
-      if (storeKey === "pencil") return toolSizes.pencil.value;
-      if (storeKey === "eraser") return toolSizes.eraser.value;
-      return undefined;
-
-    case "text":
-      if (storeKey === "font") return textSettings.font.value;
-      if (storeKey === "color") return textSettings.color.value;
-      return undefined;
-
-    default:
-      return undefined;
+  if (isBrushBacked(store)) {
+    return getBrushBackedValue(store, storeKey);
   }
+  return signalOptions[store]?.[storeKey]?.value;
 }
 
 /**
  * Set a value for a tool option in its store
  */
 export function setOptionValue(store: StoreType, storeKey: string, value: unknown): void {
-  switch (store) {
-    case "brush":
-      if (storeKey === "spacing") {
-        // Convert string to BrushSpacing
-        const spacing = value === "match" ? "match" : parseInt(value as string, 10);
-        brushStore.updateActiveBrushSettings({ spacing });
-      } else {
-        brushStore.updateActiveBrushSettings({ [storeKey]: value });
-      }
-      break;
-
-    case "magicWand":
-      if (storeKey === "tolerance") magicWandSettings.tolerance.value = value as number;
-      else if (storeKey === "contiguous") magicWandSettings.contiguous.value = value as boolean;
-      else if (storeKey === "diagonal") magicWandSettings.diagonal.value = value as boolean;
-      break;
-
-    case "eraser":
-      if (storeKey === "mode") {
-        eraserSettings.mode.value = value as EraserMode;
-      } else {
-        // Eraser also uses brush store for size/pixelPerfect
-        brushStore.updateActiveBrushSettings({ [storeKey]: value });
-      }
-      break;
-
-    case "shape":
-      if (storeKey === "fill") shapeSettings.fill.value = value as boolean;
-      else if (storeKey === "thickness") shapeSettings.thickness.value = value as number;
-      break;
-
-    case "fill":
-      if (storeKey === "contiguous") fillSettings.contiguous.value = value as boolean;
-      break;
-
-    case "gradient":
-      if (storeKey === "type") gradientSettings.type.value = value as "linear" | "radial";
-      break;
-
-    case "toolSizes":
-      if (storeKey === "pencil") toolSizes.pencil.value = value as number;
-      else if (storeKey === "eraser") toolSizes.eraser.value = value as number;
-      break;
-
-    case "text":
-      if (storeKey === "font") textSettings.font.value = value as string;
-      else if (storeKey === "color") textSettings.color.value = value as string;
-      break;
+  if (isBrushBacked(store)) {
+    setBrushBackedValue(store, storeKey, value);
+    return;
+  }
+  const option = signalOptions[store]?.[storeKey];
+  if (option) {
+    option.value = value;
   }
 }

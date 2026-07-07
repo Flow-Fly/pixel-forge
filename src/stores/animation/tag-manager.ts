@@ -14,7 +14,7 @@ import { log } from '../../utils/log';
  * Check if a range overlaps with any existing tags.
  * Optionally exclude a tag by ID (for updates).
  */
-export function hasTagOverlap(
+function hasTagOverlap(
   tags: FrameTag[],
   startIndex: number,
   endIndex: number,

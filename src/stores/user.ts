@@ -1,6 +1,6 @@
 import { signal } from '../core/signal';
 
-export interface User {
+interface User {
   id: string;
   name: string;
 }

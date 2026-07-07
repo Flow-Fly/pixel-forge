@@ -8,7 +8,7 @@
 import type { Frame, FrameTag } from '../../types/animation';
 import type { PlaybackMode } from './types';
 
-export interface PlaybackState {
+interface PlaybackState {
   isPlaying: boolean;
   fps: number;
   playbackMode: PlaybackMode;

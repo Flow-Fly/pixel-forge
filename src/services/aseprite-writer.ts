@@ -159,7 +159,7 @@ function createCelChunk(
 /**
  * Export current project as Aseprite file.
  */
-export function writeAseFile(): ArrayBuffer {
+function writeAseFile(): ArrayBuffer {
   const layers = layerStore.layers.value;
   const frames = animationStore.frames.value;
   const width = projectStore.width.value;

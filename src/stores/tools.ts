@@ -21,7 +21,7 @@ export type ToolType =
   | 'hand'
   | 'zoom';
 
-export interface CanvasTransform {
+interface CanvasTransform {
   screenX: number;      // Top-left position on screen
   screenY: number;
   zoom: number;         // Canvas zoom level

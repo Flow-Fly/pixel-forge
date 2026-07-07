@@ -178,11 +178,6 @@ export class PFUntrackedColors extends BaseComponent {
     }));
   }
 
-  handleReplaceComplete() {
-    this.isReplaceMode = false;
-    this.selectedColor = null;
-  }
-
   private handleDragStart(color: string, e: DragEvent) {
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "copy";

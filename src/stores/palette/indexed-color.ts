@@ -6,7 +6,6 @@
  */
 
 import { normalizeHex, hexToRgb, rgbToHsl, hslDistance } from './color-utils';
-import { MAX_PALETTE_SIZE } from './types';
 
 /**
  * Build color-to-index lookup maps for main and ephemeral palettes.
@@ -162,12 +161,3 @@ export function getColorByIndex(
   return null;
 }
 
-/**
- * Check if adding a new color would exceed the palette limit.
- */
-export function wouldExceedPaletteLimit(
-  mainCount: number,
-  ephemeralCount: number
-): boolean {
-  return mainCount + ephemeralCount >= MAX_PALETTE_SIZE;
-}

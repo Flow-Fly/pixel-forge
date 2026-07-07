@@ -2,9 +2,6 @@
  * Selection store types and re-exports.
  */
 
-// Re-export types from the types directory
-export type { SelectionState, SelectionShape } from '../../types/selection';
-export type { Rect } from '../../types/geometry';
 
 /**
  * Selection mode determines how new selections combine with existing ones.

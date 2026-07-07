@@ -18,12 +18,10 @@ export {
   handleKeyUp,
   handleWindowBlur,
   type KeyboardState,
-  type KeyboardHandlerCallbacks,
 } from './keyboard-handlers';
 
 export {
   createPanState,
-  isClickOnUI,
   handleGlobalMouseDown,
   handleMouseDown,
   startDragging,
@@ -33,13 +31,11 @@ export {
   handleMouseLeave,
   handleContextMenu,
   type PanState,
-  type PanHandlerCallbacks,
 } from './pan-handlers';
 
 export {
   handleWheel,
   handleGlobalWheel,
-  type WheelHandlerCallbacks,
 } from './wheel-handlers';
 
 export {

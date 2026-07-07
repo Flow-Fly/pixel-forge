@@ -1,11 +1,28 @@
 import { html, css } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
+import { customElement, state } from 'lit/decorators.js';
+import { AnimatedCanvasOverlay } from './animated-canvas-overlay';
 import { selectionStore } from '../../stores/selection';
 import { viewportStore } from '../../stores/viewport';
-import { traceMaskOutline, connectSegments, type Point } from '../../utils/mask-utils';
+import { traceMaskOutline, connectSegments } from '../../utils/mask-utils';
+import type { Point } from '../../types/geometry';
 import { type SelectionState } from '../../types/selection';
 import '../../components/common/pf-tooltip';
+
+type SelectionFrame = {
+  ctx: CanvasRenderingContext2D;
+  state: SelectionState;
+  zoom: number;
+  panX: number;
+  panY: number;
+};
+
+type SelectionVisual = {
+  bounds: { x: number; y: number; width: number; height: number };
+  shape: 'rectangle' | 'ellipse' | 'freeform';
+  mask?: Uint8Array;
+};
+
+type SelectionFrameDrawer = () => void;
 
 /**
  * Transparent canvas overlay that renders:
@@ -13,7 +30,7 @@ import '../../components/common/pf-tooltip';
  * - Floating selection pixels during move
  */
 @customElement('pf-selection-overlay')
-export class PFSelectionOverlay extends BaseComponent {
+export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   static styles = css`
     :host {
       position: absolute;
@@ -31,11 +48,6 @@ export class PFSelectionOverlay extends BaseComponent {
     }
   `;
 
-  @query('canvas') canvas!: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D | null = null;
-  private animationFrameId = 0;
-  private dashOffset = 0;
-  private lastTimestamp = 0;
 
   // Tooltip state for dimension display
   @state() private widthTooltipX = 0;
@@ -49,139 +61,105 @@ export class PFSelectionOverlay extends BaseComponent {
   // Cache for freeform outline paths
   private cachedOutlinePaths: Point[][] | null = null;
   private cachedStateId: string | null = null;
-  private resizeObserver: ResizeObserver | null = null;
 
-  connectedCallback() {
-    super.connectedCallback();
-    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
-    this.resizeObserver = new ResizeObserver(() => {
-      this.handleResize();
-    });
-    this.resizeObserver.observe(this);
+  protected draw() {
+    const frame = this.getSelectionFrame();
+    if (!frame) return;
+
+    this.drawSelectionFrame(frame);
   }
 
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    // Clean up ResizeObserver
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = 0;
-    }
+  private drawSelectionFrame(frame: SelectionFrame) {
+    this.getSelectionFrameDrawers(frame)[frame.state.type]();
   }
 
-  firstUpdated() {
-    this.initCanvas();
-    this.startAnimationLoop();
-  }
-
-  private initCanvas() {
-    if (!this.canvas) return;
-    this.ctx = this.canvas.getContext('2d');
-    this.resizeCanvas();
-  }
-
-  private handleResize = () => {
-    this.resizeCanvas();
-  };
-
-  private resizeCanvas() {
-    if (!this.canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = this.clientWidth * dpr;
-    this.canvas.height = this.clientHeight * dpr;
-  }
-
-  private startAnimationLoop() {
-    const animate = (timestamp: number) => {
-      const delta = timestamp - this.lastTimestamp;
-      this.lastTimestamp = timestamp;
-
-      // Update dash offset for marching ants animation
-      this.dashOffset = (this.dashOffset + delta * 0.06) % 16;
-
-      this.draw();
-      this.animationFrameId = requestAnimationFrame(animate);
+  private getSelectionFrameDrawers(frame: SelectionFrame): Record<SelectionState['type'], SelectionFrameDrawer> {
+    return {
+      none: () => this.clearSelectionVisualState(),
+      selecting: () => this.drawSelectingFrame(frame, frame.state as Extract<SelectionState, { type: 'selecting' }>),
+      selected: () => this.drawSelectedFrame(frame, frame.state as Extract<SelectionState, { type: 'selected' }>),
+      floating: () => this.drawFloatingFrame(frame, frame.state as Extract<SelectionState, { type: 'floating' }>),
+      transforming: () =>
+        this.drawTransformingFrame(frame, frame.state as Extract<SelectionState, { type: 'transforming' }>),
     };
-
-    this.animationFrameId = requestAnimationFrame(animate);
   }
 
-  private draw() {
-    if (!this.ctx || !this.canvas) return;
+  private getSelectionFrame(): SelectionFrame | null {
+    const ctx = this.prepareFrame();
+    if (!ctx) return null;
 
-    const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
+    return {
+      ctx,
+      state: selectionStore.state.value,
+      zoom: viewportStore.zoom.value,
+      panX: viewportStore.panX.value,
+      panY: viewportStore.panY.value,
+    };
+  }
 
-    // Clear
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.scale(dpr, dpr);
+  private clearSelectionVisualState() {
+    this.cachedOutlinePaths = null;
+    this.cachedStateId = null;
+    this.hideDimensionTooltips();
+  }
 
-    const state = selectionStore.state.value;
-    if (state.type === 'none') {
-      this.cachedOutlinePaths = null;
-      this.cachedStateId = null;
+  private drawSelectingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'selecting' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    const prevSelection = selectionStore.previousSelectionForVisual.value;
+
+    if (prevSelection) {
+      this.drawSelectionOutline(ctx, prevSelection, zoom, panX, panY);
+    }
+
+    if (state.previewPath && state.previewPath.length >= 2) {
+      this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
       this.hideDimensionTooltips();
       return;
     }
 
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    this.drawShapeMarchingAnts(ctx, state.currentBounds, 'rectangle', zoom, panX, panY);
+    this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
+  }
 
-    if (state.type === 'selecting') {
-      // Draw previous selection if in add/subtract mode
-      const prevSelection = selectionStore.previousSelectionForVisual.value;
-      if (prevSelection) {
-        if (prevSelection.shape === 'freeform' && prevSelection.mask) {
-          this.drawFreeformMarchingAnts(ctx, prevSelection.bounds, prevSelection.mask, zoom, panX, panY);
-        } else if (prevSelection.shape === 'ellipse') {
-          this.drawEllipseMarchingAnts(ctx, prevSelection.bounds, zoom, panX, panY);
-        } else {
-          this.drawRectMarchingAnts(ctx, prevSelection.bounds, zoom, panX, panY);
-        }
-      }
+  private drawSelectedFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'selected' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    this.drawSelectedState(ctx, state, zoom, panX, panY);
 
-      // Draw preview path if available (lasso tools), otherwise fall back to bounding box
-      if (state.previewPath && state.previewPath.length >= 2) {
-        this.drawPathPreview(ctx, state.previewPath, zoom, panX, panY);
-        this.hideDimensionTooltips(); // No tooltips for freeform/lasso
-      } else {
-        this.drawRectMarchingAnts(ctx, state.currentBounds, zoom, panX, panY);
-        // Show dimension tooltips for rectangular selection during drag
-        this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
-      }
-    } else if (state.type === 'selected') {
-      this.drawSelectedState(ctx, state, zoom, panX, panY);
-      // Show dimension tooltips only for rectangle shape
-      if (state.shape === 'rectangle') {
-        this.updateDimensionTooltips(state.bounds, zoom, panX, panY);
-      } else {
-        this.hideDimensionTooltips();
-      }
-    } else if (state.type === 'floating') {
-      // Draw floating pixels
-      this.drawFloatingPixels(ctx, state, zoom, panX, panY);
-
-      // Draw marching ants around floating selection
-      this.drawFloatingState(ctx, state, zoom, panX, panY);
-      this.hideDimensionTooltips(); // No tooltips when floating
-    } else if (state.type === 'transforming') {
-      // Draw the preview pixels (scaled + rotated)
-      this.drawTransformingPixels(ctx, state, zoom, panX, panY);
-
-      // Draw scaled and rotated marching ants
-      this.drawScaledRotatedMarchingAnts(ctx, state, zoom, panX, panY);
-
-      // Note: Rotation angle is shown as tooltip on the rotation handle
-      // Scale info is shown in the context bar
-
-      this.hideDimensionTooltips(); // No tooltips when transforming
+    if (state.shape === 'rectangle') {
+      this.updateDimensionTooltips(state.bounds, zoom, panX, panY);
+      return;
     }
+
+    this.hideDimensionTooltips();
+  }
+
+  private drawFloatingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'floating' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    this.drawFloatingPixels(ctx, state, zoom, panX, panY);
+    this.drawFloatingState(ctx, state, zoom, panX, panY);
+    this.hideDimensionTooltips();
+  }
+
+  private drawTransformingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'transforming' }>) {
+    const { ctx, zoom, panX, panY } = frame;
+    this.drawTransformingPixels(ctx, state, zoom, panX, panY);
+    this.drawScaledRotatedMarchingAnts(ctx, state, zoom, panX, panY);
+    this.hideDimensionTooltips();
+  }
+
+  private drawSelectionOutline(
+    ctx: CanvasRenderingContext2D,
+    selection: SelectionVisual,
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    if (selection.shape === 'freeform' && selection.mask) {
+      this.drawFreeformMarchingAnts(ctx, selection.bounds, selection.mask, zoom, panX, panY);
+      return;
+    }
+
+    this.drawShapeMarchingAnts(ctx, selection.bounds, selection.shape, zoom, panX, panY);
   }
 
   private drawTransformingPixels(
@@ -232,10 +210,8 @@ export class PFSelectionOverlay extends BaseComponent {
   ) {
     if (state.shape === 'freeform' && 'mask' in state) {
       this.drawFreeformMarchingAnts(ctx, state.bounds, state.mask, zoom, panX, panY);
-    } else if (state.shape === 'ellipse') {
-      this.drawEllipseMarchingAnts(ctx, state.bounds, zoom, panX, panY);
     } else {
-      this.drawRectMarchingAnts(ctx, state.bounds, zoom, panX, panY);
+      this.drawShapeMarchingAnts(ctx, state.bounds, state.shape, zoom, panX, panY);
     }
   }
 
@@ -255,10 +231,8 @@ export class PFSelectionOverlay extends BaseComponent {
 
     if (state.shape === 'freeform' && state.mask) {
       this.drawFreeformMarchingAnts(ctx, floatBounds, state.mask, zoom, panX, panY);
-    } else if (state.shape === 'ellipse') {
-      this.drawEllipseMarchingAnts(ctx, floatBounds, zoom, panX, panY);
     } else {
-      this.drawRectMarchingAnts(ctx, floatBounds, zoom, panX, panY);
+      this.drawShapeMarchingAnts(ctx, floatBounds, state.shape, zoom, panX, panY);
     }
   }
 
@@ -271,18 +245,15 @@ export class PFSelectionOverlay extends BaseComponent {
     panX: number,
     panY: number
   ) {
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
+    const screen = this.toScreenRect(bounds, zoom, panX, panY);
 
     // Width tooltip: centered on top edge, offset above
-    this.widthTooltipX = screenX + screenWidth / 2;
-    this.widthTooltipY = screenY - 8;
+    this.widthTooltipX = screen.x + screen.width / 2;
+    this.widthTooltipY = screen.y - 8;
 
     // Height tooltip: centered on left edge, offset to the left
-    this.heightTooltipX = screenX - 8;
-    this.heightTooltipY = screenY + screenHeight / 2;
+    this.heightTooltipX = screen.x - 8;
+    this.heightTooltipY = screen.y + screen.height / 2;
 
     this.selectionWidth = bounds.width;
     this.selectionHeight = bounds.height;
@@ -296,81 +267,31 @@ export class PFSelectionOverlay extends BaseComponent {
     this.showDimensionTooltips = false;
   }
 
-  private drawRectMarchingAnts(
+  /** Draw marching ants for a rectangle or ellipse selection. */
+  private drawShapeMarchingAnts(
     ctx: CanvasRenderingContext2D,
     bounds: { x: number; y: number; width: number; height: number },
+    shape: string,
     zoom: number,
     panX: number,
     panY: number
   ) {
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
+    const screen = this.toScreenRect(bounds, zoom, panX, panY);
+    if (shape !== 'ellipse') {
+      this.strokeMarchingAntsRect(ctx, screen.x, screen.y, screen.width, screen.height);
+      return;
+    }
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    const cx = screen.x + screen.width / 2;
+    const cy = screen.y + screen.height / 2;
+    const rx = screen.width / 2 - 0.5;
+    const ry = screen.height / 2 - 0.5;
 
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.strokeRect(
-      Math.round(screenX) + 0.5,
-      Math.round(screenY) + 0.5,
-      Math.round(screenWidth) - 1,
-      Math.round(screenHeight) - 1
-    );
-
-    // Black dashes (offset to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.strokeRect(
-      Math.round(screenX) + 0.5,
-      Math.round(screenY) + 0.5,
-      Math.round(screenWidth) - 1,
-      Math.round(screenHeight) - 1
-    );
-
-    ctx.restore();
-  }
-
-  private drawEllipseMarchingAnts(
-    ctx: CanvasRenderingContext2D,
-    bounds: { x: number; y: number; width: number; height: number },
-    zoom: number,
-    panX: number,
-    panY: number
-  ) {
-    const screenX = bounds.x * zoom + panX;
-    const screenY = bounds.y * zoom + panY;
-    const screenWidth = bounds.width * zoom;
-    const screenHeight = bounds.height * zoom;
-
-    const cx = screenX + screenWidth / 2;
-    const cy = screenY + screenHeight / 2;
-    const rx = screenWidth / 2 - 0.5;
-    const ry = screenHeight / 2 - 0.5;
-
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Black dashes
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.restore();
+    this.strokeMarchingAnts(ctx, (c) => {
+      c.beginPath();
+      c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      c.stroke();
+    });
   }
 
   /**
@@ -401,25 +322,15 @@ export class PFSelectionOverlay extends BaseComponent {
     const halfW = screenWidth / 2 - 0.5;
     const halfH = screenHeight / 2 - 0.5;
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // Translate to center and rotate
-    ctx.translate(centerX, centerY);
-    ctx.rotate((rotation * Math.PI) / 180);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1);
-
-    // Black dashes (offset to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1);
-
-    ctx.restore();
+    this.strokeMarchingAnts(
+      ctx,
+      (c) => c.strokeRect(-halfW, -halfH, screenWidth - 1, screenHeight - 1),
+      (c) => {
+        // Translate to center and rotate
+        c.translate(centerX, centerY);
+        c.rotate((rotation * Math.PI) / 180);
+      }
+    );
   }
 
   private drawFreeformMarchingAnts(
@@ -430,64 +341,66 @@ export class PFSelectionOverlay extends BaseComponent {
     panX: number,
     panY: number
   ) {
-    // Generate state ID for caching
+    const outlinePaths = this.getFreeformOutlinePaths(bounds, mask);
+
+    if (outlinePaths.length === 0) {
+      this.drawShapeMarchingAnts(ctx, bounds, 'rectangle', zoom, panX, panY);
+      return;
+    }
+
+    this.drawFreeformOutlinePaths(ctx, outlinePaths, zoom, panX, panY);
+  }
+
+  private getFreeformOutlinePaths(
+    bounds: { x: number; y: number; width: number; height: number },
+    mask: Uint8Array
+  ) {
     const stateId = `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${mask.length}`;
 
-    // Check if we need to regenerate outline paths
     if (this.cachedStateId !== stateId) {
       const segments = traceMaskOutline(mask, bounds);
       this.cachedOutlinePaths = connectSegments(segments);
       this.cachedStateId = stateId;
     }
 
-    if (!this.cachedOutlinePaths || this.cachedOutlinePaths.length === 0) {
-      // Fallback to rectangle if no paths
-      this.drawRectMarchingAnts(ctx, bounds, zoom, panX, panY);
-      return;
-    }
+    return this.cachedOutlinePaths ?? [];
+  }
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // Draw each path
-    for (const path of this.cachedOutlinePaths) {
+  private drawFreeformOutlinePaths(
+    ctx: CanvasRenderingContext2D,
+    outlinePaths: Point[][],
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    for (const path of outlinePaths) {
       if (path.length < 2) continue;
-
-      // White dashes
-      ctx.strokeStyle = 'white';
-      ctx.lineDashOffset = -this.dashOffset;
-      ctx.beginPath();
-      ctx.moveTo(
-        Math.round(path[0].x * zoom + panX) + 0.5,
-        Math.round(path[0].y * zoom + panY) + 0.5
+      this.strokeMarchingAnts(ctx, (c) =>
+        this.strokePath(c, path, zoom, panX, panY)
       );
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(
-          Math.round(path[i].x * zoom + panX) + 0.5,
-          Math.round(path[i].y * zoom + panY) + 0.5
-        );
-      }
-      ctx.stroke();
-
-      // Black dashes
-      ctx.strokeStyle = 'black';
-      ctx.lineDashOffset = -this.dashOffset + 4;
-      ctx.beginPath();
-      ctx.moveTo(
-        Math.round(path[0].x * zoom + panX) + 0.5,
-        Math.round(path[0].y * zoom + panY) + 0.5
-      );
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(
-          Math.round(path[i].x * zoom + panX) + 0.5,
-          Math.round(path[i].y * zoom + panY) + 0.5
-        );
-      }
-      ctx.stroke();
     }
+  }
 
-    ctx.restore();
+  /** Stroke a polyline in screen space with pixel-aligned coordinates. */
+  private strokePath(
+    ctx: CanvasRenderingContext2D,
+    path: { x: number; y: number }[],
+    zoom: number,
+    panX: number,
+    panY: number
+  ) {
+    ctx.beginPath();
+    ctx.moveTo(
+      Math.round(path[0].x * zoom + panX) + 0.5,
+      Math.round(path[0].y * zoom + panY) + 0.5
+    );
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(
+        Math.round(path[i].x * zoom + panX) + 0.5,
+        Math.round(path[i].y * zoom + panY) + 0.5
+      );
+    }
+    ctx.stroke();
   }
 
   /**
@@ -503,43 +416,9 @@ export class PFSelectionOverlay extends BaseComponent {
   ) {
     if (path.length < 2) return;
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    // White dashes
-    ctx.strokeStyle = 'white';
-    ctx.lineDashOffset = -this.dashOffset;
-    ctx.beginPath();
-    ctx.moveTo(
-      Math.round(path[0].x * zoom + panX) + 0.5,
-      Math.round(path[0].y * zoom + panY) + 0.5
+    this.strokeMarchingAnts(ctx, (c) =>
+      this.strokePath(c, path, zoom, panX, panY)
     );
-    for (let i = 1; i < path.length; i++) {
-      ctx.lineTo(
-        Math.round(path[i].x * zoom + panX) + 0.5,
-        Math.round(path[i].y * zoom + panY) + 0.5
-      );
-    }
-    ctx.stroke();
-
-    // Black dashes (offset to fill gaps)
-    ctx.strokeStyle = 'black';
-    ctx.lineDashOffset = -this.dashOffset + 4;
-    ctx.beginPath();
-    ctx.moveTo(
-      Math.round(path[0].x * zoom + panX) + 0.5,
-      Math.round(path[0].y * zoom + panY) + 0.5
-    );
-    for (let i = 1; i < path.length; i++) {
-      ctx.lineTo(
-        Math.round(path[i].x * zoom + panX) + 0.5,
-        Math.round(path[i].y * zoom + panY) + 0.5
-      );
-    }
-    ctx.stroke();
-
-    ctx.restore();
   }
 
   private drawFloatingPixels(

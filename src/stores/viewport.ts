@@ -3,8 +3,6 @@ import { projectStore } from "./project";
 
 // Preset zoom levels used by keyboard shortcuts, menus, and stepped zoom actions.
 export const ZOOM_LEVELS = [1, 2, 4, 8, 16, 32] as const;
-export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
-
 class ViewportStore {
   private readonly MIN_ZOOM = 0.125;
   private readonly MAX_ZOOM = 64;

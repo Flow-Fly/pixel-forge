@@ -56,7 +56,7 @@ function getSelectionInfo(): {
  * @param name Optional name for the brush (defaults to dimensions)
  * @returns The captured brush or null if capture failed
  */
-export function captureBrushFromSelection(name?: string): Brush | null {
+function captureBrushFromSelection(name?: string): Brush | null {
   const info = getSelectionInfo();
   if (!info) {
     log.warn("No selection to capture brush from");

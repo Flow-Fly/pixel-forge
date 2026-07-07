@@ -3,6 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { toolStore } from "../../stores/tools";
 import { selectionStore } from "../../stores/selection";
+import { getSelectedLayerSelection } from "../../stores/selection/selected-layer";
 import { layerStore } from "../../stores/layers";
 import { animationStore } from "../../stores/animation";
 import { historyStore } from "../../stores/history";
@@ -494,24 +495,15 @@ export class PFContextBar extends BaseComponent {
   }
 
   private _flipSelection(direction: "horizontal" | "vertical") {
-    const state = selectionStore.state.value;
-    if (state.type !== "selected") return;
-
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    if (!layer?.canvas) return;
-
-    const mask =
-      state.shape === "freeform"
-        ? (state as { mask: Uint8Array }).mask
-        : undefined;
+    const selected = getSelectedLayerSelection();
+    if (!selected) return;
 
     const command = new FlipSelectionCommand(
-      layer.canvas,
-      state.bounds,
-      state.shape,
+      selected.canvas,
+      selected.bounds,
+      selected.shape,
       direction,
-      mask
+      selected.mask
     );
     historyStore.execute(command);
   }
