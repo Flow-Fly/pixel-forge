@@ -135,3 +135,106 @@ export function constrainWithStickyAngles(
   return { x: newX, y: newY };
 }
 
+
+/** RGBA fill color plus its palette index for indexed-color mode. */
+export interface FloodFillColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+  /** Palette index written to the index buffer when one is provided. */
+  paletteIndex: number;
+}
+
+/**
+ * Stack-based 4-way flood fill starting at (startX, startY).
+ *
+ * Mutates `data` (RGBA pixels) and, when provided, `indexBuffer`
+ * (palette indices) in place. Pixels match the fill region by palette
+ * index when an index buffer is present, by exact RGBA otherwise.
+ *
+ * Returns the filled region's bounds, or null when nothing was filled
+ * (out of bounds, or the target already has the fill color).
+ */
+export function floodFill(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  fill: FloodFillColor,
+  indexBuffer?: Uint8Array
+): { x: number; y: number; width: number; height: number } | null {
+  if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
+    return null;
+  }
+
+  // Target color at the start pixel
+  const targetPos = (startY * width + startX) * 4;
+  const targetR = data[targetPos];
+  const targetG = data[targetPos + 1];
+  const targetB = data[targetPos + 2];
+  const targetA = data[targetPos + 3];
+  const targetPaletteIndex = indexBuffer ? indexBuffer[startY * width + startX] : 0;
+
+  // Don't fill if target is same as fill color
+  if (indexBuffer) {
+    // In indexed mode, compare palette indices
+    if (targetPaletteIndex === fill.paletteIndex) return null;
+  } else if (
+    targetR === fill.r &&
+    targetG === fill.g &&
+    targetB === fill.b &&
+    targetA === fill.a
+  ) {
+    return null;
+  }
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  const stack = [[startX, startY]];
+  const visited = new Set<number>(); // Avoid revisiting pixels
+
+  while (stack.length) {
+    const [cx, cy] = stack.pop()!;
+    if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+
+    const pixelIndex = cy * width + cx;
+    if (visited.has(pixelIndex)) continue;
+    visited.add(pixelIndex);
+
+    // Check if matches target (use index buffer if available, otherwise RGBA)
+    const pos = pixelIndex * 4;
+    const matches = indexBuffer
+      ? indexBuffer[pixelIndex] === targetPaletteIndex
+      : data[pos] === targetR &&
+        data[pos + 1] === targetG &&
+        data[pos + 2] === targetB &&
+        data[pos + 3] === targetA;
+    if (!matches) continue;
+
+    data[pos] = fill.r;
+    data[pos + 1] = fill.g;
+    data[pos + 2] = fill.b;
+    data[pos + 3] = fill.a;
+    if (indexBuffer) {
+      indexBuffer[pixelIndex] = fill.paletteIndex;
+    }
+
+    minX = Math.min(minX, cx);
+    maxX = Math.max(maxX, cx);
+    minY = Math.min(minY, cy);
+    maxY = Math.max(maxY, cy);
+
+    stack.push([cx + 1, cy]);
+    stack.push([cx - 1, cy]);
+    stack.push([cx, cy + 1]);
+    stack.push([cx, cy - 1]);
+  }
+
+  if (minX === Infinity) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
