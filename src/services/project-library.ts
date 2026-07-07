@@ -59,11 +59,14 @@ export class ProjectLibraryService {
 
   async duplicateProject(id: string): Promise<string> {
     const project = await this.getProjectOrThrow(id);
+    const sourceMeta = await this.findProjectMeta(id);
     const copyId = uuidv4();
     const copy = structuredClone(project);
     copy.name = `Copy of ${normalizeProjectName(project.name)}`;
 
-    await this.repository.save(copyId, copy);
+    await this.repository.save(copyId, copy, {
+      thumbnail: sourceMeta?.thumbnail,
+    });
     return copyId;
   }
 
@@ -103,6 +106,11 @@ export class ProjectLibraryService {
       throw new Error(`Project not found: ${id}`);
     }
     return project;
+  }
+
+  private async findProjectMeta(id: string): Promise<ProjectMeta | undefined> {
+    const projects = await this.repository.list();
+    return projects.find((project) => project.id === id);
   }
 }
 

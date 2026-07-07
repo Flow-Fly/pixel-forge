@@ -13,6 +13,7 @@ interface StoredProject {
   id: string;
   project: ProjectFile;
   lastModified: number;
+  thumbnail?: Uint8Array;
 }
 
 interface StoredSetting {
@@ -86,6 +87,7 @@ class IndexedDbProjectRepository implements ProjectRepository {
         width: s.project.width,
         height: s.project.height,
         lastModified: s.lastModified,
+        thumbnail: s.thumbnail,
       }))
       .sort((a, b) => b.lastModified - a.lastModified);
   }
@@ -96,12 +98,20 @@ class IndexedDbProjectRepository implements ProjectRepository {
     return stored?.project ?? null;
   }
 
-  async save(id: string, project: ProjectFile): Promise<void> {
+  async save(
+    id: string,
+    project: ProjectFile,
+    options: { thumbnail?: Uint8Array } = {}
+  ): Promise<void> {
     const db = await this.dbPromise;
+    const existing = await db.get('sprites', id);
+    const thumbnail =
+      options.thumbnail === undefined ? existing?.thumbnail : options.thumbnail;
     await db.put('sprites', {
       id,
       project,
       lastModified: Date.now(),
+      thumbnail,
     });
   }
 

@@ -144,6 +144,19 @@ export class PFProjectBrowser extends BaseComponent {
         rgba(3, 5, 8, 0.7);
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-xs);
+      overflow: hidden;
+    }
+
+    .thumbnail img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    .thumbnail-label {
+      padding: 4px;
     }
 
     .project-name {
@@ -223,10 +236,16 @@ export class PFProjectBrowser extends BaseComponent {
   @state() private renamingProjectId: string | null = null;
   @state() private renameValue = '';
   @state() private deleteTarget: ProjectMeta | null = null;
+  private thumbnailUrls = new Map<string, string>();
 
   connectedCallback() {
     super.connectedCallback();
     void this.loadProjects();
+  }
+
+  disconnectedCallback() {
+    this.clearThumbnailUrls();
+    super.disconnectedCallback();
   }
 
   render() {
@@ -312,7 +331,7 @@ export class PFProjectBrowser extends BaseComponent {
     return html`
       <article>
         <button class="project-open" type="button" @click=${() => this.openProject(project.id)}>
-          <span class="thumbnail" aria-hidden="true">${project.width}x${project.height}</span>
+          ${this.renderThumbnail(project)}
           <span class="project-name" title=${project.name}>${project.name}</span>
           <span class="meta">${project.width} x ${project.height}px</span>
           <span class="meta">Edited ${this.formatLastEdited(project.lastModified)}</span>
@@ -359,12 +378,45 @@ export class PFProjectBrowser extends BaseComponent {
     this.errorMessage = '';
 
     try {
-      this.projects = await projectLibrary.listProjects();
+      const projects = await projectLibrary.listProjects();
+      this.updateThumbnailUrls(projects);
+      this.projects = projects;
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Failed to load projects.');
     } finally {
       this.isLoading = false;
     }
+  }
+
+  private renderThumbnail(project: ProjectMeta) {
+    const url = this.thumbnailUrls.get(project.id);
+    return html`
+      <span class="thumbnail" aria-hidden="true">
+        ${url
+          ? html`<img src=${url} alt="">`
+          : html`<span class="thumbnail-label">${project.width}x${project.height}</span>`}
+      </span>
+    `;
+  }
+
+  private updateThumbnailUrls(projects: ProjectMeta[]) {
+    this.clearThumbnailUrls();
+
+    for (const project of projects) {
+      if (!project.thumbnail) continue;
+
+      const blob = new Blob([project.thumbnail as BlobPart], {
+        type: 'image/png',
+      });
+      this.thumbnailUrls.set(project.id, URL.createObjectURL(blob));
+    }
+  }
+
+  private clearThumbnailUrls() {
+    for (const url of this.thumbnailUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+    this.thumbnailUrls.clear();
   }
 
   private async openProject(id: string) {

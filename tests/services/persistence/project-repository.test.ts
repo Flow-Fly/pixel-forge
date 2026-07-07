@@ -64,6 +64,32 @@ describe('IndexedDbProjectRepository', () => {
     expect(loaded).toEqual(project);
   });
 
+  it('stores thumbnails as metadata without changing the project file', async () => {
+    const project = makeProject('With thumbnail', 16, 24);
+    const thumbnail = new Uint8Array([137, 80, 78, 71]);
+    await repo.save('id-thumbnail', project, { thumbnail });
+
+    const meta = (await repo.list()).find(
+      (projectMeta) => projectMeta.id === 'id-thumbnail'
+    );
+    expect(meta?.thumbnail).toEqual(thumbnail);
+    expect(await repo.load('id-thumbnail')).toEqual(project);
+  });
+
+  it('preserves thumbnails when callers save project data without a new one', async () => {
+    const thumbnail = new Uint8Array([1, 2, 3]);
+    await repo.save('id-preserve-thumbnail', makeProject('Original'), {
+      thumbnail,
+    });
+    await repo.save('id-preserve-thumbnail', makeProject('Renamed'));
+
+    const meta = (await repo.list()).find(
+      (projectMeta) => projectMeta.id === 'id-preserve-thumbnail'
+    );
+    expect(meta?.name).toBe('Renamed');
+    expect(meta?.thumbnail).toEqual(thumbnail);
+  });
+
   it('returns null for unknown ids', async () => {
     expect(await repo.load('nope')).toBeNull();
   });

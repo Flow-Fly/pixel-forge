@@ -9,6 +9,7 @@ import { paletteStore } from "./palette";
 import { selectionStore } from "./selection";
 import { projectRepository } from "../services/persistence/indexed-db";
 import { onionSkinCache } from "../services/onion-skin-cache";
+import { createProjectThumbnail } from "../services/project-thumbnail";
 import {
   DEFAULT_PROJECT_NAME,
   DEFAULT_PROJECT_PALETTE_ID,
@@ -251,10 +252,28 @@ class ProjectStore {
     // 10. Save the fresh state immediately
     try {
       const projectData = await this.saveProject();
-      await projectRepository.save(this.id.value, projectData);
+      await projectRepository.save(this.id.value, projectData, {
+        thumbnail: await this.createThumbnailSafely(),
+      });
       await projectRepository.setLastOpenedProjectId(this.id.value);
     } catch (error) {
       log.error("Failed to save new project:", error);
+    }
+  }
+
+  private async createThumbnailSafely(): Promise<Uint8Array | undefined> {
+    const frame = animationStore.frames.value[0];
+    if (!frame) return undefined;
+
+    try {
+      return await createProjectThumbnail({
+        frameId: frame.id,
+        width: this.width.value,
+        height: this.height.value,
+      });
+    } catch (error) {
+      log.error("Thumbnail generation failed:", error);
+      return undefined;
     }
   }
 }
