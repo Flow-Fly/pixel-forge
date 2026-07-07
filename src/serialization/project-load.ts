@@ -1,5 +1,6 @@
 import type { Cel, CelLinkType, Frame, FrameTag } from '../types/animation';
 import type { Layer } from '../types/layer';
+import type { ReferenceLayerData } from '../types/reference';
 import type {
   ProjectCelFile,
   ProjectFile,
@@ -8,6 +9,7 @@ import type {
 } from '../types/project';
 import { loadImageDataToCanvas } from '../utils/canvas-binary';
 import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
+import { normalizeHex } from '../stores/palette/color-utils';
 import { hasProjectImageData } from './project-data';
 
 type WritableSignal<T> = {
@@ -46,6 +48,10 @@ export type ProjectLoadStores = {
       width: number,
       height: number
     ) => Layer;
+    addReferenceLayer: (
+      referenceData: NonNullable<ProjectLayerFile['referenceData']>,
+      name: string
+    ) => Layer;
     removeLayer: (id: string) => void;
     setActiveLayer: (id: string) => void;
     updateLayer: (id: string, updates: Partial<Layer>) => void;
@@ -61,28 +67,41 @@ type LinkedCelGroup = {
   linkType: CelLinkType;
 };
 
+type LegacyProjectFile = ProjectFile & {
+  ephemeralPalette?: string[];
+};
+
 // Keep this boundary free of store imports; this mirrors the animation store
 // marker for shared transparent cels.
 const EMPTY_CEL_LINK_ID = '__empty__';
 
+export function migrateProjectFileForLoad(file: LegacyProjectFile): ProjectFile {
+  const fileWithoutEphemeral = stripEphemeralPalette(file);
+  if (!shouldFoldEphemeralPalette(file)) return fileWithoutEphemeral;
+
+  const basePalette = Array.isArray(file.palette) ? file.palette : [];
+  const legacyPalette = file.ephemeralPalette ?? [];
+  const { palette, oldIndexToNewIndex } =
+    foldEphemeralPalette(basePalette, legacyPalette);
+
+  return {
+    ...fileWithoutEphemeral,
+    palette,
+    frames: remapLegacyEphemeralIndices(file.frames, oldIndexToNewIndex),
+  };
+}
+
 export function restoreProjectPaletteForLoad(
   stores: ProjectLoadStores,
-  file: ProjectFile,
-  fromAutoSave: boolean
+  file: ProjectFile
 ): void {
   const { palette } = stores;
 
-  if (fromAutoSave) return;
-
   const filePalette =
     file.palette && Array.isArray(file.palette) ? file.palette : [];
-  const compatibilityPalette =
-    file.ephemeralPalette && Array.isArray(file.ephemeralPalette)
-      ? file.ephemeralPalette
-      : [];
 
   if (filePalette.length > 0) {
-    palette.setPalette([...filePalette, ...compatibilityPalette]);
+    palette.setPalette(filePalette);
   }
 }
 
@@ -136,14 +155,9 @@ export function restoreProjectFrameTags(
 }
 
 export function refreshProjectPaletteAfterLoad(
-  stores: ProjectLoadStores,
-  fromAutoSave: boolean
+  stores: ProjectLoadStores
 ): void {
-  const { animation, palette } = stores;
-
-  if (fromAutoSave) {
-    animation.rebuildAllIndexBuffers();
-  }
+  const { palette } = stores;
 
   palette.refreshUsedColors();
 }
@@ -172,10 +186,7 @@ async function hydrateProjectLayer(
 ): Promise<void> {
   const { layers } = stores;
   const layerType = layerFile.type || 'image';
-  const layer =
-    layerType === 'text' && layerFile.textData
-      ? layers.addTextLayer(layerFile.textData, layerFile.name, width, height)
-      : layers.addLayer(layerFile.name, width, height);
+  const layer = createLoadedLayer(stores, layerFile, layerType, width, height);
 
   layers.updateLayer(layer.id, {
     id: layerFile.id,
@@ -189,6 +200,51 @@ async function hydrateProjectLayer(
   if (restored && hasProjectImageData(layerFile.data) && restored.canvas) {
     await loadImageDataToCanvas(layerFile.data, restored.canvas);
   }
+}
+
+function createLoadedLayer(
+  stores: ProjectLoadStores,
+  layerFile: ProjectLayerFile,
+  layerType: Layer['type'],
+  width: number,
+  height: number
+): Layer {
+  const { layers } = stores;
+
+  if (layerType === 'text' && layerFile.textData) {
+    return layers.addTextLayer(layerFile.textData, layerFile.name, width, height);
+  }
+
+  if (layerType === 'reference') {
+    return layers.addReferenceLayer(
+      getReferenceDataForLoad(layerFile.referenceData),
+      layerFile.name
+    );
+  }
+
+  return layers.addLayer(layerFile.name, width, height);
+}
+
+function getReferenceDataForLoad(
+  referenceData: ProjectLayerFile['referenceData']
+): ReferenceLayerData {
+  if (!referenceData) return createEmptyReferenceData();
+
+  return {
+    ...referenceData,
+    position: referenceData.position ?? 'below',
+  };
+}
+
+function createEmptyReferenceData(): ReferenceLayerData {
+  return {
+    bytes: new Uint8Array(0),
+    mimeType: 'application/octet-stream',
+    x: 0,
+    y: 0,
+    scale: 1,
+    position: 'below',
+  };
 }
 
 function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
@@ -322,6 +378,89 @@ function restoreTextCelData(
       celFile.textCelData
     );
   }
+}
+
+function shouldFoldEphemeralPalette(file: LegacyProjectFile): boolean {
+  return (
+    compareVersions(file.version, '4.0.0') < 0 &&
+    Array.isArray(file.ephemeralPalette) &&
+    file.ephemeralPalette.length > 0
+  );
+}
+
+function stripEphemeralPalette(file: LegacyProjectFile): ProjectFile {
+  const currentFile = { ...file };
+  delete currentFile.ephemeralPalette;
+  return currentFile;
+}
+
+function foldEphemeralPalette(
+  basePalette: string[],
+  legacyPalette: string[]
+): { palette: string[]; oldIndexToNewIndex: Map<number, number> } {
+  const palette = basePalette.map(color => normalizeHex(color));
+  const colorToIndex = new Map<string, number>();
+  const oldIndexToNewIndex = new Map<number, number>();
+
+  palette.forEach((color, index) => {
+    if (!colorToIndex.has(color)) {
+      colorToIndex.set(color, index + 1);
+    }
+  });
+
+  legacyPalette.forEach((color, index) => {
+    const oldIndex = basePalette.length + index + 1;
+    const normalized = normalizeHex(color);
+    const existingIndex = colorToIndex.get(normalized);
+
+    if (existingIndex !== undefined) {
+      oldIndexToNewIndex.set(oldIndex, existingIndex);
+      return;
+    }
+
+    palette.push(normalized);
+    const newIndex = palette.length;
+    colorToIndex.set(normalized, newIndex);
+    oldIndexToNewIndex.set(oldIndex, newIndex);
+  });
+
+  return { palette, oldIndexToNewIndex };
+}
+
+function remapLegacyEphemeralIndices(
+  frames: ProjectFrameFile[],
+  oldIndexToNewIndex: Map<number, number>
+): ProjectFrameFile[] {
+  if (oldIndexToNewIndex.size === 0) return frames;
+
+  return frames.map(frame => ({
+    ...frame,
+    cels: frame.cels.map(cel => ({
+      ...cel,
+      indexData: cel.indexData
+        ? cel.indexData.map(index => oldIndexToNewIndex.get(index) ?? index)
+        : cel.indexData,
+    })),
+  }));
+}
+
+function compareVersions(a: string, b: string): number {
+  const aParts = parseVersion(a);
+  const bParts = parseVersion(b);
+
+  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+    const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+
+  return 0;
+}
+
+function parseVersion(version: string): number[] {
+  return version
+    .split('.')
+    .map(part => Number.parseInt(part, 10))
+    .map(part => (Number.isFinite(part) ? part : 0));
 }
 
 function trackLinkedCelGroup(

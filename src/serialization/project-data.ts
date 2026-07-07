@@ -12,6 +12,12 @@ export function normalizeProjectFileImageData(
     layers: file.layers.map((layer) => ({
       ...layer,
       data: normalizeProjectImageData(layer.data),
+      referenceData: layer.referenceData
+        ? {
+            ...layer.referenceData,
+            bytes: normalizeProjectImageData(layer.referenceData.bytes),
+          }
+        : undefined,
     })),
     frames: file.frames.map((frame) => ({
       ...frame,

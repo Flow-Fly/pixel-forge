@@ -50,6 +50,21 @@ describe('project image data normalization', () => {
           opacity: 1,
           data: 'data:image/png;base64,AQID',
         },
+        {
+          id: 'reference-1',
+          name: 'Reference',
+          type: 'reference',
+          visible: true,
+          opacity: 128,
+          data: {},
+          referenceData: {
+            bytes: { 0: 7, 1: 8, 2: 9 },
+            mimeType: 'image/png',
+            x: 1.5,
+            y: 2.5,
+            scale: 0.75,
+          },
+        },
       ],
       frames: [
         {
@@ -73,6 +88,10 @@ describe('project image data normalization', () => {
 
     expect(normalized.layers[0].data).toBeInstanceOf(Uint8Array);
     expect(Array.from(normalized.layers[0].data)).toEqual([1, 2, 3]);
+    expect(normalized.layers[1].referenceData?.bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(normalized.layers[1].referenceData?.bytes ?? [])).toEqual([
+      7, 8, 9,
+    ]);
     expect(normalized.frames[0].cels[0].data).toBeInstanceOf(Uint8Array);
     expect(Array.from(normalized.frames[0].cels[0].data)).toEqual([4, 5, 6]);
   });

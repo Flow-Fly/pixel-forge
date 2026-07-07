@@ -1,8 +1,9 @@
 import type { TextLayerData } from './text';
+import type { ReferenceLayerData } from './reference';
 
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
 
-export type LayerType = 'image' | 'group' | 'text';
+export type LayerType = 'image' | 'group' | 'text' | 'reference';
 
 export interface Layer {
   id: string;
@@ -23,4 +24,6 @@ export interface Layer {
   canvas?: HTMLCanvasElement;
   // Text layer specific (only present when type === 'text')
   textData?: TextLayerData;
+  // Reference layer specific (only present when type === 'reference')
+  referenceData?: ReferenceLayerData;
 }

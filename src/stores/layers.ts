@@ -1,7 +1,53 @@
 import { signal } from '../core/signal';
 import { type Layer } from '../types/layer';
+import type { ReferenceLayerData } from '../types/reference';
 import type { TextLayerData } from '../types/text';
 import { v4 as uuidv4 } from 'uuid';
+
+function createLayerCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext('2d', {
+    alpha: true,
+    willReadFrequently: true // Layers are read frequently for compositing and history
+  });
+
+  if (ctx) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  return canvas;
+}
+
+function fitReferenceToCanvas(
+  imageWidth: number,
+  imageHeight: number,
+  canvasWidth: number,
+  canvasHeight: number
+): Pick<ReferenceLayerData, 'x' | 'y' | 'scale'> {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    return { x: 0, y: 0, scale: 1 };
+  }
+
+  const scale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+  return {
+    x: (canvasWidth - imageWidth * scale) / 2,
+    y: (canvasHeight - imageHeight * scale) / 2,
+    scale,
+  };
+}
+
+async function getImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
+  if (typeof createImageBitmap !== 'function') return null;
+
+  const bitmap = await createImageBitmap(file);
+  const dimensions = { width: bitmap.width, height: bitmap.height };
+  bitmap.close();
+  return dimensions;
+}
 
 class LayerStore {
   layers = signal<Layer[]>([]);
@@ -13,21 +59,7 @@ class LayerStore {
   }
 
   addLayer(name?: string, width = 64, height = 64) {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    // Get context with appropriate hints for layer canvases
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true // Layers are read frequently for compositing and history
-    });
-
-    if (ctx) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-
+    const canvas = createLayerCanvas(width, height);
     const newLayer: Layer = {
       id: uuidv4(),
       name: name || `Layer ${this.layers.value.length + 1}`,
@@ -52,17 +84,9 @@ class LayerStore {
     const sourceLayer = this.layers.value.find(l => l.id === sourceLayerId);
     if (!sourceLayer || !sourceLayer.canvas) return null;
 
-    // Create new canvas and copy content
-    const canvas = document.createElement('canvas');
-    canvas.width = sourceLayer.canvas.width;
-    canvas.height = sourceLayer.canvas.height;
-
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true
-    });
-
-    if (ctx) {
+    const canvas = createLayerCanvas(sourceLayer.canvas.width, sourceLayer.canvas.height);
+    const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    if (ctx && sourceLayer.canvas) {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(sourceLayer.canvas, 0, 0);
     }
@@ -96,20 +120,7 @@ class LayerStore {
    */
   addTextLayer(textData: TextLayerData, name?: string, width = 64, height = 64): Layer {
     // Text layers still have a canvas for rendering, but content is generated from text data
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true
-    });
-
-    if (ctx) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-
+    const canvas = createLayerCanvas(width, height);
     const newLayer: Layer = {
       id: uuidv4(),
       name: name || `Text ${this.layers.value.filter(l => l.type === 'text').length + 1}`,
@@ -126,6 +137,49 @@ class LayerStore {
     this.layers.value = [...this.layers.value, newLayer];
     this.activeLayerId.value = newLayer.id;
     return newLayer;
+  }
+
+  /**
+   * Add a reference layer. Reference layers store source image bytes and
+   * transform metadata, but they do not own animation cels.
+   */
+  addReferenceLayer(referenceData: ReferenceLayerData, name?: string): Layer {
+    const newLayer: Layer = {
+      id: uuidv4(),
+      name: name || `Reference ${this.layers.value.filter(l => l.type === 'reference').length + 1}`,
+      type: 'reference',
+      visible: true,
+      locked: false,
+      opacity: 128,
+      blendMode: 'normal',
+      parentId: null,
+      referenceData,
+    };
+
+    this.layers.value = [...this.layers.value, newLayer];
+    this.activeLayerId.value = newLayer.id;
+    return newLayer;
+  }
+
+  async addReferenceLayerFromFile(
+    file: File,
+    canvasWidth = 64,
+    canvasHeight = 64
+  ): Promise<Layer> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const dimensions = await getImageDimensions(file);
+    const imageWidth = dimensions?.width ?? canvasWidth;
+    const imageHeight = dimensions?.height ?? canvasHeight;
+
+    return this.addReferenceLayer(
+      {
+        bytes,
+        mimeType: file.type || 'application/octet-stream',
+        ...fitReferenceToCanvas(imageWidth, imageHeight, canvasWidth, canvasHeight),
+        position: 'below',
+      },
+      file.name || undefined
+    );
   }
 
   /**

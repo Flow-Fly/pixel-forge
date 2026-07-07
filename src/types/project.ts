@@ -1,5 +1,6 @@
 import type { FrameTag } from './animation';
 import type { LayerType, BlendMode } from './layer';
+import type { ReferenceLayerData } from './reference';
 import type { TextLayerData, TextCelData } from './text';
 
 /**
@@ -9,9 +10,10 @@ import type { TextLayerData, TextCelData } from './text';
  * in the same PR, and the field must be annotated with the version that
  * introduced it (see existing `v2.1+` / `v3.0+` annotations).
  *
- * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added `layers[].continuous`.
+ * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added `layers[].continuous`,
+ * 4.0.0 removed `ephemeralPalette` and added reference layer data.
  */
-export const PROJECT_VERSION = '3.2.0';
+export const PROJECT_VERSION = '4.0.0';
 
 export type ProjectImageData = Uint8Array;
 export type LegacyProjectImageData =
@@ -22,13 +24,14 @@ export type LegacyProjectImageData =
 export interface ProjectLayerFile {
   id: string;
   name: string;
-  type?: LayerType;          // v2.1+: 'image' | 'text' (default: 'image' for backwards compat)
+  type?: LayerType;          // v2.1+: 'image' | 'text'; v4.0+: 'reference' (default: 'image')
   visible: boolean;
   opacity: number;
   blendMode?: BlendMode;     // v2.1+: blend mode (default: 'normal')
   continuous?: boolean;      // v3.2+: continuous layer (new cels linked to previous frame)
   data: ProjectImageData;    // v2.0+: binary PNG bytes
   textData?: TextLayerData;  // v2.1+: text layer metadata (font, color)
+  referenceData?: ReferenceLayerData; // v4.0+: reference image bytes and transform
 }
 
 export interface ProjectCelFile {
@@ -52,7 +55,6 @@ export interface ProjectFile {
   width: number;
   height: number;
   palette?: string[]; // v3.0+: indexed color palette (hex strings)
-  ephemeralPalette?: string[]; // v3.1+: ephemeral/untracked colors (generated shades)
   layers: ProjectLayerFile[];
   frames: ProjectFrameFile[];
   animation: {
@@ -64,6 +66,9 @@ export interface ProjectFile {
 
 export type ProjectLayerFileInput = Omit<ProjectLayerFile, 'data'> & {
   data: LegacyProjectImageData;
+  referenceData?: Omit<ReferenceLayerData, 'bytes'> & {
+    bytes: LegacyProjectImageData;
+  };
 };
 
 export type ProjectCelFileInput = Omit<ProjectCelFile, 'data'> & {
@@ -75,6 +80,7 @@ export type ProjectFrameFileInput = Omit<ProjectFrameFile, 'cels'> & {
 };
 
 export type ProjectFileInput = Omit<ProjectFile, 'layers' | 'frames'> & {
+  ephemeralPalette?: string[]; // v3.1-v3.2 legacy colors folded into palette on load
   layers: ProjectLayerFileInput[];
   frames: ProjectFrameFileInput[];
 };
