@@ -11,6 +11,7 @@ import "../toolbar/pf-context-bar";
 import "../timeline/pf-timeline";
 import "../ui/pf-shortcuts-overlay";
 import "../ui/pf-shortcuts-toggle";
+import "./pf-project-browser";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
@@ -27,6 +28,8 @@ import { projectStore } from "../../stores/project";
 import { viewportStore } from "../../stores/viewport";
 import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
+import { autoSaveService } from "../../services/auto-save";
+import { projectLibrary } from "../../services/project-library";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 import { log } from "../../utils/log";
@@ -227,10 +230,13 @@ export class PixelForgeApp extends BaseComponent {
   @state() showResizeDialog = false;
   @state() showExportDialog = false;
   @state() showNewProjectDialog = false;
+  @state() showProjectBrowser = false;
+  @state() showDeleteCurrentDialog = false;
   @state() showKeyboardShortcutsDialog = false;
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
+  @state() private hasLibraryProject = false;
   @state() private warningMessage: string | null = null;
 
   private resizeStartY = 0;
@@ -262,6 +268,18 @@ export class PixelForgeApp extends BaseComponent {
     window.addEventListener(
       "show-open-file-dialog",
       this.handleShowOpenFileDialog
+    );
+    window.addEventListener(
+      "show-project-browser",
+      this.handleShowProjectBrowser
+    );
+    window.addEventListener(
+      "duplicate-current-project",
+      this.handleDuplicateCurrentProject
+    );
+    window.addEventListener(
+      "delete-current-project",
+      this.handleDeleteCurrentProject
     );
     window.addEventListener("show-export-dialog", this.handleShowExportDialog);
 
@@ -323,9 +341,67 @@ export class PixelForgeApp extends BaseComponent {
     menuBar?.openFile();
   };
 
+  private handleShowProjectBrowser = () => {
+    this.showProjectBrowser = true;
+  };
+
+  private handleDuplicateCurrentProject = async () => {
+    try {
+      await autoSaveService.saveNow();
+      await projectLibrary.duplicateProject(projectStore.id.value);
+      this.showWarning("Project duplicated");
+    } catch (error) {
+      log.error("Failed to duplicate project:", error);
+      this.showWarning("Could not duplicate project");
+    }
+  };
+
+  private handleDeleteCurrentProject = () => {
+    this.showDeleteCurrentDialog = true;
+  };
+
   private handleShowExportDialog = () => {
     this.showExportDialog = true;
   };
+
+  private handleProjectBrowserClose = () => {
+    if (this.hasLibraryProject) {
+      this.showProjectBrowser = false;
+    }
+  };
+
+  private handleProjectOpened = () => {
+    this.hasLibraryProject = true;
+    this.showProjectBrowser = false;
+  };
+
+  private handleProjectCreated = () => {
+    this.hasLibraryProject = true;
+    this.showProjectBrowser = false;
+  };
+
+  private handleCurrentProjectDeleted = () => {
+    this.hasLibraryProject = false;
+    this.showProjectBrowser = true;
+  };
+
+  private confirmDeleteCurrentProject = async () => {
+    this.showDeleteCurrentDialog = false;
+
+    try {
+      await projectLibrary.deleteProject(projectStore.id.value);
+      this.handleCurrentProjectDeleted();
+    } catch (error) {
+      log.error("Failed to delete project:", error);
+      this.showWarning("Could not delete project");
+    }
+  };
+
+  private showWarning(message: string) {
+    this.handleShowWarningToast(
+      new CustomEvent("show-warning-toast", { detail: { message } })
+    );
+  }
 
   private handleBeforeUnload = (e: BeforeUnloadEvent) => {
     // Check if there are unsaved changes (history has items)
@@ -358,9 +434,16 @@ export class PixelForgeApp extends BaseComponent {
         await projectStore.loadProject(savedProject, true);
         await projectRepository.setLastOpenedProjectId(projectId);
         historyStore.clear();
+        this.hasLibraryProject = true;
+        this.showProjectBrowser = false;
+      } else {
+        this.hasLibraryProject = false;
+        this.showProjectBrowser = true;
       }
     } catch (error) {
       log.warn("Failed to load saved project, starting fresh:", error);
+      this.hasLibraryProject = false;
+      this.showProjectBrowser = true;
     }
   }
 
@@ -384,6 +467,18 @@ export class PixelForgeApp extends BaseComponent {
     window.removeEventListener(
       "show-open-file-dialog",
       this.handleShowOpenFileDialog
+    );
+    window.removeEventListener(
+      "show-project-browser",
+      this.handleShowProjectBrowser
+    );
+    window.removeEventListener(
+      "duplicate-current-project",
+      this.handleDuplicateCurrentProject
+    );
+    window.removeEventListener(
+      "delete-current-project",
+      this.handleDeleteCurrentProject
     );
     window.removeEventListener(
       "show-export-dialog",
@@ -446,6 +541,7 @@ export class PixelForgeApp extends BaseComponent {
           @resize-canvas=${() => (this.showResizeDialog = true)}
           @show-export-dialog=${() => (this.showExportDialog = true)}
           @show-new-project-dialog=${() => (this.showNewProjectDialog = true)}
+          @show-project-browser=${() => (this.showProjectBrowser = true)}
         ></pf-menu-bar>
       </header>
 
@@ -515,8 +611,46 @@ export class PixelForgeApp extends BaseComponent {
 
       <pf-new-project-dialog
         ?open=${this.showNewProjectDialog}
+        .saveCurrentBeforeCreate=${this.hasLibraryProject}
         @close=${() => (this.showNewProjectDialog = false)}
+        @project-created=${this.handleProjectCreated}
       ></pf-new-project-dialog>
+
+      ${this.showProjectBrowser
+        ? html`
+            <pf-project-browser
+              .canClose=${this.hasLibraryProject}
+              @project-browser-close=${this.handleProjectBrowserClose}
+              @project-opened=${this.handleProjectOpened}
+              @current-project-deleted=${this.handleCurrentProjectDeleted}
+            ></pf-project-browser>
+          `
+        : ""}
+
+      <pf-dialog
+        ?open=${this.showDeleteCurrentDialog}
+        width="360px"
+        @pf-close=${() => (this.showDeleteCurrentDialog = false)}
+      >
+        <span slot="title">Delete Current Project</span>
+        <p>Delete "${projectStore.name.value}" from this browser?</p>
+        <div slot="actions">
+          <button
+            type="button"
+            class="secondary"
+            @click=${() => (this.showDeleteCurrentDialog = false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="primary"
+            @click=${this.confirmDeleteCurrentProject}
+          >
+            Delete
+          </button>
+        </div>
+      </pf-dialog>
 
       <pf-keyboard-shortcuts-dialog
         ?open=${this.showKeyboardShortcutsDialog}

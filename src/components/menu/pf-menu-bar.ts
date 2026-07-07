@@ -14,6 +14,7 @@ import {
 // import { importAseFile } from "../../services/aseprite-service";
 // import pako from "pako";
 import { type ProjectFileInput } from "../../types/project";
+import { autoSaveService } from "../../services/auto-save";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 import { log } from "../../utils/log";
@@ -226,6 +227,10 @@ export class PFMenuBar extends BaseComponent {
     .menu-item:hover {
       background-color: var(--pf-color-primary-transparent);
       color: var(--pf-color-text-main);
+    }
+
+    .menu-item.danger {
+      color: #f0aaa2;
     }
 
     .shortcut {
@@ -515,6 +520,33 @@ export class PFMenuBar extends BaseComponent {
     );
   }
 
+  showProjectBrowser() {
+    this.dispatchEvent(
+      new CustomEvent("show-project-browser", {
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  duplicateCurrentProject() {
+    this.dispatchEvent(
+      new CustomEvent("duplicate-current-project", {
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  deleteCurrentProject() {
+    this.dispatchEvent(
+      new CustomEvent("delete-current-project", {
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   toggleShortcutsOverlay() {
     window.dispatchEvent(new CustomEvent("toggle-shortcuts-overlay"));
   }
@@ -555,11 +587,12 @@ export class PFMenuBar extends BaseComponent {
     }
   }
 
-  private commitNameEdit(e: Event) {
+  private async commitNameEdit(e: Event) {
     const input = e.target as HTMLInputElement;
     const newName = input.value.trim() || "Untitled";
     projectStore.name.value = newName;
     this.isEditingName = false;
+    await autoSaveService.saveNow();
   }
 
   render() {
@@ -614,10 +647,23 @@ export class PFMenuBar extends BaseComponent {
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "file")}
         >
           <div class="menu-item" @click=${this.showNewProjectDialog}>
-            New... <span class="shortcut">${formatShortcut(menuShortcuts.newProject)}</span>
+            New Project... <span class="shortcut">${formatShortcut(menuShortcuts.newProject)}</span>
           </div>
+          <div class="menu-item" @click=${this.showProjectBrowser}>
+            Open Project... <span class="shortcut">${formatShortcut(menuShortcuts.open)}</span>
+          </div>
+          <div class="menu-item" @click=${this.duplicateCurrentProject}>
+            Duplicate Current
+          </div>
+          <div class="menu-item" @click=${this.startEditingName}>
+            Rename Current...
+          </div>
+          <div class="menu-item danger" @click=${this.deleteCurrentProject}>
+            Delete Current...
+          </div>
+          <div class="divider"></div>
           <div class="menu-item" @click=${this.openFile}>
-            Open... <span class="shortcut">${formatShortcut(menuShortcuts.open)}</span>
+            Import File...
           </div>
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>

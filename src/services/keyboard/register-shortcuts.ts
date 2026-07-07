@@ -671,7 +671,7 @@ const fileShortcuts: ShortcutGroup = [
   {
     key: 'o',
     modifiers: [MOD_PRIMARY],
-    action: () => dispatchAppEvent('show-open-file-dialog'),
+    action: () => dispatchAppEvent('show-project-browser'),
     description: 'Open project',
   },
   {
