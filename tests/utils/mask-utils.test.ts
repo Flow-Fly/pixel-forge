@@ -55,7 +55,6 @@ function maskToRows(mask: Uint8Array, bounds: Rect): string[] {
 
 const RED = 0xff0000ff;
 const BLUE = 0x0000ffff;
-const CLEAR = 0x00000000;
 
 describe('floodFillSelect', () => {
   it('selects a contiguous region of matching pixels', () => {
