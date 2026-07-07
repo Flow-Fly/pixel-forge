@@ -211,6 +211,22 @@ class PaletteStore {
     this.setColorAtArrayIndex(index - 1, newColor);
   }
 
+  setColorsDirect(colors: string[], newColorFlags = this.newColorFlags.value) {
+    const normalizedColors = colors.map(c => normalizeHex(c));
+    const paletteSet = new Set(normalizedColors);
+    const flags = new Set(
+      [...newColorFlags]
+        .map(color => normalizeHex(color))
+        .filter(color => paletteSet.has(color))
+    );
+
+    this.colors.value = normalizedColors;
+    this.newColorFlags.value = flags;
+    this.markDirty();
+    this.rebuildColorMap();
+    this.saveToStorage();
+  }
+
   removeColor(index: number) {
     if (this.removeColorAtArrayIndex(index)) {
 

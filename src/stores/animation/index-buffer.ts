@@ -17,6 +17,14 @@ import { paletteStore } from '../palette';
 import { getCanvasSize } from '../store-refs';
 import { getCelKey } from './types';
 
+export interface PaletteIndexUsage {
+  paletteIndex: number;
+  pixelCount: number;
+  celCount: number;
+  frameIds: string[];
+  celKeys: string[];
+}
+
 /**
  * Get the index buffer for a cel. Returns undefined if cel doesn't exist.
  */
@@ -138,6 +146,99 @@ export function rebuildAllIndexBuffers(cels: Map<string, Cel>): Map<string, Cel>
   }
 
   return newCels;
+}
+
+/**
+ * Report where a palette index is used in cel index buffers.
+ */
+export function scanPaletteIndexUsage(
+  cels: Map<string, Cel>,
+  paletteIndex: number
+): PaletteIndexUsage {
+  const frameIds = new Set<string>();
+  const celKeys: string[] = [];
+  let pixelCount = 0;
+
+  for (const [key, cel] of cels) {
+    if (!cel.indexBuffer) continue;
+    if (cel.textCelData) continue;
+
+    let celPixelCount = 0;
+    for (const index of cel.indexBuffer) {
+      if (index === paletteIndex) {
+        celPixelCount++;
+      }
+    }
+
+    if (celPixelCount === 0) continue;
+
+    pixelCount += celPixelCount;
+    frameIds.add(cel.frameId);
+    celKeys.push(key);
+  }
+
+  return {
+    paletteIndex,
+    pixelCount,
+    celCount: celKeys.length,
+    frameIds: [...frameIds],
+    celKeys,
+  };
+}
+
+export function remapPaletteIndexAfterDelete(
+  cels: Map<string, Cel>,
+  removedIndex: number,
+  replacementIndex: number,
+  oldPaletteSize: number
+): Map<string, Cel> {
+  const newCels = new Map(cels);
+  const safeReplacement = Math.max(
+    0,
+    Math.min(replacementIndex, oldPaletteSize - 1)
+  );
+
+  for (const [key, cel] of cels) {
+    if (!cel.indexBuffer) continue;
+    if (cel.textCelData) continue;
+
+    const nextBuffer = new Uint8Array(cel.indexBuffer);
+    let changed = false;
+
+    for (let i = 0; i < nextBuffer.length; i++) {
+      const currentIndex = nextBuffer[i];
+      const nextIndex = getIndexAfterPaletteDelete(
+        currentIndex,
+        removedIndex,
+        safeReplacement,
+        oldPaletteSize
+      );
+
+      if (nextIndex === currentIndex) continue;
+
+      nextBuffer[i] = nextIndex;
+      changed = true;
+    }
+
+    if (changed) {
+      newCels.set(key, { ...cel, indexBuffer: nextBuffer });
+    }
+  }
+
+  return newCels;
+}
+
+function getIndexAfterPaletteDelete(
+  currentIndex: number,
+  removedIndex: number,
+  replacementIndex: number,
+  oldPaletteSize: number
+): number {
+  if (currentIndex === 0) return 0;
+  if (currentIndex > oldPaletteSize) return 0;
+  if (currentIndex === removedIndex) return replacementIndex;
+  if (currentIndex > removedIndex) return currentIndex - 1;
+  return currentIndex;
 }
 
 /**

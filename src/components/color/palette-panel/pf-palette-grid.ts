@@ -1,8 +1,23 @@
 import { html, css } from "lit";
-import { customElement, state, property } from "lit/decorators.js";
+import { customElement, state, property, query } from "lit/decorators.js";
 import { BaseComponent } from "../../../core/base-component";
+import {
+  DeletePaletteColorCommand,
+  type DeletePaletteColorReplacement,
+} from "../../../commands/palette-command";
+import { historyStore } from "../../../stores/history";
+import { animationStore } from "../../../stores/animation";
 import { colorStore } from "../../../stores/colors";
 import { paletteStore } from "../../../stores/palette";
+import { findClosestColorIndex } from "../../../stores/palette/indexed-color";
+
+interface PendingDeleteColor {
+  paletteIndex: number;
+  color: string;
+  pixelCount: number;
+  frameCount: number;
+  nearestColor: string | null;
+}
 
 @customElement("pf-palette-grid")
 export class PFPaletteGrid extends BaseComponent {
@@ -176,6 +191,73 @@ export class PFPaletteGrid extends BaseComponent {
     .palette-grid.replace-mode .swatch-delete {
       display: none;
     }
+
+    .delete-dialog {
+      width: min(320px, calc(100vw - 32px));
+      padding: 16px;
+      color: var(--pf-color-text-main);
+      background: rgba(13, 16, 21, 0.98);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-md);
+      box-shadow: var(--pf-shadow-lg);
+    }
+
+    .delete-dialog::backdrop {
+      background: rgba(0, 0, 0, 0.64);
+      backdrop-filter: blur(4px);
+    }
+
+    .delete-dialog form {
+      display: grid;
+      gap: 12px;
+    }
+
+    .delete-dialog h2,
+    .delete-dialog p {
+      margin: 0;
+    }
+
+    .delete-dialog h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .delete-dialog p {
+      color: var(--pf-color-text-muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .delete-actions {
+      display: grid;
+      gap: 8px;
+    }
+
+    .delete-actions button {
+      min-height: 30px;
+      padding: 6px 10px;
+      color: var(--pf-color-text-main);
+      background: var(--pf-color-bg);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .delete-actions button:hover,
+    .delete-actions button:focus-visible {
+      border-color: var(--pf-color-accent);
+    }
+
+    .delete-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .delete-actions .cancel {
+      text-align: center;
+    }
   `;
 
   @property({ type: Boolean }) replaceMode = false;
@@ -184,6 +266,9 @@ export class PFPaletteGrid extends BaseComponent {
   @state() private dragOverIndex: number | null = null;
   @state() private isDragging = false;
   @state() private draggedIndex: number | null = null;
+  @state() private pendingDelete: PendingDeleteColor | null = null;
+
+  @query(".delete-dialog") private deleteDialog?: HTMLDialogElement;
 
   private selectColor(color: string) {
     colorStore.setPrimaryColor(color);
@@ -212,9 +297,75 @@ export class PFPaletteGrid extends BaseComponent {
     }));
   }
 
-  private handleDeleteColor(e: Event, index: number) {
+  private async handleDeleteColor(e: Event, index: number) {
     e.stopPropagation();
-    paletteStore.removeColor(index);
+    const paletteIndex = index + 1;
+    const usage = animationStore.scanPaletteIndexUsage(paletteIndex);
+
+    if (usage.pixelCount === 0) {
+      void historyStore.execute(
+        new DeletePaletteColorCommand(paletteIndex, "transparent")
+      );
+      return;
+    }
+
+    this.pendingDelete = this.getPendingDeleteColor(
+      index,
+      usage.pixelCount,
+      usage.frameIds.length
+    );
+    await this.updateComplete;
+
+    if (this.deleteDialog && !this.deleteDialog.open) {
+      this.deleteDialog.returnValue = "cancel";
+      this.deleteDialog.showModal();
+    }
+  }
+
+  private getPendingDeleteColor(
+    index: number,
+    pixelCount: number,
+    frameCount: number
+  ): PendingDeleteColor {
+    const color = paletteStore.mainColors.value[index];
+    const remainingColors = paletteStore.mainColors.value.filter(
+      (_, colorIndex) => colorIndex !== index
+    );
+    const nearestIndex = remainingColors.length > 0
+      ? findClosestColorIndex(color, remainingColors)
+      : 0;
+
+    return {
+      paletteIndex: index + 1,
+      color,
+      pixelCount,
+      frameCount,
+      nearestColor: nearestIndex > 0 ? remainingColors[nearestIndex - 1] : null,
+    };
+  }
+
+  private handleDeleteDialogClose() {
+    const command = this.getDeleteDialogCommand(this.deleteDialog?.returnValue);
+    this.pendingDelete = null;
+
+    if (command) {
+      void historyStore.execute(command);
+    }
+  }
+
+  private getDeleteDialogCommand(choice: string | undefined) {
+    const pendingDelete = this.pendingDelete;
+    const replacement = this.getDeleteDialogReplacement(choice);
+
+    if (!pendingDelete || !replacement) return null;
+
+    return new DeletePaletteColorCommand(pendingDelete.paletteIndex, replacement);
+  }
+
+  private getDeleteDialogReplacement(choice: string | undefined): DeletePaletteColorReplacement | null {
+    if (choice === "transparent") return "transparent";
+    if (choice === "nearest" && this.pendingDelete?.nearestColor) return "nearest";
+    return null;
   }
 
   private handleMarkAsKept(e: Event, color: string) {
@@ -339,6 +490,7 @@ export class PFPaletteGrid extends BaseComponent {
           class="swatch-delete"
           @click=${(e: Event) => this.handleDeleteColor(e, index)}
           title="Remove from palette"
+          aria-label="Remove ${color} from palette"
         >
           ×
         </button>
@@ -373,6 +525,47 @@ export class PFPaletteGrid extends BaseComponent {
       >
         ${colors.map((color, index) => this.renderSwatch(color, index, usedColors))}
       </div>
+      ${this.renderDeleteDialog()}
+    `;
+  }
+
+  private renderDeleteDialog() {
+    const pendingDelete = this.pendingDelete ?? {
+      paletteIndex: 0,
+      color: "",
+      pixelCount: 0,
+      frameCount: 0,
+      nearestColor: null,
+    };
+    const nearestLabel = pendingDelete.nearestColor
+      ? `Replace with nearest palette color (${pendingDelete.nearestColor})`
+      : "Replace with nearest palette color";
+
+    return html`
+      <dialog
+        class="delete-dialog"
+        aria-labelledby="delete-color-title"
+        aria-describedby="delete-color-summary"
+        @close=${this.handleDeleteDialogClose}
+      >
+        <form method="dialog">
+          <h2 id="delete-color-title">Delete palette color</h2>
+          <p id="delete-color-summary">
+            Used in ${pendingDelete.pixelCount} pixels across
+            ${pendingDelete.frameCount} frames.
+          </p>
+          <div class="delete-actions">
+            <button
+              value="nearest"
+              ?disabled=${!pendingDelete.nearestColor}
+            >
+              ${nearestLabel}
+            </button>
+            <button value="transparent">Replace with transparency</button>
+            <button class="cancel" value="cancel">Cancel</button>
+          </div>
+        </form>
+      </dialog>
     `;
   }
 }

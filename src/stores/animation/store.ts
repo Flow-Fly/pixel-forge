@@ -359,6 +359,10 @@ class AnimationStore {
     return indexBuffer.scanUsedColorsFromCanvas(this.cels.value);
   }
 
+  scanPaletteIndexUsage(paletteIndex: number): indexBuffer.PaletteIndexUsage {
+    return indexBuffer.scanPaletteIndexUsage(this.cels.value, paletteIndex);
+  }
+
   // ===== Frame Navigation =====
 
   nextFrame() {
