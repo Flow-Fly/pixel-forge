@@ -212,22 +212,15 @@ export class PFPaletteGrid extends BaseComponent {
     e.preventDefault();
     e.stopPropagation();
 
-    const paletteIndexStr = e.dataTransfer?.getData("application/x-palette-index");
-    const color = e.dataTransfer?.getData("application/x-palette-color");
+    const fromIndex = this.getDroppedPaletteIndex(e);
 
-    if (paletteIndexStr !== undefined && paletteIndexStr !== "") {
-      const fromIndex = parseInt(paletteIndexStr, 10);
-      if (fromIndex !== targetIndex && fromIndex !== targetIndex - 1) {
-        const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
-        paletteStore.moveColor(fromIndex, adjustedTarget);
-      }
-    } else if (color) {
-      paletteStore.insertColorAt(targetIndex + 1, color);
+    if (fromIndex !== null) {
+      this.moveDroppedPaletteColor(fromIndex, targetIndex);
+    } else {
+      this.insertDroppedColor(e, targetIndex);
     }
 
-    this.isDragging = false;
-    this.draggedIndex = null;
-    this.dragOverIndex = null;
+    this.resetDragState();
   }
 
   private handleGridDragOver(e: DragEvent) {
@@ -246,9 +239,70 @@ export class PFPaletteGrid extends BaseComponent {
       paletteStore.addColor(color);
     }
 
+    this.resetDragState();
+  }
+
+  private resetDragState() {
     this.isDragging = false;
     this.draggedIndex = null;
     this.dragOverIndex = null;
+  }
+
+  private getDroppedPaletteIndex(e: DragEvent): number | null {
+    const value = e.dataTransfer?.getData("application/x-palette-index");
+    if (!value) return null;
+
+    return Number.parseInt(value, 10);
+  }
+
+  private moveDroppedPaletteColor(fromIndex: number, targetIndex: number) {
+    if (fromIndex === targetIndex || fromIndex === targetIndex - 1) return;
+
+    const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    paletteStore.moveColor(fromIndex, adjustedTarget);
+  }
+
+  private insertDroppedColor(e: DragEvent, targetIndex: number) {
+    const color = e.dataTransfer?.getData("application/x-palette-color");
+    if (color) {
+      paletteStore.insertColorAt(targetIndex + 1, color);
+    }
+  }
+
+  private renderSwatch(color: string, index: number, usedColors: Set<string>) {
+    const isUsed = usedColors.has(color.toLowerCase());
+
+    return html`
+      <div
+        class="swatch-container ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
+        @dragover=${(e: DragEvent) => this.handleDragOver(index, e)}
+        @dragleave=${this.handleDragLeave}
+        @drop=${(e: DragEvent) => this.handleDrop(index, e)}
+      >
+        <div
+          class="swatch ${isUsed ? "swatch-used" : ""}"
+          style="background-color: ${color}"
+          title="${this.getSwatchTitle(color, isUsed)}"
+          draggable="${!this.replaceMode}"
+          @click=${(e: Event) => this.handleSwatchClick(color, index, e)}
+          @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color, index)}
+          @dragstart=${(e: DragEvent) => this.handleDragStart(index, color, e)}
+          @dragend=${this.handleDragEnd}
+        ></div>
+        <button
+          class="swatch-delete"
+          @click=${(e: Event) => this.handleDeleteColor(e, index)}
+          title="Remove from palette"
+        >
+          ×
+        </button>
+      </div>
+    `;
+  }
+
+  private getSwatchTitle(color: string, isUsed: boolean): string {
+    const label = this.replaceMode ? `Click to replace with ${this.replaceColor}` : color;
+    return isUsed ? `${label} (in use)` : label;
   }
 
   render() {
@@ -261,35 +315,7 @@ export class PFPaletteGrid extends BaseComponent {
         @dragover=${this.handleGridDragOver}
         @drop=${this.handleGridDrop}
       >
-        ${colors.map((color, index) => {
-          const isUsed = usedColors.has(color.toLowerCase());
-          return html`
-            <div
-              class="swatch-container ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
-              @dragover=${(e: DragEvent) => this.handleDragOver(index, e)}
-              @dragleave=${this.handleDragLeave}
-              @drop=${(e: DragEvent) => this.handleDrop(index, e)}
-            >
-              <div
-                class="swatch ${isUsed ? "swatch-used" : ""}"
-                style="background-color: ${color}"
-                title="${this.replaceMode ? `Click to replace with ${this.replaceColor}` : color}${isUsed ? " (in use)" : ""}"
-                draggable="${!this.replaceMode}"
-                @click=${(e: Event) => this.handleSwatchClick(color, index, e)}
-                @contextmenu=${(e: MouseEvent) => this.handleSwatchRightClick(e, color, index)}
-                @dragstart=${(e: DragEvent) => this.handleDragStart(index, color, e)}
-                @dragend=${this.handleDragEnd}
-              ></div>
-              <button
-                class="swatch-delete"
-                @click=${(e: Event) => this.handleDeleteColor(e, index)}
-                title="Remove from palette"
-              >
-                ×
-              </button>
-            </div>
-          `;
-        })}
+        ${colors.map((color, index) => this.renderSwatch(color, index, usedColors))}
       </div>
     `;
   }
