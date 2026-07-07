@@ -11,8 +11,7 @@ import type { Cel } from '../../types/animation';
 import {
   createIndexBuffer,
   rebuildCanvasFromIndices,
-  buildIndexBufferFromCanvas,
-  rgbToHex
+  buildIndexBufferFromCanvas
 } from '../../utils/indexed-color';
 import { paletteStore } from '../palette';
 import { getCanvasSize } from '../store-refs';
@@ -67,31 +66,28 @@ export function ensureCelIndexBuffer(
   // Create index buffer - either empty or built from existing canvas content
   const width = cel.canvas.width;
   const height = cel.canvas.height;
-  const indexBuffer = hasOpaquePixel(cel.canvas, width, height)
-    ? buildIndexBufferFromCanvas(cel.canvas, true)
-    : createIndexBuffer(width, height);
+  let indexBuffer: Uint8Array;
+
+  // Check if canvas has any content (for migration from non-indexed projects)
+  const ctx = cel.canvas.getContext('2d', { willReadFrequently: true });
+  if (ctx) {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0);
+
+    if (hasContent) {
+      indexBuffer = buildIndexBufferFromCanvas(cel.canvas, true);
+    } else {
+      indexBuffer = createIndexBuffer(width, height);
+    }
+  } else {
+    indexBuffer = createIndexBuffer(width, height);
+  }
 
   // Update cel with the new index buffer
   const newCels = new Map(cels);
   newCels.set(key, { ...cel, indexBuffer });
 
   return { cels: newCels, indexBuffer };
-}
-
-function hasOpaquePixel(
-  canvas: HTMLCanvasElement,
-  width: number,
-  height: number
-): boolean {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return false;
-
-  const data = ctx.getImageData(0, 0, width, height).data;
-  for (let alphaOffset = 3; alphaOffset < data.length; alphaOffset += 4) {
-    if (data[alphaOffset] > 0) return true;
-  }
-
-  return false;
 }
 
 /**
@@ -278,32 +274,31 @@ export function scanUsedColorsFromCanvas(cels: Map<string, Cel>): Set<string> {
   const usedColors = new Set<string>();
 
   for (const [_key, cel] of cels) {
+    if (!cel.canvas) continue;
     if (cel.textCelData) continue;
 
-    const data = readCanvasPixels(cel.canvas);
-    if (!data) continue;
+    const ctx = cel.canvas.getContext('2d');
+    if (!ctx) continue;
 
-    for (let alphaOffset = 3; alphaOffset < data.length; alphaOffset += 4) {
-      if (data[alphaOffset] === 0) continue;
+    const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
+    const data = imageData.data;
 
-      usedColors.add(getPixelHex(data, alphaOffset).toLowerCase());
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a === 0) continue;
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const hex = '#' +
+        r.toString(16).padStart(2, '0') +
+        g.toString(16).padStart(2, '0') +
+        b.toString(16).padStart(2, '0');
+
+      usedColors.add(hex.toLowerCase());
     }
   }
 
   return usedColors;
-}
-
-function readCanvasPixels(canvas: HTMLCanvasElement): Uint8ClampedArray | null {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-}
-
-function getPixelHex(data: Uint8ClampedArray, alphaOffset: number): string {
-  return rgbToHex(
-    data[alphaOffset - 3],
-    data[alphaOffset - 2],
-    data[alphaOffset - 1]
-  );
 }
