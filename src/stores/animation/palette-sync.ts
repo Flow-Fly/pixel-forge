@@ -10,6 +10,38 @@ import { paletteStore } from '../palette';
 import { normalizeHex } from '../palette/color-utils';
 import { rebuildAllCelCanvases } from './index-buffer';
 
+type IndexMapper = (oldIndex: number) => number;
+
+function rebuildChangedCels(cels: Map<string, Cel>): Map<string, Cel> {
+  const newCels = new Map(cels);
+  rebuildAllCelCanvases(newCels);
+  return newCels;
+}
+
+function remapCelBuffers(
+  cels: Map<string, Cel>,
+  mapIndex: IndexMapper,
+  options: { skipTextCels?: boolean } = {}
+): Map<string, Cel> {
+  for (const cel of cels.values()) {
+    if (!cel.indexBuffer) continue;
+    if (options.skipTextCels && cel.textCelData) continue;
+
+    remapBuffer(cel.indexBuffer, mapIndex);
+  }
+
+  return rebuildChangedCels(cels);
+}
+
+function remapBuffer(buffer: Uint8Array, mapIndex: IndexMapper): void {
+  for (let i = 0; i < buffer.length; i++) {
+    const oldIndex = buffer[i];
+    if (oldIndex === 0) continue;
+
+    buffer[i] = mapIndex(oldIndex);
+  }
+}
+
 /**
  * Handle palette color reorder - update index buffers to use new indices.
  */
@@ -18,36 +50,27 @@ function handlePaletteReorder(
   fromIndex: number,
   toIndex: number
 ): Map<string, Cel> {
-  for (const [_key, cel] of cels) {
-    if (!cel.indexBuffer) continue;
+  return remapCelBuffers(cels, oldIndex =>
+    getReorderedIndex(oldIndex, fromIndex, toIndex)
+  );
+}
 
-    const buffer = cel.indexBuffer;
-    for (let i = 0; i < buffer.length; i++) {
-      const oldIndex = buffer[i];
-      if (oldIndex === 0) continue; // Skip transparent
+function getReorderedIndex(
+  oldIndex: number,
+  fromIndex: number,
+  toIndex: number
+): number {
+  if (oldIndex === fromIndex) return toIndex;
 
-      if (fromIndex < toIndex) {
-        // Moving forward: indices between from+1 and to shift down by 1
-        if (oldIndex === fromIndex) {
-          buffer[i] = toIndex;
-        } else if (oldIndex > fromIndex && oldIndex <= toIndex) {
-          buffer[i] = oldIndex - 1;
-        }
-      } else {
-        // Moving backward: indices between to and from-1 shift up by 1
-        if (oldIndex === fromIndex) {
-          buffer[i] = toIndex;
-        } else if (oldIndex >= toIndex && oldIndex < fromIndex) {
-          buffer[i] = oldIndex + 1;
-        }
-      }
-    }
+  if (fromIndex < toIndex && oldIndex > fromIndex && oldIndex <= toIndex) {
+    return oldIndex - 1;
   }
 
-  // Force new Map to trigger reactivity
-  const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
-  return newCels;
+  if (fromIndex > toIndex && oldIndex >= toIndex && oldIndex < fromIndex) {
+    return oldIndex + 1;
+  }
+
+  return oldIndex;
 }
 
 /**
@@ -57,27 +80,15 @@ function handlePaletteColorRemoved(
   cels: Map<string, Cel>,
   removedIndex: number
 ): Map<string, Cel> {
-  for (const [_key, cel] of cels) {
-    if (!cel.indexBuffer) continue;
+  return remapCelBuffers(cels, oldIndex =>
+    getIndexAfterRemoval(oldIndex, removedIndex)
+  );
+}
 
-    const buffer = cel.indexBuffer;
-    for (let i = 0; i < buffer.length; i++) {
-      const oldIndex = buffer[i];
-      if (oldIndex === 0) continue;
-
-      if (oldIndex === removedIndex) {
-        // Remap to first color (fallback)
-        buffer[i] = 1;
-      } else if (oldIndex > removedIndex) {
-        // Indices after removed one shift down
-        buffer[i] = oldIndex - 1;
-      }
-    }
-  }
-
-  const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
-  return newCels;
+function getIndexAfterRemoval(oldIndex: number, removedIndex: number): number {
+  if (oldIndex === removedIndex) return 1;
+  if (oldIndex > removedIndex) return oldIndex - 1;
+  return oldIndex;
 }
 
 /**
@@ -87,23 +98,9 @@ function handlePaletteColorInserted(
   cels: Map<string, Cel>,
   insertedIndex: number
 ): Map<string, Cel> {
-  for (const [_key, cel] of cels) {
-    if (!cel.indexBuffer) continue;
-
-    const buffer = cel.indexBuffer;
-    for (let i = 0; i < buffer.length; i++) {
-      const oldIndex = buffer[i];
-      if (oldIndex === 0) continue;
-
-      if (oldIndex >= insertedIndex) {
-        buffer[i] = oldIndex + 1;
-      }
-    }
-  }
-
-  const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
-  return newCels;
+  return remapCelBuffers(cels, oldIndex =>
+    oldIndex >= insertedIndex ? oldIndex + 1 : oldIndex
+  );
 }
 
 /**
@@ -113,40 +110,37 @@ function handlePaletteReplacedWithRemap(
   cels: Map<string, Cel>,
   oldMainColors: string[]
 ): Map<string, Cel> {
-  // Build lookup: old 1-based index -> hex color (normalized for consistent comparison)
+  const oldIndexToColor = buildOldIndexToColor(oldMainColors);
+
+  return remapCelBuffers(
+    cels,
+    oldIndex => getReplacementIndex(oldIndex, oldIndexToColor),
+    { skipTextCels: true }
+  );
+}
+
+function buildOldIndexToColor(oldMainColors: string[]): Map<number, string> {
   const oldIndexToColor = new Map<number, string>();
 
   oldMainColors.forEach((color, i) => {
     oldIndexToColor.set(i + 1, normalizeHex(color));
   });
 
-  // Remap each pixel by color
-  for (const [_key, cel] of cels) {
-    if (!cel.indexBuffer) continue;
-    if (cel.textCelData) continue;
+  return oldIndexToColor;
+}
 
-    const buffer = cel.indexBuffer;
-    for (let i = 0; i < buffer.length; i++) {
-      const oldIndex = buffer[i];
-      if (oldIndex === 0) continue;
+function getReplacementIndex(
+  oldIndex: number,
+  oldIndexToColor: Map<number, string>
+): number {
+  const color = oldIndexToColor.get(oldIndex);
+  if (!color) return oldIndex;
 
-      const color = oldIndexToColor.get(oldIndex);
-      if (!color) continue;
+  const exactIndex = paletteStore.getColorIndex(color);
+  if (exactIndex !== 0) return exactIndex;
 
-      let newIndex = paletteStore.getColorIndex(color);
-      if (newIndex === 0) {
-        // Color not in new palette - find closest match
-        newIndex = paletteStore.findClosestColorIndex(color);
-      }
-      if (newIndex !== 0) {
-        buffer[i] = newIndex;
-      }
-    }
-  }
-
-  const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
-  return newCels;
+  const closestIndex = paletteStore.findClosestColorIndex(color);
+  return closestIndex === 0 ? oldIndex : closestIndex;
 }
 
 /**

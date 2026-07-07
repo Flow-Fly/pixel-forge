@@ -195,17 +195,10 @@ class PaletteStore {
   // ==========================================
 
   updateColor(index: number, newColor: string) {
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
-
-    const normalized = normalizeHex(newColor);
-    const colors = [...this.colors.value];
-    colors[arrayIndex] = normalized;
-    this.colors.value = colors;
-    this.markDirty();
-    this.pruneNewFlags();
-    this.rebuildColorMap();
-    this.saveToStorage();
+    const normalized = this.setColorAtArrayIndex(index - 1, newColor, {
+      markDirty: true,
+    });
+    if (!normalized) return;
 
     window.dispatchEvent(
       new CustomEvent('palette-color-changed', {
@@ -215,27 +208,11 @@ class PaletteStore {
   }
 
   updateColorDirect(index: number, newColor: string) {
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
-
-    const normalized = normalizeHex(newColor);
-    const colors = [...this.colors.value];
-    colors[arrayIndex] = normalized;
-    this.colors.value = colors;
-    this.pruneNewFlags();
-    this.rebuildColorMap();
-    this.saveToStorage();
+    this.setColorAtArrayIndex(index - 1, newColor);
   }
 
   removeColor(index: number) {
-    if (index >= 0 && index < this.colors.value.length) {
-      const newColors = [...this.colors.value];
-      newColors.splice(index, 1);
-      this.colors.value = newColors;
-      this.markDirty();
-      this.pruneNewFlags();
-      this.rebuildColorMap();
-      this.saveToStorage();
+    if (this.removeColorAtArrayIndex(index)) {
 
       window.dispatchEvent(
         new CustomEvent('palette-color-removed', {
@@ -246,16 +223,7 @@ class PaletteStore {
   }
 
   removeColorByIndex(index: number) {
-    const arrayIndex = index - 1;
-    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return;
-
-    const newColors = [...this.colors.value];
-    newColors.splice(arrayIndex, 1);
-    this.colors.value = newColors;
-    this.markDirty();
-    this.pruneNewFlags();
-    this.rebuildColorMap();
-    this.saveToStorage();
+    if (!this.removeColorAtArrayIndex(index - 1)) return;
 
     window.dispatchEvent(
       new CustomEvent('palette-color-removed', {
@@ -512,6 +480,43 @@ class PaletteStore {
 
   private markDirty() {
     this.isDirty.value = true;
+  }
+
+  private setColorAtArrayIndex(
+    arrayIndex: number,
+    newColor: string,
+    options: { markDirty?: boolean } = {}
+  ): string | null {
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return null;
+
+    const normalized = normalizeHex(newColor);
+    const colors = [...this.colors.value];
+    colors[arrayIndex] = normalized;
+    this.colors.value = colors;
+
+    if (options.markDirty) {
+      this.markDirty();
+    }
+
+    this.pruneNewFlags();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    return normalized;
+  }
+
+  private removeColorAtArrayIndex(arrayIndex: number): boolean {
+    if (arrayIndex < 0 || arrayIndex >= this.colors.value.length) return false;
+
+    const colors = [...this.colors.value];
+    colors.splice(arrayIndex, 1);
+    this.colors.value = colors;
+    this.markDirty();
+    this.pruneNewFlags();
+    this.rebuildColorMap();
+    this.saveToStorage();
+
+    return true;
   }
 
   // ==========================================
