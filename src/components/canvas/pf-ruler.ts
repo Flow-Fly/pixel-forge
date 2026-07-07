@@ -4,6 +4,7 @@ import { BaseComponent } from "../../core/base-component";
 import { viewportStore } from "../../stores/viewport";
 import { projectStore } from "../../stores/project";
 import { guidesStore } from "../../stores/guides";
+import { clearCanvasForDpr } from "../../utils/canvas-utils";
 import "../common/pf-tooltip";
 
 type RulerOrientation = "horizontal" | "vertical";
@@ -428,10 +429,7 @@ export class PFRuler extends BaseComponent {
     const width = this.canvas.width / dpr;
     const height = this.canvas.height / dpr;
 
-    // Clear
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.scale(dpr, dpr);
+    clearCanvasForDpr(ctx, this.canvas);
 
     const zoom = viewportStore.zoom.value;
     const panX = viewportStore.panX.value;

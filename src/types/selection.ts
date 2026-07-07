@@ -43,19 +43,3 @@ export type SelectionState =
       mask?: Uint8Array;              // Original mask (for freeform)
     };
 
-// Helper type guards
-export function isSelected(state: SelectionState): state is SelectionState & { type: 'selected' } {
-  return state.type === 'selected';
-}
-
-export function isFloating(state: SelectionState): state is SelectionState & { type: 'floating' } {
-  return state.type === 'floating';
-}
-
-export function isTransforming(state: SelectionState): state is SelectionState & { type: 'transforming' } {
-  return state.type === 'transforming';
-}
-
-export function hasSelection(state: SelectionState): boolean {
-  return state.type === 'selected' || state.type === 'floating' || state.type === 'selecting' || state.type === 'transforming';
-}

@@ -135,24 +135,139 @@ export function constrainWithStickyAngles(
   return { x: newX, y: newY };
 }
 
-/**
- * Constrain a point to the dominant axis (horizontal or vertical) from an origin.
- * Used for Shift+Drag to create straight horizontal/vertical lines without drift.
- */
-export function constrainToAxis(
-  originX: number,
-  originY: number,
-  targetX: number,
-  targetY: number
-): Point {
-  const dx = Math.abs(targetX - originX);
-  const dy = Math.abs(targetY - originY);
 
-  if (dx >= dy) {
-    // Horizontal - keep X movement, lock Y
-    return { x: targetX, y: originY };
-  } else {
-    // Vertical - keep Y movement, lock X
-    return { x: originX, y: targetY };
+/** RGBA fill color plus its palette index for indexed-color mode. */
+export interface FloodFillColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+  /** Palette index written to the index buffer when one is provided. */
+  paletteIndex: number;
+}
+
+/**
+ * Stack-based 4-way flood fill starting at (startX, startY).
+ *
+ * Mutates `data` (RGBA pixels) and, when provided, `indexBuffer`
+ * (palette indices) in place. Pixels match the fill region by palette
+ * index when an index buffer is present, by exact RGBA otherwise.
+ *
+ * Returns the filled region's bounds, or null when nothing was filled
+ * (out of bounds, or the target already has the fill color).
+ */
+export function floodFill(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  fill: FloodFillColor,
+  indexBuffer?: Uint8Array
+): { x: number; y: number; width: number; height: number } | null {
+  if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
+    return null;
   }
+
+  const matches = makeTargetMatcher(data, startX, startY, width, fill, indexBuffer);
+  // Don't fill if target is same as fill color
+  if (!matches) return null;
+
+  return fillMatchingRegion(data, width, height, startX, startY, fill, matches, indexBuffer);
+}
+
+/**
+ * Build a predicate matching the fill region's target color (palette index
+ * in indexed mode, exact RGBA otherwise). Returns null when the target
+ * already has the fill color.
+ */
+function makeTargetMatcher(
+  data: Uint8ClampedArray,
+  startX: number,
+  startY: number,
+  width: number,
+  fill: FloodFillColor,
+  indexBuffer?: Uint8Array
+): ((pixelIndex: number) => boolean) | null {
+  if (indexBuffer) {
+    // In indexed mode, compare palette indices
+    const targetPaletteIndex = indexBuffer[startY * width + startX];
+    if (targetPaletteIndex === fill.paletteIndex) return null;
+    return (pixelIndex) => indexBuffer[pixelIndex] === targetPaletteIndex;
+  }
+
+  const targetPos = (startY * width + startX) * 4;
+  const targetR = data[targetPos];
+  const targetG = data[targetPos + 1];
+  const targetB = data[targetPos + 2];
+  const targetA = data[targetPos + 3];
+  if (targetR === fill.r && targetG === fill.g && targetB === fill.b && targetA === fill.a) {
+    return null;
+  }
+  return (pixelIndex) => {
+    const pos = pixelIndex * 4;
+    return (
+      data[pos] === targetR &&
+      data[pos + 1] === targetG &&
+      data[pos + 2] === targetB &&
+      data[pos + 3] === targetA
+    );
+  };
+}
+
+function inBounds(x: number, y: number, width: number, height: number): boolean {
+  return x >= 0 && x < width && y >= 0 && y < height;
+}
+
+/** Stack-based 4-way scan writing the fill color over matching pixels. */
+function fillMatchingRegion(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  fill: FloodFillColor,
+  matches: (pixelIndex: number) => boolean,
+  indexBuffer?: Uint8Array
+): { x: number; y: number; width: number; height: number } | null {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  const stack = [[startX, startY]];
+  const visited = new Set<number>(); // Avoid revisiting pixels
+
+  while (stack.length) {
+    const [cx, cy] = stack.pop()!;
+    if (!inBounds(cx, cy, width, height)) continue;
+
+    const pixelIndex = cy * width + cx;
+    if (visited.has(pixelIndex)) continue;
+    visited.add(pixelIndex);
+
+    if (!matches(pixelIndex)) continue;
+
+    const pos = pixelIndex * 4;
+    data[pos] = fill.r;
+    data[pos + 1] = fill.g;
+    data[pos + 2] = fill.b;
+    data[pos + 3] = fill.a;
+    if (indexBuffer) {
+      indexBuffer[pixelIndex] = fill.paletteIndex;
+    }
+
+    minX = Math.min(minX, cx);
+    maxX = Math.max(maxX, cx);
+    minY = Math.min(minY, cy);
+    maxY = Math.max(maxY, cy);
+
+    stack.push([cx + 1, cy]);
+    stack.push([cx - 1, cy]);
+    stack.push([cx, cy + 1]);
+    stack.push([cx, cy - 1]);
+  }
+
+  if (minX === Infinity) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }

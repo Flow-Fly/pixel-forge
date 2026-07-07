@@ -9,7 +9,7 @@ import { signal } from '../../core/signal';
 import type { Frame, Cel, OnionSkinSettings, FrameTag } from '../../types/animation';
 import type { TextCelData } from '../../types/text';
 import { layerStore } from '../layers';
-import { projectStore } from '../project';
+import { getCanvasSize, registerAnimationSource } from '../store-refs';
 
 // Import extracted modules
 import type { PlaybackMode } from './types';
@@ -178,8 +178,9 @@ class AnimationStore {
 
       if (!cel) {
         const canvas = document.createElement('canvas');
-        canvas.width = projectStore.width.value;
-        canvas.height = projectStore.height.value;
+        const size = getCanvasSize();
+        canvas.width = size.width;
+        canvas.height = size.height;
         const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
         if (ctx) {
           ctx.imageSmoothingEnabled = false;
@@ -239,8 +240,7 @@ class AnimationStore {
 
     const layers = layerStore.layers.value;
     const cels = new Map(this.cels.value);
-    const width = projectStore.width.value;
-    const height = projectStore.height.value;
+    const { width, height } = getCanvasSize();
     const sharedCanvas = this.getSharedTransparentCanvas(width, height);
 
     layers.forEach(layer => {
@@ -650,3 +650,4 @@ class AnimationStore {
 }
 
 export const animationStore = new AnimationStore();
+registerAnimationSource(animationStore);

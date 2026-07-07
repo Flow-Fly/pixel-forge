@@ -12,7 +12,6 @@ vi.mock("../../../src/stores/tools", () => ({
   toolStore: toolStoreMock,
 }));
 
-vi.mock("../../../src/components/toolbar/pf-tool-options-popover", () => ({}));
 
 import "../../../src/components/toolbar/pf-tool-button";
 import "../../../src/components/toolbar/pf-tool-group-menu";

@@ -22,37 +22,6 @@ export async function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8
 }
 
 /**
- * Convert a PNG Uint8Array back to a canvas.
- */
-export async function pngBytesToCanvas(
-  bytes: Uint8Array,
-  width: number,
-  height: number
-): Promise<HTMLCanvasElement> {
-  const blob = new Blob([bytes as BlobPart], { type: 'image/png' });
-  const url = URL.createObjectURL(blob);
-
-  try {
-    const img = await loadImage(url);
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      willReadFrequently: true
-    });
-    if (!ctx) {
-      throw new Error('Failed to get canvas context');
-    }
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, 0);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-/**
  * Load an image from a URL (data URL or blob URL).
  */
 function loadImage(src: string): Promise<HTMLImageElement> {

@@ -4,6 +4,7 @@
  * User preferences and UI customization settings.
  */
 import { signal } from "../core/signal";
+import { hexToRgb } from "./palette/color-utils";
 import { log } from "../utils/log";
 
 // Predefined accent color themes
@@ -57,7 +58,7 @@ export const DEFAULT_CHECKER_SETTINGS = {
   tileSize: 8,
 } as const;
 
-export interface CheckerSettings {
+interface CheckerSettings {
   lightColor: string;
   darkColor: string;
   tileSize: number;
@@ -178,8 +179,8 @@ class SettingsStore {
     root.style.setProperty("--pf-color-primary-active", colors.active);
 
     // Update transparent versions
-    const restRgb = this.hexToRgb(colors.rest);
-    const activeRgb = this.hexToRgb(colors.active);
+    const restRgb = hexToRgb(colors.rest);
+    const activeRgb = hexToRgb(colors.active);
     if (restRgb) {
       root.style.setProperty("--pf-color-primary-transparent", `rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.14)`);
       root.style.setProperty("--pf-color-primary-muted", `rgba(${restRgb.r}, ${restRgb.g}, ${restRgb.b}, 0.18)`);
@@ -193,16 +194,6 @@ class SettingsStore {
     }
   }
 
-  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result
-      ? {
-          r: parseInt(result[1], 16),
-          g: parseInt(result[2], 16),
-          b: parseInt(result[3], 16),
-        }
-      : null;
-  }
 
   private isHexColor(value: unknown): value is string {
     return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);

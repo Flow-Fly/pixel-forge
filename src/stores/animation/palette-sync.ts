@@ -13,7 +13,7 @@ import { rebuildAllCelCanvases } from './index-buffer';
 /**
  * Handle palette color reorder - update index buffers to use new indices.
  */
-export function handlePaletteReorder(
+function handlePaletteReorder(
   cels: Map<string, Cel>,
   fromIndex: number,
   toIndex: number
@@ -53,7 +53,7 @@ export function handlePaletteReorder(
 /**
  * Handle palette color removal - remap affected pixels.
  */
-export function handlePaletteColorRemoved(
+function handlePaletteColorRemoved(
   cels: Map<string, Cel>,
   removedIndex: number
 ): Map<string, Cel> {
@@ -83,7 +83,7 @@ export function handlePaletteColorRemoved(
 /**
  * Handle palette color insertion - shift indices up.
  */
-export function handlePaletteColorInserted(
+function handlePaletteColorInserted(
   cels: Map<string, Cel>,
   insertedIndex: number
 ): Map<string, Cel> {
@@ -109,7 +109,7 @@ export function handlePaletteColorInserted(
 /**
  * Handle palette replacement with color-based index remapping.
  */
-export function handlePaletteReplacedWithRemap(
+function handlePaletteReplacedWithRemap(
   cels: Map<string, Cel>,
   oldMainColors: string[]
 ): Map<string, Cel> {

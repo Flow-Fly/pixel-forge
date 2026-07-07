@@ -5,7 +5,7 @@
  * similar colors together.
  */
 
-import { normalizeHex, hexToRgb, rgbToHsl, rgbToHex, hslDistance, type HSL } from './color-utils';
+import { hexToRgb, rgbToHsl, rgbToHex, hslDistance, type HSL } from './color-utils';
 
 /** Simple readable signal interface */
 interface Readable<T> {
@@ -81,7 +81,7 @@ interface ClusterResult {
  * Cluster similar colors together using HSL distance.
  * Returns representative color (most frequent) for each cluster.
  */
-export function clusterColors(
+function clusterColors(
   colorCounts: Map<string, number>
 ): ClusterResult[] {
   const threshold = 0.15; // HSL distance threshold for clustering
@@ -129,13 +129,3 @@ export function clusterColors(
   });
 }
 
-/**
- * Filter out colors that already exist in the palette.
- */
-export function filterExistingColors(
-  colors: string[],
-  existingColors: string[]
-): string[] {
-  const existingSet = new Set(existingColors.map(c => normalizeHex(c)));
-  return colors.filter(c => !existingSet.has(normalizeHex(c)));
-}

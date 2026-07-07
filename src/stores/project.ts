@@ -1,4 +1,5 @@
 import { signal } from "../core/signal";
+import { registerCanvasSizeSource } from "./store-refs";
 import { v4 as uuidv4 } from "uuid";
 import { layerStore } from "./layers";
 import { animationStore } from "./animation";
@@ -228,3 +229,4 @@ class ProjectStore {
 }
 
 export const projectStore = new ProjectStore();
+registerCanvasSizeSource(projectStore);

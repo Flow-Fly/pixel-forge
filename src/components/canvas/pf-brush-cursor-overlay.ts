@@ -1,6 +1,6 @@
 import { html, css } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
-import { BaseComponent } from '../../core/base-component';
+import { customElement, state } from 'lit/decorators.js';
+import { CanvasOverlay } from './canvas-overlay';
 import { brushStore } from '../../stores/brush';
 import { colorStore } from '../../stores/colors';
 import { toolStore } from '../../stores/tools';
@@ -10,8 +10,17 @@ import { PencilTool } from '../../tools/pencil-tool';
 import { EraserTool } from '../../tools/eraser-tool';
 import type { BrushImageData } from '../../types/brush';
 
+type BrushCursorFrame = {
+  ctx: CanvasRenderingContext2D;
+  tool: 'pencil' | 'eraser';
+  zoom: number;
+  panX: number;
+  panY: number;
+  color: string;
+};
+
 @customElement('pf-brush-cursor-overlay')
-export class PFBrushCursorOverlay extends BaseComponent {
+export class PFBrushCursorOverlay extends CanvasOverlay {
   static styles = css`
     :host {
       position: absolute;
@@ -29,22 +38,13 @@ export class PFBrushCursorOverlay extends BaseComponent {
     }
   `;
 
-  @query('canvas') canvas!: HTMLCanvasElement;
   @state() private cursorPos: { x: number; y: number } | null = null;
   @state() private linePreview: { start: { x: number; y: number }; end: { x: number; y: number } } | null = null;
 
-  private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId = 0;
-  private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-
-    // Use ResizeObserver to detect size changes from flex layout (e.g., timeline resize)
-    this.resizeObserver = new ResizeObserver(() => {
-      this.handleResize();
-    });
-    this.resizeObserver.observe(this);
 
     // Listen for cursor position from drawing canvas
     window.addEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
@@ -62,12 +62,6 @@ export class PFBrushCursorOverlay extends BaseComponent {
   disconnectedCallback() {
     super.disconnectedCallback();
 
-    // Clean up ResizeObserver
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-
     window.removeEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
     window.removeEventListener('canvas-cursor-leave', this.handleCanvasCursorLeave);
     window.removeEventListener('line-preview', this.handleLinePreview as EventListener);
@@ -81,32 +75,11 @@ export class PFBrushCursorOverlay extends BaseComponent {
     }
   }
 
-  firstUpdated() {
-    this.initCanvas();
-  }
-
   updated() {
     // Redraw cursor when signals change (brush size, color, tool, zoom, etc.)
     if (this.cursorPos) {
       this.scheduleDraw();
     }
-  }
-
-  private initCanvas() {
-    if (!this.canvas) return;
-    this.ctx = this.canvas.getContext('2d');
-    this.resizeCanvas();
-  }
-
-  private handleResize = () => {
-    this.resizeCanvas();
-  };
-
-  private resizeCanvas() {
-    if (!this.canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = this.clientWidth * dpr;
-    this.canvas.height = this.clientHeight * dpr;
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -182,64 +155,114 @@ export class PFBrushCursorOverlay extends BaseComponent {
   }
 
   private draw() {
-    if (!this.ctx || !this.canvas) return;
-    if (!this.cursorPos && !this.linePreview) return;
+    const frame = this.getBrushCursorFrame();
+    if (!frame) return;
 
-    const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
+    this.drawLinePreviewFrame(frame);
+    this.drawCursorPreviewFrame(frame);
+  }
 
-    // Clear canvas
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.scale(dpr, dpr);
+  private getBrushCursorFrame(): BrushCursorFrame | null {
+    const ctx = this.getCursorFrameContext();
+    const tool = this.getDrawableTool();
+    if (!ctx || !tool) return null;
 
-    // Check if we should show preview (only pencil/eraser)
+    return this.createBrushCursorFrame(ctx, tool);
+  }
+
+  private getCursorFrameContext(): CanvasRenderingContext2D | null {
+    if (!this.hasCursorFrameContent()) return null;
+    if (this.isViewportPanning()) return null;
+
+    return this.prepareFrame();
+  }
+
+  private hasCursorFrameContent(): boolean {
+    return Boolean(this.cursorPos || this.linePreview);
+  }
+
+  private isViewportPanning(): boolean {
+    return viewportStore.isSpacebarDown.value || viewportStore.isPanning.value;
+  }
+
+  private getDrawableTool(): 'pencil' | 'eraser' | null {
     const tool = toolStore.activeTool.value;
-    if (tool !== 'pencil' && tool !== 'eraser') return;
+    return tool === 'pencil' || tool === 'eraser' ? tool : null;
+  }
 
-    // Check if in pan mode
-    if (viewportStore.isSpacebarDown.value || viewportStore.isPanning.value) return;
+  private createBrushCursorFrame(ctx: CanvasRenderingContext2D, tool: 'pencil' | 'eraser'): BrushCursorFrame {
+    return {
+      ctx,
+      tool,
+      zoom: viewportStore.zoom.value,
+      panX: viewportStore.panX.value,
+      panY: viewportStore.panY.value,
+      color: tool === 'eraser' ? colorStore.secondaryColor.value : colorStore.primaryColor.value,
+    };
+  }
 
-    // Get viewport transform
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+  private drawLinePreviewFrame(frame: BrushCursorFrame) {
+    if (!this.linePreview) return;
 
-    // Get color based on tool
-    const color = tool === 'eraser'
-      ? colorStore.secondaryColor.value
-      : colorStore.primaryColor.value;
+    this.drawLinePreview(
+      frame.ctx,
+      this.linePreview.start,
+      this.linePreview.end,
+      frame.zoom,
+      frame.panX,
+      frame.panY,
+      frame.color
+    );
+  }
 
-    // Draw ghost line preview for shift+click
-    if (this.linePreview) {
-      this.drawLinePreview(ctx, this.linePreview.start, this.linePreview.end, zoom, panX, panY, color);
+  private drawCursorPreviewFrame(frame: BrushCursorFrame) {
+    if (!this.cursorPos) return;
+
+    const customBrushImage = this.getCustomBrushImage(frame.tool);
+    if (customBrushImage) {
+      this.drawCustomBrushAtCursor(frame, customBrushImage);
+      return;
     }
 
-    // Draw brush cursor if we have cursor position
-    if (this.cursorPos) {
-      const brush = brushStore.activeBrush.value;
+    this.drawSquareBrushAtCursor(frame);
+  }
 
-      // Check if using a custom brush with image data (only for pencil tool)
-      if (tool === 'pencil' && brush.type === 'custom' && brush.imageData) {
-        this.drawCustomBrush(ctx, this.cursorPos.x, this.cursorPos.y, brush.imageData, zoom, panX, panY, color);
-      } else {
-        // Standard square brush preview
-        // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore
-        const size = tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
+  private getCustomBrushImage(tool: 'pencil' | 'eraser'): BrushImageData | null {
+    if (tool !== 'pencil') return null;
 
-        // Calculate screen position - always center brush on cursor
-        const halfSize = Math.floor(size / 2);
-        const screenX = (this.cursorPos.x - halfSize) * zoom + panX;
-        const screenY = (this.cursorPos.y - halfSize) * zoom + panY;
-        const screenSize = size * zoom;
+    const brush = brushStore.activeBrush.value;
+    if (brush.type !== 'custom') return null;
 
-        // Minimum visible size for outline
-        const minOutlineSize = Math.max(screenSize, 3);
+    return brush.imageData ?? null;
+  }
 
-        // Draw the brush preview (always square)
-        this.drawSquareBrush(ctx, screenX, screenY, screenSize, minOutlineSize, color);
-      }
-    }
+  private drawCustomBrushAtCursor(frame: BrushCursorFrame, imageData: BrushImageData) {
+    if (!this.cursorPos) return;
+
+    this.drawCustomBrush(
+      frame.ctx,
+      this.cursorPos.x,
+      this.cursorPos.y,
+      imageData,
+      frame.zoom,
+      frame.panX,
+      frame.panY,
+      frame.color
+    );
+  }
+
+  private drawSquareBrushAtCursor(frame: BrushCursorFrame) {
+    if (!this.cursorPos) return;
+
+    // Size comes from toolSizes (which Ctrl+wheel updates), not brushStore.
+    const size = frame.tool === 'pencil' ? toolSizes.pencil.value : toolSizes.eraser.value;
+    const halfSize = Math.floor(size / 2);
+    const screenX = (this.cursorPos.x - halfSize) * frame.zoom + frame.panX;
+    const screenY = (this.cursorPos.y - halfSize) * frame.zoom + frame.panY;
+    const screenSize = size * frame.zoom;
+    const minOutlineSize = Math.max(screenSize, 3);
+
+    this.drawSquareBrush(frame.ctx, screenX, screenY, screenSize, minOutlineSize, frame.color);
   }
 
   private drawLinePreview(

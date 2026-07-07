@@ -197,34 +197,5 @@ function drawCelToCanvas(
   ctx.drawImage(tempCanvas, x, y);
 }
 
-/**
- * Open file dialog to import an Aseprite file.
- */
-export function openAseFile(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".ase,.aseprite";
-
-    input.onchange = async (e: Event) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) {
-        reject(new Error("No file selected"));
-        return;
-      }
-
-      try {
-        const buffer = await file.arrayBuffer();
-        await importAseFile(buffer);
-        resolve();
-      } catch (error) {
-        reject(new Error(`Failed to import Aseprite file: ${error}`));
-      }
-    };
-
-    input.click();
-  });
-}
-
 // Re-export the export function for convenience
 export { exportAseFile };

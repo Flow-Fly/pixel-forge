@@ -3,7 +3,7 @@ import { colorStore } from '../stores/colors';
 import { shapeSettings } from '../stores/tool-settings';
 import { constrainWithStickyAngles } from '../services/drawing/algorithms';
 
-export abstract class ShapeTool extends BaseTool {
+abstract class ShapeTool extends BaseTool {
   cursor = 'crosshair';
   protected startX = 0;
   protected startY = 0;

@@ -1,10 +1,7 @@
 import { dirtyRectStore } from '../stores/dirty-rect';
 import { rectExpand, type Rect } from '../types/geometry';
 
-export interface Point {
-  x: number;
-  y: number;
-}
+export type { Point } from '../types/geometry';
 
 export interface ModifierKeys {
   shift: boolean;

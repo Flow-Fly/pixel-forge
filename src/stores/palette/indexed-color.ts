@@ -6,7 +6,6 @@
  */
 
 import { normalizeHex, hexToRgb, rgbToHsl, hslDistance } from './color-utils';
-import { MAX_PALETTE_SIZE } from './types';
 
 /**
  * Build the color-to-index lookup map for the palette.
@@ -43,37 +42,6 @@ export function isMainPaletteColor(
   colorToIndex: Map<string, number>
 ): boolean {
   return colorToIndex.has(normalizeHex(color));
-}
-
-/**
- * Find the best insertion index for a new color based on hue proximity.
- * Creates natural lightness gradients within hue groups.
- */
-export function findInsertionIndex(hex: string, colors: string[]): number {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return colors.length; // Append at end
-
-  const newHsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-
-  let bestIndex = colors.length;
-  let bestDistance = Infinity;
-
-  for (let i = 0; i < colors.length; i++) {
-    const existingRgb = hexToRgb(colors[i]);
-    if (!existingRgb) continue;
-
-    const existingHsl = rgbToHsl(existingRgb.r, existingRgb.g, existingRgb.b);
-    const distance = hslDistance(newHsl, existingHsl);
-
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      // Insert after colors that are darker, before colors that are lighter
-      // This creates natural lightness gradients within hue groups
-      bestIndex = existingHsl.l < newHsl.l ? i + 1 : i;
-    }
-  }
-
-  return bestIndex;
 }
 
 /**
@@ -122,11 +90,4 @@ export function getColorByIndex(
   }
 
   return null;
-}
-
-/**
- * Check if adding a new color would exceed the palette limit.
- */
-export function wouldExceedPaletteLimit(mainCount: number): boolean {
-  return mainCount >= MAX_PALETTE_SIZE;
 }

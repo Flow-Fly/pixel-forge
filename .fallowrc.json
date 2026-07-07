@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.fallow.tools/schema/fallowrc.json",
+  "entry": [
+    "src/main.ts",
+    "index.html"
+  ],
+  "dynamicallyLoaded": [
+    "src/tools/**"
+  ],
+  "usedClassMembers": [
+    "styles",
+    "render",
+    "willUpdate",
+    "updated",
+    "firstUpdated",
+    "connectedCallback",
+    "disconnectedCallback",
+    "createRenderRoot",
+    "shouldUpdate",
+    "update"
+  ]
+}

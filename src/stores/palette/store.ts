@@ -7,7 +7,7 @@
 
 import { signal } from '../../core/signal';
 import { layerStore } from '../layers';
-import { animationStore } from '../animation';
+import { getAnimationSource } from '../store-refs';
 import type { CustomPalette } from '../../types/palette';
 
 import { DB32_COLORS, MAX_PALETTE_SIZE, PALETTE_BY_ID } from './types';
@@ -403,10 +403,10 @@ class PaletteStore {
     await waitForNextFrame();
 
     try {
-      const colors = await extraction.extractColorsFromDrawing(
-        animationStore,
-        layerStore
-      );
+      const animation = getAnimationSource();
+      const colors = animation
+        ? await extraction.extractColorsFromDrawing(animation, layerStore)
+        : [];
       this.extractedColors.value = colors;
     } finally {
       this.isExtracting.value = false;
@@ -599,7 +599,7 @@ class PaletteStore {
 
   private withUsedColorsPreserved(newPaletteColors: string[]): string[] {
     const normalizedPalette = newPaletteColors.map(c => normalizeHex(c));
-    const usedColors = animationStore.scanUsedColors();
+    const usedColors = getAnimationSource()?.scanUsedColors() ?? new Set<string>();
     if (usedColors.size === 0) return normalizedPalette;
 
     const paletteSet = new Set(normalizedPalette);
@@ -617,7 +617,7 @@ class PaletteStore {
   }
 
   refreshUsedColors(): void {
-    const colors = animationStore.scanUsedColorsFromCanvas();
+    const colors = getAnimationSource()?.scanUsedColorsFromCanvas() ?? new Set<string>();
     const normalized = new Set<string>();
     for (const color of colors) {
       normalized.add(normalizeHex(color));

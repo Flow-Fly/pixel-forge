@@ -1,6 +1,4 @@
-import type { Frame, Cel, OnionSkinSettings, FrameTag } from '../../types/animation';
 
-export type { Frame, Cel, OnionSkinSettings, FrameTag };
 
 export type PlaybackMode = 'all' | 'tag';
 

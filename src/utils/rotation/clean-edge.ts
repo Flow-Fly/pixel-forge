@@ -5,115 +5,18 @@
  * by torcado (MIT license). Preserves clean edges during rotation.
  */
 
-import type { RGBA, EdgePriority, CleanEdgeOptions } from './types';
+import type { EdgePriority, CleanEdgeOptions } from './types';
 import { NO_SLICE_PACKED } from './types';
 import { normalizeAngle } from './angle';
 import { rotateNearestNeighbor } from './basic-rotation';
 import {
-  getPixel,
   getPixelPacked,
-  sliceDist,
   sliceDistPacked,
 } from './clean-edge-core';
 
 // ============================================
 // Legacy RGBA applyCleanEdge
 // ============================================
-
-export function applyCleanEdge(
-  imageData: ImageData,
-  scale: number,
-  cleanup: boolean = false
-): ImageData {
-  const { width: srcWidth, height: srcHeight, data: srcData } = imageData;
-  const dstWidth = srcWidth * scale;
-  const dstHeight = srcHeight * scale;
-  const result = new ImageData(dstWidth, dstHeight);
-  const dstData = result.data;
-
-  for (let dstY = 0; dstY < dstHeight; dstY++) {
-    for (let dstX = 0; dstX < dstWidth; dstX++) {
-      const srcX = Math.floor(dstX / scale);
-      const srcY = Math.floor(dstY / scale);
-
-      const localX = ((dstX % scale) + 0.5) / scale;
-      const localY = ((dstY % scale) + 0.5) / scale;
-
-      const pointDirX = Math.round(localX) * 2 - 1;
-      const pointDirY = Math.round(localY) * 2 - 1;
-      const pointDir = { x: pointDirX, y: pointDirY };
-
-      const uub = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-1 * pointDirX), srcY + Math.round(-2 * pointDirY));
-      const uu = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(0 * pointDirX), srcY + Math.round(-2 * pointDirY));
-      const uuf = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(1 * pointDirX), srcY + Math.round(-2 * pointDirY));
-
-      const ubb = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-2 * pointDirX), srcY + Math.round(-2 * pointDirY));
-      const ub = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-1 * pointDirX), srcY + Math.round(-1 * pointDirY));
-      const u = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(0 * pointDirX), srcY + Math.round(-1 * pointDirY));
-      const uf = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(1 * pointDirX), srcY + Math.round(-1 * pointDirY));
-      const uff = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(2 * pointDirX), srcY + Math.round(-1 * pointDirY));
-
-      const bb = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-2 * pointDirX), srcY + Math.round(0 * pointDirY));
-      const b = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-1 * pointDirX), srcY + Math.round(0 * pointDirY));
-      const c = getPixel(srcData, srcWidth, srcHeight, srcX, srcY);
-      const f = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(1 * pointDirX), srcY + Math.round(0 * pointDirY));
-      const ff = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(2 * pointDirX), srcY + Math.round(0 * pointDirY));
-
-      const dbb = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-2 * pointDirX), srcY + Math.round(1 * pointDirY));
-      const db = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-1 * pointDirX), srcY + Math.round(1 * pointDirY));
-      const d = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(0 * pointDirX), srcY + Math.round(1 * pointDirY));
-      const df = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(1 * pointDirX), srcY + Math.round(1 * pointDirY));
-      const dff = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(2 * pointDirX), srcY + Math.round(1 * pointDirY));
-
-      const ddb = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(-1 * pointDirX), srcY + Math.round(2 * pointDirY));
-      const dd = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(0 * pointDirX), srcY + Math.round(2 * pointDirY));
-      const ddf = getPixel(srcData, srcWidth, srcHeight, srcX + Math.round(1 * pointDirX), srcY + Math.round(2 * pointDirY));
-
-      let col: RGBA = c;
-
-      const local = { x: localX, y: localY };
-
-      const c_col = sliceDist(
-        local, { x: 1, y: 1 }, pointDir,
-        ub, u, uf, uff,
-        b, c, f, ff,
-        db, d, df, dff,
-        ddb, dd, ddf,
-        cleanup
-      );
-
-      const b_col = sliceDist(
-        local, { x: -1, y: 1 }, pointDir,
-        uf, u, ub, ubb,
-        f, c, b, bb,
-        df, d, db, dbb,
-        ddf, dd, ddb,
-        cleanup
-      );
-
-      const u_col = sliceDist(
-        local, { x: 1, y: -1 }, pointDir,
-        db, d, df, dff,
-        b, c, f, ff,
-        ub, u, uf, uff,
-        uub, uu, uuf,
-        cleanup
-      );
-
-      if (c_col.r >= 0) col = c_col;
-      if (b_col.r >= 0) col = b_col;
-      if (u_col.r >= 0) col = u_col;
-
-      const dstIdx = (dstY * dstWidth + dstX) * 4;
-      dstData[dstIdx] = col.r;
-      dstData[dstIdx + 1] = col.g;
-      dstData[dstIdx + 2] = col.b;
-      dstData[dstIdx + 3] = col.a;
-    }
-  }
-
-  return result;
-}
 
 // ============================================
 // Packed Pixel applyCleanEdge (Performance Optimized)

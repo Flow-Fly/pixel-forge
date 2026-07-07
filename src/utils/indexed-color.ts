@@ -7,36 +7,17 @@
  */
 
 import { paletteStore } from '../stores/palette';
+import { hexToRgb, rgbToHex } from '../stores/palette/color-utils';
 import { log } from './log';
 
-/**
- * Parse hex color to RGB components.
- */
-export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : null;
-}
-
-/**
- * Convert RGB to hex string.
- */
-export function rgbToHex(r: number, g: number, b: number): string {
-  return '#' + [r, g, b].map(x => {
-    const hex = Math.round(x).toString(16);
-    return hex.length === 1 ? '0' + hex : hex;
-  }).join('');
-}
+export { rgbToHex };
 
 /**
  * Get RGBA values for a palette index using the palette store.
  * @param index 1-based palette index (0 = transparent)
  * @returns [r, g, b, a] tuple
  */
-export function indexToRgbaFromStore(index: number): [number, number, number, number] {
+function indexToRgbaFromStore(index: number): [number, number, number, number] {
   if (index === 0) {
     return [0, 0, 0, 0]; // Transparent
   }
@@ -60,7 +41,7 @@ export function indexToRgbaFromStore(index: number): [number, number, number, nu
  * @param palette Array of hex colors (optional - uses store if not provided)
  * @returns [r, g, b, a] tuple
  */
-export function indexToRgba(index: number, palette?: string[]): [number, number, number, number] {
+function indexToRgba(index: number, palette?: string[]): [number, number, number, number] {
   if (index === 0) {
     return [0, 0, 0, 0]; // Transparent
   }
@@ -218,17 +199,3 @@ export function cloneIndexBuffer(buffer: Uint8Array): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-/**
- * Remap indices in a buffer when palette order changes.
- * Used when colors are moved or removed.
- * @param buffer The index buffer to remap
- * @param remapFn Function that maps old index to new index
- */
-export function remapIndexBuffer(
-  buffer: Uint8Array,
-  remapFn: (oldIndex: number) => number
-): void {
-  for (let i = 0; i < buffer.length; i++) {
-    buffer[i] = remapFn(buffer[i]);
-  }
-}
