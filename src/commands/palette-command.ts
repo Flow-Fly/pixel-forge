@@ -1,11 +1,11 @@
-import type { Command } from "./index";
-import { paletteStore } from "../stores/palette";
-import { animationStore } from "../stores/animation";
-import type { Cel } from "../types/animation";
-import { findClosestColorIndex } from "../stores/palette/indexed-color";
-import { remapPaletteIndexAfterDelete } from "../stores/animation/index-buffer";
+import type { Command } from './index';
+import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
+import type { Cel } from '../types/animation';
+import { findClosestColorIndex } from '../stores/palette/indexed-color';
+import { remapPaletteIndexAfterDelete } from '../stores/animation/index-buffer';
 
-export type DeletePaletteColorReplacement = "nearest" | "transparent";
+export type DeletePaletteColorReplacement = 'nearest' | 'transparent';
+type PaletteCommandContext = Pick<ProjectContext, 'animation' | 'palette'>;
 
 /**
  * Command for changing a single palette color.
@@ -21,26 +21,33 @@ export class PaletteChangeCommand implements Command {
   private paletteIndex: number; // 1-based palette index
   private previousColor: string;
   private newColor: string;
+  private readonly context: PaletteCommandContext;
 
-  constructor(paletteIndex: number, previousColor: string, newColor: string) {
+  constructor(
+    paletteIndex: number,
+    previousColor: string,
+    newColor: string,
+    context: PaletteCommandContext = getActiveProjectContext()
+  ) {
     this.id = crypto.randomUUID();
-    this.name = "Change Palette Color";
+    this.name = 'Change Palette Color';
     this.paletteIndex = paletteIndex;
     this.previousColor = previousColor;
     this.newColor = newColor;
+    this.context = context;
     this.timestamp = Date.now();
   }
 
   execute(): void {
     // Update the color in the palette (this triggers canvas rebuild via event)
-    paletteStore.updateColorDirect(this.paletteIndex, this.newColor);
-    animationStore.rebuildAllCelCanvases();
+    this.context.palette.updateColorDirect(this.paletteIndex, this.newColor);
+    this.context.animation.rebuildAllCelCanvases();
   }
 
   undo(): void {
     // Restore the previous color
-    paletteStore.updateColorDirect(this.paletteIndex, this.previousColor);
-    animationStore.rebuildAllCelCanvases();
+    this.context.palette.updateColorDirect(this.paletteIndex, this.previousColor);
+    this.context.animation.rebuildAllCelCanvases();
   }
 }
 
@@ -62,15 +69,18 @@ export class DeletePaletteColorCommand implements Command {
   private newIndexBuffers: Map<string, Uint8Array> | null = null;
   private readonly paletteIndex: number;
   private readonly replacement: DeletePaletteColorReplacement;
+  private readonly context: PaletteCommandContext;
 
   constructor(
     paletteIndex: number,
-    replacement: DeletePaletteColorReplacement
+    replacement: DeletePaletteColorReplacement,
+    context: PaletteCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
-    this.name = "Delete Palette Color";
+    this.name = 'Delete Palette Color';
     this.paletteIndex = paletteIndex;
     this.replacement = replacement;
+    this.context = context;
     this.timestamp = Date.now();
   }
 
@@ -90,16 +100,16 @@ export class DeletePaletteColorCommand implements Command {
   private ensureSnapshots(): void {
     if (this.oldColors) return;
 
-    const oldColors = [...paletteStore.mainColors.value];
+    const oldColors = [...this.context.palette.mainColors.value];
     const removedArrayIndex = this.paletteIndex - 1;
     if (removedArrayIndex < 0 || removedArrayIndex >= oldColors.length) return;
 
     const removedColor = oldColors[removedArrayIndex];
     const newColors = oldColors.filter((_, index) => index !== removedArrayIndex);
     const replacementIndex = this.getReplacementIndex(removedColor, newColors);
-    const oldIndexBuffers = cloneIndexBuffers(animationStore.cels.value);
+    const oldIndexBuffers = cloneIndexBuffers(this.context.animation.cels.value);
     const remappedCels = remapPaletteIndexAfterDelete(
-      animationStore.cels.value,
+      this.context.animation.cels.value,
       this.paletteIndex,
       replacementIndex,
       oldColors.length
@@ -107,16 +117,15 @@ export class DeletePaletteColorCommand implements Command {
 
     this.oldColors = oldColors;
     this.newColors = newColors;
-    this.oldNewColorFlags = new Set(paletteStore.newColorFlags.value);
+    this.oldNewColorFlags = new Set(this.context.palette.newColorFlags.value);
     this.newColorFlags = withoutDeletedColor(this.oldNewColorFlags, removedColor);
     this.oldIndexBuffers = oldIndexBuffers;
     this.newIndexBuffers = cloneIndexBuffers(remappedCels);
-    this.memorySize =
-      bufferBytes(this.oldIndexBuffers) + bufferBytes(this.newIndexBuffers) + 200;
+    this.memorySize = bufferBytes(this.oldIndexBuffers) + bufferBytes(this.newIndexBuffers) + 200;
   }
 
   private getReplacementIndex(removedColor: string, newColors: string[]): number {
-    if (this.replacement === "transparent") return 0;
+    if (this.replacement === 'transparent') return 0;
     if (newColors.length === 0) return 0;
 
     return findClosestColorIndex(removedColor, newColors);
@@ -127,12 +136,12 @@ export class DeletePaletteColorCommand implements Command {
     newColorFlags: Set<string>,
     indexBuffers: Map<string, Uint8Array>
   ): void {
-    paletteStore.setColorsDirect(colors, newColorFlags);
-    animationStore.cels.value = withIndexBuffers(
-      animationStore.cels.value,
+    this.context.palette.setColorsDirect(colors, newColorFlags);
+    this.context.animation.cels.value = withIndexBuffers(
+      this.context.animation.cels.value,
       indexBuffers
     );
-    animationStore.rebuildAllCelCanvases();
+    this.context.animation.rebuildAllCelCanvases();
   }
 }
 

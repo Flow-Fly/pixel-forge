@@ -1,19 +1,18 @@
-import { html, css, nothing } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { paletteStore } from "../../stores/palette";
-import { historyStore } from "../../stores/history";
-import { PaletteChangeCommand } from "../../commands/palette-command";
-import "../ui/pf-popover";
-import "./pf-color-picker-popup";
-import "./pf-palette-selector";
-import "./pf-save-palette-dialog";
-import "./pf-unsaved-changes-dialog";
-import "./palette-panel/pf-palette-toolbar";
-import "./palette-panel/pf-palette-grid";
-import "./palette-panel/pf-extraction-section";
+import { html, css, nothing } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { PaletteChangeCommand } from '../../commands/palette-command';
+import '../ui/pf-popover';
+import './pf-color-picker-popup';
+import './pf-palette-selector';
+import './pf-save-palette-dialog';
+import './pf-unsaved-changes-dialog';
+import './palette-panel/pf-palette-toolbar';
+import './palette-panel/pf-palette-grid';
+import './palette-panel/pf-extraction-section';
 
-@customElement("pf-palette-panel")
+@customElement('pf-palette-panel')
 export class PFPalettePanel extends BaseComponent {
   static styles = css`
     :host {
@@ -57,52 +56,73 @@ export class PFPalettePanel extends BaseComponent {
 
   // Color picker popup state
   @state() private showColorPicker = false;
-  @state() private editingColor = "";
+  @state() private editingColor = '';
   @state() private editingIndex = 0;
   @state() private anchorElement: HTMLElement | null = null;
 
   // Save dialog state
   @state() private showSaveDialog = false;
-  @state() private saveDialogTitle = "Save Palette";
-  @state() private saveDialogDefaultName = "";
+  @state() private saveDialogTitle = 'Save Palette';
+  @state() private saveDialogDefaultName = '';
   @state() private isRenaming = false;
 
   // Unsaved changes dialog state
   @state() private showUnsavedDialog = false;
   @state() private pendingSwitchAction: (() => void) | null = null;
+  private pendingSwitchContext: ProjectContext | null = null;
+
+  private context = defaultProjectContext;
+  private editingContext = defaultProjectContext;
+  private saveDialogContext = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  private get palette() {
+    return this.context.palette;
+  }
 
   // ==========================================
   // Toolbar event handlers
   // ==========================================
 
   private async handleSaveClick() {
-    if (paletteStore.isCustomPalette()) {
-      await paletteStore.saveCurrentPalette();
+    if (this.palette.isCustomPalette()) {
+      await this.palette.saveCurrentPalette();
     } else {
-      this.openSaveAsDialog();
+      this.openSaveAsDialog(this.context);
     }
   }
 
-  private openSaveAsDialog() {
-    this.saveDialogTitle = "Save Palette";
-    this.saveDialogDefaultName = paletteStore.getCurrentPaletteName();
-    if (this.saveDialogDefaultName === "Untitled Palette") {
-      this.saveDialogDefaultName = "";
+  private openSaveAsDialog(context: ProjectContext = this.context) {
+    const palette = context.palette;
+
+    this.saveDialogContext = context;
+    this.saveDialogTitle = 'Save Palette';
+    this.saveDialogDefaultName = palette.getCurrentPaletteName();
+    if (this.saveDialogDefaultName === 'Untitled Palette') {
+      this.saveDialogDefaultName = '';
     }
     this.isRenaming = false;
     this.showSaveDialog = true;
   }
 
-  private openRenameDialog() {
-    this.saveDialogTitle = "Rename Palette";
-    this.saveDialogDefaultName = paletteStore.getCurrentPaletteName();
+  private openRenameDialog(context: ProjectContext = this.context) {
+    this.saveDialogContext = context;
+    this.saveDialogTitle = 'Rename Palette';
+    this.saveDialogDefaultName = context.palette.getCurrentPaletteName();
     this.isRenaming = true;
     this.showSaveDialog = true;
   }
 
   private handleMenuReset() {
-    if (paletteStore.isPresetPalette() && paletteStore.isDirty.value) {
-      paletteStore.resetPresetToOriginal();
+    if (this.palette.isPresetPalette() && this.palette.isDirty.value) {
+      this.palette.resetPresetToOriginal();
     }
   }
 
@@ -112,14 +132,15 @@ export class PFPalettePanel extends BaseComponent {
 
   private async handleSaveDialogSave(e: CustomEvent) {
     const { name } = e.detail;
+    const palette = this.saveDialogContext.palette;
 
     if (this.isRenaming) {
-      const customId = paletteStore.currentCustomPaletteId.value;
+      const customId = palette.currentCustomPaletteId.value;
       if (customId) {
-        await paletteStore.renameCustomPalette(customId, name);
+        await palette.renameCustomPalette(customId, name);
       }
     } else {
-      await paletteStore.saveAsNewPalette(name);
+      await palette.saveAsNewPalette(name);
     }
 
     this.showSaveDialog = false;
@@ -134,38 +155,44 @@ export class PFPalettePanel extends BaseComponent {
   // ==========================================
 
   private handleRequestSwitch(e: CustomEvent) {
-    const { type, id } = e.detail;
+    const { type, id, context = this.context } = e.detail;
+    const palette = context.palette;
 
     let switchAction: () => void;
     switch (type) {
-      case "preset":
-        switchAction = () => paletteStore.loadPreset(id);
+      case 'preset':
+        switchAction = () => palette.loadPreset(id);
         break;
-      case "custom":
-        switchAction = () => paletteStore.loadCustomPalette(id);
+      case 'custom':
+        switchAction = () => palette.loadCustomPalette(id);
         break;
-      case "empty":
-        switchAction = () => paletteStore.createEmpty();
+      case 'empty':
+        switchAction = () => palette.createEmpty();
         break;
       default:
         return;
     }
 
     this.pendingSwitchAction = switchAction;
+    this.pendingSwitchContext = context;
     this.showUnsavedDialog = true;
   }
 
   private async handleUnsavedSave() {
-    if (paletteStore.isCustomPalette()) {
-      await paletteStore.saveCurrentPalette();
+    const context = this.pendingSwitchContext ?? this.context;
+    const palette = context.palette;
+
+    if (palette.isCustomPalette()) {
+      await palette.saveCurrentPalette();
       this.showUnsavedDialog = false;
       if (this.pendingSwitchAction) {
         this.pendingSwitchAction();
         this.pendingSwitchAction = null;
+        this.pendingSwitchContext = null;
       }
     } else {
       this.showUnsavedDialog = false;
-      this.openSaveAsDialog();
+      this.openSaveAsDialog(context);
     }
   }
 
@@ -174,12 +201,14 @@ export class PFPalettePanel extends BaseComponent {
     if (this.pendingSwitchAction) {
       this.pendingSwitchAction();
       this.pendingSwitchAction = null;
+      this.pendingSwitchContext = null;
     }
   }
 
   private handleUnsavedCancel() {
     this.showUnsavedDialog = false;
     this.pendingSwitchAction = null;
+    this.pendingSwitchContext = null;
   }
 
   // ==========================================
@@ -187,21 +216,23 @@ export class PFPalettePanel extends BaseComponent {
   // ==========================================
 
   private handleSwatchEdit(e: CustomEvent) {
-    const { color, index, anchor } = e.detail;
+    const { color, index, anchor, context = this.context } = e.detail;
     this.editingColor = color;
     this.editingIndex = index;
     this.anchorElement = anchor;
+    this.editingContext = context;
     this.showColorPicker = true;
   }
 
   private handleColorPickerApply(e: CustomEvent) {
     const { color, paletteIndex } = e.detail;
+    const context = this.editingContext;
     const oneBasedIndex = paletteIndex + 1;
-    const previousColor = paletteStore.getColorByIndex(oneBasedIndex);
+    const previousColor = context.palette.getColorByIndex(oneBasedIndex);
 
     if (previousColor && previousColor !== color) {
-      const command = new PaletteChangeCommand(oneBasedIndex, previousColor, color);
-      historyStore.execute(command);
+      const command = new PaletteChangeCommand(oneBasedIndex, previousColor, color, context);
+      void context.history.execute(command);
     }
 
     this.showColorPicker = false;
@@ -212,41 +243,36 @@ export class PFPalettePanel extends BaseComponent {
   }
 
   private handleClearAllNewMarks() {
-    paletteStore.clearAllNewFlags();
+    this.palette.clearAllNewFlags();
   }
 
   render() {
-    const hasNewMarks = paletteStore.newColorFlags.value.size > 0;
+    const hasNewMarks = this.palette.newColorFlags.value.size > 0;
 
     return html`
       <pf-palette-toolbar
         class="toolbar"
         @save-click=${this.handleSaveClick}
-        @menu-save-as=${this.openSaveAsDialog}
-        @menu-rename=${this.openRenameDialog}
+        @menu-save-as=${() => this.openSaveAsDialog(this.context)}
+        @menu-rename=${() => this.openRenameDialog(this.context)}
         @menu-reset=${this.handleMenuReset}
       >
-        <pf-palette-selector
-          @request-switch=${this.handleRequestSwitch}
-        ></pf-palette-selector>
+        <pf-palette-selector @request-switch=${this.handleRequestSwitch}></pf-palette-selector>
       </pf-palette-toolbar>
 
-      <pf-palette-grid
-        @swatch-edit=${this.handleSwatchEdit}
-      ></pf-palette-grid>
+      <pf-palette-grid @swatch-edit=${this.handleSwatchEdit}></pf-palette-grid>
 
-      ${hasNewMarks
-        ? html`
-            <div class="new-marks">
-              <button
-                class="clear-new-marks"
-                @click=${this.handleClearAllNewMarks}
-              >
-                Clear all new marks
-              </button>
-            </div>
-          `
-        : nothing}
+      ${
+        hasNewMarks
+          ? html`
+              <div class="new-marks">
+                <button class="clear-new-marks" @click=${this.handleClearAllNewMarks}>
+                  Clear all new marks
+                </button>
+              </div>
+            `
+          : nothing
+      }
 
       <pf-extraction-section></pf-extraction-section>
 
@@ -269,7 +295,7 @@ export class PFPalettePanel extends BaseComponent {
 
       <pf-unsaved-changes-dialog
         ?open=${this.showUnsavedDialog}
-        .paletteName=${paletteStore.getCurrentPaletteName()}
+        .paletteName=${this.palette.getCurrentPaletteName()}
         @save=${this.handleUnsavedSave}
         @discard=${this.handleUnsavedDiscard}
         @cancel=${this.handleUnsavedCancel}

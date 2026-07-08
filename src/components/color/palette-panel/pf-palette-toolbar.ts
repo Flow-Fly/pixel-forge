@@ -1,10 +1,10 @@
-import { html, css } from "lit";
-import { customElement, state, query } from "lit/decorators.js";
-import { BaseComponent } from "../../../core/base-component";
-import { paletteStore } from "../../../stores/palette";
-import "../../ui/pf-popover";
+import { html, css } from 'lit';
+import { customElement, state, query } from 'lit/decorators.js';
+import { BaseComponent } from '../../../core/base-component';
+import { defaultProjectContext } from '../../../stores/project-context';
+import '../../ui/pf-popover';
 
-@customElement("pf-palette-toolbar")
+@customElement('pf-palette-toolbar')
 export class PFPaletteToolbar extends BaseComponent {
   static styles = css`
     :host {
@@ -43,7 +43,7 @@ export class PFPaletteToolbar extends BaseComponent {
     }
 
     .save-btn.dirty::after {
-      content: "";
+      content: '';
       position: absolute;
       top: 4px;
       right: 4px;
@@ -174,14 +174,28 @@ export class PFPaletteToolbar extends BaseComponent {
   @state() private menuBtnRect: DOMRect | null = null;
   @state() private showAddPopover = false;
   @state() private addBtnRect: DOMRect | null = null;
-  @state() private hexInput = "";
+  @state() private hexInput = '';
   @state() private hexInvalid = false;
 
-  @query(".menu-btn") private menuButton!: HTMLButtonElement;
-  @query(".add-btn") private addButton!: HTMLButtonElement;
+  @query('.menu-btn') private menuButton!: HTMLButtonElement;
+  @query('.add-btn') private addButton!: HTMLButtonElement;
+
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  private get palette() {
+    return this.context.palette;
+  }
 
   private handleSaveClick() {
-    this.dispatchEvent(new CustomEvent("save-click"));
+    this.dispatchEvent(new CustomEvent('save-click'));
   }
 
   private toggleMenu(e: Event) {
@@ -197,20 +211,20 @@ export class PFPaletteToolbar extends BaseComponent {
   }
 
   private handleMenuSaveAs() {
-    this.dispatchEvent(new CustomEvent("menu-save-as"));
+    this.dispatchEvent(new CustomEvent('menu-save-as'));
     this.closeMenu();
   }
 
   private handleMenuRename() {
-    if (paletteStore.isCustomPalette()) {
-      this.dispatchEvent(new CustomEvent("menu-rename"));
+    if (this.palette.isCustomPalette()) {
+      this.dispatchEvent(new CustomEvent('menu-rename'));
       this.closeMenu();
     }
   }
 
   private handleMenuReset() {
-    if (paletteStore.isPresetPalette() && paletteStore.isDirty.value) {
-      this.dispatchEvent(new CustomEvent("menu-reset"));
+    if (this.palette.isPresetPalette() && this.palette.isDirty.value) {
+      this.dispatchEvent(new CustomEvent('menu-reset'));
       this.closeMenu();
     }
   }
@@ -225,7 +239,7 @@ export class PFPaletteToolbar extends BaseComponent {
 
   private closeAddPopover() {
     this.showAddPopover = false;
-    this.hexInput = "";
+    this.hexInput = '';
     this.hexInvalid = false;
   }
 
@@ -235,7 +249,7 @@ export class PFPaletteToolbar extends BaseComponent {
   }
 
   private handleHexKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter") {
+    if (e.key === 'Enter') {
       this.addHexColor();
     }
   }
@@ -243,8 +257,8 @@ export class PFPaletteToolbar extends BaseComponent {
   private addHexColor() {
     let hex = this.hexInput.trim();
 
-    if (hex && !hex.startsWith("#")) {
-      hex = "#" + hex;
+    if (hex && !hex.startsWith('#')) {
+      hex = '#' + hex;
     }
 
     if (!/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/.test(hex)) {
@@ -253,23 +267,23 @@ export class PFPaletteToolbar extends BaseComponent {
     }
 
     if (hex.length === 4) {
-      hex = "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+      hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
     }
 
-    paletteStore.addColor(hex.toLowerCase());
-    this.hexInput = "";
+    this.palette.addColor(hex.toLowerCase());
+    this.hexInput = '';
     this.hexInvalid = false;
   }
 
   private handleColorPicker(e: Event) {
     const color = (e.target as HTMLInputElement).value;
-    paletteStore.addColor(color);
+    this.palette.addColor(color);
   }
 
   render() {
-    const isDirty = paletteStore.isDirty.value;
-    const isCustomPalette = paletteStore.isCustomPalette();
-    const isPresetPalette = paletteStore.isPresetPalette();
+    const isDirty = this.palette.isDirty.value;
+    const isCustomPalette = this.palette.isCustomPalette();
+    const isPresetPalette = this.palette.isPresetPalette();
     const canRename = isCustomPalette;
     const canReset = isPresetPalette && isDirty;
 
@@ -277,26 +291,18 @@ export class PFPaletteToolbar extends BaseComponent {
       <slot></slot>
 
       <button
-        class="toolbar-btn save-btn ${isDirty ? "dirty" : ""}"
+        class="toolbar-btn save-btn ${isDirty ? 'dirty' : ''}"
         @click=${this.handleSaveClick}
-        title="${isDirty ? "Save palette (unsaved changes)" : "Save palette"}"
+        title="${isDirty ? 'Save palette (unsaved changes)' : 'Save palette'}"
       >
         &#128190;
       </button>
 
-      <button
-        class="toolbar-btn menu-btn"
-        @click=${this.toggleMenu}
-        title="Palette options"
-      >
+      <button class="toolbar-btn menu-btn" @click=${this.toggleMenu} title="Palette options">
         &#8942;
       </button>
 
-      <button
-        class="toolbar-btn add-btn"
-        @click=${this.toggleAddPopover}
-        title="Add color"
-      >
+      <button class="toolbar-btn add-btn" @click=${this.toggleAddPopover} title="Add color">
         +
       </button>
 
@@ -308,17 +314,11 @@ export class PFPaletteToolbar extends BaseComponent {
       >
         <div class="menu-content">
           <div class="menu-item" @click=${this.handleMenuSaveAs}>Save As...</div>
-          <div
-            class="menu-item ${canRename ? "" : "disabled"}"
-            @click=${this.handleMenuRename}
-          >
+          <div class="menu-item ${canRename ? '' : 'disabled'}" @click=${this.handleMenuRename}>
             Rename...
           </div>
           <div class="menu-divider"></div>
-          <div
-            class="menu-item ${canReset ? "" : "disabled"}"
-            @click=${this.handleMenuReset}
-          >
+          <div class="menu-item ${canReset ? '' : 'disabled'}" @click=${this.handleMenuReset}>
             Reset to Original
           </div>
         </div>
@@ -334,7 +334,7 @@ export class PFPaletteToolbar extends BaseComponent {
           <div class="form-row">
             <input
               type="text"
-              class="hex-input ${this.hexInvalid ? "invalid" : ""}"
+              class="hex-input ${this.hexInvalid ? 'invalid' : ''}"
               placeholder="#hex"
               .value=${this.hexInput}
               @input=${this.handleHexInput}
@@ -344,11 +344,7 @@ export class PFPaletteToolbar extends BaseComponent {
           </div>
           <div class="divider"></div>
           <div class="form-row">
-            <input
-              type="color"
-              class="native-picker"
-              @change=${this.handleColorPicker}
-            />
+            <input type="color" class="native-picker" @change=${this.handleColorPicker} />
             <span class="picker-label">Pick color</span>
           </div>
         </div>
