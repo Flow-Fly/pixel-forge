@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { animationStore } from "../../src/stores/animation";
 import { colorStore } from "../../src/stores/colors";
@@ -13,6 +13,7 @@ import { projectStore } from "../../src/stores/project";
 import {
   createProjectContext,
   defaultProjectContext,
+  type ProjectContext,
 } from "../../src/stores/project-context";
 import { selectionStore } from "../../src/stores/selection";
 import { viewportStore } from "../../src/stores/viewport";
@@ -31,17 +32,28 @@ const paletteWithLightnessVariations = {
   },
 };
 
+const createdContexts: ProjectContext[] = [];
+
 function createTestContext(width: number, height: number) {
-  return createProjectContext({
+  const context = createProjectContext({
     colorPalette: paletteWithLightnessVariations,
     viewportCanvasSize: {
       width: { value: width },
       height: { value: height },
     },
   });
+  createdContexts.push(context);
+  return context;
 }
 
 describe("ProjectContext", () => {
+  afterEach(() => {
+    for (const context of createdContexts.splice(0)) {
+      context.dispose();
+    }
+    vi.restoreAllMocks();
+  });
+
   it("creates isolated layer, dirty rect, and guide stores", () => {
     const contextA = createTestContext(100, 80);
     const contextB = createTestContext(20, 20);
@@ -125,5 +137,31 @@ describe("ProjectContext", () => {
     expect(defaultProjectContext.project).toBe(projectStore);
     expect(defaultProjectContext.selection).toBe(selectionStore);
     expect(defaultProjectContext.viewport).toBe(viewportStore);
+  });
+
+  it("owns palette sync startup and cleanup", () => {
+    const addListener = vi.spyOn(window, "addEventListener");
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const context = createTestContext(100, 80);
+
+    expect(addListener).toHaveBeenCalledWith(
+      "palette-color-changed",
+      expect.any(Function),
+    );
+    expect(addListener).toHaveBeenCalledWith(
+      "palette-replaced",
+      expect.any(Function),
+    );
+
+    context.dispose();
+
+    expect(removeListener).toHaveBeenCalledWith(
+      "palette-color-changed",
+      expect.any(Function),
+    );
+    expect(removeListener).toHaveBeenCalledWith(
+      "palette-replaced",
+      expect.any(Function),
+    );
   });
 });
