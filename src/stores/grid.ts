@@ -74,4 +74,8 @@ class GridStore {
   }
 }
 
-export const gridStore = new GridStore();
+export function createGridStore() {
+  return new GridStore();
+}
+
+export const gridStore = createGridStore();

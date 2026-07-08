@@ -154,4 +154,8 @@ class GuidesStore {
   }
 }
 
-export const guidesStore = new GuidesStore();
+export function createGuidesStore() {
+  return new GuidesStore();
+}
+
+export const guidesStore = createGuidesStore();

@@ -368,4 +368,8 @@ class LayerStore {
   }
 }
 
-export const layerStore = new LayerStore();
+export function createLayerStore() {
+  return new LayerStore();
+}
+
+export const layerStore = createLayerStore();

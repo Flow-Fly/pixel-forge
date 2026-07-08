@@ -3,9 +3,16 @@ import { projectStore } from "./project";
 
 // Preset zoom levels used by keyboard shortcuts, menus, and stepped zoom actions.
 export const ZOOM_LEVELS = [1, 2, 4, 8, 16, 32] as const;
+
+interface CanvasSizeStore {
+  width: { value: number };
+  height: { value: number };
+}
+
 class ViewportStore {
   private readonly MIN_ZOOM = 0.125;
   private readonly MAX_ZOOM = 64;
+  private readonly canvasSize: CanvasSizeStore;
 
   // Core state
   zoom = signal<number>(8); // 8 = 800%
@@ -26,6 +33,10 @@ class ViewportStore {
 
   // Minimum pixels of canvas that must remain visible
   private readonly MIN_VISIBLE_PIXELS = 32;
+
+  constructor(canvasSize: CanvasSizeStore = projectStore) {
+    this.canvasSize = canvasSize;
+  }
 
   /**
    * Get zoom as percentage (e.g., 800 for 800%)
@@ -145,8 +156,8 @@ class ViewportStore {
    * Fit canvas to container, centered.
    */
   zoomToFit(containerWidth: number, containerHeight: number): void {
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
+    const canvasWidth = this.canvasSize.width.value;
+    const canvasHeight = this.canvasSize.height.value;
 
     if (
       canvasWidth <= 0 ||
@@ -229,8 +240,8 @@ class ViewportStore {
   getPanBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
     const containerW = this.containerWidth.value;
     const containerH = this.containerHeight.value;
-    const canvasW = projectStore.width.value * this.zoom.value;
-    const canvasH = projectStore.height.value * this.zoom.value;
+    const canvasW = this.canvasSize.width.value * this.zoom.value;
+    const canvasH = this.canvasSize.height.value * this.zoom.value;
     const minVisible = this.MIN_VISIBLE_PIXELS;
 
     // Canvas right edge must be at least minVisible pixels into viewport
@@ -305,4 +316,8 @@ class ViewportStore {
   }
 }
 
-export const viewportStore = new ViewportStore();
+export function createViewportStore(canvasSize?: CanvasSizeStore) {
+  return new ViewportStore(canvasSize);
+}
+
+export const viewportStore = createViewportStore();

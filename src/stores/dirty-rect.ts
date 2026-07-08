@@ -78,4 +78,8 @@ class DirtyRectStore {
   }
 }
 
-export const dirtyRectStore = new DirtyRectStore();
+export function createDirtyRectStore() {
+  return new DirtyRectStore();
+}
+
+export const dirtyRectStore = createDirtyRectStore();
