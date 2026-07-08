@@ -1,12 +1,12 @@
-import { html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../../core/base-component";
-import { animationStore } from "../../../stores/animation";
-import type { FrameTag } from "../../../types/animation";
+import { html, css } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
+import { BaseComponent } from '../../../core/base-component';
+import { defaultProjectContext } from '../../../stores/project-context';
+import type { FrameTag } from '../../../types/animation';
 
 const FRAME_WIDTH = 32;
 
-@customElement("pf-timeline-tag-bars")
+@customElement('pf-timeline-tag-bars')
 export class PFTimelineTagBars extends BaseComponent {
   static styles = css`
     :host {
@@ -30,7 +30,9 @@ export class PFTimelineTagBars extends BaseComponent {
       display: flex;
       align-items: center;
       border-radius: 8px;
-      transition: transform 0.1s, box-shadow 0.1s;
+      transition:
+        transform 0.1s,
+        box-shadow 0.1s;
     }
 
     .tag-bar:hover {
@@ -39,7 +41,8 @@ export class PFTimelineTagBars extends BaseComponent {
     }
 
     .tag-bar.active-loop {
-      box-shadow: 0 0 0 2px var(--pf-color-accent),
+      box-shadow:
+        0 0 0 2px var(--pf-color-accent),
         0 0 8px var(--pf-color-accent);
     }
 
@@ -119,6 +122,15 @@ export class PFTimelineTagBars extends BaseComponent {
   `;
 
   @property({ type: String }) resizingTagId: string | null = null;
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   /**
    * Calculate positions for tags, accounting for collapsed tags.
@@ -126,14 +138,9 @@ export class PFTimelineTagBars extends BaseComponent {
   private calculateTagPositions(
     tags: FrameTag[]
   ): Map<string, { left: number; width: number; visualStartIndex: number }> {
-    const positions = new Map<
-      string,
-      { left: number; width: number; visualStartIndex: number }
-    >();
+    const positions = new Map<string, { left: number; width: number; visualStartIndex: number }>();
 
-    const sortedTags = [...tags].sort(
-      (a, b) => a.startFrameIndex - b.startFrameIndex
-    );
+    const sortedTags = [...tags].sort((a, b) => a.startFrameIndex - b.startFrameIndex);
 
     let visualOffset = 0;
 
@@ -148,8 +155,7 @@ export class PFTimelineTagBars extends BaseComponent {
         visualOffset -= tag.endFrameIndex - tag.startFrameIndex;
       } else {
         const left = (tag.startFrameIndex + visualOffset) * FRAME_WIDTH;
-        const width =
-          (tag.endFrameIndex - tag.startFrameIndex + 1) * FRAME_WIDTH;
+        const width = (tag.endFrameIndex - tag.startFrameIndex + 1) * FRAME_WIDTH;
         positions.set(tag.id, {
           left,
           width,
@@ -166,64 +172,72 @@ export class PFTimelineTagBars extends BaseComponent {
     const target = e.target as HTMLElement;
 
     // Don't process if clicking on chevron
-    if (target.classList.contains("tag-chevron")) return;
+    if (target.classList.contains('tag-chevron')) return;
 
     if (tag.collapsed) {
-      animationStore.toggleTagCollapsed(tag.id);
+      this.context.animation.toggleTagCollapsed(tag.id);
     } else {
-      const currentActiveTag = animationStore.activeTagId.value;
+      const currentActiveTag = this.context.animation.activeTagId.value;
       if (currentActiveTag === tag.id) {
-        animationStore.setPlaybackMode("all");
+        this.context.animation.setPlaybackMode('all');
       } else {
-        animationStore.setPlaybackMode("tag", tag.id);
+        this.context.animation.setPlaybackMode('tag', tag.id);
       }
     }
   }
 
   private handleChevronClick(tagId: string, e: MouseEvent) {
     e.stopPropagation();
-    animationStore.toggleTagCollapsed(tagId);
+    this.context.animation.toggleTagCollapsed(tagId);
   }
 
   private handleContextMenu(tagId: string, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    this.dispatchEvent(new CustomEvent("tag-context-menu", {
-      detail: { tagId, anchor: e.currentTarget, event: e },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('tag-context-menu', {
+        detail: { tagId, anchor: e.currentTarget, event: e },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private handleMouseEnter(tag: FrameTag, e: MouseEvent) {
     if (!tag.collapsed) return;
-    this.dispatchEvent(new CustomEvent("tag-hover-start", {
-      detail: { tagId: tag.id, target: e.currentTarget },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('tag-hover-start', {
+        detail: { tagId: tag.id, target: e.currentTarget },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private handleMouseLeave() {
-    this.dispatchEvent(new CustomEvent("tag-hover-end", {
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('tag-hover-end', {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
-  private handleResizeStart(tagId: string, edge: "left" | "right", e: MouseEvent) {
+  private handleResizeStart(tagId: string, edge: 'left' | 'right', e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    this.dispatchEvent(new CustomEvent("tag-resize-start", {
-      detail: { tagId, edge },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('tag-resize-start', {
+        detail: { tagId, edge },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   render() {
-    const tags = animationStore.tags.value;
-    const activeTagId = animationStore.activeTagId.value;
+    const tags = this.context.animation.tags.value;
+    const activeTagId = this.context.animation.activeTagId.value;
     const positions = this.calculateTagPositions(tags);
 
     return html`
@@ -239,32 +253,36 @@ export class PFTimelineTagBars extends BaseComponent {
 
         return html`
           <div
-            class="tag-bar ${isActiveLoop ? "active-loop" : ""} ${isResizing ? "resizing" : ""} ${tag.collapsed ? "collapsed" : ""}"
+            class="tag-bar ${isActiveLoop ? 'active-loop' : ''} ${isResizing ? 'resizing' : ''} ${tag.collapsed ? 'collapsed' : ''}"
             style="left: ${left}px; width: ${width}px; background-color: ${tag.color};"
             @click=${(e: MouseEvent) => this.handleTagClick(tag, e)}
             @contextmenu=${(e: MouseEvent) => this.handleContextMenu(tag.id, e)}
             @mouseenter=${(e: MouseEvent) => this.handleMouseEnter(tag, e)}
             @mouseleave=${this.handleMouseLeave}
-            title="${tag.name}${isActiveLoop ? " (looping)" : ""}${tag.collapsed ? " - Click to expand" : ""}"
+            title="${tag.name}${isActiveLoop ? ' (looping)' : ''}${tag.collapsed ? ' - Click to expand' : ''}"
           >
             <span
               class="tag-chevron"
               @click=${(e: MouseEvent) => this.handleChevronClick(tag.id, e)}
-              title="${tag.collapsed ? "Expand" : "Collapse"}"
+              title="${tag.collapsed ? 'Expand' : 'Collapse'}"
             >
               ▼
             </span>
             <span class="tag-label">${label}</span>
-            ${!tag.collapsed ? html`
-              <div
-                class="tag-drag-handle left"
-                @mousedown=${(e: MouseEvent) => this.handleResizeStart(tag.id, "left", e)}
-              ></div>
-              <div
-                class="tag-drag-handle right"
-                @mousedown=${(e: MouseEvent) => this.handleResizeStart(tag.id, "right", e)}
-              ></div>
-            ` : ""}
+            ${
+              !tag.collapsed
+                ? html`
+                    <div
+                      class="tag-drag-handle left"
+                      @mousedown=${(e: MouseEvent) => this.handleResizeStart(tag.id, 'left', e)}
+                    ></div>
+                    <div
+                      class="tag-drag-handle right"
+                      @mousedown=${(e: MouseEvent) => this.handleResizeStart(tag.id, 'right', e)}
+                    ></div>
+                  `
+                : ''
+            }
           </div>
         `;
       })}

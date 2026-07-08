@@ -1,5 +1,13 @@
 import { animationStore } from '../stores/animation';
 import { layerStore } from '../stores/layers';
+import type { ProjectContext } from '../stores/project-context';
+
+type CompositeFrameContext = Pick<ProjectContext, 'animation' | 'layers'>;
+
+interface CompositeFrameOptions {
+  clearFirst?: boolean;
+  context?: CompositeFrameContext;
+}
 
 /**
  * Composite all visible layers for a specific frame onto a target canvas.
@@ -7,11 +15,12 @@ import { layerStore } from '../stores/layers';
 export function compositeFrame(
   frameId: string,
   targetCtx: CanvasRenderingContext2D,
-  options: { clearFirst?: boolean } = {}
+  options: CompositeFrameOptions = {}
 ): void {
-  const { clearFirst = true } = options;
-  const layers = layerStore.layers.value;
-  const cels = animationStore.cels.value;
+  const { clearFirst = true, context } = options;
+  const animation = context?.animation ?? animationStore;
+  const layers = context?.layers.layers.value ?? layerStore.layers.value;
+  const cels = animation.cels.value;
 
   if (clearFirst) {
     targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
@@ -21,7 +30,7 @@ export function compositeFrame(
   for (const layer of layers) {
     if (!layer.visible) continue;
 
-    const key = animationStore.getCelKey(layer.id, frameId);
+    const key = animation.getCelKey(layer.id, frameId);
     const cel = cels.get(key);
 
     // Fall back to layer.canvas if cel doesn't exist yet (new layers)
@@ -33,7 +42,9 @@ export function compositeFrame(
       const celOpacity = (cel?.opacity ?? 100) / 100;
       targetCtx.globalAlpha = layerOpacity * celOpacity;
       targetCtx.globalCompositeOperation =
-        layer.blendMode === 'normal' ? 'source-over' : (layer.blendMode as GlobalCompositeOperation);
+        layer.blendMode === 'normal'
+          ? 'source-over'
+          : (layer.blendMode as GlobalCompositeOperation);
       targetCtx.drawImage(canvasToUse, 0, 0);
     }
   }
@@ -43,15 +54,11 @@ export function compositeFrame(
   targetCtx.globalCompositeOperation = 'source-over';
 }
 
-
 /**
  * Reset the transform, clear the whole canvas, and re-apply the
  * device-pixel-ratio scale so subsequent drawing uses CSS pixels.
  */
-export function clearCanvasForDpr(
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement
-): void {
+export function clearCanvasForDpr(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement): void {
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);

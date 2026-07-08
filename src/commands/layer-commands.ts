@@ -1,42 +1,49 @@
-import { type Command } from "./index";
-import { layerStore } from "../stores/layers";
-import { animationStore } from "../stores/animation";
-import { projectStore } from "../stores/project";
-import { type Layer } from "../types/layer";
-import { type Cel } from "../types/animation";
+import { type Command } from './index';
+import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
+import { type Layer } from '../types/layer';
+import { type Cel } from '../types/animation';
+
+type LayerCommandContext = Pick<ProjectContext, 'animation' | 'layers' | 'project'>;
 
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = "Add Layer";
+  name = 'Add Layer';
   private layerId: string | null = null;
+  private readonly context: LayerCommandContext;
+
+  constructor(context: LayerCommandContext = getActiveProjectContext()) {
+    this.context = context;
+  }
 
   execute() {
-    const width = projectStore.width.value;
-    const height = projectStore.height.value;
-    const layer = layerStore.addLayer(undefined, width, height);
+    const width = this.context.project.width.value;
+    const height = this.context.project.height.value;
+    const layer = this.context.layers.addLayer(undefined, width, height);
     this.layerId = layer.id;
   }
 
   undo() {
     if (this.layerId) {
-      layerStore.removeLayer(this.layerId);
+      this.context.layers.removeLayer(this.layerId);
     }
   }
 }
 
 export class DuplicateLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = "Duplicate Layer";
+  name = 'Duplicate Layer';
   private sourceLayerId: string;
   private newLayerId: string | null = null;
   private duplicatedCelKeys: string[] = [];
+  private readonly context: LayerCommandContext;
 
-  constructor(sourceLayerId: string) {
+  constructor(sourceLayerId: string, context: LayerCommandContext = getActiveProjectContext()) {
     this.sourceLayerId = sourceLayerId;
+    this.context = context;
   }
 
   execute() {
-    const newLayer = layerStore.duplicateLayer(this.sourceLayerId);
+    const newLayer = this.context.layers.duplicateLayer(this.sourceLayerId);
     this.newLayerId = newLayer?.id ?? null;
 
     if (this.newLayerId) {
@@ -46,25 +53,25 @@ export class DuplicateLayerCommand implements Command {
   }
 
   private duplicateCels(sourceLayerId: string, newLayerId: string) {
-    const frames = animationStore.frames.value;
-    const cels = animationStore.cels.value;
+    const frames = this.context.animation.frames.value;
+    const cels = this.context.animation.cels.value;
     const newCels = new Map(cels);
 
     // Track which linkedCelIds map to new linkedCelIds (to preserve link groups)
     const linkIdMap = new Map<string, string>();
 
     for (const frame of frames) {
-      const sourceKey = animationStore.getCelKey(sourceLayerId, frame.id);
+      const sourceKey = this.context.animation.getCelKey(sourceLayerId, frame.id);
       const sourceCel = cels.get(sourceKey);
 
       if (sourceCel) {
-        const newKey = animationStore.getCelKey(newLayerId, frame.id);
+        const newKey = this.context.animation.getCelKey(newLayerId, frame.id);
 
         // Create new canvas and copy content
-        const newCanvas = document.createElement("canvas");
+        const newCanvas = document.createElement('canvas');
         newCanvas.width = sourceCel.canvas.width;
         newCanvas.height = sourceCel.canvas.height;
-        const ctx = newCanvas.getContext("2d", {
+        const ctx = newCanvas.getContext('2d', {
           alpha: true,
           willReadFrequently: true,
         });
@@ -90,9 +97,7 @@ export class DuplicateLayerCommand implements Command {
           linkedCelId: newLinkedCelId,
           linkType: sourceCel.linkType,
           opacity: sourceCel.opacity,
-          textCelData: sourceCel.textCelData
-            ? { ...sourceCel.textCelData }
-            : undefined,
+          textCelData: sourceCel.textCelData ? { ...sourceCel.textCelData } : undefined,
         };
 
         newCels.set(newKey, newCel);
@@ -100,68 +105,76 @@ export class DuplicateLayerCommand implements Command {
       }
     }
 
-    animationStore.cels.value = newCels;
+    this.context.animation.cels.value = newCels;
   }
 
   undo() {
     if (this.newLayerId) {
       // Remove duplicated cels
-      const cels = animationStore.cels.value;
+      const cels = this.context.animation.cels.value;
       const newCels = new Map(cels);
       for (const key of this.duplicatedCelKeys) {
         newCels.delete(key);
       }
-      animationStore.cels.value = newCels;
+      this.context.animation.cels.value = newCels;
       this.duplicatedCelKeys = [];
 
       // Remove the layer
-      layerStore.removeLayer(this.newLayerId);
+      this.context.layers.removeLayer(this.newLayerId);
     }
   }
 }
 
 export class RemoveLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = "Remove Layer";
+  name = 'Remove Layer';
   private layer: Layer;
   private index: number;
+  private readonly context: LayerCommandContext;
 
-  constructor(layerId: string) {
-    const layer = layerStore.layers.value.find((l) => l.id === layerId);
-    if (!layer) throw new Error("Layer not found");
+  constructor(layerId: string, context: LayerCommandContext = getActiveProjectContext()) {
+    this.context = context;
+
+    const layer = this.context.layers.layers.value.find((l) => l.id === layerId);
+    if (!layer) throw new Error('Layer not found');
     this.layer = { ...layer }; // Clone
-    this.index = layerStore.layers.value.findIndex((l) => l.id === layerId);
+    this.index = this.context.layers.layers.value.findIndex((l) => l.id === layerId);
   }
 
   execute() {
-    layerStore.removeLayer(this.layer.id);
+    this.context.layers.removeLayer(this.layer.id);
   }
 
   undo() {
     // We need to insert it back at the specific index
-    // layerStore.addLayer doesn't support index or restoring existing object
-    // We might need to extend layerStore or manually manipulate the array
+    // The store cannot insert an existing layer at an index, so restore the array.
 
-    const layers = [...layerStore.layers.value];
+    const layers = [...this.context.layers.layers.value];
     layers.splice(this.index, 0, this.layer);
-    layerStore.layers.value = layers;
-    layerStore.activeLayerId.value = this.layer.id;
+    this.context.layers.layers.value = layers;
+    this.context.layers.activeLayerId.value = this.layer.id;
   }
 }
 
 export class UpdateLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = "Update Layer";
+  name = 'Update Layer';
   private layerId: string;
   private oldUpdates: Partial<Layer>;
   private newUpdates: Partial<Layer>;
+  private readonly context: LayerCommandContext;
 
-  constructor(layerId: string, updates: Partial<Layer>) {
+  constructor(
+    layerId: string,
+    updates: Partial<Layer>,
+    context: LayerCommandContext = getActiveProjectContext()
+  ) {
     this.layerId = layerId;
     this.newUpdates = updates;
+    this.context = context;
 
-    const layer = layerStore.layers.value.find((l) => l.id === layerId);
-    if (!layer) throw new Error("Layer not found");
+    const layer = this.context.layers.layers.value.find((l) => l.id === layerId);
+    if (!layer) throw new Error('Layer not found');
 
     this.oldUpdates = {};
     for (const key in updates) {
@@ -171,24 +184,30 @@ export class UpdateLayerCommand implements Command {
   }
 
   execute() {
-    layerStore.updateLayer(this.layerId, this.newUpdates);
+    this.context.layers.updateLayer(this.layerId, this.newUpdates);
   }
 
   undo() {
-    layerStore.updateLayer(this.layerId, this.oldUpdates);
+    this.context.layers.updateLayer(this.layerId, this.oldUpdates);
   }
 }
 // ... existing commands ...
 
 export class FlipLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = "Flip Layer";
+  name = 'Flip Layer';
   private layerId: string;
-  private direction: "horizontal" | "vertical";
+  private direction: 'horizontal' | 'vertical';
+  private readonly context: LayerCommandContext;
 
-  constructor(layerId: string, direction: "horizontal" | "vertical") {
+  constructor(
+    layerId: string,
+    direction: 'horizontal' | 'vertical',
+    context: LayerCommandContext = getActiveProjectContext()
+  ) {
     this.layerId = layerId;
     this.direction = direction;
+    this.context = context;
     this.name = `Flip Layer ${direction}`;
   }
 
@@ -201,23 +220,23 @@ export class FlipLayerCommand implements Command {
   }
 
   private flip() {
-    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
+    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
     if (!layer || !layer.canvas) return;
 
-    const ctx = layer.canvas.getContext("2d");
+    const ctx = layer.canvas.getContext('2d');
     if (!ctx) return;
 
     const width = layer.canvas.width;
     const height = layer.canvas.height;
 
     // Create temp canvas to draw flipped
-    const tempCanvas = document.createElement("canvas");
+    const tempCanvas = document.createElement('canvas');
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d")!;
+    const tempCtx = tempCanvas.getContext('2d')!;
 
     tempCtx.save();
-    if (this.direction === "horizontal") {
+    if (this.direction === 'horizontal') {
       tempCtx.scale(-1, 1);
       tempCtx.drawImage(layer.canvas, -width, 0);
     } else {
@@ -231,19 +250,25 @@ export class FlipLayerCommand implements Command {
     ctx.drawImage(tempCanvas, 0, 0);
 
     // Trigger update
-    layerStore.updateLayer(this.layerId, {});
+    this.context.layers.updateLayer(this.layerId, {});
   }
 }
 
 export class RotateLayerCommand implements Command {
   id = crypto.randomUUID();
-  name = "Rotate Layer";
+  name = 'Rotate Layer';
   private layerId: string;
   private angle: number; // 90, 180, -90
+  private readonly context: LayerCommandContext;
 
-  constructor(layerId: string, angle: number) {
+  constructor(
+    layerId: string,
+    angle: number,
+    context: LayerCommandContext = getActiveProjectContext()
+  ) {
     this.layerId = layerId;
     this.angle = angle;
+    this.context = context;
     this.name = `Rotate Layer ${angle}°`;
   }
 
@@ -256,20 +281,20 @@ export class RotateLayerCommand implements Command {
   }
 
   private rotate(angle: number) {
-    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
+    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
     if (!layer || !layer.canvas) return;
 
-    const ctx = layer.canvas.getContext("2d");
+    const ctx = layer.canvas.getContext('2d');
     if (!ctx) return;
 
     const width = layer.canvas.width;
     const height = layer.canvas.height;
 
     // Create temp canvas
-    const tempCanvas = document.createElement("canvas");
+    const tempCanvas = document.createElement('canvas');
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d")!;
+    const tempCtx = tempCanvas.getContext('2d')!;
 
     tempCtx.save();
     tempCtx.translate(width / 2, height / 2);
@@ -283,39 +308,41 @@ export class RotateLayerCommand implements Command {
     ctx.drawImage(tempCanvas, 0, 0);
 
     // Trigger update
-    layerStore.updateLayer(this.layerId, {});
+    this.context.layers.updateLayer(this.layerId, {});
   }
 }
 
 export class GroupLayersCommand implements Command {
   id = crypto.randomUUID();
-  name = "Group Layers";
+  name = 'Group Layers';
   private layerIds: string[];
   private groupId: string | null = null;
   private originalParentIds: Map<string, string | null> = new Map();
   private originalLayerOrder: string[] = [];
+  private readonly context: LayerCommandContext;
 
-  constructor(layerIds: string[]) {
+  constructor(layerIds: string[], context: LayerCommandContext = getActiveProjectContext()) {
     this.layerIds = layerIds;
+    this.context = context;
     // Store original state for undo
     for (const id of layerIds) {
-      const layer = layerStore.layers.value.find((l) => l.id === id);
+      const layer = this.context.layers.layers.value.find((l) => l.id === id);
       if (layer) {
         this.originalParentIds.set(id, layer.parentId);
       }
     }
-    this.originalLayerOrder = layerStore.layers.value.map((l) => l.id);
+    this.originalLayerOrder = this.context.layers.layers.value.map((l) => l.id);
   }
 
   execute() {
-    this.groupId = layerStore.createGroup(this.layerIds);
+    this.groupId = this.context.layers.createGroup(this.layerIds);
   }
 
   undo() {
     if (!this.groupId) return;
 
     // Restore original parent IDs
-    const layers = layerStore.layers.value.map((l) => {
+    const layers = this.context.layers.layers.value.map((l) => {
       if (this.originalParentIds.has(l.id)) {
         return { ...l, parentId: this.originalParentIds.get(l.id) ?? null };
       }
@@ -333,43 +360,45 @@ export class GroupLayersCommand implements Command {
       }
     }
 
-    layerStore.layers.value = reordered;
+    this.context.layers.layers.value = reordered;
 
     // Select first of the original layers
     if (this.layerIds.length > 0) {
-      layerStore.activeLayerId.value = this.layerIds[0];
+      this.context.layers.activeLayerId.value = this.layerIds[0];
     }
   }
 }
 
 export class UngroupLayersCommand implements Command {
   id = crypto.randomUUID();
-  name = "Ungroup Layers";
+  name = 'Ungroup Layers';
   private groupId: string;
   private groupLayer: Layer | null = null;
   private childIds: string[] = [];
   private originalLayerOrder: string[] = [];
+  private readonly context: LayerCommandContext;
 
-  constructor(groupId: string) {
+  constructor(groupId: string, context: LayerCommandContext = getActiveProjectContext()) {
     this.groupId = groupId;
+    this.context = context;
     // Store original state for undo
-    const group = layerStore.layers.value.find((l) => l.id === groupId);
+    const group = this.context.layers.layers.value.find((l) => l.id === groupId);
     if (group) {
       this.groupLayer = { ...group };
     }
-    this.childIds = layerStore.getGroupChildren(groupId).map((l) => l.id);
-    this.originalLayerOrder = layerStore.layers.value.map((l) => l.id);
+    this.childIds = this.context.layers.getGroupChildren(groupId).map((l) => l.id);
+    this.originalLayerOrder = this.context.layers.layers.value.map((l) => l.id);
   }
 
   execute() {
-    layerStore.ungroup(this.groupId);
+    this.context.layers.ungroup(this.groupId);
   }
 
   undo() {
     if (!this.groupLayer) return;
 
     // Restore children's parentId and add the group back
-    const layers = layerStore.layers.value.map((l) => {
+    const layers = this.context.layers.layers.value.map((l) => {
       if (this.childIds.includes(l.id)) {
         return { ...l, parentId: this.groupId };
       }
@@ -389,7 +418,7 @@ export class UngroupLayersCommand implements Command {
       }
     }
 
-    layerStore.layers.value = reordered;
-    layerStore.activeLayerId.value = this.groupId;
+    this.context.layers.layers.value = reordered;
+    this.context.layers.activeLayerId.value = this.groupId;
   }
 }

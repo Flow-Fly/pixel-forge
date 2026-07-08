@@ -1,15 +1,13 @@
-import { html, css, render } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../../core/base-component";
-import { animationStore } from "../../../stores/animation";
-import { layerStore } from "../../../stores/layers";
-import { projectStore } from "../../../stores/project";
-import { renderFrameToCanvas } from "../../../utils/preview-renderer";
+import { html, css, render } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
+import { BaseComponent } from '../../../core/base-component';
+import { defaultProjectContext } from '../../../stores/project-context';
+import { renderFrameToCanvas } from '../../../utils/preview-renderer';
 
 const FRAME_WIDTH = 32;
 const PREVIEW_SCALE = 2;
 
-@customElement("pf-timeline-resize-preview")
+@customElement('pf-timeline-resize-preview')
 export class PFTimelineResizePreview extends BaseComponent {
   static styles = css`
     :host {
@@ -18,16 +16,17 @@ export class PFTimelineResizePreview extends BaseComponent {
   `;
 
   @property({ type: String }) tagId: string | null = null;
-  @property({ type: String }) edge: "left" | "right" | null = null;
+  @property({ type: String }) edge: 'left' | 'right' | null = null;
   @property({ type: Number }) previewIndex: number | null = null;
   @property({ type: Object }) headerRect: DOMRect | null = null;
 
   private portal: HTMLDivElement | null = null;
+  private context = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
-    this.portal = document.createElement("div");
-    this.portal.id = "resize-preview-portal";
+    this.portal = document.createElement('div');
+    this.portal.id = 'resize-preview-portal';
     this.portal.style.cssText = `
       position: fixed;
       z-index: 10000;
@@ -35,6 +34,10 @@ export class PFTimelineResizePreview extends BaseComponent {
       display: none;
     `;
     document.body.appendChild(this.portal);
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.renderPortal();
+    });
   }
 
   disconnectedCallback() {
@@ -48,9 +51,9 @@ export class PFTimelineResizePreview extends BaseComponent {
   protected updated(changedProperties: Map<string, unknown>): void {
     super.updated(changedProperties);
     if (
-      changedProperties.has("previewIndex") ||
-      changedProperties.has("tagId") ||
-      changedProperties.has("edge")
+      changedProperties.has('previewIndex') ||
+      changedProperties.has('tagId') ||
+      changedProperties.has('edge')
     ) {
       this.renderPortal();
     }
@@ -60,28 +63,25 @@ export class PFTimelineResizePreview extends BaseComponent {
     if (!this.portal) return;
 
     if (!this.tagId || this.previewIndex === null || !this.headerRect) {
-      this.portal.style.display = "none";
+      this.portal.style.display = 'none';
       return;
     }
 
-    const tag = animationStore.tags.value.find((t) => t.id === this.tagId);
+    const animation = this.context.animation;
+    const tag = animation.tags.value.find((t) => t.id === this.tagId);
     if (!tag) return;
 
-    const frames = animationStore.frames.value;
-    const layers = layerStore.layers.value;
-    const cels = animationStore.cels.value;
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
+    const frames = animation.frames.value;
+    const layers = this.context.layers.layers.value;
+    const cels = animation.cels.value;
+    const canvasW = this.context.project.width.value;
+    const canvasH = this.context.project.height.value;
 
     // Calculate preview range
     const previewStart =
-      this.edge === "left"
-        ? Math.min(this.previewIndex, tag.endFrameIndex)
-        : tag.startFrameIndex;
+      this.edge === 'left' ? Math.min(this.previewIndex, tag.endFrameIndex) : tag.startFrameIndex;
     const previewEnd =
-      this.edge === "right"
-        ? Math.max(this.previewIndex, tag.startFrameIndex)
-        : tag.endFrameIndex;
+      this.edge === 'right' ? Math.max(this.previewIndex, tag.startFrameIndex) : tag.endFrameIndex;
 
     const previewStartLabel = `Frame ${previewStart + 1}`;
     const previewEndLabel = `Frame ${previewEnd + 1}`;
@@ -91,15 +91,9 @@ export class PFTimelineResizePreview extends BaseComponent {
     const previewHeight = canvasH * PREVIEW_SCALE + 24;
 
     const startX =
-      this.headerRect.left +
-      previewStart * FRAME_WIDTH +
-      FRAME_WIDTH / 2 -
-      previewWidth / 2;
+      this.headerRect.left + previewStart * FRAME_WIDTH + FRAME_WIDTH / 2 - previewWidth / 2;
     const endX =
-      this.headerRect.left +
-      previewEnd * FRAME_WIDTH +
-      FRAME_WIDTH / 2 -
-      previewWidth / 2;
+      this.headerRect.left + previewEnd * FRAME_WIDTH + FRAME_WIDTH / 2 - previewWidth / 2;
 
     let previewY = this.headerRect.top - previewHeight - 8;
     if (previewY < 8) {
@@ -137,65 +131,55 @@ export class PFTimelineResizePreview extends BaseComponent {
     `;
 
     const template = html`
-      <div
-        class="resize-preview-start"
-        style="${previewFrameStyle} left: ${startX}px;"
-      >
+      <div class="resize-preview-start" style="${previewFrameStyle} left: ${startX}px;">
         <canvas
           class="resize-preview-start-canvas"
           width="${canvasW}"
           height="${canvasH}"
           style="${canvasStyle}"
         ></canvas>
-        <span
-          style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;"
-        >
+        <span style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;">
           ${previewStartLabel}
         </span>
       </div>
-      <div
-        class="resize-preview-end"
-        style="${previewFrameStyle} left: ${endX}px;"
-      >
+      <div class="resize-preview-end" style="${previewFrameStyle} left: ${endX}px;">
         <canvas
           class="resize-preview-end-canvas"
           width="${canvasW}"
           height="${canvasH}"
           style="${canvasStyle}"
         ></canvas>
-        <span
-          style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;"
-        >
+        <span style="font-size: 9px; color: var(--pf-color-text-muted, #888); white-space: nowrap;">
           ${previewEndLabel}
         </span>
       </div>
     `;
 
     render(template, this.portal);
-    this.portal.style.display = "block";
+    this.portal.style.display = 'block';
 
     // Render frame content to canvases after DOM update
     requestAnimationFrame(() => {
       if (!this.portal) return;
 
       const startCanvas = this.portal.querySelector(
-        ".resize-preview-start-canvas"
+        '.resize-preview-start-canvas'
       ) as HTMLCanvasElement;
       const endCanvas = this.portal.querySelector(
-        ".resize-preview-end-canvas"
+        '.resize-preview-end-canvas'
       ) as HTMLCanvasElement;
 
       if (startCanvas && frames[previewStart]) {
-        const ctx = startCanvas.getContext("2d");
+        const ctx = startCanvas.getContext('2d');
         if (ctx) {
-          renderFrameToCanvas(ctx, frames[previewStart].id, layers, cels);
+          renderFrameToCanvas(ctx, frames[previewStart].id, layers, cels, animation);
         }
       }
 
       if (endCanvas && frames[previewEnd]) {
-        const ctx = endCanvas.getContext("2d");
+        const ctx = endCanvas.getContext('2d');
         if (ctx) {
-          renderFrameToCanvas(ctx, frames[previewEnd].id, layers, cels);
+          renderFrameToCanvas(ctx, frames[previewEnd].id, layers, cels, animation);
         }
       }
     });
@@ -203,7 +187,7 @@ export class PFTimelineResizePreview extends BaseComponent {
 
   hide() {
     if (this.portal) {
-      this.portal.style.display = "none";
+      this.portal.style.display = 'none';
     }
   }
 

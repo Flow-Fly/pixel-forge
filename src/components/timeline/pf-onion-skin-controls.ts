@@ -1,8 +1,8 @@
 import { html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { animationStore } from '../../stores/animation';
-import { dirtyRectStore } from '../../stores/dirty-rect';
+import { defaultProjectContext } from '../../stores/project-context';
+import type { OnionSkinSettings } from '../../types/animation';
 
 @customElement('pf-onion-skin-controls')
 export class PFOnionSkinControls extends BaseComponent {
@@ -34,11 +34,11 @@ export class PFOnionSkinControls extends BaseComponent {
       user-select: none;
     }
 
-    input[type="checkbox"] {
+    input[type='checkbox'] {
       accent-color: var(--pf-color-primary);
     }
 
-    input[type="number"] {
+    input[type='number'] {
       width: 40px;
       background: var(--pf-color-bg-input);
       border: 1px solid var(--pf-color-border);
@@ -71,74 +71,91 @@ export class PFOnionSkinControls extends BaseComponent {
     }
   `;
 
-  private toggleEnabled(e: Event) {
-    const enabled = (e.target as HTMLInputElement).checked;
-    animationStore.onionSkin.value = {
-      ...animationStore.onionSkin.value,
-      enabled
-    };
-    // Trigger canvas redraw to show/hide onion skins
-    dirtyRectStore.requestFullRedraw();
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
   }
 
-  private updateSettings(updates: Partial<typeof animationStore.onionSkin.value>) {
-    animationStore.onionSkin.value = {
-      ...animationStore.onionSkin.value,
-      ...updates
+  private toggleEnabled(e: Event) {
+    const enabled = (e.target as HTMLInputElement).checked;
+    this.context.animation.onionSkin.value = {
+      ...this.context.animation.onionSkin.value,
+      enabled,
+    };
+    // Trigger canvas redraw to show/hide onion skins
+    this.context.dirtyRect.requestFullRedraw();
+  }
+
+  private updateSettings(updates: Partial<OnionSkinSettings>) {
+    this.context.animation.onionSkin.value = {
+      ...this.context.animation.onionSkin.value,
+      ...updates,
     };
     // Trigger canvas redraw to update onion skin display
-    dirtyRectStore.requestFullRedraw();
+    this.context.dirtyRect.requestFullRedraw();
   }
 
   render() {
-    const { enabled, prevFrames, nextFrames, tint } = animationStore.onionSkin.value;
+    const { enabled, prevFrames, nextFrames, tint } = this.context.animation.onionSkin.value;
 
     return html`
       <div class="control-group">
         <label title="Enable Onion Skin">
-          <input 
-            type="checkbox" 
-            .checked=${enabled}
-            @change=${this.toggleEnabled}
-          >
+          <input type="checkbox" .checked=${enabled} @change=${this.toggleEnabled} />
           <span>Onion Skin</span>
         </label>
       </div>
 
-      ${enabled ? html`
-        <div class="control-group" title="Previous Frames">
-          <span>-</span>
-          <input 
-            type="number" 
-            min="0" 
-            max="5" 
-            .value=${prevFrames}
-            @change=${(e: Event) => this.updateSettings({ prevFrames: parseInt((e.target as HTMLInputElement).value) })}
-          >
-        </div>
+      ${
+        enabled
+          ? html`
+              <div class="control-group" title="Previous Frames">
+                <span>-</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="5"
+                  .value=${prevFrames}
+                  @change=${(e: Event) => this.updateSettings({ prevFrames: parseInt((e.target as HTMLInputElement).value) })}
+                />
+              </div>
 
-        <div class="control-group" title="Next Frames">
-          <span>+</span>
-          <input 
-            type="number" 
-            min="0" 
-            max="5" 
-            .value=${nextFrames}
-            @change=${(e: Event) => this.updateSettings({ nextFrames: parseInt((e.target as HTMLInputElement).value) })}
-          >
-        </div>
+              <div class="control-group" title="Next Frames">
+                <span>+</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="5"
+                  .value=${nextFrames}
+                  @change=${(e: Event) => this.updateSettings({ nextFrames: parseInt((e.target as HTMLInputElement).value) })}
+                />
+              </div>
 
-        <button 
-          class="icon-btn ${tint ? 'active' : ''}" 
-          title="Toggle Tint (Red/Blue)"
-          @click=${() => this.updateSettings({ tint: !tint })}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <path d="M12 12L12 12.01"></path>
-          </svg>
-        </button>
-      ` : ''}
+              <button
+                class="icon-btn ${tint ? 'active' : ''}"
+                title="Toggle Tint (Red/Blue)"
+                @click=${() => this.updateSettings({ tint: !tint })}
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M12 12L12 12.01"></path>
+                </svg>
+              </button>
+            `
+          : ''
+      }
     `;
   }
 }
