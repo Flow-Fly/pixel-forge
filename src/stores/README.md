@@ -78,6 +78,29 @@ exports so later ProjectContext slices can compose fresh instances without
 breaking existing imports such as `layerStore`, `paletteStore`, and
 `animationStore`.
 
+## ProjectContext shell
+
+`project-context.ts` introduces the first composition root for per-project
+state. `ProjectContext` constructs fresh instances only for the simple stores
+that currently have safe factories:
+
+- `colors`
+- `dirtyRect`
+- `grid`
+- `guides`
+- `historyHighlight`
+- `layers`
+- `selection`
+- `viewport`
+
+`defaultProjectContext` is a compatibility layer over the current singleton
+exports. It points at the same stores imported by the app today, so this slice
+does not change one-project runtime behavior or require app-shell migration.
+
+Do not add active context switching here yet. New project-local stores should
+gain explicit factories first, then be added to `ProjectContext` in a narrow
+follow-up.
+
 ### App-global stores
 
 These stores belong to the editor session, user, or shell rather than one
