@@ -1,5 +1,8 @@
 import { signal } from "../core/signal";
-import { registerCanvasSizeSource } from "./store-refs";
+import {
+  defaultStoreRefs,
+  type StoreRefs,
+} from "./store-refs";
 import { v4 as uuidv4 } from "uuid";
 import { layerStore } from "./layers";
 import { animationStore } from "./animation";
@@ -97,6 +100,12 @@ class ProjectStore {
   name = signal("Untitled");
   /** Timestamp of last auto-save */
   lastSaved = signal<number | null>(null);
+  private refs: StoreRefs;
+
+  constructor(refs: StoreRefs = defaultStoreRefs) {
+    this.refs = refs;
+    this.refs.registerCanvasSizeSource(this);
+  }
 
   setSize(width: number, height: number) {
     this.width.value = width;
@@ -278,5 +287,9 @@ class ProjectStore {
   }
 }
 
-export const projectStore = new ProjectStore();
-registerCanvasSizeSource(projectStore);
+// fallow-ignore-next-line unused-export -- ProjectContext composition will create context-local stores in a later slice.
+export function createProjectStore(refs: StoreRefs = defaultStoreRefs) {
+  return new ProjectStore(refs);
+}
+
+export const projectStore = createProjectStore();

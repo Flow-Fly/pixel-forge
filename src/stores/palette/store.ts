@@ -7,7 +7,7 @@
 
 import { signal } from '../../core/signal';
 import { layerStore } from '../layers';
-import { getAnimationSource } from '../store-refs';
+import { defaultStoreRefs, type StoreRefs } from '../store-refs';
 import type { CustomPalette } from '../../types/palette';
 
 import { DB32_COLORS, MAX_PALETTE_SIZE, PALETTE_BY_ID } from './types';
@@ -68,6 +68,7 @@ class PaletteStore {
 
   private colorToIndex = new Map<string, number>();
   private cachedPaletteName: string | null = null;
+  private refs: StoreRefs;
 
   // ==========================================
   // Deprecated Aliases
@@ -87,7 +88,8 @@ class PaletteStore {
   // Constructor
   // ==========================================
 
-  constructor() {
+  constructor(refs: StoreRefs = defaultStoreRefs) {
+    this.refs = refs;
     this.loadFromStorage();
     this.rebuildColorMap();
     this.loadCustomPalettes();
@@ -387,7 +389,7 @@ class PaletteStore {
     await waitForNextFrame();
 
     try {
-      const animation = getAnimationSource();
+      const animation = this.refs.getAnimationSource();
       const colors = animation
         ? await extraction.extractColorsFromDrawing(animation, layerStore)
         : [];
@@ -620,7 +622,7 @@ class PaletteStore {
 
   private withUsedColorsPreserved(newPaletteColors: string[]): string[] {
     const normalizedPalette = newPaletteColors.map(c => normalizeHex(c));
-    const usedColors = getAnimationSource()?.scanUsedColors() ?? new Set<string>();
+    const usedColors = this.refs.getAnimationSource()?.scanUsedColors() ?? new Set<string>();
     if (usedColors.size === 0) return normalizedPalette;
 
     const paletteSet = new Set(normalizedPalette);
@@ -638,7 +640,7 @@ class PaletteStore {
   }
 
   refreshUsedColors(): void {
-    const colors = getAnimationSource()?.scanUsedColorsFromCanvas() ?? new Set<string>();
+    const colors = this.refs.getAnimationSource()?.scanUsedColorsFromCanvas() ?? new Set<string>();
     const normalized = new Set<string>();
     for (const color of colors) {
       normalized.add(normalizeHex(color));
@@ -651,4 +653,9 @@ class PaletteStore {
   }
 }
 
-export const paletteStore = new PaletteStore();
+// fallow-ignore-next-line unused-export -- ProjectContext composition will create context-local stores in a later slice.
+export function createPaletteStore(refs: StoreRefs = defaultStoreRefs) {
+  return new PaletteStore(refs);
+}
+
+export const paletteStore = createPaletteStore();

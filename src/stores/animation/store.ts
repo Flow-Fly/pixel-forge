@@ -9,7 +9,10 @@ import { signal } from '../../core/signal';
 import type { Frame, Cel, OnionSkinSettings, FrameTag } from '../../types/animation';
 import type { TextCelData } from '../../types/text';
 import { layerStore } from '../layers';
-import { getCanvasSize, registerAnimationSource } from '../store-refs';
+import {
+  defaultStoreRefs,
+  type StoreRefs,
+} from '../store-refs';
 
 // Import extracted modules
 import type { PlaybackMode } from './types';
@@ -55,10 +58,13 @@ class AnimationStore {
   // ===== Private State =====
   private playbackEngine: PlaybackEngine;
   private sharedTransparentCanvas: HTMLCanvasElement | null = null;
+  private refs: StoreRefs;
   // Stored for future dispose() implementation
   private _cleanupPaletteListeners: (() => void) | null = null;
 
-  constructor() {
+  constructor(refs: StoreRefs = defaultStoreRefs) {
+    this.refs = refs;
+
     // Set up playback engine
     this.playbackEngine = createPlaybackEngine({
       getCurrentFrameId: () => this.currentFrameId.value,
@@ -178,7 +184,7 @@ class AnimationStore {
 
       if (!cel) {
         const canvas = document.createElement('canvas');
-        const size = getCanvasSize();
+        const size = this.refs.getCanvasSize();
         canvas.width = size.width;
         canvas.height = size.height;
         const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
@@ -240,7 +246,7 @@ class AnimationStore {
 
     const layers = layerStore.layers.value;
     const cels = new Map(this.cels.value);
-    const { width, height } = getCanvasSize();
+    const { width, height } = this.refs.getCanvasSize();
     const sharedCanvas = this.getSharedTransparentCanvas(width, height);
 
     layers.filter(layer => layer.type !== 'reference').forEach(layer => {
@@ -331,7 +337,8 @@ class AnimationStore {
       this.cels.value,
       layerId,
       frameId,
-      () => this.syncLayerCanvases()
+      () => this.syncLayerCanvases(),
+      () => this.refs.getCanvasSize()
     );
     if (result.cels !== this.cels.value) {
       this.cels.value = result.cels;
@@ -653,5 +660,11 @@ class AnimationStore {
   }
 }
 
-export const animationStore = new AnimationStore();
-registerAnimationSource(animationStore);
+// fallow-ignore-next-line unused-export -- ProjectContext composition will create context-local stores in a later slice.
+export function createAnimationStore(refs: StoreRefs = defaultStoreRefs) {
+  const store = new AnimationStore(refs);
+  refs.registerAnimationSource(store);
+  return store;
+}
+
+export const animationStore = createAnimationStore();
