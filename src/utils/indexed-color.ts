@@ -6,33 +6,16 @@
  * Palette indices are 1-based (index 1 = first color in palette array).
  */
 
-import { paletteStore } from '../stores/palette';
 import { hexToRgb, rgbToHex } from '../stores/palette/color-utils';
 import { log } from './log';
 
 export { rgbToHex };
 
-/**
- * Get RGBA values for a palette index using the palette store.
- * @param index 1-based palette index (0 = transparent)
- * @returns [r, g, b, a] tuple
- */
-function indexToRgbaFromStore(index: number): [number, number, number, number] {
-  if (index === 0) {
-    return [0, 0, 0, 0]; // Transparent
-  }
-
-  const hex = paletteStore.getColorByIndex(index);
-  if (!hex) {
-    return [0, 0, 0, 0]; // Invalid index = transparent
-  }
-
-  const rgb = hexToRgb(hex);
-  if (!rgb) {
-    return [0, 0, 0, 0];
-  }
-
-  return [rgb.r, rgb.g, rgb.b, 255];
+export interface IndexedColorPalette {
+  findClosestColorIndex(hex: string): number;
+  getColorByIndex(index: number): string | null;
+  getColorIndex(hex: string): number;
+  getOrAddColor(hex: string): number;
 }
 
 /**
@@ -46,15 +29,9 @@ function indexToRgba(index: number, palette?: string[]): [number, number, number
     return [0, 0, 0, 0]; // Transparent
   }
 
-  // If no palette provided, use the store.
-  if (!palette) {
-    return indexToRgbaFromStore(index);
-  }
-
   const arrayIndex = index - 1;
-  if (arrayIndex < 0 || arrayIndex >= palette.length) {
-    // The store may have newer colors than the passed palette.
-    return indexToRgbaFromStore(index);
+  if (!palette || arrayIndex < 0 || arrayIndex >= palette.length) {
+    return [0, 0, 0, 0];
   }
 
   const rgb = hexToRgb(palette[arrayIndex]);
@@ -117,6 +94,7 @@ export function rebuildCanvasFromIndices(
  */
 export function buildIndexBufferFromCanvas(
   canvas: HTMLCanvasElement,
+  palette: IndexedColorPalette,
   addMissingColors: boolean = true
 ): Uint8Array {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -148,11 +126,11 @@ export function buildIndexBufferFromCanvas(
 
     if (addMissingColors) {
       // getOrAddColor will add the color if not present
-      indexBuffer[i] = paletteStore.getOrAddColor(hex);
+      indexBuffer[i] = palette.getOrAddColor(hex);
     } else {
       // Just find closest existing color
-      const existingIndex = paletteStore.getColorIndex(hex);
-      indexBuffer[i] = existingIndex !== 0 ? existingIndex : paletteStore.findClosestColorIndex(hex);
+      const existingIndex = palette.getColorIndex(hex);
+      indexBuffer[i] = existingIndex !== 0 ? existingIndex : palette.findClosestColorIndex(hex);
     }
   }
 
@@ -198,4 +176,3 @@ export function getIndexBufferPixel(
 export function cloneIndexBuffer(buffer: Uint8Array): Uint8Array {
   return new Uint8Array(buffer);
 }
-

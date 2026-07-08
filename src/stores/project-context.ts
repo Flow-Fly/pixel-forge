@@ -1,15 +1,18 @@
-import { colorStore, createColorStore } from "./colors";
-import { dirtyRectStore, createDirtyRectStore } from "./dirty-rect";
-import { gridStore, createGridStore } from "./grid";
-import { guidesStore, createGuidesStore } from "./guides";
-import {
-  historyHighlightStore,
-  createHistoryHighlightStore,
-} from "./history-highlight";
-import { layerStore, createLayerStore } from "./layers";
-import { selectionStore, createSelectionStore } from "./selection";
-import { viewportStore, createViewportStore } from "./viewport";
+import { createAnimationStore } from "./animation/store";
+import { createColorStore } from "./colors-store";
+import { createDirtyRectStore } from "./dirty-rect-store";
+import { createGridStore } from "./grid-store";
+import { createGuidesStore } from "./guides-store";
+import { createHistoryHighlightStore } from "./history-highlight-store";
+import { createHistoryStore } from "./history-store";
+import { createLayerStore } from "./layers-store";
+import { createPaletteStore } from "./palette/store";
+import { createProjectStore } from "./project-store";
+import { createSelectionStore } from "./selection/store";
+import { createStoreRefs, type StoreRefs } from "./store-refs";
+import { createViewportStore } from "./viewport-store";
 
+export type ProjectAnimationStore = ReturnType<typeof createAnimationStore>;
 export type ProjectColorStore = ReturnType<typeof createColorStore>;
 export type ProjectDirtyRectStore = ReturnType<typeof createDirtyRectStore>;
 export type ProjectGridStore = ReturnType<typeof createGridStore>;
@@ -17,17 +20,25 @@ export type ProjectGuidesStore = ReturnType<typeof createGuidesStore>;
 export type ProjectHistoryHighlightStore = ReturnType<
   typeof createHistoryHighlightStore
 >;
+export type ProjectHistoryStore = ReturnType<typeof createHistoryStore>;
 export type ProjectLayerStore = ReturnType<typeof createLayerStore>;
+export type ProjectPaletteStore = ReturnType<typeof createPaletteStore>;
+export type ProjectStore = ReturnType<typeof createProjectStore>;
 export type ProjectSelectionStore = ReturnType<typeof createSelectionStore>;
 export type ProjectViewportStore = ReturnType<typeof createViewportStore>;
 
 export interface ProjectContextStores {
+  animation: ProjectAnimationStore;
   colors: ProjectColorStore;
   dirtyRect: ProjectDirtyRectStore;
   grid: ProjectGridStore;
   guides: ProjectGuidesStore;
+  history: ProjectHistoryStore;
   historyHighlight: ProjectHistoryHighlightStore;
   layers: ProjectLayerStore;
+  palette: ProjectPaletteStore;
+  project: ProjectStore;
+  refs: StoreRefs;
   selection: ProjectSelectionStore;
   viewport: ProjectViewportStore;
 }
@@ -40,35 +51,72 @@ export interface CreateProjectContextOptions {
 function createProjectContextStores(
   options: CreateProjectContextOptions = {},
 ): ProjectContextStores {
+  const refs = createStoreRefs();
+  const layers = createLayerStore();
+  const dirtyRect = createDirtyRectStore();
+  const grid = createGridStore();
+  const guides = createGuidesStore();
+  const historyHighlight = createHistoryHighlightStore();
+  const selection = createSelectionStore();
+  const palette = createPaletteStore({ layers, refs });
+  const animation = createAnimationStore({ layers, palette, refs });
+  const colors = createColorStore(options.colorPalette ?? palette);
+  const history = createHistoryStore({ palette });
+  const project = createProjectStore({
+    animation,
+    dirtyRect,
+    history,
+    layers,
+    palette,
+    refs,
+    selection,
+  });
+  const viewport = createViewportStore(options.viewportCanvasSize ?? project);
+
   return {
-    colors: createColorStore(options.colorPalette),
-    dirtyRect: createDirtyRectStore(),
-    grid: createGridStore(),
-    guides: createGuidesStore(),
-    historyHighlight: createHistoryHighlightStore(),
-    layers: createLayerStore(),
-    selection: createSelectionStore(),
-    viewport: createViewportStore(options.viewportCanvasSize),
+    animation,
+    colors,
+    dirtyRect,
+    grid,
+    guides,
+    history,
+    historyHighlight,
+    layers,
+    palette,
+    project,
+    refs,
+    selection,
+    viewport,
   };
 }
 
 class ProjectContext {
+  readonly animation: ProjectAnimationStore;
   readonly colors: ProjectColorStore;
   readonly dirtyRect: ProjectDirtyRectStore;
   readonly grid: ProjectGridStore;
   readonly guides: ProjectGuidesStore;
+  readonly history: ProjectHistoryStore;
   readonly historyHighlight: ProjectHistoryHighlightStore;
   readonly layers: ProjectLayerStore;
+  readonly palette: ProjectPaletteStore;
+  readonly project: ProjectStore;
+  readonly refs: StoreRefs;
   readonly selection: ProjectSelectionStore;
   readonly viewport: ProjectViewportStore;
 
   constructor(stores: ProjectContextStores = createProjectContextStores()) {
+    this.animation = stores.animation;
     this.colors = stores.colors;
     this.dirtyRect = stores.dirtyRect;
     this.grid = stores.grid;
     this.guides = stores.guides;
+    this.history = stores.history;
     this.historyHighlight = stores.historyHighlight;
     this.layers = stores.layers;
+    this.palette = stores.palette;
+    this.project = stores.project;
+    this.refs = stores.refs;
     this.selection = stores.selection;
     this.viewport = stores.viewport;
   }
@@ -80,13 +128,4 @@ export function createProjectContext(
   return new ProjectContext(createProjectContextStores(options));
 }
 
-export const defaultProjectContext: ProjectContextStores = new ProjectContext({
-  colors: colorStore,
-  dirtyRect: dirtyRectStore,
-  grid: gridStore,
-  guides: guidesStore,
-  historyHighlight: historyHighlightStore,
-  layers: layerStore,
-  selection: selectionStore,
-  viewport: viewportStore,
-});
+export const defaultProjectContext: ProjectContextStores = new ProjectContext();

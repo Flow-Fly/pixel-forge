@@ -1,0 +1,244 @@
+import { signal } from '../core/signal';
+import { userStore } from './user';
+import { log } from '../utils/log';
+import type { createPaletteStore } from './palette/store';
+
+// Configuration constants for history limits
+const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_HISTORY_COUNT = 100;
+
+export interface Command {
+  id: string;
+  name: string;
+  userId?: string;
+  timestamp?: number;
+  memorySize?: number; // Optional for backwards compatibility
+  execute(): void | Promise<void>;
+  undo(): void | Promise<void>;
+}
+
+interface HistoryContext {
+  undoStack: Command[];
+  redoStack: Command[];
+  memoryUsage: number;
+}
+
+type HistoryPaletteStore = ReturnType<typeof createPaletteStore>;
+
+export interface HistoryStoreDependencies {
+  palette: HistoryPaletteStore;
+}
+
+class HistoryStore {
+  undoStack = signal<Command[]>([]);
+  redoStack = signal<Command[]>([]);
+
+  // Computed signals for UI
+  canUndo = signal<boolean>(false);
+  canRedo = signal<boolean>(false);
+
+  // Version signal - increments on undo/redo to trigger canvas re-render
+  version = signal<number>(0);
+
+  // Track total memory usage
+  private memoryUsage = 0;
+  private readonly palette: HistoryPaletteStore;
+
+  // Context stack for isolated editing modes (e.g., brush editing)
+  private contextStack: HistoryContext[] = [];
+
+  constructor(dependencies: HistoryStoreDependencies) {
+    this.palette = dependencies.palette;
+  }
+
+  // NOTE: persistence is intentionally NOT a concern of this store.
+  // AutoSaveService (src/services/auto-save.ts) observes `version` and
+  // saves the project; history only tracks commands.
+
+  async execute(command: Command) {
+    // Auto-stamp with userId if not provided
+    if (!command.userId) {
+      command.userId = userStore.getCurrentUserId();
+    }
+    if (!command.timestamp) {
+      command.timestamp = Date.now();
+    }
+
+    await command.execute();
+
+    this.undoStack.value = [...this.undoStack.value, command];
+    this.redoStack.value = []; // Clear redo stack on new action
+
+    // Update memory tracking
+    if (command.memorySize) {
+      this.memoryUsage += command.memorySize;
+    }
+
+    // Enforce limits
+    this.enforceHistoryLimits();
+    this.updateComputed();
+
+    // Update palette usage indicators
+    this.palette.refreshUsedColors();
+  }
+
+  /**
+   * Enforce history limits by removing oldest commands when necessary.
+   */
+  private enforceHistoryLimits() {
+    const stack = [...this.undoStack.value];
+
+    // Remove oldest commands if over count limit
+    while (stack.length > MAX_HISTORY_COUNT) {
+      const removed = stack.shift();
+      if (removed?.memorySize) {
+        this.memoryUsage -= removed.memorySize;
+      }
+    }
+
+    // Remove oldest commands if over memory limit
+    while (this.memoryUsage > MAX_HISTORY_SIZE_BYTES && stack.length > 1) {
+      const removed = stack.shift();
+      if (removed?.memorySize) {
+        this.memoryUsage -= removed.memorySize;
+      }
+    }
+
+    this.undoStack.value = stack;
+  }
+
+  /**
+   * Get current memory usage for debugging/UI.
+   */
+  getMemoryUsage(): number {
+    return this.memoryUsage;
+  }
+
+  async undo() {
+    const targetUserId = userStore.getCurrentUserId();
+    const undoStack = this.undoStack.value;
+
+    // Find last command for this user
+    let commandIndex = -1;
+    for (let i = undoStack.length - 1; i >= 0; i--) {
+      const cmd = undoStack[i];
+      // Commands without userId are treated as belonging to any user (backward compat)
+      if (!cmd.userId || cmd.userId === targetUserId) {
+        commandIndex = i;
+        break;
+      }
+    }
+
+    if (commandIndex === -1) return;
+
+    const command = undoStack[commandIndex];
+    await command.undo();
+
+    // Remove from undo stack
+    const newUndoStack = [...undoStack];
+    newUndoStack.splice(commandIndex, 1);
+    this.undoStack.value = newUndoStack;
+
+    // Add to redo stack
+    this.redoStack.value = [...this.redoStack.value, command];
+
+    this.updateComputed();
+
+    // Update palette usage indicators
+    this.palette.refreshUsedColors();
+  }
+
+  async redo() {
+    const targetUserId = userStore.getCurrentUserId();
+    const redoStack = this.redoStack.value;
+
+    // Find last undone command for this user
+    let commandIndex = -1;
+    for (let i = redoStack.length - 1; i >= 0; i--) {
+      const cmd = redoStack[i];
+      if (!cmd.userId || cmd.userId === targetUserId) {
+        commandIndex = i;
+        break;
+      }
+    }
+
+    if (commandIndex === -1) return;
+
+    const command = redoStack[commandIndex];
+    await command.execute();
+
+    // Remove from redo stack
+    const newRedoStack = [...redoStack];
+    newRedoStack.splice(commandIndex, 1);
+    this.redoStack.value = newRedoStack;
+
+    // Add back to undo stack
+    this.undoStack.value = [...this.undoStack.value, command];
+
+    this.updateComputed();
+
+    // Update palette usage indicators
+    this.palette.refreshUsedColors();
+  }
+
+  private updateComputed() {
+    this.canUndo.value = this.undoStack.value.length > 0;
+    this.canRedo.value = this.redoStack.value.length > 0;
+    this.version.value++;
+  }
+  
+  clear() {
+    this.undoStack.value = [];
+    this.redoStack.value = [];
+    this.memoryUsage = 0;
+    this.updateComputed();
+  }
+
+  /**
+   * Push current history context onto the stack and start fresh.
+   * Used for isolated editing modes like brush editing.
+   */
+  pushContext() {
+    // Save current state
+    this.contextStack.push({
+      undoStack: [...this.undoStack.value],
+      redoStack: [...this.redoStack.value],
+      memoryUsage: this.memoryUsage,
+    });
+
+    // Start fresh
+    this.undoStack.value = [];
+    this.redoStack.value = [];
+    this.memoryUsage = 0;
+    this.updateComputed();
+  }
+
+  /**
+   * Pop and restore the previous history context.
+   * Discards the current context (any isolated edits are lost).
+   */
+  popContext() {
+    const context = this.contextStack.pop();
+    if (!context) {
+      log.warn('No history context to restore');
+      return;
+    }
+
+    // Restore previous state
+    this.undoStack.value = context.undoStack;
+    this.redoStack.value = context.redoStack;
+    this.memoryUsage = context.memoryUsage;
+    this.updateComputed();
+  }
+
+  /**
+   * Check if currently in a nested context.
+   */
+  isInContext(): boolean {
+    return this.contextStack.length > 0;
+  }
+}
+
+export function createHistoryStore(dependencies: HistoryStoreDependencies) {
+  return new HistoryStore(dependencies);
+}

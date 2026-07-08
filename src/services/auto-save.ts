@@ -5,6 +5,7 @@ import { projectStore } from '../stores/project';
 import { projectRepository } from './persistence/indexed-db';
 import { createProjectThumbnail } from './project-thumbnail';
 import { log } from '../utils/log';
+import { compositeFrame } from '../utils/canvas-utils';
 
 const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
@@ -140,6 +141,7 @@ async function createThumbnailSafely(): Promise<Uint8Array | undefined> {
 
   try {
     return await createProjectThumbnail({
+      compositeFrame,
       frameId: frame.id,
       width: projectStore.width.value,
       height: projectStore.height.value,

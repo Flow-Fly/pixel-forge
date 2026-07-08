@@ -6,21 +6,32 @@
  */
 
 import type { Cel } from '../../types/animation';
-import { paletteStore } from '../palette';
 import { normalizeHex } from '../palette/color-utils';
-import { rebuildAllCelCanvases } from './index-buffer';
+import {
+  rebuildAllCelCanvases,
+  type PaletteColorSource,
+} from './index-buffer';
 
 type IndexMapper = (oldIndex: number) => number;
 
-function rebuildChangedCels(cels: Map<string, Cel>): Map<string, Cel> {
+export interface PaletteIndexLookup extends PaletteColorSource {
+  getColorIndex(color: string): number;
+  findClosestColorIndex(color: string): number;
+}
+
+function rebuildChangedCels(
+  cels: Map<string, Cel>,
+  palette: PaletteIndexLookup
+): Map<string, Cel> {
   const newCels = new Map(cels);
-  rebuildAllCelCanvases(newCels);
+  rebuildAllCelCanvases(newCels, palette.colors.value);
   return newCels;
 }
 
 function remapCelBuffers(
   cels: Map<string, Cel>,
   mapIndex: IndexMapper,
+  palette: PaletteIndexLookup,
   options: { skipTextCels?: boolean } = {}
 ): Map<string, Cel> {
   for (const cel of cels.values()) {
@@ -30,7 +41,7 @@ function remapCelBuffers(
     remapBuffer(cel.indexBuffer, mapIndex);
   }
 
-  return rebuildChangedCels(cels);
+  return rebuildChangedCels(cels, palette);
 }
 
 function remapBuffer(buffer: Uint8Array, mapIndex: IndexMapper): void {
@@ -48,10 +59,13 @@ function remapBuffer(buffer: Uint8Array, mapIndex: IndexMapper): void {
 function handlePaletteReorder(
   cels: Map<string, Cel>,
   fromIndex: number,
-  toIndex: number
+  toIndex: number,
+  palette: PaletteIndexLookup
 ): Map<string, Cel> {
-  return remapCelBuffers(cels, oldIndex =>
-    getReorderedIndex(oldIndex, fromIndex, toIndex)
+  return remapCelBuffers(
+    cels,
+    oldIndex => getReorderedIndex(oldIndex, fromIndex, toIndex),
+    palette,
   );
 }
 
@@ -79,10 +93,13 @@ function getReorderedIndex(
 function handlePaletteColorRemoved(
   cels: Map<string, Cel>,
   removedIndex: number,
-  replacementIndex = 0
+  replacementIndex = 0,
+  palette: PaletteIndexLookup
 ): Map<string, Cel> {
-  return remapCelBuffers(cels, oldIndex =>
-    getIndexAfterRemoval(oldIndex, removedIndex, replacementIndex)
+  return remapCelBuffers(
+    cels,
+    oldIndex => getIndexAfterRemoval(oldIndex, removedIndex, replacementIndex),
+    palette,
   );
 }
 
@@ -101,10 +118,13 @@ function getIndexAfterRemoval(
  */
 function handlePaletteColorInserted(
   cels: Map<string, Cel>,
-  insertedIndex: number
+  insertedIndex: number,
+  palette: PaletteIndexLookup
 ): Map<string, Cel> {
-  return remapCelBuffers(cels, oldIndex =>
-    oldIndex >= insertedIndex ? oldIndex + 1 : oldIndex
+  return remapCelBuffers(
+    cels,
+    oldIndex => oldIndex >= insertedIndex ? oldIndex + 1 : oldIndex,
+    palette,
   );
 }
 
@@ -113,13 +133,15 @@ function handlePaletteColorInserted(
  */
 function handlePaletteReplacedWithRemap(
   cels: Map<string, Cel>,
-  oldMainColors: string[]
+  oldMainColors: string[],
+  palette: PaletteIndexLookup
 ): Map<string, Cel> {
   const oldIndexToColor = buildOldIndexToColor(oldMainColors);
 
   return remapCelBuffers(
     cels,
-    oldIndex => getReplacementIndex(oldIndex, oldIndexToColor),
+    oldIndex => getReplacementIndex(oldIndex, oldIndexToColor, palette),
+    palette,
     { skipTextCels: true }
   );
 }
@@ -136,15 +158,16 @@ function buildOldIndexToColor(oldMainColors: string[]): Map<number, string> {
 
 function getReplacementIndex(
   oldIndex: number,
-  oldIndexToColor: Map<number, string>
+  oldIndexToColor: Map<number, string>,
+  palette: PaletteIndexLookup
 ): number {
   const color = oldIndexToColor.get(oldIndex);
   if (!color) return oldIndex;
 
-  const exactIndex = paletteStore.getColorIndex(color);
+  const exactIndex = palette.getColorIndex(color);
   if (exactIndex !== 0) return exactIndex;
 
-  const closestIndex = paletteStore.findClosestColorIndex(color);
+  const closestIndex = palette.findClosestColorIndex(color);
   return closestIndex === 0 ? oldIndex : closestIndex;
 }
 
@@ -153,6 +176,7 @@ function getReplacementIndex(
  * Returns a cleanup function to remove listeners.
  */
 export function setupPaletteListeners(
+  palette: PaletteIndexLookup,
   getCels: () => Map<string, Cel>,
   setCels: (cels: Map<string, Cel>) => void,
   rebuildCanvases: () => void
@@ -169,7 +193,8 @@ export function setupPaletteListeners(
       } else if (detail?.oldMainColors) {
         const newCels = handlePaletteReplacedWithRemap(
           getCels(),
-          detail.oldMainColors
+          detail.oldMainColors,
+          palette
         );
         setCels(newCels);
       } else {
@@ -183,7 +208,7 @@ export function setupPaletteListeners(
 
     'palette-colors-reordered': (event: Event) => {
       const { fromIndex, toIndex } = (event as CustomEvent).detail;
-      const newCels = handlePaletteReorder(getCels(), fromIndex, toIndex);
+      const newCels = handlePaletteReorder(getCels(), fromIndex, toIndex, palette);
       setCels(newCels);
     },
 
@@ -192,14 +217,15 @@ export function setupPaletteListeners(
       const newCels = handlePaletteColorRemoved(
         getCels(),
         removedIndex,
-        replacementIndex
+        replacementIndex,
+        palette
       );
       setCels(newCels);
     },
 
     'palette-color-inserted': (event: Event) => {
       const { insertedIndex } = (event as CustomEvent).detail;
-      const newCels = handlePaletteColorInserted(getCels(), insertedIndex);
+      const newCels = handlePaletteColorInserted(getCels(), insertedIndex, palette);
       setCels(newCels);
     },
   };

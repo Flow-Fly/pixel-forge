@@ -11,13 +11,17 @@ import type { Cel } from '../../types/animation';
 import {
   createIndexBuffer,
   rebuildCanvasFromIndices,
-  buildIndexBufferFromCanvas
+  buildIndexBufferFromCanvas,
+  type IndexedColorPalette,
 } from '../../utils/indexed-color';
-import { paletteStore } from '../palette';
 import { getCanvasSize } from '../store-refs';
 import { getCelKey } from './types';
 
 type GetCanvasSize = () => { width: number; height: number };
+
+export interface PaletteColorSource extends IndexedColorPalette {
+  colors: { value: string[] };
+}
 
 export interface PaletteIndexUsage {
   paletteIndex: number;
@@ -48,6 +52,7 @@ export function ensureCelIndexBuffer(
   layerId: string,
   frameId: string,
   syncLayerCanvases: () => void,
+  palette: PaletteColorSource,
   readCanvasSize: GetCanvasSize = getCanvasSize
 ): { cels: Map<string, Cel>; indexBuffer: Uint8Array } {
   const key = getCelKey(layerId, frameId);
@@ -78,7 +83,7 @@ export function ensureCelIndexBuffer(
     const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0);
 
     if (hasContent) {
-      indexBuffer = buildIndexBufferFromCanvas(cel.canvas, true);
+      indexBuffer = buildIndexBufferFromCanvas(cel.canvas, palette, true);
     } else {
       indexBuffer = createIndexBuffer(width, height);
     }
@@ -100,7 +105,8 @@ export function updateCelIndexBuffer(
   cels: Map<string, Cel>,
   layerId: string,
   frameId: string,
-  indexBuffer: Uint8Array
+  indexBuffer: Uint8Array,
+  palette: string[]
 ): Map<string, Cel> {
   const key = getCelKey(layerId, frameId);
   const cel = cels.get(key);
@@ -110,7 +116,6 @@ export function updateCelIndexBuffer(
   newCels.set(key, { ...cel, indexBuffer });
 
   // Rebuild canvas from index buffer
-  const palette = paletteStore.colors.value;
   rebuildCanvasFromIndices(cel.canvas, indexBuffer, palette);
 
   return newCels;
@@ -120,9 +125,7 @@ export function updateCelIndexBuffer(
  * Rebuild all cel canvases from their index buffers.
  * Called when palette colors change.
  */
-export function rebuildAllCelCanvases(cels: Map<string, Cel>): void {
-  const palette = paletteStore.colors.value;
-
+export function rebuildAllCelCanvases(cels: Map<string, Cel>, palette: string[]): void {
   for (const [_key, cel] of cels) {
     // Skip cels without index buffers (empty/linked cels sharing transparent canvas)
     if (!cel.indexBuffer) continue;
@@ -137,14 +140,17 @@ export function rebuildAllCelCanvases(cels: Map<string, Cel>): void {
  * Rebuild all cel index buffers from their canvas content.
  * Called after loading with a different palette.
  */
-export function rebuildAllIndexBuffers(cels: Map<string, Cel>): Map<string, Cel> {
+export function rebuildAllIndexBuffers(
+  cels: Map<string, Cel>,
+  palette: PaletteColorSource
+): Map<string, Cel> {
   const newCels = new Map(cels);
 
   for (const [key, cel] of newCels) {
     if (!cel.canvas) continue;
     if (cel.textCelData) continue;
 
-    const newIndexBuffer = buildIndexBufferFromCanvas(cel.canvas, false);
+    const newIndexBuffer = buildIndexBufferFromCanvas(cel.canvas, palette, false);
     newCels.set(key, { ...cel, indexBuffer: newIndexBuffer });
   }
 
@@ -247,7 +253,10 @@ function getIndexAfterPaletteDelete(
 /**
  * Scan all index buffers and return the set of colors actually used.
  */
-export function scanUsedColors(cels: Map<string, Cel>): Set<string> {
+export function scanUsedColors(
+  cels: Map<string, Cel>,
+  palette: PaletteColorSource
+): Set<string> {
   const usedColors = new Set<string>();
 
   for (const [_key, cel] of cels) {
@@ -259,7 +268,7 @@ export function scanUsedColors(cels: Map<string, Cel>): Set<string> {
       const paletteIndex = buffer[i];
       if (paletteIndex === 0) continue; // Skip transparent
 
-      const color = paletteStore.getColorByIndex(paletteIndex);
+      const color = palette.getColorByIndex(paletteIndex);
       if (color) {
         usedColors.add(color.toLowerCase());
       }

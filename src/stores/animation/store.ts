@@ -8,11 +8,8 @@
 import { signal } from '../../core/signal';
 import type { Frame, Cel, OnionSkinSettings, FrameTag } from '../../types/animation';
 import type { TextCelData } from '../../types/text';
-import { layerStore } from '../layers';
-import {
-  defaultStoreRefs,
-  type StoreRefs,
-} from '../store-refs';
+import { type StoreRefs } from '../store-refs';
+import type { createLayerStore } from '../layers-store';
 
 // Import extracted modules
 import type { PlaybackMode } from './types';
@@ -24,6 +21,16 @@ import * as celLinking from './cel-linking';
 import * as tagManager from './tag-manager';
 import * as textCels from './text-cels';
 import { createPlaybackEngine, type PlaybackEngine } from './playback';
+
+type AnimationLayerStore = ReturnType<typeof createLayerStore>;
+type AnimationPaletteStore = paletteSync.PaletteIndexLookup &
+  indexBuffer.PaletteColorSource;
+
+export interface AnimationStoreDependencies {
+  layers: AnimationLayerStore;
+  palette: AnimationPaletteStore;
+  refs: StoreRefs;
+}
 
 class AnimationStore {
   // ===== Core State (Signals) =====
@@ -57,13 +64,17 @@ class AnimationStore {
 
   // ===== Private State =====
   private playbackEngine: PlaybackEngine;
+  private readonly layers: AnimationLayerStore;
+  private readonly palette: AnimationPaletteStore;
   private sharedTransparentCanvas: HTMLCanvasElement | null = null;
-  private refs: StoreRefs;
+  private readonly refs: StoreRefs;
   // Stored for future dispose() implementation
   private _cleanupPaletteListeners: (() => void) | null = null;
 
-  constructor(refs: StoreRefs = defaultStoreRefs) {
-    this.refs = refs;
+  constructor(dependencies: AnimationStoreDependencies) {
+    this.layers = dependencies.layers;
+    this.palette = dependencies.palette;
+    this.refs = dependencies.refs;
 
     // Set up playback engine
     this.playbackEngine = createPlaybackEngine({
@@ -101,6 +112,7 @@ class AnimationStore {
 
   private setupPaletteListeners() {
     this._cleanupPaletteListeners = paletteSync.setupPaletteListeners(
+      this.palette,
       () => this.cels.value,
       (newCels) => { this.cels.value = newCels; },
       () => this.rebuildAllCelCanvases()
@@ -143,7 +155,7 @@ class AnimationStore {
   // ===== Frame Management =====
 
   private initializeCelsForFrame(frameId: string) {
-    const layers = layerStore.layers.value;
+    const layers = this.layers.layers.value;
     const newCels = new Map(this.cels.value);
     const firstLayer = layers[0];
     const width = firstLayer?.canvas?.width ?? 64;
@@ -174,7 +186,7 @@ class AnimationStore {
 
   syncLayerCanvases() {
     const frameId = this.currentFrameId.value;
-    const layers = layerStore.layers.value;
+    const layers = this.layers.layers.value;
     const cels = new Map(this.cels.value);
     let celsUpdated = false;
 
@@ -206,7 +218,7 @@ class AnimationStore {
       }
 
       if (cel && layer.canvas !== cel.canvas) {
-        layerStore.updateLayer(layer.id, { canvas: cel.canvas });
+        this.layers.updateLayer(layer.id, { canvas: cel.canvas });
       }
     });
 
@@ -244,7 +256,7 @@ class AnimationStore {
     // Adjust tags for frame insertion
     this.tags.value = tagManager.adjustTagsForFrameInsert(this.tags.value, insertIndex);
 
-    const layers = layerStore.layers.value;
+    const layers = this.layers.layers.value;
     const cels = new Map(this.cels.value);
     const { width, height } = this.refs.getCanvasSize();
     const sharedCanvas = this.getSharedTransparentCanvas(width, height);
@@ -308,7 +320,7 @@ class AnimationStore {
     const newFrames = frames.filter(f => f.id !== frameId);
 
     const cels = new Map(this.cels.value);
-    const layers = layerStore.layers.value;
+    const layers = this.layers.layers.value;
     layers.filter(layer => layer.type !== 'reference').forEach(layer => {
       const key = getCelKey(layer.id, frameId);
       cels.delete(key);
@@ -338,6 +350,7 @@ class AnimationStore {
       layerId,
       frameId,
       () => this.syncLayerCanvases(),
+      this.palette,
       () => this.refs.getCanvasSize()
     );
     if (result.cels !== this.cels.value) {
@@ -347,19 +360,25 @@ class AnimationStore {
   }
 
   updateCelIndexBuffer(layerId: string, frameId: string, buffer: Uint8Array): void {
-    this.cels.value = indexBuffer.updateCelIndexBuffer(this.cels.value, layerId, frameId, buffer);
+    this.cels.value = indexBuffer.updateCelIndexBuffer(
+      this.cels.value,
+      layerId,
+      frameId,
+      buffer,
+      this.palette.colors.value,
+    );
   }
 
   rebuildAllCelCanvases(): void {
-    indexBuffer.rebuildAllCelCanvases(this.cels.value);
+    indexBuffer.rebuildAllCelCanvases(this.cels.value, this.palette.colors.value);
   }
 
   rebuildAllIndexBuffers(): void {
-    this.cels.value = indexBuffer.rebuildAllIndexBuffers(this.cels.value);
+    this.cels.value = indexBuffer.rebuildAllIndexBuffers(this.cels.value, this.palette);
   }
 
   scanUsedColors(): Set<string> {
-    return indexBuffer.scanUsedColors(this.cels.value);
+    return indexBuffer.scanUsedColors(this.cels.value, this.palette);
   }
 
   scanUsedColorsFromCanvas(): Set<string> {
@@ -577,7 +596,7 @@ class AnimationStore {
 
   selectCelRange(fromLayerId: string, fromFrameId: string, toLayerId: string, toFrameId: string) {
     this.selectedCelKeys.value = celSelection.selectCelRange(
-      layerStore.layers.value,
+      this.layers.layers.value,
       this.frames.value,
       fromLayerId, fromFrameId,
       toLayerId, toFrameId
@@ -660,11 +679,8 @@ class AnimationStore {
   }
 }
 
-// fallow-ignore-next-line unused-export -- ProjectContext composition will create context-local stores in a later slice.
-export function createAnimationStore(refs: StoreRefs = defaultStoreRefs) {
-  const store = new AnimationStore(refs);
-  refs.registerAnimationSource(store);
+export function createAnimationStore(dependencies: AnimationStoreDependencies) {
+  const store = new AnimationStore(dependencies);
+  dependencies.refs.registerAnimationSource(store);
   return store;
 }
-
-export const animationStore = createAnimationStore();

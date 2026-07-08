@@ -1,5 +1,4 @@
-import { selectionStore } from './store';
-import { layerStore } from '../layers';
+import { defaultProjectContext } from '../project-context';
 import type { Layer } from '../../types/layer';
 import type { Rect } from '../../types/geometry';
 import type { SelectionShape } from '../../types/selection';
@@ -16,11 +15,12 @@ export function getSelectedLayerSelection(): {
   shape: SelectionShape;
   mask?: Uint8Array;
 } | null {
-  const state = selectionStore.state.value;
+  const { layers, selection } = defaultProjectContext;
+  const state = selection.state.value;
   if (state.type !== 'selected') return null;
 
-  const activeLayerId = layerStore.activeLayerId.value;
-  const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+  const activeLayerId = layers.activeLayerId.value;
+  const layer = layers.layers.value.find((l) => l.id === activeLayerId);
   if (!layer?.canvas) return null;
 
   const mask =

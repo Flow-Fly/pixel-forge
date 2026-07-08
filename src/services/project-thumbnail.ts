@@ -1,9 +1,12 @@
 import { canvasToPngBytes } from '../utils/canvas-binary';
-import { compositeFrame } from '../utils/canvas-utils';
 
 const THUMBNAIL_MAX_SIZE = 128;
 
 export async function createProjectThumbnail(options: {
+  compositeFrame: (
+    frameId: string,
+    targetCtx: CanvasRenderingContext2D
+  ) => void;
   frameId: string;
   width: number;
   height: number;
@@ -18,7 +21,7 @@ export async function createProjectThumbnail(options: {
   if (!sourceCtx) return undefined;
 
   sourceCtx.imageSmoothingEnabled = false;
-  compositeFrame(options.frameId, sourceCtx);
+  options.compositeFrame(options.frameId, sourceCtx);
 
   const longSide = Math.max(sourceWidth, sourceHeight);
   const scale = Math.min(1, THUMBNAIL_MAX_SIZE / longSide);
