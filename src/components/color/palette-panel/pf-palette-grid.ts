@@ -1,17 +1,15 @@
-import { html, css } from "lit";
-import { customElement, state, property, query } from "lit/decorators.js";
-import { BaseComponent } from "../../../core/base-component";
+import { html, css } from 'lit';
+import { customElement, state, property, query } from 'lit/decorators.js';
+import { BaseComponent } from '../../../core/base-component';
 import {
   DeletePaletteColorCommand,
   type DeletePaletteColorReplacement,
-} from "../../../commands/palette-command";
-import { historyStore } from "../../../stores/history";
-import { animationStore } from "../../../stores/animation";
-import { colorStore } from "../../../stores/colors";
-import { paletteStore } from "../../../stores/palette";
-import { findClosestColorIndex } from "../../../stores/palette/indexed-color";
+} from '../../../commands/palette-command';
+import { defaultProjectContext, type ProjectContext } from '../../../stores/project-context';
+import { findClosestColorIndex } from '../../../stores/palette/indexed-color';
 
 interface PendingDeleteColor {
+  context: ProjectContext;
   paletteIndex: number;
   color: string;
   pixelCount: number;
@@ -19,7 +17,7 @@ interface PendingDeleteColor {
   nearestColor: string | null;
 }
 
-@customElement("pf-palette-grid")
+@customElement('pf-palette-grid')
 export class PFPaletteGrid extends BaseComponent {
   static styles = css`
     :host {
@@ -70,7 +68,7 @@ export class PFPaletteGrid extends BaseComponent {
     }
 
     .new-color-badge::before {
-      content: "";
+      content: '';
       position: absolute;
       inset-block-start: 3px;
       inset-inline-start: 3px;
@@ -125,7 +123,7 @@ export class PFPaletteGrid extends BaseComponent {
 
     /* Usage indicator */
     .swatch-used::after {
-      content: "";
+      content: '';
       position: absolute;
       bottom: 2px;
       right: 2px;
@@ -144,7 +142,7 @@ export class PFPaletteGrid extends BaseComponent {
     }
 
     .swatch-container.drag-before::before {
-      content: "";
+      content: '';
       position: absolute;
       left: -2px;
       top: 0;
@@ -156,7 +154,7 @@ export class PFPaletteGrid extends BaseComponent {
     }
 
     .swatch-container.drag-after::after {
-      content: "";
+      content: '';
       position: absolute;
       right: -2px;
       top: 0;
@@ -173,8 +171,13 @@ export class PFPaletteGrid extends BaseComponent {
 
     /* Replace mode */
     @keyframes wiggle {
-      0%, 100% { transform: rotate(-2deg); }
-      50% { transform: rotate(2deg); }
+      0%,
+      100% {
+        transform: rotate(-2deg);
+      }
+      50% {
+        transform: rotate(2deg);
+      }
     }
 
     .palette-grid.replace-mode .swatch-container .swatch {
@@ -268,21 +271,41 @@ export class PFPaletteGrid extends BaseComponent {
   @state() private draggedIndex: number | null = null;
   @state() private pendingDelete: PendingDeleteColor | null = null;
 
-  @query(".delete-dialog") private deleteDialog?: HTMLDialogElement;
+  @query('.delete-dialog') private deleteDialog?: HTMLDialogElement;
+
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  private get colors() {
+    return this.context.colors;
+  }
+
+  private get palette() {
+    return this.context.palette;
+  }
 
   private selectColor(color: string) {
-    colorStore.setPrimaryColor(color);
-    colorStore.updateLightnessVariations(color);
+    this.colors.setPrimaryColor(color);
+    this.colors.updateLightnessVariations(color);
   }
 
   private handleSwatchClick(color: string, index: number, e: Event) {
     if (this.replaceMode) {
       e.stopPropagation();
-      this.dispatchEvent(new CustomEvent("replace-target", {
-        detail: { index },
-        bubbles: true,
-        composed: true,
-      }));
+      this.dispatchEvent(
+        new CustomEvent('replace-target', {
+          detail: { index },
+          bubbles: true,
+          composed: true,
+        })
+      );
     } else {
       this.selectColor(color);
     }
@@ -290,26 +313,30 @@ export class PFPaletteGrid extends BaseComponent {
 
   private handleSwatchRightClick(e: MouseEvent, color: string, index: number) {
     e.preventDefault();
-    this.dispatchEvent(new CustomEvent("swatch-edit", {
-      detail: { color, index, anchor: e.currentTarget },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('swatch-edit', {
+        detail: { color, index, anchor: e.currentTarget, context: this.context },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private async handleDeleteColor(e: Event, index: number) {
     e.stopPropagation();
+    const context = this.context;
     const paletteIndex = index + 1;
-    const usage = animationStore.scanPaletteIndexUsage(paletteIndex);
+    const usage = context.animation.scanPaletteIndexUsage(paletteIndex);
 
     if (usage.pixelCount === 0) {
-      void historyStore.execute(
-        new DeletePaletteColorCommand(paletteIndex, "transparent")
+      void context.history.execute(
+        new DeletePaletteColorCommand(paletteIndex, 'transparent', context)
       );
       return;
     }
 
     this.pendingDelete = this.getPendingDeleteColor(
+      context,
       index,
       usage.pixelCount,
       usage.frameIds.length
@@ -317,25 +344,26 @@ export class PFPaletteGrid extends BaseComponent {
     await this.updateComplete;
 
     if (this.deleteDialog && !this.deleteDialog.open) {
-      this.deleteDialog.returnValue = "cancel";
+      this.deleteDialog.returnValue = 'cancel';
       this.deleteDialog.showModal();
     }
   }
 
   private getPendingDeleteColor(
+    context: ProjectContext,
     index: number,
     pixelCount: number,
     frameCount: number
   ): PendingDeleteColor {
-    const color = paletteStore.mainColors.value[index];
-    const remainingColors = paletteStore.mainColors.value.filter(
+    const color = context.palette.mainColors.value[index];
+    const remainingColors = context.palette.mainColors.value.filter(
       (_, colorIndex) => colorIndex !== index
     );
-    const nearestIndex = remainingColors.length > 0
-      ? findClosestColorIndex(color, remainingColors)
-      : 0;
+    const nearestIndex =
+      remainingColors.length > 0 ? findClosestColorIndex(color, remainingColors) : 0;
 
     return {
+      context,
       paletteIndex: index + 1,
       color,
       pixelCount,
@@ -345,40 +373,40 @@ export class PFPaletteGrid extends BaseComponent {
   }
 
   private handleDeleteDialogClose() {
-    const command = this.getDeleteDialogCommand(this.deleteDialog?.returnValue);
+    const pendingDelete = this.pendingDelete;
+    const replacement = this.getDeleteDialogReplacement(this.deleteDialog?.returnValue);
     this.pendingDelete = null;
 
-    if (command) {
-      void historyStore.execute(command);
+    if (pendingDelete && replacement) {
+      void pendingDelete.context.history.execute(
+        new DeletePaletteColorCommand(
+          pendingDelete.paletteIndex,
+          replacement,
+          pendingDelete.context
+        )
+      );
     }
   }
 
-  private getDeleteDialogCommand(choice: string | undefined) {
-    const pendingDelete = this.pendingDelete;
-    const replacement = this.getDeleteDialogReplacement(choice);
-
-    if (!pendingDelete || !replacement) return null;
-
-    return new DeletePaletteColorCommand(pendingDelete.paletteIndex, replacement);
-  }
-
-  private getDeleteDialogReplacement(choice: string | undefined): DeletePaletteColorReplacement | null {
-    if (choice === "transparent") return "transparent";
-    if (choice === "nearest" && this.pendingDelete?.nearestColor) return "nearest";
+  private getDeleteDialogReplacement(
+    choice: string | undefined
+  ): DeletePaletteColorReplacement | null {
+    if (choice === 'transparent') return 'transparent';
+    if (choice === 'nearest' && this.pendingDelete?.nearestColor) return 'nearest';
     return null;
   }
 
   private handleMarkAsKept(e: Event, color: string) {
     e.stopPropagation();
-    paletteStore.clearNewFlag(color);
+    this.palette.clearNewFlag(color);
   }
 
   // Drag-drop handlers
   private handleDragStart(index: number, color: string, e: DragEvent) {
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("application/x-palette-index", String(index));
-      e.dataTransfer.setData("application/x-palette-color", color);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('application/x-palette-index', String(index));
+      e.dataTransfer.setData('application/x-palette-color', color);
     }
     this.isDragging = true;
     this.draggedIndex = index;
@@ -393,7 +421,7 @@ export class PFPaletteGrid extends BaseComponent {
   private handleDragOver(index: number, e: DragEvent) {
     e.preventDefault();
     if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect = 'move';
     }
     if (this.dragOverIndex !== index) {
       this.dragOverIndex = index;
@@ -422,17 +450,17 @@ export class PFPaletteGrid extends BaseComponent {
   private handleGridDragOver(e: DragEvent) {
     e.preventDefault();
     if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect = 'move';
     }
   }
 
   private handleGridDrop(e: DragEvent) {
     e.preventDefault();
-    const color = e.dataTransfer?.getData("application/x-palette-color");
-    const paletteIndexStr = e.dataTransfer?.getData("application/x-palette-index");
+    const color = e.dataTransfer?.getData('application/x-palette-color');
+    const paletteIndexStr = e.dataTransfer?.getData('application/x-palette-index');
 
     if (color && !paletteIndexStr) {
-      paletteStore.addColor(color);
+      this.palette.addColor(color);
     }
 
     this.resetDragState();
@@ -445,7 +473,7 @@ export class PFPaletteGrid extends BaseComponent {
   }
 
   private getDroppedPaletteIndex(e: DragEvent): number | null {
-    const value = e.dataTransfer?.getData("application/x-palette-index");
+    const value = e.dataTransfer?.getData('application/x-palette-index');
     if (!value) return null;
 
     return Number.parseInt(value, 10);
@@ -455,29 +483,29 @@ export class PFPaletteGrid extends BaseComponent {
     if (fromIndex === targetIndex || fromIndex === targetIndex - 1) return;
 
     const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    paletteStore.moveColor(fromIndex, adjustedTarget);
+    this.palette.moveColor(fromIndex, adjustedTarget);
   }
 
   private insertDroppedColor(e: DragEvent, targetIndex: number) {
-    const color = e.dataTransfer?.getData("application/x-palette-color");
+    const color = e.dataTransfer?.getData('application/x-palette-color');
     if (color) {
-      paletteStore.insertColorAt(targetIndex + 1, color);
+      this.palette.insertColorAt(targetIndex + 1, color);
     }
   }
 
   private renderSwatch(color: string, index: number, usedColors: Set<string>) {
     const isUsed = usedColors.has(color.toLowerCase());
-    const isNew = paletteStore.isNewColor(color);
+    const isNew = this.palette.isNewColor(color);
 
     return html`
       <div
-        class="swatch-container ${isNew ? "new-color" : ""} ${this.dragOverIndex === index ? "drag-before" : ""} ${this.draggedIndex === index ? "dragging" : ""}"
+        class="swatch-container ${isNew ? 'new-color' : ''} ${this.dragOverIndex === index ? 'drag-before' : ''} ${this.draggedIndex === index ? 'dragging' : ''}"
         @dragover=${(e: DragEvent) => this.handleDragOver(index, e)}
         @dragleave=${this.handleDragLeave}
         @drop=${(e: DragEvent) => this.handleDrop(index, e)}
       >
         <div
-          class="swatch ${isUsed ? "swatch-used" : ""}"
+          class="swatch ${isUsed ? 'swatch-used' : ''}"
           style="background-color: ${color}"
           title="${this.getSwatchTitle(color, isUsed)}"
           draggable="${!this.replaceMode}"
@@ -494,16 +522,18 @@ export class PFPaletteGrid extends BaseComponent {
         >
           ×
         </button>
-        ${isNew
-          ? html`
-              <button
-                class="new-color-badge"
-                @click=${(e: Event) => this.handleMarkAsKept(e, color)}
-                title="Mark as kept"
-                aria-label="Mark ${color} as kept"
-              ></button>
-            `
-          : ""}
+        ${
+          isNew
+            ? html`
+                <button
+                  class="new-color-badge"
+                  @click=${(e: Event) => this.handleMarkAsKept(e, color)}
+                  title="Mark as kept"
+                  aria-label="Mark ${color} as kept"
+                ></button>
+              `
+            : ''
+        }
       </div>
     `;
   }
@@ -514,12 +544,12 @@ export class PFPaletteGrid extends BaseComponent {
   }
 
   render() {
-    const colors = paletteStore.mainColors.value;
-    const usedColors = paletteStore.usedColors.value;
+    const colors = this.palette.mainColors.value;
+    const usedColors = this.palette.usedColors.value;
 
     return html`
       <div
-        class="palette-grid ${this.isDragging || this.dragOverIndex !== null ? "drag-active" : ""} ${this.replaceMode ? "replace-mode" : ""}"
+        class="palette-grid ${this.isDragging || this.dragOverIndex !== null ? 'drag-active' : ''} ${this.replaceMode ? 'replace-mode' : ''}"
         @dragover=${this.handleGridDragOver}
         @drop=${this.handleGridDrop}
       >
@@ -532,14 +562,14 @@ export class PFPaletteGrid extends BaseComponent {
   private renderDeleteDialog() {
     const pendingDelete = this.pendingDelete ?? {
       paletteIndex: 0,
-      color: "",
+      color: '',
       pixelCount: 0,
       frameCount: 0,
       nearestColor: null,
     };
     const nearestLabel = pendingDelete.nearestColor
       ? `Replace with nearest palette color (${pendingDelete.nearestColor})`
-      : "Replace with nearest palette color";
+      : 'Replace with nearest palette color';
 
     return html`
       <dialog
@@ -551,14 +581,10 @@ export class PFPaletteGrid extends BaseComponent {
         <form method="dialog">
           <h2 id="delete-color-title">Delete palette color</h2>
           <p id="delete-color-summary">
-            Used in ${pendingDelete.pixelCount} pixels across
-            ${pendingDelete.frameCount} frames.
+            Used in ${pendingDelete.pixelCount} pixels across ${pendingDelete.frameCount} frames.
           </p>
           <div class="delete-actions">
-            <button
-              value="nearest"
-              ?disabled=${!pendingDelete.nearestColor}
-            >
+            <button value="nearest" ?disabled=${!pendingDelete.nearestColor}>
               ${nearestLabel}
             </button>
             <button value="transparent">Replace with transparency</button>

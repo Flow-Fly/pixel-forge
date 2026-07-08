@@ -1,15 +1,11 @@
-import { html, css, nothing } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import {
-  paletteStore,
-  PRESET_PALETTES,
-  type PresetPalette,
-  type CustomPalette,
-} from "../../stores/palette";
-import "../ui/pf-popover";
+import { html, css, nothing } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { PRESET_PALETTES, type PresetPalette, type CustomPalette } from '../../stores/palette';
+import { defaultProjectContext } from '../../stores/project-context';
+import '../ui/pf-popover';
 
-@customElement("pf-palette-selector")
+@customElement('pf-palette-selector')
 export class PfPaletteSelector extends BaseComponent {
   static styles = css`
     :host {
@@ -263,13 +259,27 @@ export class PfPaletteSelector extends BaseComponent {
   `;
 
   @state() private isOpen = false;
-  @state() private searchQuery = "";
+  @state() private searchQuery = '';
   @state() private triggerRect: DOMRect | null = null;
   @state() private confirmDeleteId: string | null = null;
-  @state() private confirmDeleteName: string = "";
+  @state() private confirmDeleteName: string = '';
+
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  private get palette() {
+    return this.context.palette;
+  }
 
   private get filteredCustomPalettes(): CustomPalette[] {
-    const custom = paletteStore.customPalettes.value;
+    const custom = this.palette.customPalettes.value;
     if (!this.searchQuery.trim()) {
       return custom;
     }
@@ -283,14 +293,12 @@ export class PfPaletteSelector extends BaseComponent {
     }
     const query = this.searchQuery.toLowerCase();
     return PRESET_PALETTES.filter(
-      (p) =>
-        p.name.toLowerCase().includes(query) ||
-        p.author.toLowerCase().includes(query)
+      (p) => p.name.toLowerCase().includes(query) || p.author.toLowerCase().includes(query)
     );
   }
 
   private get currentPaletteName(): string {
-    return paletteStore.getCurrentPaletteName();
+    return this.palette.getCurrentPaletteName();
   }
 
   private handleTriggerClick(e: Event) {
@@ -302,7 +310,7 @@ export class PfPaletteSelector extends BaseComponent {
 
   private handleClose() {
     this.isOpen = false;
-    this.searchQuery = "";
+    this.searchQuery = '';
     this.confirmDeleteId = null;
   }
 
@@ -312,52 +320,52 @@ export class PfPaletteSelector extends BaseComponent {
 
   private handlePresetSelect(palette: PresetPalette) {
     // Check if we need to confirm unsaved changes when leaving a custom palette
-    if (paletteStore.isDirty.value && paletteStore.isCustomPalette()) {
+    if (this.palette.isDirty.value && this.palette.isCustomPalette()) {
       this.dispatchEvent(
-        new CustomEvent("request-switch", {
+        new CustomEvent('request-switch', {
           bubbles: true,
           composed: true,
-          detail: { type: "preset", id: palette.id },
+          detail: { type: 'preset', id: palette.id, context: this.context },
         })
       );
       this.handleClose();
       return;
     }
-    paletteStore.loadPreset(palette.id);
+    this.palette.loadPreset(palette.id);
     this.handleClose();
   }
 
   private handleCustomSelect(palette: CustomPalette) {
     // Check if we need to confirm unsaved changes when leaving a custom palette
-    if (paletteStore.isDirty.value && paletteStore.isCustomPalette()) {
+    if (this.palette.isDirty.value && this.palette.isCustomPalette()) {
       this.dispatchEvent(
-        new CustomEvent("request-switch", {
+        new CustomEvent('request-switch', {
           bubbles: true,
           composed: true,
-          detail: { type: "custom", id: palette.id },
+          detail: { type: 'custom', id: palette.id, context: this.context },
         })
       );
       this.handleClose();
       return;
     }
-    paletteStore.loadCustomPalette(palette.id);
+    this.palette.loadCustomPalette(palette.id);
     this.handleClose();
   }
 
   private handleNewEmpty() {
     // Check if we need to confirm unsaved changes when leaving a custom palette
-    if (paletteStore.isDirty.value && paletteStore.isCustomPalette()) {
+    if (this.palette.isDirty.value && this.palette.isCustomPalette()) {
       this.dispatchEvent(
-        new CustomEvent("request-switch", {
+        new CustomEvent('request-switch', {
           bubbles: true,
           composed: true,
-          detail: { type: "empty" },
+          detail: { type: 'empty', context: this.context },
         })
       );
       this.handleClose();
       return;
     }
-    paletteStore.createEmpty();
+    this.palette.createEmpty();
     this.handleClose();
   }
 
@@ -369,15 +377,15 @@ export class PfPaletteSelector extends BaseComponent {
 
   private handleConfirmDelete() {
     if (this.confirmDeleteId) {
-      paletteStore.deleteCustomPalette(this.confirmDeleteId);
+      this.palette.deleteCustomPalette(this.confirmDeleteId);
       this.confirmDeleteId = null;
-      this.confirmDeleteName = "";
+      this.confirmDeleteName = '';
     }
   }
 
   private handleCancelDelete() {
     this.confirmDeleteId = null;
-    this.confirmDeleteName = "";
+    this.confirmDeleteName = '';
   }
 
   private renderPalettePreview(colors: string[]) {
@@ -386,9 +394,7 @@ export class PfPaletteSelector extends BaseComponent {
     return html`
       <div class="palette-preview">
         ${displayColors.map(
-          (color) => html`
-            <div class="preview-color" style="background-color: ${color}"></div>
-          `
+          (color) => html` <div class="preview-color" style="background-color: ${color}"></div> `
         )}
       </div>
     `;
@@ -403,20 +409,16 @@ export class PfPaletteSelector extends BaseComponent {
           Delete <span class="confirm-name">${this.confirmDeleteName}</span>?
         </div>
         <div class="confirm-buttons">
-          <button class="confirm-btn cancel" @click=${this.handleCancelDelete}>
-            Cancel
-          </button>
-          <button class="confirm-btn delete" @click=${this.handleConfirmDelete}>
-            Delete
-          </button>
+          <button class="confirm-btn cancel" @click=${this.handleCancelDelete}>Cancel</button>
+          <button class="confirm-btn delete" @click=${this.handleConfirmDelete}>Delete</button>
         </div>
       </div>
     `;
   }
 
   render() {
-    const currentPresetId = paletteStore.currentPresetId.value;
-    const currentCustomId = paletteStore.currentCustomPaletteId.value;
+    const currentPresetId = this.palette.currentPresetId.value;
+    const currentCustomId = this.palette.currentCustomPaletteId.value;
     const filteredCustom = this.filteredCustomPalettes;
     const filteredPreset = this.filteredPresetPalettes;
     const hasCustomPalettes = filteredCustom.length > 0;
@@ -424,11 +426,7 @@ export class PfPaletteSelector extends BaseComponent {
     const hasResults = hasCustomPalettes || hasPresets;
 
     return html`
-      <button
-        class="selector-trigger"
-        @click=${this.handleTriggerClick}
-        title="Select palette"
-      >
+      <button class="selector-trigger" @click=${this.handleTriggerClick} title="Select palette">
         <span class="trigger-label">${this.currentPaletteName}</span>
         <span class="trigger-chevron">▼</span>
       </button>
@@ -451,31 +449,25 @@ export class PfPaletteSelector extends BaseComponent {
           />
 
           <div class="palette-list">
-            ${!hasResults
-              ? html` <div class="no-results">No palettes found</div> `
-              : nothing}
-            ${hasCustomPalettes
-              ? html`
-                  <div class="section-header">My Palettes</div>
-                  ${filteredCustom.map(
+            ${!hasResults ? html` <div class="no-results">No palettes found</div> ` : nothing}
+            ${
+              hasCustomPalettes
+                ? html`
+                    <div class="section-header">My Palettes</div>
+                    ${filteredCustom.map(
                     (palette) => html`
                       <div
-                        class="palette-item ${currentCustomId === palette.id
-                          ? "selected"
-                          : ""}"
+                        class="palette-item ${currentCustomId === palette.id ? 'selected' : ''}"
                         @click=${() => this.handleCustomSelect(palette)}
                       >
                         <div class="palette-header">
                           <span class="palette-name">${palette.name}</span>
-                          <span class="palette-count"
-                            >${palette.colors.length}</span
-                          >
+                          <span class="palette-count">${palette.colors.length}</span>
                         </div>
                         ${this.renderPalettePreview(palette.colors)}
                         <button
                           class="delete-btn"
-                          @click=${(e: Event) =>
-                            this.handleDeleteClick(e, palette)}
+                          @click=${(e: Event) => this.handleDeleteClick(e, palette)}
                           title="Delete palette"
                         >
                           Delete
@@ -483,34 +475,31 @@ export class PfPaletteSelector extends BaseComponent {
                       </div>
                     `
                   )}
-                `
-              : nothing}
-            ${hasCustomPalettes && hasPresets
-              ? html` <div class="divider"></div> `
-              : nothing}
-            ${hasPresets
-              ? html`
-                  <div class="section-header">Presets</div>
-                  ${filteredPreset.map(
+                  `
+                : nothing
+            }
+            ${hasCustomPalettes && hasPresets ? html` <div class="divider"></div> ` : nothing}
+            ${
+              hasPresets
+                ? html`
+                    <div class="section-header">Presets</div>
+                    ${filteredPreset.map(
                     (palette) => html`
                       <div
-                        class="palette-item ${currentPresetId === palette.id
-                          ? "selected"
-                          : ""}"
+                        class="palette-item ${currentPresetId === palette.id ? 'selected' : ''}"
                         @click=${() => this.handlePresetSelect(palette)}
                       >
                         <div class="palette-header">
                           <span class="palette-name">${palette.name}</span>
-                          <span class="palette-count"
-                            >${palette.colors.length}</span
-                          >
+                          <span class="palette-count">${palette.colors.length}</span>
                         </div>
                         ${this.renderPalettePreview(palette.colors)}
                       </div>
                     `
                   )}
-                `
-              : nothing}
+                  `
+                : nothing
+            }
           </div>
 
           <div class="divider"></div>
