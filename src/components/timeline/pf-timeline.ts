@@ -1,8 +1,7 @@
 import { html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { layerStore } from '../../stores/layers';
-import { historyStore } from '../../stores/history';
+import { defaultProjectContext } from '../../stores/project-context';
 import { AddLayerCommand, RemoveLayerCommand } from '../../commands/layer-commands';
 import './pf-playback-controls';
 import './pf-onion-skin-controls';
@@ -18,8 +17,7 @@ export class PFTimeline extends BaseComponent {
       display: flex;
       flex-direction: column;
       height: 100%;
-      background:
-        linear-gradient(180deg, rgba(15, 18, 24, 0.94), rgba(8, 10, 14, 0.96));
+      background: linear-gradient(180deg, rgba(15, 18, 24, 0.94), rgba(8, 10, 14, 0.96));
       border-top: 1px solid var(--pf-color-border);
       overflow: hidden;
       color: var(--pf-color-text-secondary);
@@ -102,7 +100,8 @@ export class PFTimeline extends BaseComponent {
 
       /* Firefox scrollbar styling */
       scrollbar-width: thin;
-      scrollbar-color: var(--pf-color-scrollbar-thumb, #555) var(--pf-color-scrollbar-track, #2a2a2a);
+      scrollbar-color: var(--pf-color-scrollbar-thumb, #555)
+        var(--pf-color-scrollbar-track, #2a2a2a);
     }
 
     /* Webkit (Chrome, Safari, Edge) scrollbar styling */
@@ -165,9 +164,14 @@ export class PFTimeline extends BaseComponent {
   private scrollStartX = 0;
   private scrollStartY = 0;
   private static readonly PAN_THRESHOLD = 3; // Pixels of movement before pan starts
+  private context = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
     // Add global listeners for pan end (in case mouse leaves component)
     window.addEventListener('mouseup', this.handlePanEnd);
     window.addEventListener('mousemove', this.handlePanMove);
@@ -245,20 +249,20 @@ export class PFTimeline extends BaseComponent {
   };
 
   private addLayer() {
-    historyStore.execute(new AddLayerCommand());
+    void this.context.history.execute(new AddLayerCommand(this.context));
   }
 
   private deleteLayer() {
-    const activeId = layerStore.activeLayerId.value;
-    if (activeId && layerStore.layers.value.length > 1) {
-      historyStore.execute(new RemoveLayerCommand(activeId));
+    const activeId = this.context.layers.activeLayerId.value;
+    if (activeId && this.context.layers.layers.value.length > 1) {
+      void this.context.history.execute(new RemoveLayerCommand(activeId, this.context));
     }
   }
 
   private moveLayer(direction: 'up' | 'down') {
-    const activeId = layerStore.activeLayerId.value;
+    const activeId = this.context.layers.activeLayerId.value;
     if (activeId) {
-      layerStore.reorderLayer(activeId, direction);
+      this.context.layers.reorderLayer(activeId, direction);
     }
   }
 
@@ -273,12 +277,13 @@ export class PFTimeline extends BaseComponent {
 
   render() {
     // Access signals for reactivity
+    const layerStore = this.context.layers;
     const layers = layerStore.layers.value;
     const activeLayerId = layerStore.activeLayerId.value;
     const canDelete = layers.length > 1;
 
     // Check if we can move up/down
-    const activeIndex = layers.findIndex(l => l.id === activeLayerId);
+    const activeIndex = layers.findIndex((l) => l.id === activeLayerId);
     const canMoveUp = activeIndex < layers.length - 1;
     const canMoveDown = activeIndex > 0;
 
@@ -291,8 +296,16 @@ export class PFTimeline extends BaseComponent {
         <div class="layers-toolbar">
           <button @click=${this.addLayer} title="Add Layer">+</button>
           <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>-</button>
-          <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>↑</button>
-          <button @click=${() => this.moveLayer('down')} title="Move Down" ?disabled=${!canMoveDown}>↓</button>
+          <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>
+            ↑
+          </button>
+          <button
+            @click=${() => this.moveLayer('down')}
+            title="Move Down"
+            ?disabled=${!canMoveDown}
+          >
+            ↓
+          </button>
         </div>
         <div class="header-frames">
           <pf-timeline-header></pf-timeline-header>

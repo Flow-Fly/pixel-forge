@@ -1,19 +1,17 @@
-import { html, css } from "lit";
-import { customElement, query } from "lit/decorators.js";
-import { classMap } from "lit/directives/class-map.js";
-import { BaseComponent } from "../../core/base-component";
-import { animationStore, EMPTY_CEL_LINK_ID } from "../../stores/animation";
-import { layerStore } from "../../stores/layers";
-import { projectStore } from "../../stores/project";
-import { historyStore } from "../../stores/history";
-import { SetCelOpacityCommand } from "../../commands/cel-opacity-command";
-import type { FrameTag } from "../../types/animation";
-import "../ui/pf-context-menu";
-import type { PFContextMenu, ContextMenuItem } from "../ui/pf-context-menu";
-import "./pf-timeline-tooltip";
-import type { PFTimelineTooltip } from "./pf-timeline-tooltip";
+import { html, css } from 'lit';
+import { customElement, query } from 'lit/decorators.js';
+import { classMap } from 'lit/directives/class-map.js';
+import { BaseComponent } from '../../core/base-component';
+import { EMPTY_CEL_LINK_ID } from '../../stores/animation';
+import { defaultProjectContext } from '../../stores/project-context';
+import { SetCelOpacityCommand } from '../../commands/cel-opacity-command';
+import type { FrameTag } from '../../types/animation';
+import '../ui/pf-context-menu';
+import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
+import './pf-timeline-tooltip';
+import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 
-@customElement("pf-timeline-grid")
+@customElement('pf-timeline-grid')
 export class PFTimelineGrid extends BaseComponent {
   static styles = css`
     :host {
@@ -124,7 +122,7 @@ export class PFTimelineGrid extends BaseComponent {
     /* Soft link spanning lines */
     /* Line connecting to next cel (right side) */
     .cel.link-continues-right::after {
-      content: "";
+      content: '';
       position: absolute;
       top: 50%;
       left: 50%;
@@ -137,7 +135,7 @@ export class PFTimelineGrid extends BaseComponent {
 
     /* Line connecting from previous cel (left side) */
     .cel.link-continues-left::before {
-      content: "";
+      content: '';
       position: absolute;
       top: 50%;
       left: 0;
@@ -158,40 +156,45 @@ export class PFTimelineGrid extends BaseComponent {
     }
   `;
 
-  @query("pf-context-menu") private contextMenu!: PFContextMenu;
-  @query("pf-timeline-tooltip") private tooltip!: PFTimelineTooltip;
+  @query('pf-context-menu') private contextMenu!: PFContextMenu;
+  @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
 
   // Track original opacity for undo/redo
   private contextMenuOriginalOpacity: number = 100;
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   selectCel(layerId: string, frameId: string, e: MouseEvent) {
-    const anchor = animationStore.selectionAnchor.value;
+    const animation = this.context.animation;
+    const anchor = animation.selectionAnchor.value;
 
     if (e.shiftKey && anchor) {
       // Range select from anchor to clicked cell
-      animationStore.selectCelRange(
-        anchor.layerId,
-        anchor.frameId,
-        layerId,
-        frameId
-      );
+      animation.selectCelRange(anchor.layerId, anchor.frameId, layerId, frameId);
     } else if (e.metaKey || e.ctrlKey) {
       // Toggle individual cell (anchor unchanged)
-      animationStore.toggleCel(layerId, frameId);
+      animation.toggleCel(layerId, frameId);
     } else {
       // Normal click: clear selection, select this cell, set anchor
-      animationStore.clearCelSelection();
-      animationStore.selectCel(layerId, frameId, false);
-      animationStore.setSelectionAnchor(layerId, frameId);
+      animation.clearCelSelection();
+      animation.selectCel(layerId, frameId, false);
+      animation.setSelectionAnchor(layerId, frameId);
     }
 
     // Always navigate to clicked cell
-    layerStore.setActiveLayer(layerId);
-    animationStore.goToFrame(frameId);
+    this.context.layers.setActiveLayer(layerId);
+    animation.goToFrame(frameId);
   }
 
   private handleCollapsedTagClick(tag: FrameTag) {
-    animationStore.toggleTagCollapsed(tag.id);
+    this.context.animation.toggleTagCollapsed(tag.id);
   }
 
   private handleCelMouseEnter(
@@ -204,10 +207,11 @@ export class PFTimelineGrid extends BaseComponent {
     const target = e.currentTarget as HTMLElement;
     if (!this.tooltip) return;
 
+    const context = this.context;
     // For large canvases, use a capped preview size for performance
     const MAX_PREVIEW_SIZE = 128;
-    const width = projectStore.width.value;
-    const height = projectStore.height.value;
+    const width = context.project.width.value;
+    const height = context.project.height.value;
     const maxDim = Math.max(width, height);
     const previewScale = maxDim > MAX_PREVIEW_SIZE ? MAX_PREVIEW_SIZE / maxDim : 1;
     const previewWidth = Math.round(width * previewScale);
@@ -226,7 +230,7 @@ export class PFTimelineGrid extends BaseComponent {
       if (ctx) {
         ctx.clearRect(0, 0, previewWidth, previewHeight);
         // Get the cel's canvas and draw it scaled
-        const celCanvas = animationStore.getCelCanvas(frameId, layerId);
+        const celCanvas = context.animation.getCelCanvas(frameId, layerId);
         if (celCanvas) {
           ctx.drawImage(celCanvas, 0, 0, previewWidth, previewHeight);
         }
@@ -244,7 +248,9 @@ export class PFTimelineGrid extends BaseComponent {
     e.preventDefault();
     e.stopPropagation();
 
-    const cels = animationStore.cels.value;
+    const context = this.context;
+    const animation = context.animation;
+    const cels = animation.cels.value;
     const cel = cels.get(celKey);
     const currentOpacity = cel?.opacity ?? 100;
 
@@ -253,27 +259,29 @@ export class PFTimelineGrid extends BaseComponent {
 
     const items: ContextMenuItem[] = [
       {
-        type: "slider",
-        label: "Opacity",
+        type: 'slider',
+        label: 'Opacity',
         min: 0,
         max: 100,
         value: currentOpacity,
-        unit: "%",
+        unit: '%',
         onSliderChange: (value: number) => {
           // Live preview
-          animationStore.setCelOpacity([celKey], value);
+          animation.setCelOpacity([celKey], value);
         },
         onSliderCommit: (value: number) => {
           // Add to history for undo/redo
           if (value !== this.contextMenuOriginalOpacity) {
             // Restore original, then execute command to record in history
-            animationStore.setCelOpacity([celKey], this.contextMenuOriginalOpacity);
+            animation.setCelOpacity([celKey], this.contextMenuOriginalOpacity);
             const beforeOpacities = new Map<string, number>();
             beforeOpacities.set(celKey, this.contextMenuOriginalOpacity);
-            historyStore.execute(new SetCelOpacityCommand([celKey], beforeOpacities, value));
+            void context.history.execute(
+              new SetCelOpacityCommand([celKey], beforeOpacities, value, context)
+            );
           }
-        }
-      }
+        },
+      },
     ];
 
     this.contextMenu.show(e.clientX, e.clientY, items);
@@ -283,15 +291,9 @@ export class PFTimelineGrid extends BaseComponent {
    * Get the tag color for a frame index (for column tinting).
    * Returns null if frame is not in any tag.
    */
-  private getTagColorForFrame(
-    frameIndex: number,
-    tags: FrameTag[]
-  ): string | null {
+  private getTagColorForFrame(frameIndex: number, tags: FrameTag[]): string | null {
     for (const tag of tags) {
-      if (
-        frameIndex >= tag.startFrameIndex &&
-        frameIndex <= tag.endFrameIndex
-      ) {
+      if (frameIndex >= tag.startFrameIndex && frameIndex <= tag.endFrameIndex) {
         return tag.color;
       }
     }
@@ -306,11 +308,11 @@ export class PFTimelineGrid extends BaseComponent {
     frameIndex: number,
     tags: FrameTag[]
   ): { inPreview: boolean; color: string | null } {
-    const preview = animationStore.tagResizePreview.value;
+    const preview = this.context.animation.tagResizePreview.value;
     if (!preview) return { inPreview: false, color: null };
 
     if (frameIndex >= preview.previewStart && frameIndex <= preview.previewEnd) {
-      const tag = tags.find(t => t.id === preview.tagId);
+      const tag = tags.find((t) => t.id === preview.tagId);
       return { inPreview: true, color: tag?.color ?? null };
     }
     return { inPreview: false, color: null };
@@ -324,10 +326,7 @@ export class PFTimelineGrid extends BaseComponent {
   private getFrameRenderInfo(
     tags: FrameTag[],
     totalFrames: number
-  ): Map<
-    number,
-    { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }
-  > {
+  ): Map<number, { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }> {
     const info = new Map<
       number,
       { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }
@@ -357,14 +356,16 @@ export class PFTimelineGrid extends BaseComponent {
   }
 
   render() {
+    const animation = this.context.animation;
+    const layerStore = this.context.layers;
     const layers = [...layerStore.layers.value].reverse();
-    const frames = animationStore.frames.value;
-    const currentFrameId = animationStore.currentFrameId.value;
+    const frames = animation.frames.value;
+    const currentFrameId = animation.currentFrameId.value;
     const activeLayerId = layerStore.activeLayerId.value;
-    const cels = animationStore.cels.value;
-    const tags = animationStore.tags.value;
+    const cels = animation.cels.value;
+    const tags = animation.tags.value;
     // Read selection signal to trigger re-renders on selection change
-    const selectedCels = animationStore.selectedCelKeys.value;
+    const selectedCels = animation.selectedCelKeys.value;
 
     // Get frame render info (which frames are collapsed/hidden)
     const frameRenderInfo = this.getFrameRenderInfo(tags, frames.length);
@@ -378,7 +379,7 @@ export class PFTimelineGrid extends BaseComponent {
 
               // Skip hidden frames (part of a collapsed tag but not the first)
               if (renderInfo?.isHidden) {
-                return "";
+                return '';
               }
 
               // Render collapsed tag cell
@@ -390,28 +391,20 @@ export class PFTimelineGrid extends BaseComponent {
                     @click=${() => this.handleCollapsedTagClick(tag)}
                     title="${tag.name} - Click to expand"
                   >
-                    <div
-                      class="collapsed-tag-block"
-                      style="background-color: ${tag.color};"
-                    ></div>
+                    <div class="collapsed-tag-block" style="background-color: ${tag.color};"></div>
                   </div>
                 `;
               }
 
               // Normal cel rendering
-              const key = animationStore.getCelKey(layer.id, frame.id);
+              const key = animation.getCelKey(layer.id, frame.id);
               const cel = cels.get(key);
-              const isActive =
-                layer.id === activeLayerId && frame.id === currentFrameId;
+              const isActive = layer.id === activeLayerId && frame.id === currentFrameId;
               const isSelected = selectedCels.has(key);
               // Exclude empty cels from linking visualization (they're just a memory optimization)
-              const isLinked =
-                cel?.linkedCelId != null &&
-                cel.linkedCelId !== EMPTY_CEL_LINK_ID;
-              const isHardLinked = isLinked && cel?.linkType === "hard";
-              const linkColor = isLinked
-                ? animationStore.getLinkColor(cel!.linkedCelId!)
-                : null;
+              const isLinked = cel?.linkedCelId != null && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
+              const isHardLinked = isLinked && cel?.linkType === 'hard';
+              const linkColor = isLinked ? animation.getLinkColor(cel!.linkedCelId!) : null;
 
               // Check link continuity with neighboring frames
               let linkContinuesLeft = false;
@@ -420,30 +413,21 @@ export class PFTimelineGrid extends BaseComponent {
                 // Check previous frame
                 if (frameIndex > 0) {
                   const prevFrame = frames[frameIndex - 1];
-                  const prevKey = animationStore.getCelKey(
-                    layer.id,
-                    prevFrame.id
-                  );
+                  const prevKey = animation.getCelKey(layer.id, prevFrame.id);
                   const prevCel = cels.get(prevKey);
-                  linkContinuesLeft =
-                    prevCel?.linkedCelId === cel.linkedCelId;
+                  linkContinuesLeft = prevCel?.linkedCelId === cel.linkedCelId;
                 }
                 // Check next frame
                 if (frameIndex < frames.length - 1) {
                   const nextFrame = frames[frameIndex + 1];
-                  const nextKey = animationStore.getCelKey(
-                    layer.id,
-                    nextFrame.id
-                  );
+                  const nextKey = animation.getCelKey(layer.id, nextFrame.id);
                   const nextCel = cels.get(nextKey);
-                  linkContinuesRight =
-                    nextCel?.linkedCelId === cel.linkedCelId;
+                  linkContinuesRight = nextCel?.linkedCelId === cel.linkedCelId;
                 }
               }
 
               // Empty cels (sharing transparent canvas) don't have content
-              const hasContent =
-                !!cel && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
+              const hasContent = !!cel && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
               const tagColor = this.getTagColorForFrame(frameIndex, tags);
               const hasTint = tagColor !== null;
 
@@ -455,48 +439,43 @@ export class PFTimelineGrid extends BaseComponent {
                 cel: true,
                 active: isActive,
                 selected: isSelected,
-                "has-content": hasContent,
+                'has-content': hasContent,
                 linked: isLinked,
-                "hard-linked": isHardLinked,
-                "link-continues-left": linkContinuesLeft,
-                "link-continues-right": linkContinuesRight,
+                'hard-linked': isHardLinked,
+                'link-continues-left': linkContinuesLeft,
+                'link-continues-right': linkContinuesRight,
               };
 
               // Build style string with link line color
               // Soft links: colorless (same as cel-content dot)
               // Hard links: colored (distinct per link group)
-              const effectiveLinkColor = isHardLinked
-                ? linkColor
-                : "var(--pf-color-text-muted)";
+              const effectiveLinkColor = isHardLinked ? linkColor : 'var(--pf-color-text-muted)';
               const styleStr = [
-                hasTint ? `--tag-tint-color: ${tagColor}` : "",
-                isLinked ? `--link-line-color: ${effectiveLinkColor}` : "",
-                hasResizePreview ? `--resize-preview-color: ${resizePreview.color}` : "",
+                hasTint ? `--tag-tint-color: ${tagColor}` : '',
+                isLinked ? `--link-line-color: ${effectiveLinkColor}` : '',
+                hasResizePreview ? `--resize-preview-color: ${resizePreview.color}` : '',
               ]
                 .filter(Boolean)
-                .join("; ");
+                .join('; ');
 
               return html`
                 <div
                   class=${classMap(celClasses)}
                   style="${styleStr}"
-                  @click=${(e: MouseEvent) =>
-                    this.selectCel(layer.id, frame.id, e)}
-                  @contextmenu=${(e: MouseEvent) =>
-                    this.handleCelContextMenu(e, key)}
+                  @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
+                  @contextmenu=${(e: MouseEvent) => this.handleCelContextMenu(e, key)}
                   @mouseenter=${(e: MouseEvent) =>
                     this.handleCelMouseEnter(e, layer.id, frame.id, layer.name, frameIndex)}
                   @mouseleave=${this.handleCelMouseLeave}
                 >
-                  ${hasTint ? html`<div class="tag-tint"></div>` : ""}
-                  ${hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ""}
+                  ${hasTint ? html`<div class="tag-tint"></div>` : ''}
+                  ${hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ''}
                   <div class="cel-content"></div>
-                  ${isHardLinked
-                    ? html`<div
-                        class="link-badge"
-                        style="background-color: ${linkColor}"
-                      ></div>`
-                    : ""}
+                  ${
+                    isHardLinked
+                      ? html`<div class="link-badge" style="background-color: ${linkColor}"></div>`
+                      : ''
+                  }
                 </div>
               `;
             })}

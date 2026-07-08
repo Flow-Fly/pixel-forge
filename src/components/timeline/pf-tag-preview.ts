@@ -1,13 +1,8 @@
-import { html, css, render } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { animationStore } from "../../stores/animation";
-import { layerStore } from "../../stores/layers";
-import { projectStore } from "../../stores/project";
-import {
-  renderFrameToCanvas,
-  getFrameIdsForTag,
-} from "../../utils/preview-renderer";
+import { html, css, render } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext } from '../../stores/project-context';
+import { renderFrameToCanvas, getFrameIdsForTag } from '../../utils/preview-renderer';
 
 const PREVIEW_SCALE = 2;
 const HOVER_DELAY = 300;
@@ -16,7 +11,7 @@ const HOVER_DELAY = 300;
  * Tag preview component that uses a portal pattern to escape
  * any parent transforms that would break fixed positioning.
  */
-@customElement("pf-tag-preview")
+@customElement('pf-tag-preview')
 export class PFTagPreview extends BaseComponent {
   // No styles needed - we render to a portal outside shadow DOM
   static styles = css`
@@ -25,12 +20,12 @@ export class PFTagPreview extends BaseComponent {
     }
   `;
 
-  @property({ type: String, reflect: true }) tagId: string = "";
+  @property({ type: String, reflect: true }) tagId: string = '';
   @property({ type: Boolean, reflect: true }) visible: boolean = false;
   @property({ type: Number }) posX: number = 0;
   @property({ type: Number }) posY: number = 0;
 
-  @state() private displayTagName: string = "";
+  @state() private displayTagName: string = '';
   @state() private computedX: number = 0;
   @state() private computedY: number = 0;
 
@@ -43,12 +38,14 @@ export class PFTagPreview extends BaseComponent {
 
   // Portal container on document.body
   private portalContainer: HTMLDivElement | null = null;
+  private context = defaultProjectContext;
+  private previewContext = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
     // Create portal container on document.body
-    this.portalContainer = document.createElement("div");
-    this.portalContainer.id = `tag-preview-portal-${this.tagId || "default"}`;
+    this.portalContainer = document.createElement('div');
+    this.portalContainer.id = `tag-preview-portal-${this.tagId || 'default'}`;
     this.portalContainer.style.cssText = `
       position: fixed;
       z-index: 10000;
@@ -56,6 +53,17 @@ export class PFTagPreview extends BaseComponent {
       display: none;
     `;
     document.body.appendChild(this.portalContainer);
+    this.subscribeToActiveProjectContext((context) => {
+      this.clearHoverTimeout();
+      this.context = context;
+      this.previewContext = context;
+      if (this.visible) {
+        this.loadTagInfo();
+        this.updatePosition();
+        this.renderToPortal();
+      }
+      this.requestUpdate();
+    });
   }
 
   disconnectedCallback() {
@@ -70,13 +78,13 @@ export class PFTagPreview extends BaseComponent {
   }
 
   updated(changedProps: Map<string, unknown>) {
-    if (changedProps.has("visible")) {
+    if (changedProps.has('visible')) {
       if (this.visible) {
         // Calculate position before showing
         this.updatePosition();
         // Show portal
         if (this.portalContainer) {
-          this.portalContainer.style.display = "block";
+          this.portalContainer.style.display = 'block';
         }
         // Render to portal and start animation
         this.renderToPortal();
@@ -88,20 +96,17 @@ export class PFTagPreview extends BaseComponent {
         this.stopAnimation();
         // Hide portal
         if (this.portalContainer) {
-          this.portalContainer.style.display = "none";
+          this.portalContainer.style.display = 'none';
         }
       }
     }
 
-    if (changedProps.has("tagId") && this.tagId) {
+    if (changedProps.has('tagId') && this.tagId) {
       this.loadTagInfo();
     }
 
     // Recalculate position when posX or posY change
-    if (
-      (changedProps.has("posX") || changedProps.has("posY")) &&
-      this.visible
-    ) {
+    if ((changedProps.has('posX') || changedProps.has('posY')) && this.visible) {
       this.updatePosition();
       this.renderToPortal();
     }
@@ -111,19 +116,19 @@ export class PFTagPreview extends BaseComponent {
     // Query from portal container
     if (!this.ctx && this.portalContainer) {
       const canvas = this.portalContainer.querySelector(
-        ".preview-canvas"
+        '.preview-canvas'
       ) as HTMLCanvasElement | null;
       if (canvas) {
-        this.ctx = canvas.getContext("2d");
+        this.ctx = canvas.getContext('2d');
       }
     }
   }
 
   private loadTagInfo() {
-    const tag = animationStore.tags.value.find((t) => t.id === this.tagId);
+    const tag = this.previewContext.animation.tags.value.find((t) => t.id === this.tagId);
     if (tag) {
       this.displayTagName = tag.name;
-      this.frameIds = getFrameIdsForTag(this.tagId);
+      this.frameIds = getFrameIdsForTag(this.tagId, this.previewContext.animation);
       this.currentFrameIndex = 0;
     }
   }
@@ -133,8 +138,8 @@ export class PFTagPreview extends BaseComponent {
    * Positions above the anchor by default, falls back to below if off-screen.
    */
   private updatePosition() {
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
+    const canvasW = this.previewContext.project.width.value;
+    const canvasH = this.previewContext.project.height.value;
     const displayH = canvasH * PREVIEW_SCALE;
     const displayW = canvasW * PREVIEW_SCALE;
     const padding = 16; // 8px padding on each side
@@ -165,8 +170,8 @@ export class PFTagPreview extends BaseComponent {
   private renderToPortal() {
     if (!this.portalContainer) return;
 
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
+    const canvasW = this.previewContext.project.width.value;
+    const canvasH = this.previewContext.project.height.value;
     const displayW = canvasW * PREVIEW_SCALE;
     const displayH = canvasH * PREVIEW_SCALE;
     const frameCount = this.frameIds.length;
@@ -231,8 +236,10 @@ export class PFTagPreview extends BaseComponent {
    */
   showWithDelay(tagId: string, x: number, y: number) {
     this.clearHoverTimeout();
+    const context = this.context;
 
     this.hoverTimeout = window.setTimeout(() => {
+      this.previewContext = context;
       this.tagId = tagId;
       this.posX = x;
       this.posY = y;
@@ -271,7 +278,7 @@ export class PFTagPreview extends BaseComponent {
       }
 
       // Get frame duration from current frame or use default
-      const frames = animationStore.frames.value;
+      const frames = this.previewContext.animation.frames.value;
       const currentFrameId = this.frameIds[this.currentFrameIndex];
       const currentFrame = frames.find((f) => f.id === currentFrameId);
       const frameDuration = currentFrame?.duration ?? 100;
@@ -280,8 +287,7 @@ export class PFTagPreview extends BaseComponent {
 
       if (elapsed >= frameDuration) {
         // Advance to next frame
-        this.currentFrameIndex =
-          (this.currentFrameIndex + 1) % this.frameIds.length;
+        this.currentFrameIndex = (this.currentFrameIndex + 1) % this.frameIds.length;
         this.lastFrameTime = timestamp;
       }
 
@@ -303,10 +309,11 @@ export class PFTagPreview extends BaseComponent {
     if (!this.ctx || this.frameIds.length === 0) return;
 
     const frameId = this.frameIds[this.currentFrameIndex];
-    const layers = layerStore.layers.value;
-    const cels = animationStore.cels.value;
+    const layers = this.previewContext.layers.layers.value;
+    const animation = this.previewContext.animation;
+    const cels = animation.cels.value;
 
-    renderFrameToCanvas(this.ctx, frameId, layers, cels);
+    renderFrameToCanvas(this.ctx, frameId, layers, cels, animation);
   }
 
   // No content rendered in shadow DOM - everything goes to portal
@@ -317,6 +324,6 @@ export class PFTagPreview extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "pf-tag-preview": PFTagPreview;
+    'pf-tag-preview': PFTagPreview;
   }
 }

@@ -1,6 +1,9 @@
 import type { Layer } from '../types/layer';
 import type { Cel } from '../types/animation';
 import { animationStore } from '../stores/animation';
+import type { ProjectContext } from '../stores/project-context';
+
+type PreviewAnimationStore = Pick<ProjectContext['animation'], 'frames' | 'tags' | 'getCelKey'>;
 
 /**
  * Render a specific frame to a canvas context by compositing all visible layers.
@@ -14,7 +17,8 @@ export function renderFrameToCanvas(
   ctx: CanvasRenderingContext2D,
   frameId: string,
   layers: Layer[],
-  cels: Map<string, Cel>
+  cels: Map<string, Cel>,
+  animation: Pick<ProjectContext['animation'], 'getCelKey'> = animationStore
 ): void {
   const canvas = ctx.canvas;
 
@@ -25,7 +29,7 @@ export function renderFrameToCanvas(
   for (const layer of layers) {
     if (!layer.visible) continue;
 
-    const key = animationStore.getCelKey(layer.id, frameId);
+    const key = animation.getCelKey(layer.id, frameId);
     const cel = cels.get(key);
 
     // Fall back to layer.canvas if cel doesn't exist yet (new layers)
@@ -39,7 +43,9 @@ export function renderFrameToCanvas(
       ctx.globalAlpha = layerOpacity * celOpacity;
 
       ctx.globalCompositeOperation =
-        layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+        layer.blendMode === 'normal'
+          ? 'source-over'
+          : (layer.blendMode as GlobalCompositeOperation);
       ctx.drawImage(canvasToUse, 0, 0);
     }
   }
@@ -55,12 +61,15 @@ export function renderFrameToCanvas(
  * @param tag - The frame tag
  * @returns Array of frame IDs in the tag's range
  */
-export function getFrameIdsForTag(tagId: string): string[] {
-  const tag = animationStore.tags.value.find(t => t.id === tagId);
+export function getFrameIdsForTag(
+  tagId: string,
+  animation: PreviewAnimationStore = animationStore
+): string[] {
+  const tag = animation.tags.value.find((t) => t.id === tagId);
   if (!tag) return [];
 
-  const frames = animationStore.frames.value;
+  const frames = animation.frames.value;
   return frames
     .filter((_, index) => index >= tag.startFrameIndex && index <= tag.endFrameIndex)
-    .map(f => f.id);
+    .map((f) => f.id);
 }

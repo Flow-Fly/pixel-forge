@@ -1,12 +1,11 @@
-import { html, css } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../../core/base-component";
-import { animationStore } from "../../../stores/animation";
-import { historyStore } from "../../../stores/history";
-import { ReorderFrameCommand } from "../../../commands/animation-commands";
-import type { FrameTag } from "../../../types/animation";
+import { html, css } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../../stores/project-context';
+import { ReorderFrameCommand } from '../../../commands/animation-commands';
+import type { FrameTag } from '../../../types/animation';
 
-@customElement("pf-timeline-frame-cells")
+@customElement('pf-timeline-frame-cells')
 export class PFTimelineFrameCells extends BaseComponent {
   static styles = css`
     :host {
@@ -52,7 +51,7 @@ export class PFTimelineFrameCells extends BaseComponent {
     }
 
     .frame-cell.tag-tinted::before {
-      content: "";
+      content: '';
       position: absolute;
       inset: 0;
       pointer-events: none;
@@ -76,54 +75,74 @@ export class PFTimelineFrameCells extends BaseComponent {
 
   @state() private draggedFrameIndex: number | null = null;
   @state() private dragOverFrameIndex: number | null = null;
+  private context = defaultProjectContext;
+  private draggedFrameContext: ProjectContext | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   private selectFrame(frameId: string) {
     // Clear cel selection when clicking a frame header
-    animationStore.clearCelSelection();
-    animationStore.goToFrame(frameId);
+    this.context.animation.clearCelSelection();
+    this.context.animation.goToFrame(frameId);
   }
 
   private handleContextMenu(e: MouseEvent, frameId: string, frameIndex: number) {
     e.preventDefault();
-    this.dispatchEvent(new CustomEvent("frame-context-menu", {
-      detail: { frameId, frameIndex, anchor: e.currentTarget, event: e },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('frame-context-menu', {
+        detail: { frameId, frameIndex, anchor: e.currentTarget, event: e },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private handleMouseEnter(e: MouseEvent, frameId: string, frameIndex: number) {
-    this.dispatchEvent(new CustomEvent("frame-hover-start", {
-      detail: { frameId, frameIndex, target: e.currentTarget },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('frame-hover-start', {
+        detail: { frameId, frameIndex, target: e.currentTarget },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private handleMouseLeave() {
-    this.dispatchEvent(new CustomEvent("frame-hover-end", {
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('frame-hover-end', {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   // Drag-drop handlers
   private handleDragStart(index: number, e: DragEvent) {
     this.draggedFrameIndex = index;
+    this.draggedFrameContext = this.context;
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", String(index));
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(index));
     }
     // Hide tooltip during drag
-    this.dispatchEvent(new CustomEvent("frame-hover-end", {
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent('frame-hover-end', {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private handleDragEnd() {
     this.draggedFrameIndex = null;
     this.dragOverFrameIndex = null;
+    this.draggedFrameContext = null;
   }
 
   private handleDragOver(index: number, e: DragEvent) {
@@ -139,28 +158,23 @@ export class PFTimelineFrameCells extends BaseComponent {
 
   private handleDrop(targetIndex: number, e: DragEvent) {
     e.preventDefault();
-    if (
-      this.draggedFrameIndex === null ||
-      this.draggedFrameIndex === targetIndex
-    )
-      return;
+    if (this.draggedFrameIndex === null || this.draggedFrameIndex === targetIndex) return;
 
-    historyStore.execute(
-      new ReorderFrameCommand(this.draggedFrameIndex, targetIndex)
+    const context = this.draggedFrameContext ?? this.context;
+    void context.history.execute(
+      new ReorderFrameCommand(this.draggedFrameIndex, targetIndex, context)
     );
 
     this.draggedFrameIndex = null;
     this.dragOverFrameIndex = null;
+    this.draggedFrameContext = null;
   }
 
   private getDragOverClass(index: number): string {
-    if (this.dragOverFrameIndex === null || this.draggedFrameIndex === null)
-      return "";
-    if (this.dragOverFrameIndex !== index) return "";
+    if (this.dragOverFrameIndex === null || this.draggedFrameIndex === null) return '';
+    if (this.dragOverFrameIndex !== index) return '';
 
-    return this.draggedFrameIndex < index
-      ? "drag-over-right"
-      : "drag-over-left";
+    return this.draggedFrameIndex < index ? 'drag-over-right' : 'drag-over-left';
   }
 
   /**
@@ -168,11 +182,7 @@ export class PFTimelineFrameCells extends BaseComponent {
    */
   private isFrameHidden(frameIndex: number, tags: FrameTag[]): boolean {
     for (const tag of tags) {
-      if (
-        tag.collapsed &&
-        frameIndex > tag.startFrameIndex &&
-        frameIndex <= tag.endFrameIndex
-      ) {
+      if (tag.collapsed && frameIndex > tag.startFrameIndex && frameIndex <= tag.endFrameIndex) {
         return true;
       }
     }
@@ -182,15 +192,9 @@ export class PFTimelineFrameCells extends BaseComponent {
   /**
    * Get the tag color for a frame index (for column tinting).
    */
-  private getTagColorForFrame(
-    frameIndex: number,
-    tags: FrameTag[]
-  ): string | null {
+  private getTagColorForFrame(frameIndex: number, tags: FrameTag[]): string | null {
     for (const tag of tags) {
-      if (
-        frameIndex >= tag.startFrameIndex &&
-        frameIndex <= tag.endFrameIndex
-      ) {
+      if (frameIndex >= tag.startFrameIndex && frameIndex <= tag.endFrameIndex) {
         return tag.color;
       }
     }
@@ -198,15 +202,16 @@ export class PFTimelineFrameCells extends BaseComponent {
   }
 
   render() {
-    const frames = animationStore.frames.value;
-    const currentFrameId = animationStore.currentFrameId.value;
-    const tags = animationStore.tags.value;
+    const animation = this.context.animation;
+    const frames = animation.frames.value;
+    const currentFrameId = animation.currentFrameId.value;
+    const tags = animation.tags.value;
 
     return html`
       ${frames.map((frame, index) => {
         // Skip frames that are hidden (inside collapsed tags)
         if (this.isFrameHidden(index, tags)) {
-          return "";
+          return '';
         }
 
         const isDragging = this.draggedFrameIndex === index;
@@ -216,8 +221,8 @@ export class PFTimelineFrameCells extends BaseComponent {
 
         return html`
           <div
-            class="frame-cell ${frame.id === currentFrameId ? "active" : ""} ${isDragging ? "dragging" : ""} ${dragOverClass} ${hasTint ? "tag-tinted" : ""}"
-            style="${hasTint ? `--tag-tint-color: ${tagColor}` : ""}"
+            class="frame-cell ${frame.id === currentFrameId ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${dragOverClass} ${hasTint ? 'tag-tinted' : ''}"
+            style="${hasTint ? `--tag-tint-color: ${tagColor}` : ''}"
             @click=${() => this.selectFrame(frame.id)}
             @contextmenu=${(e: MouseEvent) => this.handleContextMenu(e, frame.id, index)}
             @mouseenter=${(e: MouseEvent) => this.handleMouseEnter(e, frame.id, index)}

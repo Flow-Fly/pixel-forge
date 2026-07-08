@@ -1,16 +1,12 @@
-import { html, css } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { animationStore } from "../../stores/animation";
-import { historyStore } from "../../stores/history";
-import {
-  AddFrameCommand,
-  DeleteFrameCommand,
-} from "../../commands/animation-commands";
+import { html, css } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext } from '../../stores/project-context';
+import { AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
 
-const DURATION_UNIT_KEY = "pf-timeline-duration-unit";
+const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
 
-@customElement("pf-playback-controls")
+@customElement('pf-playback-controls')
 export class PFPlaybackControls extends BaseComponent {
   static styles = css`
     :host {
@@ -66,38 +62,43 @@ export class PFPlaybackControls extends BaseComponent {
     }
   `;
 
-  @state() private durationUnit: "ms" | "fps" = "ms";
+  @state() private durationUnit: 'ms' | 'fps' = 'ms';
+  private context = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
     const saved = localStorage.getItem(DURATION_UNIT_KEY);
-    if (saved === "fps" || saved === "ms") {
+    if (saved === 'fps' || saved === 'ms') {
       this.durationUnit = saved;
     }
   }
 
   togglePlay() {
-    animationStore.togglePlayback();
+    this.context.animation.togglePlayback();
   }
 
   addFrame() {
-    historyStore.execute(new AddFrameCommand(true));
+    void this.context.history.execute(new AddFrameCommand(true, undefined, this.context));
   }
 
   deleteFrame() {
-    const currentFrameId = animationStore.currentFrameId.value;
+    const currentFrameId = this.context.animation.currentFrameId.value;
     if (currentFrameId) {
-      historyStore.execute(new DeleteFrameCommand(currentFrameId));
+      void this.context.history.execute(new DeleteFrameCommand(currentFrameId, this.context));
     }
   }
 
   private toggleUnit() {
-    this.durationUnit = this.durationUnit === "ms" ? "fps" : "ms";
+    this.durationUnit = this.durationUnit === 'ms' ? 'fps' : 'ms';
     localStorage.setItem(DURATION_UNIT_KEY, this.durationUnit);
 
     // Dispatch event to notify timeline header
     this.dispatchEvent(
-      new CustomEvent("unit-change", {
+      new CustomEvent('unit-change', {
         detail: { unit: this.durationUnit },
         bubbles: true,
         composed: true,
@@ -106,7 +107,7 @@ export class PFPlaybackControls extends BaseComponent {
   }
 
   private getEffectiveFPS(): number {
-    const frames = animationStore.frames.value;
+    const frames = this.context.animation.frames.value;
     if (frames.length === 0) return 0;
 
     const totalDuration = frames.reduce((sum, f) => sum + f.duration, 0);
@@ -115,7 +116,7 @@ export class PFPlaybackControls extends BaseComponent {
   }
 
   private getTotalDuration(): number {
-    const frames = animationStore.frames.value;
+    const frames = this.context.animation.frames.value;
     if (frames.length === 0) return 0;
 
     return frames.reduce((sum, f) => sum + f.duration, 0);
@@ -130,27 +131,18 @@ export class PFPlaybackControls extends BaseComponent {
   }
 
   render() {
-    const isPlaying = animationStore.isPlaying.value;
-    const frameCount = animationStore.frames.value.length;
+    const animation = this.context.animation;
+    const isPlaying = animation.isPlaying.value;
+    const frameCount = animation.frames.value.length;
     const effectiveFPS = this.getEffectiveFPS();
     const totalDuration = this.getTotalDuration();
 
     return html`
-      <button
-        @click=${() =>
-          animationStore.goToFrame(animationStore.frames.value[0]?.id)}
-      >
-        |&lt;
+      <button @click=${() => animation.goToFrame(animation.frames.value[0]?.id)}>|&lt;</button>
+      <button class=${isPlaying ? 'active' : ''} @click=${this.togglePlay}>
+        ${isPlaying ? 'Pause' : 'Play'}
       </button>
-      <button class=${isPlaying ? "active" : ""} @click=${this.togglePlay}>
-        ${isPlaying ? "Pause" : "Play"}
-      </button>
-      <button
-        @click=${() =>
-          animationStore.goToFrame(
-            animationStore.frames.value[frameCount - 1]?.id
-          )}
-      >
+      <button @click=${() => animation.goToFrame(animation.frames.value[frameCount - 1]?.id)}>
         &gt;|
       </button>
 
@@ -158,14 +150,8 @@ export class PFPlaybackControls extends BaseComponent {
         style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
       ></div>
 
-      <button @click=${this.addFrame} title="Add Duplicate Frame">
-        + Frame
-      </button>
-      <button
-        @click=${this.deleteFrame}
-        title="Delete Current Frame"
-        ?disabled=${frameCount <= 1}
-      >
+      <button @click=${this.addFrame} title="Add Duplicate Frame">+ Frame</button>
+      <button @click=${this.deleteFrame} title="Delete Current Frame" ?disabled=${frameCount <= 1}>
         - Frame
       </button>
 
@@ -176,9 +162,9 @@ export class PFPlaybackControls extends BaseComponent {
           @click=${this.toggleUnit}
           title="Click to toggle between duration and FPS"
         >
-          ${this.durationUnit === "fps"
-            ? `${effectiveFPS} FPS`
-            : this.formatDuration(totalDuration)}
+          ${
+            this.durationUnit === 'fps' ? `${effectiveFPS} FPS` : this.formatDuration(totalDuration)
+          }
         </span>
       </span>
     `;
