@@ -172,10 +172,10 @@ function getReplacementIndex(
 }
 
 /**
- * Set up palette event listeners.
- * Returns a cleanup function to remove listeners.
+ * Start palette event listeners.
+ * Returns a cleanup function to stop listening.
  */
-export function setupPaletteListeners(
+export function startPaletteSync(
   palette: PaletteIndexLookup,
   getCels: () => Map<string, Cel>,
   setCels: (cels: Map<string, Cel>) => void,

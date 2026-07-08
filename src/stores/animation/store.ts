@@ -68,8 +68,7 @@ class AnimationStore {
   private readonly palette: AnimationPaletteStore;
   private sharedTransparentCanvas: HTMLCanvasElement | null = null;
   private readonly refs: StoreRefs;
-  // Stored for future dispose() implementation
-  private _cleanupPaletteListeners: (() => void) | null = null;
+  private cleanupPaletteSync: (() => void) | null = null;
 
   constructor(dependencies: AnimationStoreDependencies) {
     this.layers = dependencies.layers;
@@ -87,7 +86,6 @@ class AnimationStore {
 
     this.initialize();
     this.loadUIState();
-    this.setupPaletteListeners();
   }
 
   // ===== Initialization =====
@@ -110,13 +108,20 @@ class AnimationStore {
     }
   }
 
-  private setupPaletteListeners() {
-    this._cleanupPaletteListeners = paletteSync.setupPaletteListeners(
+  startPaletteSync() {
+    if (this.cleanupPaletteSync) return;
+
+    this.cleanupPaletteSync = paletteSync.startPaletteSync(
       this.palette,
       () => this.cels.value,
       (newCels) => { this.cels.value = newCels; },
       () => this.rebuildAllCelCanvases()
     );
+  }
+
+  stopPaletteSync() {
+    this.cleanupPaletteSync?.();
+    this.cleanupPaletteSync = null;
   }
 
   // ===== Shared Transparent Canvas =====
@@ -672,10 +677,7 @@ class AnimationStore {
 
   dispose() {
     this.stopPlayback();
-    if (this._cleanupPaletteListeners) {
-      this._cleanupPaletteListeners();
-      this._cleanupPaletteListeners = null;
-    }
+    this.stopPaletteSync();
   }
 }
 

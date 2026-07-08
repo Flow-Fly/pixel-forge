@@ -90,7 +90,7 @@ function createProjectContextStores(
   };
 }
 
-class ProjectContext {
+export class ProjectContext {
   readonly animation: ProjectAnimationStore;
   readonly colors: ProjectColorStore;
   readonly dirtyRect: ProjectDirtyRectStore;
@@ -104,6 +104,8 @@ class ProjectContext {
   readonly refs: StoreRefs;
   readonly selection: ProjectSelectionStore;
   readonly viewport: ProjectViewportStore;
+
+  private started = false;
 
   constructor(stores: ProjectContextStores = createProjectContextStores()) {
     this.animation = stores.animation;
@@ -119,13 +121,29 @@ class ProjectContext {
     this.refs = stores.refs;
     this.selection = stores.selection;
     this.viewport = stores.viewport;
+
+    this.start();
+  }
+
+  start() {
+    if (this.started) return;
+
+    this.animation.startPaletteSync();
+    this.started = true;
+  }
+
+  dispose() {
+    if (!this.started) return;
+
+    this.animation.dispose();
+    this.started = false;
   }
 }
 
 export function createProjectContext(
   options: CreateProjectContextOptions = {},
-): ProjectContextStores {
+): ProjectContext {
   return new ProjectContext(createProjectContextStores(options));
 }
 
-export const defaultProjectContext: ProjectContextStores = new ProjectContext();
+export const defaultProjectContext = new ProjectContext();

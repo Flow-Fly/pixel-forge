@@ -123,6 +123,6 @@ project:
 
 - `store-refs.ts` still exports default compatibility helpers for older imports.
   ProjectContext-created stores use context-local refs.
-- `animation/palette-sync.ts` registers palette listeners per animation store.
-  A later lifecycle slice should dispose non-default contexts when they are no
-  longer needed.
+- `ProjectContext` starts palette sync for its animation store and exposes
+  `dispose()` so future non-default contexts can stop those listeners when they
+  are no longer needed.
