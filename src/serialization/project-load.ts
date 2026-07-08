@@ -57,6 +57,10 @@ export type ProjectLoadStores = {
     updateLayer: (id: string, updates: Partial<Layer>) => void;
   };
   palette: {
+    findClosestColorIndex: (hex: string) => number;
+    getColorByIndex: (index: number) => string | null;
+    getColorIndex: (hex: string) => number;
+    getOrAddColor: (hex: string) => number;
     refreshUsedColors: () => void;
     setPalette: (colors: string[]) => void;
   };
@@ -359,7 +363,7 @@ function restoreCelIndexBuffer(
   } else if (canvas && !file.palette) {
     cels.set(celKey, {
       ...cel,
-      indexBuffer: buildIndexBufferFromCanvas(canvas, true),
+      indexBuffer: buildIndexBufferFromCanvas(canvas, stores.palette, true),
     });
   }
 

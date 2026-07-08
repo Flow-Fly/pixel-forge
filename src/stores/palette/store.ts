@@ -6,8 +6,8 @@
  */
 
 import { signal } from '../../core/signal';
-import { layerStore } from '../layers';
-import { defaultStoreRefs, type StoreRefs } from '../store-refs';
+import { type StoreRefs } from '../store-refs';
+import type { createLayerStore } from '../layers-store';
 import type { CustomPalette } from '../../types/palette';
 
 import { DB32_COLORS, MAX_PALETTE_SIZE, PALETTE_BY_ID } from './types';
@@ -31,6 +31,13 @@ function waitForNextFrame(): Promise<void> {
 type AddColorOptions = {
   flagNew?: boolean;
 };
+
+type PaletteLayerStore = ReturnType<typeof createLayerStore>;
+
+export interface PaletteStoreDependencies {
+  layers: PaletteLayerStore;
+  refs: StoreRefs;
+}
 
 class PaletteStore {
   // ==========================================
@@ -68,7 +75,8 @@ class PaletteStore {
 
   private colorToIndex = new Map<string, number>();
   private cachedPaletteName: string | null = null;
-  private refs: StoreRefs;
+  private readonly layers: PaletteLayerStore;
+  private readonly refs: StoreRefs;
 
   // ==========================================
   // Deprecated Aliases
@@ -88,8 +96,9 @@ class PaletteStore {
   // Constructor
   // ==========================================
 
-  constructor(refs: StoreRefs = defaultStoreRefs) {
-    this.refs = refs;
+  constructor(dependencies: PaletteStoreDependencies) {
+    this.layers = dependencies.layers;
+    this.refs = dependencies.refs;
     this.loadFromStorage();
     this.rebuildColorMap();
     this.loadCustomPalettes();
@@ -391,7 +400,7 @@ class PaletteStore {
     try {
       const animation = this.refs.getAnimationSource();
       const colors = animation
-        ? await extraction.extractColorsFromDrawing(animation, layerStore)
+        ? await extraction.extractColorsFromDrawing(animation, this.layers)
         : [];
       this.extractedColors.value = colors;
     } finally {
@@ -653,9 +662,6 @@ class PaletteStore {
   }
 }
 
-// fallow-ignore-next-line unused-export -- ProjectContext composition will create context-local stores in a later slice.
-export function createPaletteStore(refs: StoreRefs = defaultStoreRefs) {
-  return new PaletteStore(refs);
+export function createPaletteStore(dependencies: PaletteStoreDependencies) {
+  return new PaletteStore(dependencies);
 }
-
-export const paletteStore = createPaletteStore();

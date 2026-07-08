@@ -81,25 +81,29 @@ breaking existing imports such as `layerStore`, `paletteStore`, and
 ## ProjectContext shell
 
 `project-context.ts` introduces the first composition root for per-project
-state. `ProjectContext` constructs fresh instances only for the simple stores
-that currently have safe factories:
+state. `ProjectContext` constructs these per-project stores:
 
+- `animation`
 - `colors`
 - `dirtyRect`
 - `grid`
 - `guides`
+- `history`
 - `historyHighlight`
 - `layers`
+- `palette`
+- `project`
 - `selection`
 - `viewport`
 
-`defaultProjectContext` is a compatibility layer over the current singleton
-exports. It points at the same stores imported by the app today, so this slice
-does not change one-project runtime behavior or require app-shell migration.
+The old singleton exports (`projectStore`, `layerStore`, `animationStore`,
+and so on) are compatibility aliases for `defaultProjectContext`. This keeps
+the current one-project app behavior while making the default stores come from
+the same composition path as future project contexts.
 
-Do not add active context switching here yet. New project-local stores should
-gain explicit factories first, then be added to `ProjectContext` in a narrow
-follow-up.
+Do not add active context switching here yet. Components and panels should keep
+using the default singleton exports until a dedicated active-context slice moves
+them.
 
 ### App-global stores
 
@@ -117,11 +121,8 @@ project:
 
 ### Current migration seams
 
-- `store-refs.ts` is still process-global and must become context-local before
-  multiple ProjectContexts can isolate animation, palette, and canvas-size
-  dependencies.
-- `animation/palette-sync.ts` registers module-level palette listeners. A later
-  lifecycle slice should instantiate and dispose those listeners per context.
-- `project.ts`, `history.ts`, `animation/`, and `palette/` still import other
-  singleton stores directly in several paths. Keep the default singleton exports
-  until those dependencies are moved behind a ProjectContext composition root.
+- `store-refs.ts` still exports default compatibility helpers for older imports.
+  ProjectContext-created stores use context-local refs.
+- `animation/palette-sync.ts` registers palette listeners per animation store.
+  A later lifecycle slice should dispose non-default contexts when they are no
+  longer needed.

@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts'],
+    setupFiles: ['fake-indexeddb/auto'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

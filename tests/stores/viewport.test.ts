@@ -1,25 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { viewportStore } from "../../src/stores/viewport";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createViewportStore } from "../../src/stores/viewport";
 
-const projectStoreMock = vi.hoisted(() => {
-  const store = {
-    width: { value: 100 },
-    height: { value: 50 },
-    setSize(width: number, height: number) {
-      store.width.value = width;
-      store.height.value = height;
-    },
-  };
-  return store;
-});
+const canvasSize = {
+  width: { value: 100 },
+  height: { value: 50 },
+  setSize(width: number, height: number) {
+    canvasSize.width.value = width;
+    canvasSize.height.value = height;
+  },
+};
 
-vi.mock("../../src/stores/project", () => ({
-  projectStore: projectStoreMock,
-}));
+const viewportStore = createViewportStore(canvasSize);
 
 describe("viewportStore zoom behavior", () => {
   beforeEach(() => {
-    projectStoreMock.setSize(100, 50);
+    canvasSize.setSize(100, 50);
     viewportStore.containerWidth.value = 500;
     viewportStore.containerHeight.value = 250;
     viewportStore.zoom.value = 1;

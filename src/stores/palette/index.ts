@@ -4,8 +4,10 @@
  * Re-exports the palette store and related types for backward compatibility.
  */
 
+import { defaultProjectContext } from '../project-context';
+
 // Main store
-export { paletteStore } from './store';
+export const paletteStore = defaultProjectContext.palette;
 
 // Types and constants
 export { PRESET_PALETTES } from './types';

@@ -4,8 +4,12 @@
  * Re-exports the selection store and related types for backward compatibility.
  */
 
+import { defaultProjectContext } from '../project-context';
+
 // Main store
-export { createSelectionStore, selectionStore } from './store';
+export { createSelectionStore } from './store';
+
+export const selectionStore = defaultProjectContext.selection;
 
 // Types
 
