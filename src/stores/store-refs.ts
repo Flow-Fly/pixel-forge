@@ -28,20 +28,55 @@ export interface CanvasSizeSource {
   height: ReadableRef<number>;
 }
 
-let animationSource: AnimationSource | null = null;
-let canvasSizeSource: CanvasSizeSource | null = null;
+export interface StoreRefs {
+  registerAnimationSource(source: AnimationSource): void;
+  getAnimationSource(): AnimationSource | null;
+  registerCanvasSizeSource(source: CanvasSizeSource): void;
+  getCanvasSize(): { width: number; height: number };
+}
 
+export function createStoreRefs(): StoreRefs {
+  let contextAnimationSource: AnimationSource | null = null;
+  let contextCanvasSizeSource: CanvasSizeSource | null = null;
+
+  return {
+    registerAnimationSource(source: AnimationSource): void {
+      contextAnimationSource = source;
+    },
+
+    getAnimationSource(): AnimationSource | null {
+      return contextAnimationSource;
+    },
+
+    registerCanvasSizeSource(source: CanvasSizeSource): void {
+      contextCanvasSizeSource = source;
+    },
+
+    getCanvasSize(): { width: number; height: number } {
+      return {
+        width: contextCanvasSizeSource?.width.value ?? 64,
+        height: contextCanvasSizeSource?.height.value ?? 64,
+      };
+    },
+  };
+}
+
+export const defaultStoreRefs = createStoreRefs();
+
+// fallow-ignore-next-line unused-export -- compatibility path for singleton store registration during ProjectContext migration.
 export function registerAnimationSource(source: AnimationSource): void {
-  animationSource = source;
+  defaultStoreRefs.registerAnimationSource(source);
 }
 
 /** Null until the animation store module has been evaluated. */
+// fallow-ignore-next-line unused-export -- compatibility path for singleton animation lookups during ProjectContext migration.
 export function getAnimationSource(): AnimationSource | null {
-  return animationSource;
+  return defaultStoreRefs.getAnimationSource();
 }
 
+// fallow-ignore-next-line unused-export -- compatibility path for singleton canvas-size registration during ProjectContext migration.
 export function registerCanvasSizeSource(source: CanvasSizeSource): void {
-  canvasSizeSource = source;
+  defaultStoreRefs.registerCanvasSizeSource(source);
 }
 
 /**
@@ -50,8 +85,5 @@ export function registerCanvasSizeSource(source: CanvasSizeSource): void {
  * (only reachable from isolated unit tests).
  */
 export function getCanvasSize(): { width: number; height: number } {
-  return {
-    width: canvasSizeSource?.width.value ?? 64,
-    height: canvasSizeSource?.height.value ?? 64,
-  };
+  return defaultStoreRefs.getCanvasSize();
 }

@@ -17,6 +17,8 @@ import { paletteStore } from '../palette';
 import { getCanvasSize } from '../store-refs';
 import { getCelKey } from './types';
 
+type GetCanvasSize = () => { width: number; height: number };
+
 export interface PaletteIndexUsage {
   paletteIndex: number;
   pixelCount: number;
@@ -45,7 +47,8 @@ export function ensureCelIndexBuffer(
   cels: Map<string, Cel>,
   layerId: string,
   frameId: string,
-  syncLayerCanvases: () => void
+  syncLayerCanvases: () => void,
+  readCanvasSize: GetCanvasSize = getCanvasSize
 ): { cels: Map<string, Cel>; indexBuffer: Uint8Array } {
   const key = getCelKey(layerId, frameId);
   const cel = cels.get(key);
@@ -54,7 +57,7 @@ export function ensureCelIndexBuffer(
     // Create the cel first via sync, then recurse
     syncLayerCanvases();
     // Return empty result - caller should retry after sync
-    const { width, height } = getCanvasSize();
+    const { width, height } = readCanvasSize();
     return { cels, indexBuffer: createIndexBuffer(width, height) };
   }
 
@@ -266,6 +269,32 @@ export function scanUsedColors(cels: Map<string, Cel>): Set<string> {
   return usedColors;
 }
 
+function pixelToHex(data: Uint8ClampedArray, index: number): string {
+  const r = data[index];
+  const g = data[index + 1];
+  const b = data[index + 2];
+
+  return '#' +
+    r.toString(16).padStart(2, '0') +
+    g.toString(16).padStart(2, '0') +
+    b.toString(16).padStart(2, '0');
+}
+
+function addOpaqueCanvasColors(canvas: HTMLCanvasElement, usedColors: Set<string>): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let index = 0;
+
+  while (index < data.length) {
+    if (data[index + 3] !== 0) {
+      usedColors.add(pixelToHex(data, index).toLowerCase());
+    }
+    index += 4;
+  }
+}
+
 /**
  * Scan actual canvas pixels to get colors used.
  * Works correctly even when palette has changed since drawing was made.
@@ -277,27 +306,7 @@ export function scanUsedColorsFromCanvas(cels: Map<string, Cel>): Set<string> {
     if (!cel.canvas) continue;
     if (cel.textCelData) continue;
 
-    const ctx = cel.canvas.getContext('2d');
-    if (!ctx) continue;
-
-    const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
-    const data = imageData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const a = data[i + 3];
-      if (a === 0) continue;
-
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-
-      const hex = '#' +
-        r.toString(16).padStart(2, '0') +
-        g.toString(16).padStart(2, '0') +
-        b.toString(16).padStart(2, '0');
-
-      usedColors.add(hex.toLowerCase());
-    }
+    addOpaqueCanvasColors(cel.canvas, usedColors);
   }
 
   return usedColors;
