@@ -101,6 +101,19 @@ and so on) are compatibility aliases for `defaultProjectContext`. This keeps
 the current one-project app behavior while making the default stores come from
 the same composition path as future project contexts.
 
+Until #114 moves panels and components to an active project context, these
+compatibility paths intentionally stay on `defaultProjectContext`:
+
+- direct store aliases in `project.ts`, `layers.ts`, `history.ts`,
+  `history-highlight.ts`, `dirty-rect.ts`, `grid.ts`, `guides.ts`,
+  `colors.ts`, and `viewport.ts`.
+- barrel exports in `animation/index.ts`, `palette/index.ts`, and
+  `selection/index.ts`.
+- `selection/selected-layer.ts`, which still reads the default layer and
+  selection stores together.
+- `store-refs.ts` default helpers, which keep older singleton consumers wired
+  while ProjectContext-created stores use context-local refs.
+
 Do not add active context switching here yet. Components and panels should keep
 using the default singleton exports until a dedicated active-context slice moves
 them.

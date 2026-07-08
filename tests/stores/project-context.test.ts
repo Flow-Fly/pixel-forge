@@ -124,6 +124,48 @@ describe("ProjectContext", () => {
     expect(contextB.history.canUndo.value).toBe(false);
   });
 
+  it("keeps two full contexts isolated after representative mutations and disposal", async () => {
+    const contextA = createTestContext(100, 80);
+    const contextB = createTestContext(20, 20);
+    const contextBLayerCount = contextB.layers.layers.value.length;
+    const contextBPalette = [...contextB.palette.mainColors.value];
+
+    contextA.project.name.value = "Context A";
+    contextA.layers.addLayer("Only A", 8, 8);
+    contextA.palette.setPalette(["#111111", "#222222"]);
+    await contextA.history.execute({
+      id: "context-a-command",
+      name: "Context A Command",
+      execute() {},
+      undo() {},
+    });
+
+    expect(contextB.project.name.value).not.toBe("Context A");
+    expect(contextB.layers.layers.value).toHaveLength(contextBLayerCount);
+    expect(contextB.palette.mainColors.value).toEqual(contextBPalette);
+    expect(contextB.history.canUndo.value).toBe(false);
+
+    const contextARebuild = vi.spyOn(
+      contextA.animation,
+      "rebuildAllCelCanvases",
+    );
+    const contextBRebuild = vi.spyOn(
+      contextB.animation,
+      "rebuildAllCelCanvases",
+    );
+    const defaultRebuild = vi.spyOn(
+      defaultProjectContext.animation,
+      "rebuildAllCelCanvases",
+    );
+
+    contextA.dispose();
+    window.dispatchEvent(new CustomEvent("palette-color-changed"));
+
+    expect(contextARebuild).not.toHaveBeenCalled();
+    expect(contextBRebuild).toHaveBeenCalledTimes(1);
+    expect(defaultRebuild).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps default context stores compatible with singleton exports", () => {
     expect(defaultProjectContext.animation).toBe(animationStore);
     expect(defaultProjectContext.colors).toBe(colorStore);
