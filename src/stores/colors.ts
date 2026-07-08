@@ -2,13 +2,19 @@ import { signal } from '../core/signal';
 import { hexToRgb } from './palette/color-utils';
 import { paletteStore } from './palette';
 
+interface LightnessPalette {
+  getLightnessVariations(color: string): string[];
+}
+
 class ColorStore {
   primaryColor = signal('#000000');
   secondaryColor = signal('#ffffff');
   lightnessIndex = signal(3); // Default to middle (50%)
   lightnessVariations = signal<string[]>([]);
+  private readonly palette: LightnessPalette;
 
-  constructor() {
+  constructor(palette: LightnessPalette = paletteStore) {
+    this.palette = palette;
     // Initialize variations for the default color
     this.updateLightnessVariations(this.primaryColor.value);
   }
@@ -36,7 +42,7 @@ class ColorStore {
    * Calculates the closest lightness index for the given color.
    */
   updateLightnessVariations(color: string) {
-    const variations = paletteStore.getLightnessVariations(color);
+    const variations = this.palette.getLightnessVariations(color);
     this.lightnessVariations.value = variations;
     this.lightnessIndex.value = this.findClosestLightnessIndex(color, variations);
   }
@@ -108,4 +114,8 @@ class ColorStore {
   }
 }
 
-export const colorStore = new ColorStore();
+export function createColorStore(palette?: LightnessPalette) {
+  return new ColorStore(palette);
+}
+
+export const colorStore = createColorStore();

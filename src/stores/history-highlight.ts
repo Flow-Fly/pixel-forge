@@ -114,4 +114,8 @@ class HistoryHighlightStore {
   }
 }
 
-export const historyHighlightStore = new HistoryHighlightStore();
+export function createHistoryHighlightStore() {
+  return new HistoryHighlightStore();
+}
+
+export const historyHighlightStore = createHistoryHighlightStore();

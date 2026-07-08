@@ -49,3 +49,56 @@ The store graph predates this document; the codebase converged on
 invalidation" and that hybrid is fine — what causes bugs is *mixing the
 styles for the same data*. These rules just make the existing pattern
 explicit so new code (and refactors like #63/#71) stay consistent.
+
+## ProjectContext ownership map
+
+This checkout does not have `src/stores/index.ts`; use the real store files
+below as the ProjectContext migration map.
+
+### Per-project stores
+
+These stores describe one open project, its canvas view, or session state that
+must not leak between two open projects:
+
+- `project.ts` - project identity, size, name, load/save/new-project flow.
+- `layers.ts` - layer list, active layer, grouping, text/reference layers.
+- `animation/` - frames, cels, playback state, tags, cel selection.
+- `palette/` - project palette, custom palette state, used-color indicators.
+- `selection/` - current selection/floating/transform state.
+- `history.ts` - undo/redo stacks and the bitmap invalidation version.
+- `history-highlight.ts` - command hover/expanded highlight state.
+- `viewport.ts` - zoom, pan, viewport dimensions, cursor position.
+- `dirty-rect.ts` - pending redraw and stroke dirty regions.
+- `guides.ts` - ruler guides and mirror drawing state.
+- `colors.ts` - active colors and palette-derived lightness variations.
+- `grid.ts` - pixel/tile grid overlay settings for the current canvas.
+
+Simple per-project stores now export factory functions next to their singleton
+exports so later ProjectContext slices can compose fresh instances without
+breaking existing imports such as `layerStore`, `paletteStore`, and
+`animationStore`.
+
+### App-global stores
+
+These stores belong to the editor session, user, or shell rather than one
+project:
+
+- `settings.ts` - app theme and checkerboard preferences.
+- `tools.ts` - active tool and brush-editing override mode.
+- `tool-settings.ts` - shared tool size and option values.
+- `tool-groups.ts` - toolbar grouping preferences.
+- `brush.ts` - user brush library and active brush.
+- `panels.ts` - shell panel collapsed state.
+- `clipboard.ts` - cross-project copy/paste buffer.
+- `user.ts` - current user identity.
+
+### Current migration seams
+
+- `store-refs.ts` is still process-global and must become context-local before
+  multiple ProjectContexts can isolate animation, palette, and canvas-size
+  dependencies.
+- `animation/palette-sync.ts` registers module-level palette listeners. A later
+  lifecycle slice should instantiate and dispose those listeners per context.
+- `project.ts`, `history.ts`, `animation/`, and `palette/` still import other
+  singleton stores directly in several paths. Keep the default singleton exports
+  until those dependencies are moved behind a ProjectContext composition root.

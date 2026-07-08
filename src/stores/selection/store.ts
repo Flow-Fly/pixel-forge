@@ -908,4 +908,8 @@ class SelectionStore {
   }
 }
 
-export const selectionStore = new SelectionStore();
+export function createSelectionStore() {
+  return new SelectionStore();
+}
+
+export const selectionStore = createSelectionStore();

@@ -5,11 +5,10 @@
  */
 
 // Main store
-export { selectionStore } from './store';
+export { createSelectionStore, selectionStore } from './store';
 
 // Types
 
 // Bounds utilities
 
 // Hit testing utilities
-
