@@ -11,8 +11,12 @@ import { layerStore } from "../../src/stores/layers";
 import { paletteStore } from "../../src/stores/palette";
 import { projectStore } from "../../src/stores/project";
 import {
+  activeProjectContext,
   createProjectContext,
   defaultProjectContext,
+  getActiveProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
   type ProjectContext,
 } from "../../src/stores/project-context";
 import { selectionStore } from "../../src/stores/selection";
@@ -48,6 +52,7 @@ function createTestContext(width: number, height: number) {
 
 describe("ProjectContext", () => {
   afterEach(() => {
+    restoreDefaultProjectContext();
     for (const context of createdContexts.splice(0)) {
       context.dispose();
     }
@@ -179,6 +184,37 @@ describe("ProjectContext", () => {
     expect(defaultProjectContext.project).toBe(projectStore);
     expect(defaultProjectContext.selection).toBe(selectionStore);
     expect(defaultProjectContext.viewport).toBe(viewportStore);
+  });
+
+  it("defaults active project context to the default context", () => {
+    expect(activeProjectContext.value).toBe(defaultProjectContext);
+    expect(getActiveProjectContext()).toBe(defaultProjectContext);
+  });
+
+  it("switches active project context and restores the default context", () => {
+    const contextA = createTestContext(100, 80);
+    const contextB = createTestContext(20, 20);
+    contextA.project.name.value = "Context A";
+    contextB.project.name.value = "Context B";
+
+    const previousContext = setActiveProjectContext(contextA);
+
+    expect(previousContext).toBe(defaultProjectContext);
+    expect(activeProjectContext.value).toBe(contextA);
+    expect(getActiveProjectContext()).toBe(contextA);
+    expect(getActiveProjectContext().project.name.value).toBe("Context A");
+
+    setActiveProjectContext(contextB);
+
+    expect(activeProjectContext.value).toBe(contextB);
+    expect(getActiveProjectContext()).toBe(contextB);
+    expect(getActiveProjectContext().project.name.value).toBe("Context B");
+    expect(contextA.project.name.value).toBe("Context A");
+
+    restoreDefaultProjectContext();
+
+    expect(activeProjectContext.value).toBe(defaultProjectContext);
+    expect(getActiveProjectContext()).toBe(defaultProjectContext);
   });
 
   it("owns palette sync startup and cleanup", () => {
