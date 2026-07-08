@@ -1,3 +1,4 @@
+import { signal } from "../core/signal";
 import { createAnimationStore } from "./animation/store";
 import { createColorStore } from "./colors-store";
 import { createDirtyRectStore } from "./dirty-rect-store";
@@ -147,3 +148,19 @@ export function createProjectContext(
 }
 
 export const defaultProjectContext = new ProjectContext();
+
+export const activeProjectContext = signal<ProjectContext>(defaultProjectContext);
+
+export function getActiveProjectContext(): ProjectContext {
+  return activeProjectContext.value;
+}
+
+export function setActiveProjectContext(context: ProjectContext): ProjectContext {
+  const previousContext = activeProjectContext.value;
+  activeProjectContext.value = context;
+  return previousContext;
+}
+
+export function restoreDefaultProjectContext(): ProjectContext {
+  return setActiveProjectContext(defaultProjectContext);
+}

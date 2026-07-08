@@ -101,8 +101,14 @@ and so on) are compatibility aliases for `defaultProjectContext`. This keeps
 the current one-project app behavior while making the default stores come from
 the same composition path as future project contexts.
 
-Until #114 moves panels and components to an active project context, these
-compatibility paths intentionally stay on `defaultProjectContext`:
+`activeProjectContext` is the workspace-level signal for the currently selected
+project context. It starts at `defaultProjectContext`, and the explicit
+`getActiveProjectContext()`, `setActiveProjectContext()`, and
+`restoreDefaultProjectContext()` helpers keep tests and later workspace code
+from assigning the signal in scattered places.
+
+Until later #114 slices move panels and components to `activeProjectContext`,
+these compatibility paths intentionally stay on `defaultProjectContext`:
 
 - direct store aliases in `project.ts`, `layers.ts`, `history.ts`,
   `history-highlight.ts`, `dirty-rect.ts`, `grid.ts`, `guides.ts`,
@@ -114,9 +120,8 @@ compatibility paths intentionally stay on `defaultProjectContext`:
 - `store-refs.ts` default helpers, which keep older singleton consumers wired
   while ProjectContext-created stores use context-local refs.
 
-Do not add active context switching here yet. Components and panels should keep
-using the default singleton exports until a dedicated active-context slice moves
-them.
+Components and panels should keep using the default singleton exports until a
+dedicated rebind slice moves them.
 
 ### App-global stores
 
