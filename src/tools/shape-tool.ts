@@ -1,5 +1,4 @@
 import { BaseTool, type ModifierKeys } from './base-tool';
-import { colorStore } from '../stores/colors';
 import { shapeSettings } from '../stores/tool-settings';
 import { constrainWithStickyAngles } from '../services/drawing/algorithms';
 
@@ -141,14 +140,14 @@ abstract class ShapeTool extends BaseTool {
 
   /** Get the stroke color (always foreground) */
   protected getStrokeColor(): string {
-    return colorStore.primaryColor.value;
+    return this.projectContext.colors.primaryColor.value;
   }
 
   /** Get the fill color based on settings (foreground or background) */
   protected getFillColor(): string {
     return shapeSettings.fillColor.value === "background"
-      ? colorStore.secondaryColor.value
-      : colorStore.primaryColor.value;
+      ? this.projectContext.colors.secondaryColor.value
+      : this.projectContext.colors.primaryColor.value;
   }
 
   protected setPixel(x: number, y: number) {

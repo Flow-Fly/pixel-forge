@@ -1,5 +1,4 @@
 import { BaseTool } from './base-tool';
-import { colorStore } from '../stores/colors';
 
 export class GradientTool extends BaseTool {
   name = 'gradient';
@@ -55,8 +54,8 @@ export class GradientTool extends BaseTool {
     
     // Create gradient
     const gradient = this.ctx.createLinearGradient(x1, y1, x2, y2);
-    gradient.addColorStop(0, colorStore.primaryColor.value);
-    gradient.addColorStop(1, colorStore.secondaryColor.value);
+    gradient.addColorStop(0, this.projectContext.colors.primaryColor.value);
+    gradient.addColorStop(1, this.projectContext.colors.secondaryColor.value);
 
     this.ctx.fillStyle = gradient;
     this.ctx.fillRect(0, 0, width, height);
