@@ -1,8 +1,7 @@
 import { html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { AnimatedCanvasOverlay } from './animated-canvas-overlay';
-import { historyHighlightStore } from '../../stores/history-highlight';
-import { viewportStore } from '../../stores/viewport';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 
 /**
  * Transparent canvas overlay that renders animated marching ants
@@ -26,20 +25,28 @@ export class PFMarchingAntsOverlay extends AnimatedCanvasOverlay {
       height: 100%;
     }
   `;
+  private context: ProjectContext = defaultProjectContext;
 
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   protected draw() {
     const ctx = this.prepareFrame();
     if (!ctx) return;
 
     // Get the bounds to highlight
-    const bounds = historyHighlightStore.highlightBounds.value;
+    const bounds = this.context.historyHighlight.highlightBounds.value;
     if (!bounds) return;
 
     // Convert canvas coordinates to screen coordinates
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    const zoom = this.context.viewport.zoom.value;
+    const panX = this.context.viewport.panX.value;
+    const panY = this.context.viewport.panY.value;
 
     const screen = this.toScreenRect(bounds, zoom, panX, panY);
 
@@ -49,10 +56,10 @@ export class PFMarchingAntsOverlay extends AnimatedCanvasOverlay {
 
   render() {
     // Access signals to trigger re-render when they change
-    void historyHighlightStore.highlightBounds.value;
-    void viewportStore.zoom.value;
-    void viewportStore.panX.value;
-    void viewportStore.panY.value;
+    void this.context.historyHighlight.highlightBounds.value;
+    void this.context.viewport.zoom.value;
+    void this.context.viewport.panX.value;
+    void this.context.viewport.panY.value;
 
     return html`<canvas></canvas>`;
   }

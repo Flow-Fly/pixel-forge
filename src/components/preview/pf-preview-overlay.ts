@@ -1,19 +1,16 @@
-import { html, css } from "lit";
-import { customElement, state, query } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { animationStore } from "../../stores/animation";
-import { layerStore } from "../../stores/layers";
-import { viewportStore } from "../../stores/viewport";
-import { projectStore } from "../../stores/project";
+import { html, css } from 'lit';
+import { customElement, state, query } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 
-type BackgroundType = "white" | "black" | "checker";
+type BackgroundType = 'white' | 'black' | 'checker';
 
-const STORAGE_KEY_POSITION = "pf-preview-position";
-const STORAGE_KEY_COLLAPSED = "pf-preview-collapsed";
-const STORAGE_KEY_BG = "pf-preview-bg";
-const STORAGE_KEY_SIZE = "pf-preview-size";
+const STORAGE_KEY_POSITION = 'pf-preview-position';
+const STORAGE_KEY_COLLAPSED = 'pf-preview-collapsed';
+const STORAGE_KEY_BG = 'pf-preview-bg';
+const STORAGE_KEY_SIZE = 'pf-preview-size';
 
-@customElement("pf-preview-overlay")
+@customElement('pf-preview-overlay')
 export class PFPreviewOverlay extends BaseComponent {
   static styles = css`
     :host {
@@ -79,7 +76,9 @@ export class PFPreviewOverlay extends BaseComponent {
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      transition: max-height 0.15s ease, opacity 0.15s ease;
+      transition:
+        max-height 0.15s ease,
+        opacity 0.15s ease;
     }
 
     .content.collapsed {
@@ -104,7 +103,9 @@ export class PFPreviewOverlay extends BaseComponent {
       background-image: var(--preview-bg-image, none);
       background-position: var(--preview-bg-position, 0 0);
       background-size: var(--preview-bg-size, auto);
-      box-shadow: 0 0 0 1px var(--pf-color-border), 0 12px 30px rgba(0, 0, 0, 0.36);
+      box-shadow:
+        0 0 0 1px var(--pf-color-border),
+        0 12px 30px rgba(0, 0, 0, 0.36);
     }
 
     canvas {
@@ -123,12 +124,14 @@ export class PFPreviewOverlay extends BaseComponent {
 
     .preview-canvas-wrapper.bg-checker {
       --preview-bg-color: var(--pf-checker-dark-color);
-      --preview-bg-image: linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+      --preview-bg-image:
+        linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
         linear-gradient(-45deg, var(--pf-checker-light-color) 25%, transparent 25%),
         linear-gradient(45deg, transparent 75%, var(--pf-checker-light-color) 75%),
         linear-gradient(-45deg, transparent 75%, var(--pf-checker-light-color) 75%);
       --preview-bg-size: calc(var(--pf-checker-tile-size) * 2) calc(var(--pf-checker-tile-size) * 2);
-      --preview-bg-position: 0 0, 0 var(--pf-checker-tile-size),
+      --preview-bg-position:
+        0 0, 0 var(--pf-checker-tile-size),
         var(--pf-checker-tile-size) calc(-1 * var(--pf-checker-tile-size)),
         calc(-1 * var(--pf-checker-tile-size)) 0;
     }
@@ -182,12 +185,17 @@ export class PFPreviewOverlay extends BaseComponent {
     }
 
     .bg-btn.checker {
-      background-image: linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
+      background-image:
+        linear-gradient(45deg, var(--pf-checker-light-color) 25%, transparent 25%),
         linear-gradient(-45deg, var(--pf-checker-light-color) 25%, transparent 25%),
         linear-gradient(45deg, transparent 75%, var(--pf-checker-light-color) 75%),
         linear-gradient(-45deg, transparent 75%, var(--pf-checker-light-color) 75%);
       background-size: 6px 6px;
-      background-position: 0 0, 0 3px, 3px -3px, -3px 0px;
+      background-position:
+        0 0,
+        0 3px,
+        3px -3px,
+        -3px 0px;
       background-color: var(--pf-checker-dark-color);
     }
 
@@ -224,7 +232,7 @@ export class PFPreviewOverlay extends BaseComponent {
 
     .resize-handle::before,
     .resize-handle::after {
-      content: "";
+      content: '';
       position: absolute;
       background: var(--pf-color-text-muted);
     }
@@ -248,10 +256,10 @@ export class PFPreviewOverlay extends BaseComponent {
     }
   `;
 
-  @query("canvas") previewCanvas!: HTMLCanvasElement;
+  @query('canvas') previewCanvas!: HTMLCanvasElement;
 
   @state() private collapsed = false;
-  @state() private bgType: BackgroundType = "checker";
+  @state() private bgType: BackgroundType = 'checker';
   @state() private posX = 0;
   @state() private posY = 0;
   @state() private isDragging = false;
@@ -265,6 +273,7 @@ export class PFPreviewOverlay extends BaseComponent {
 
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number = 0;
+  private context: ProjectContext = defaultProjectContext;
 
   // Preview sizing constraints
   private readonly MAX_PREVIEW_SIZE = 300; // Max user-resizable size
@@ -272,6 +281,10 @@ export class PFPreviewOverlay extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
     this.loadState();
     this.startAnimationLoop();
   }
@@ -279,15 +292,15 @@ export class PFPreviewOverlay extends BaseComponent {
   disconnectedCallback() {
     super.disconnectedCallback();
     cancelAnimationFrame(this.animationFrameId);
-    window.removeEventListener("mousemove", this.handleMouseMove);
-    window.removeEventListener("mouseup", this.handleMouseUp);
-    window.removeEventListener("mousemove", this.handleResizeMouseMove);
-    window.removeEventListener("mouseup", this.handleResizeMouseUp);
+    window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('mouseup', this.handleMouseUp);
+    window.removeEventListener('mousemove', this.handleResizeMouseMove);
+    window.removeEventListener('mouseup', this.handleResizeMouseUp);
   }
 
   firstUpdated() {
     if (this.previewCanvas) {
-      this.ctx = this.previewCanvas.getContext("2d");
+      this.ctx = this.previewCanvas.getContext('2d');
     }
     // Set default position if not loaded
     if (this.posX === 0 && this.posY === 0) {
@@ -310,11 +323,11 @@ export class PFPreviewOverlay extends BaseComponent {
 
     const savedCollapsed = localStorage.getItem(STORAGE_KEY_COLLAPSED);
     if (savedCollapsed !== null) {
-      this.collapsed = savedCollapsed === "true";
+      this.collapsed = savedCollapsed === 'true';
     }
 
     const savedBg = localStorage.getItem(STORAGE_KEY_BG) as BackgroundType;
-    if (savedBg && ["white", "black", "checker"].includes(savedBg)) {
+    if (savedBg && ['white', 'black', 'checker'].includes(savedBg)) {
       this.bgType = savedBg;
     }
 
@@ -328,10 +341,7 @@ export class PFPreviewOverlay extends BaseComponent {
   }
 
   private savePosition() {
-    localStorage.setItem(
-      STORAGE_KEY_POSITION,
-      JSON.stringify({ x: this.posX, y: this.posY })
-    );
+    localStorage.setItem(STORAGE_KEY_POSITION, JSON.stringify({ x: this.posX, y: this.posY }));
   }
 
   private saveCollapsed() {
@@ -358,14 +368,14 @@ export class PFPreviewOverlay extends BaseComponent {
 
   private handleHeaderMouseDown = (e: MouseEvent) => {
     // Don't start drag if clicking on chevron
-    if ((e.target as HTMLElement).classList.contains("chevron")) return;
+    if ((e.target as HTMLElement).classList.contains('chevron')) return;
 
     this.isDragging = true;
     this.dragOffsetX = e.clientX - this.posX;
     this.dragOffsetY = e.clientY - this.posY;
 
-    window.addEventListener("mousemove", this.handleMouseMove);
-    window.addEventListener("mouseup", this.handleMouseUp);
+    window.addEventListener('mousemove', this.handleMouseMove);
+    window.addEventListener('mouseup', this.handleMouseUp);
   };
 
   private handleMouseMove = (e: MouseEvent) => {
@@ -387,8 +397,8 @@ export class PFPreviewOverlay extends BaseComponent {
   private handleMouseUp = () => {
     this.isDragging = false;
     this.savePosition();
-    window.removeEventListener("mousemove", this.handleMouseMove);
-    window.removeEventListener("mouseup", this.handleMouseUp);
+    window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('mouseup', this.handleMouseUp);
   };
 
   private handleResizeMouseDown = (e: MouseEvent) => {
@@ -399,8 +409,8 @@ export class PFPreviewOverlay extends BaseComponent {
     this.resizeStartY = e.clientY;
     this.resizeStartSize = this.previewSize;
 
-    window.addEventListener("mousemove", this.handleResizeMouseMove);
-    window.addEventListener("mouseup", this.handleResizeMouseUp);
+    window.addEventListener('mousemove', this.handleResizeMouseMove);
+    window.addEventListener('mouseup', this.handleResizeMouseUp);
   };
 
   private handleResizeMouseMove = (e: MouseEvent) => {
@@ -422,8 +432,8 @@ export class PFPreviewOverlay extends BaseComponent {
   private handleResizeMouseUp = () => {
     this.isResizing = false;
     this.saveSize();
-    window.removeEventListener("mousemove", this.handleResizeMouseMove);
-    window.removeEventListener("mouseup", this.handleResizeMouseUp);
+    window.removeEventListener('mousemove', this.handleResizeMouseMove);
+    window.removeEventListener('mouseup', this.handleResizeMouseUp);
   };
 
   private handlePreviewClick(e: MouseEvent) {
@@ -439,16 +449,16 @@ export class PFPreviewOverlay extends BaseComponent {
     const canvasY = clickY / previewScale;
 
     // Center viewport on this point
-    viewportStore.centerOn(canvasX, canvasY);
+    this.context.viewport.centerOn(canvasX, canvasY);
   }
 
   private togglePlay() {
     // Delegate to store's playback engine
-    animationStore.togglePlayback();
+    this.context.animation.togglePlayback();
   }
 
   private startAnimationLoop() {
-    // This loop only handles rendering - playback is managed by animationStore
+    // This loop only handles rendering; playback state lives in the active context.
     const loop = () => {
       this.renderPreview();
       this.animationFrameId = requestAnimationFrame(loop);
@@ -459,9 +469,10 @@ export class PFPreviewOverlay extends BaseComponent {
   private renderPreview() {
     if (!this.ctx || !this.previewCanvas) return;
 
-    const currentFrameId = animationStore.currentFrameId.value;
-    const layers = layerStore.layers.value;
-    const cels = animationStore.cels.value;
+    const { animation, layers } = this.context;
+    const currentFrameId = animation.currentFrameId.value;
+    const visibleLayers = layers.layers.value;
+    const cels = animation.cels.value;
     const canvas = this.previewCanvas;
     const previewScale = this.getPreviewScale();
 
@@ -469,7 +480,7 @@ export class PFPreviewOverlay extends BaseComponent {
     this.ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Render each visible layer
-    for (const layer of layers) {
+    for (const layer of visibleLayers) {
       if (!layer.visible) continue;
 
       const key = `${layer.id}:${currentFrameId}`;
@@ -483,7 +494,9 @@ export class PFPreviewOverlay extends BaseComponent {
         this.ctx.globalAlpha = layerOpacity * celOpacity;
 
         this.ctx.globalCompositeOperation =
-          layer.blendMode === 'normal' ? 'source-over' : layer.blendMode as GlobalCompositeOperation;
+          layer.blendMode === 'normal'
+            ? 'source-over'
+            : (layer.blendMode as GlobalCompositeOperation);
 
         if (previewScale >= 1) {
           // Scaling UP: draw at native resolution, CSS handles pixelated scaling
@@ -504,8 +517,8 @@ export class PFPreviewOverlay extends BaseComponent {
    * Calculate the preview scale to fit the canvas within the user-defined previewSize.
    */
   private getPreviewScale(): number {
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
+    const canvasW = this.context.project.width.value;
+    const canvasH = this.context.project.height.value;
     const maxDim = Math.max(canvasW, canvasH);
 
     // Scale to fit within user-defined preview size
@@ -513,13 +526,14 @@ export class PFPreviewOverlay extends BaseComponent {
   }
 
   private getViewportIndicatorStyle() {
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-    const containerW = viewportStore.containerWidth.value;
-    const containerH = viewportStore.containerHeight.value;
+    const { project, viewport } = this.context;
+    const canvasW = project.width.value;
+    const canvasH = project.height.value;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
+    const containerW = viewport.containerWidth.value;
+    const containerH = viewport.containerHeight.value;
 
     if (containerW === 0 || containerH === 0) return null;
 
@@ -556,9 +570,10 @@ export class PFPreviewOverlay extends BaseComponent {
   }
 
   render() {
-    const isPlaying = animationStore.isPlaying.value;
-    const canvasW = projectStore.width.value;
-    const canvasH = projectStore.height.value;
+    const { animation, project } = this.context;
+    const isPlaying = animation.isPlaying.value;
+    const canvasW = project.width.value;
+    const canvasH = project.height.value;
     const previewScale = this.getPreviewScale();
     const displayW = Math.round(canvasW * previewScale);
     const displayH = Math.round(canvasH * previewScale);
@@ -571,24 +586,17 @@ export class PFPreviewOverlay extends BaseComponent {
     const viewportStyle = this.getViewportIndicatorStyle();
 
     return html`
-      <div
-        class="container"
-        style="transform: translate(${this.posX}px, ${this.posY}px)"
-      >
+      <div class="container" style="transform: translate(${this.posX}px, ${this.posY}px)">
         <div class="header" @mousedown=${this.handleHeaderMouseDown}>
-          <span
-            class="chevron ${this.collapsed ? "collapsed" : ""}"
-            @click=${this.toggleCollapse}
+          <span class="chevron ${this.collapsed ? 'collapsed' : ''}" @click=${this.toggleCollapse}
             >▼</span
           >
           <span class="header-title">Preview</span>
         </div>
 
         <div
-          class="content ${this.collapsed ? "collapsed" : ""}"
-          style="${!this.collapsed
-            ? `max-height: ${this.previewSize + 100}px`
-            : ""}"
+          class="content ${this.collapsed ? 'collapsed' : ''}"
+          style="${!this.collapsed ? `max-height: ${this.previewSize + 100}px` : ''}"
         >
           <div class="preview-area" @click=${this.handlePreviewClick}>
             <div class="preview-canvas-wrapper bg-${this.bgType}">
@@ -597,40 +605,38 @@ export class PFPreviewOverlay extends BaseComponent {
                 height="${actualCanvasH}"
                 style="width: ${displayW}px; height: ${displayH}px;"
               ></canvas>
-              ${viewportStyle
-                ? html`
-                    <div
-                      class="viewport-indicator"
-                      style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
-                    ></div>
-                  `
-                : ""}
+              ${
+                viewportStyle
+                  ? html`
+                      <div
+                        class="viewport-indicator"
+                        style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
+                      ></div>
+                    `
+                  : ''
+              }
             </div>
           </div>
 
           <div class="controls">
             <div class="bg-selector">
               <button
-                class="bg-btn white ${this.bgType === "white" ? "active" : ""}"
-                @click=${() => this.setBgType("white")}
+                class="bg-btn white ${this.bgType === 'white' ? 'active' : ''}"
+                @click=${() => this.setBgType('white')}
                 title="White background"
               ></button>
               <button
-                class="bg-btn black ${this.bgType === "black" ? "active" : ""}"
-                @click=${() => this.setBgType("black")}
+                class="bg-btn black ${this.bgType === 'black' ? 'active' : ''}"
+                @click=${() => this.setBgType('black')}
                 title="Black background"
               ></button>
               <button
-                class="bg-btn checker ${this.bgType === "checker"
-                  ? "active"
-                  : ""}"
-                @click=${() => this.setBgType("checker")}
+                class="bg-btn checker ${this.bgType === 'checker' ? 'active' : ''}"
+                @click=${() => this.setBgType('checker')}
                 title="Transparent (checker)"
               ></button>
             </div>
-            <button class="play-btn" @click=${this.togglePlay}>
-              ${isPlaying ? "⏸" : "▶"}
-            </button>
+            <button class="play-btn" @click=${this.togglePlay}>${isPlaying ? '⏸' : '▶'}</button>
           </div>
         </div>
         <div
@@ -645,6 +651,6 @@ export class PFPreviewOverlay extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "pf-preview-overlay": PFPreviewOverlay;
+    'pf-preview-overlay': PFPreviewOverlay;
   }
 }

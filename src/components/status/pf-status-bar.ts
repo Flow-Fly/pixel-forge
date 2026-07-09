@@ -1,10 +1,9 @@
-import { html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { viewportStore } from "../../stores/viewport";
-import { projectStore } from "../../stores/project";
+import { html, css } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 
-@customElement("pf-status-bar")
+@customElement('pf-status-bar')
 export class PFStatusBar extends BaseComponent {
   static styles = css`
     :host {
@@ -44,35 +43,44 @@ export class PFStatusBar extends BaseComponent {
   `;
 
   @property({ type: Object }) cursor = { x: 0, y: 0 };
+  private context: ProjectContext = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   private formatLastSaved(timestamp: number | null): string {
-    if (!timestamp) return "";
+    if (!timestamp) return '';
 
     const now = Date.now();
     const diff = now - timestamp;
 
-    if (diff < 5000) return "Saved just now";
+    if (diff < 5000) return 'Saved just now';
     if (diff < 60000) return `Saved ${Math.floor(diff / 1000)}s ago`;
     if (diff < 3600000) return `Saved ${Math.floor(diff / 60000)}m ago`;
 
     const date = new Date(timestamp);
-    return `Saved at ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    return `Saved at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }
 
   render() {
-    const zoomPercent = viewportStore.formattedZoom();
-    const lastSaved = projectStore.lastSaved.value;
+    const zoomPercent = this.context.viewport.formattedZoom();
+    const lastSaved = this.context.project.lastSaved.value;
 
     return html`
       <div class="left">
         <span>${this.cursor.x + 1}, ${this.cursor.y + 1}</span>
       </div>
       <div class="center">
-        ${lastSaved
-          ? html`<span class="saved-indicator"
-              >${this.formatLastSaved(lastSaved)}</span
-            >`
-          : html`<span>make small light.</span>`}
+        ${
+          lastSaved
+            ? html`<span class="saved-indicator">${this.formatLastSaved(lastSaved)}</span>`
+            : html`<span>make small light.</span>`
+        }
       </div>
       <div class="right">
         <span>${zoomPercent}%</span>

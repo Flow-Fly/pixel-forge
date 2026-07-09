@@ -1,8 +1,10 @@
 import { type Command } from '../../stores/history';
-import { selectionStore } from '../../stores/selection';
+import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { clearCanvasSelection, fillCanvasSelection } from './pixels';
+
+type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
 
 /**
  * Command for deleting selected pixels (without moving).
@@ -19,16 +21,19 @@ export class DeleteSelectionCommand implements Command {
   private shape: SelectionShape;
   private deletedImageData: ImageData;
   private mask?: Uint8Array;
+  private readonly context: SelectionCommandContext;
 
   constructor(
     canvas: HTMLCanvasElement,
     bounds: Rect,
     shape: SelectionShape,
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    context: SelectionCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
     this.canvas = canvas;
+    this.context = context;
     this.bounds = { ...bounds };
     this.shape = shape;
     this.mask = mask;
@@ -42,7 +47,7 @@ export class DeleteSelectionCommand implements Command {
     const ctx = this.canvas.getContext('2d')!;
     clearCanvasSelection(ctx, this.bounds, this.shape, this.mask);
 
-    selectionStore.clear();
+    this.context.selection.clear();
   }
 
   undo() {
@@ -50,7 +55,7 @@ export class DeleteSelectionCommand implements Command {
     ctx.putImageData(this.deletedImageData, this.bounds.x, this.bounds.y);
 
     // Restore selection
-    selectionStore.setSelected(this.bounds, this.shape, this.mask);
+    this.context.selection.setSelected(this.bounds, this.shape, this.mask);
   }
 }
 
@@ -70,17 +75,20 @@ export class FillSelectionCommand implements Command {
   private fillColor: string;
   private previousImageData: ImageData;
   private mask?: Uint8Array;
+  private readonly context: SelectionCommandContext;
 
   constructor(
     canvas: HTMLCanvasElement,
     bounds: Rect,
     shape: SelectionShape,
     fillColor: string,
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    context: SelectionCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
     this.canvas = canvas;
+    this.context = context;
     this.bounds = { ...bounds };
     this.shape = shape;
     this.fillColor = fillColor;
@@ -94,7 +102,7 @@ export class FillSelectionCommand implements Command {
   execute() {
     const ctx = this.canvas.getContext('2d')!;
     fillCanvasSelection(ctx, this.bounds, this.fillColor, this.shape, this.mask);
-    selectionStore.clear();
+    this.context.selection.clear();
   }
 
   undo() {
@@ -102,6 +110,6 @@ export class FillSelectionCommand implements Command {
     ctx.putImageData(this.previousImageData, this.bounds.x, this.bounds.y);
 
     // Restore selection
-    selectionStore.setSelected(this.bounds, this.shape, this.mask);
+    this.context.selection.setSelected(this.bounds, this.shape, this.mask);
   }
 }

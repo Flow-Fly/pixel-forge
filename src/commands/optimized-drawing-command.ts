@@ -1,9 +1,9 @@
-import type { Command } from "./index";
-import type { Rect } from "../types/geometry";
-import { layerStore } from "../stores/layers";
-import { dirtyRectStore } from "../stores/dirty-rect";
-import { animationStore } from "../stores/animation";
-import { writeIndexRegion } from "../utils/buffer-region";
+import type { Command } from './index';
+import type { Rect } from '../types/geometry';
+import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
+import { writeIndexRegion } from '../utils/buffer-region';
+
+type DrawingCommandContext = Pick<ProjectContext, 'animation' | 'dirtyRect' | 'layers'>;
 
 /**
  * Memory-efficient drawing command that stores only the dirty region.
@@ -26,6 +26,7 @@ export class OptimizedDrawingCommand implements Command {
   private previousIndexData: Uint8Array | null = null;
   private newIndexData: Uint8Array | null = null;
   private canvasWidth: number = 0;
+  private readonly context: DrawingCommandContext;
 
   // Estimated memory usage in bytes (for history limit tracking)
   readonly memorySize: number;
@@ -49,19 +50,20 @@ export class OptimizedDrawingCommand implements Command {
     bounds: Rect,
     previousData: Uint8ClampedArray,
     newData: Uint8ClampedArray,
-    name: string = "Drawing",
+    name: string = 'Drawing',
     indexBufferData?: {
       frameId: string;
       canvasWidth: number;
       previousIndexData: Uint8Array;
       newIndexData: Uint8Array;
-    }
+    },
+    context: DrawingCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.name = name;
+    this.context = context;
     this.layerId = layerId;
-    this.frameId =
-      indexBufferData?.frameId ?? animationStore.currentFrameId.value;
+    this.frameId = indexBufferData?.frameId ?? this.context.animation.currentFrameId.value;
     this.bounds = { ...bounds }; // Copy to avoid reference issues
     this.previousData = previousData;
     this.newData = newData;
@@ -77,18 +79,16 @@ export class OptimizedDrawingCommand implements Command {
     // Calculate memory: 2 RGBA arrays + 2 index arrays (if present) + object overhead
     let indexMemory = 0;
     if (this.previousIndexData && this.newIndexData) {
-      indexMemory =
-        this.previousIndexData.byteLength + this.newIndexData.byteLength;
+      indexMemory = this.previousIndexData.byteLength + this.newIndexData.byteLength;
     }
-    this.memorySize =
-      previousData.byteLength + newData.byteLength + indexMemory + 200;
+    this.memorySize = previousData.byteLength + newData.byteLength + indexMemory + 200;
   }
 
   execute(): void {
-    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
+    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
     if (!layer?.canvas) return;
 
-    const ctx = layer.canvas.getContext("2d");
+    const ctx = layer.canvas.getContext('2d');
     if (!ctx) return;
 
     // Create ImageData from stored array
@@ -105,14 +105,14 @@ export class OptimizedDrawingCommand implements Command {
     }
 
     // Mark dirty for re-render
-    dirtyRectStore.markDirty(this.bounds);
+    this.context.dirtyRect.markDirty(this.bounds);
   }
 
   undo(): void {
-    const layer = layerStore.layers.value.find((l) => l.id === this.layerId);
+    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
     if (!layer?.canvas) return;
 
-    const ctx = layer.canvas.getContext("2d");
+    const ctx = layer.canvas.getContext('2d');
     if (!ctx) return;
 
     // Create ImageData from stored array
@@ -129,20 +129,16 @@ export class OptimizedDrawingCommand implements Command {
     }
 
     // Mark dirty for re-render
-    dirtyRectStore.markDirty(this.bounds);
+    this.context.dirtyRect.markDirty(this.bounds);
   }
 
   /**
    * Restore a region of the index buffer from stored data.
    */
   private restoreIndexBufferRegion(indexData: Uint8Array): void {
-    const indexBuffer = animationStore.getCelIndexBuffer(
-      this.layerId,
-      this.frameId
-    );
+    const indexBuffer = this.context.animation.getCelIndexBuffer(this.layerId, this.frameId);
     if (!indexBuffer || this.canvasWidth === 0) return;
 
     writeIndexRegion(indexBuffer, this.canvasWidth, this.bounds, indexData);
   }
 }
-

@@ -1,28 +1,22 @@
-import { html, css } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { toolStore } from "../../stores/tools";
-import { selectionStore } from "../../stores/selection";
-import { getSelectedLayerSelection } from "../../stores/selection/selected-layer";
-import { layerStore } from "../../stores/layers";
-import { animationStore } from "../../stores/animation";
-import { historyStore } from "../../stores/history";
-import { getToolMeta } from "../../tools/tool-registry";
-import {
-  LinkCelsCommand,
-  UnlinkCelsCommand,
-} from "../../commands/animation-commands";
-import { SetCelOpacityCommand } from "../../commands/cel-opacity-command";
-import { FlipSelectionCommand } from "../../commands/selection-commands";
-import type { ToolOption } from "../../types/tool-meta";
-import "./options/pf-option-slider";
-import "./options/pf-option-checkbox";
-import "./options/pf-option-select";
-import "./pf-alternative-tools";
-import "../color/pf-lightness-bar";
-import "../ui/pf-button";
+import { html, css } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { toolStore } from '../../stores/tools';
+import { getSelectedLayerSelection } from '../../stores/selection/selected-layer';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { getToolMeta } from '../../tools/tool-registry';
+import { LinkCelsCommand, UnlinkCelsCommand } from '../../commands/animation-commands';
+import { SetCelOpacityCommand } from '../../commands/cel-opacity-command';
+import { FlipSelectionCommand } from '../../commands/selection-commands';
+import type { ToolOption } from '../../types/tool-meta';
+import './options/pf-option-slider';
+import './options/pf-option-checkbox';
+import './options/pf-option-select';
+import './pf-alternative-tools';
+import '../color/pf-lightness-bar';
+import '../ui/pf-button';
 
-@customElement("pf-context-bar")
+@customElement('pf-context-bar')
 export class PFContextBar extends BaseComponent {
   static styles = css`
     :host {
@@ -32,8 +26,7 @@ export class PFContextBar extends BaseComponent {
       padding: 0 18px;
       gap: 12px;
       font-size: 12px;
-      background:
-        linear-gradient(180deg, rgba(15, 18, 24, 0.86), rgba(10, 12, 17, 0.84));
+      background: linear-gradient(180deg, rgba(15, 18, 24, 0.86), rgba(10, 12, 17, 0.84));
       border-bottom: 1px solid var(--pf-color-border);
       box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025) inset;
       color: var(--pf-color-text-secondary);
@@ -101,7 +94,7 @@ export class PFContextBar extends BaseComponent {
       text-transform: uppercase;
     }
 
-    .angle-control input[type="range"] {
+    .angle-control input[type='range'] {
       width: 80px;
       height: 4px;
       -webkit-appearance: none;
@@ -111,7 +104,7 @@ export class PFContextBar extends BaseComponent {
       cursor: pointer;
     }
 
-    .angle-control input[type="range"]::-webkit-slider-thumb {
+    .angle-control input[type='range']::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
       width: 12px;
@@ -121,7 +114,7 @@ export class PFContextBar extends BaseComponent {
       cursor: pointer;
     }
 
-    .angle-control input[type="number"] {
+    .angle-control input[type='number'] {
       width: 50px;
       padding: 2px 4px;
       border: 1px solid var(--pf-color-border);
@@ -210,23 +203,36 @@ export class PFContextBar extends BaseComponent {
   private celScrubStartX = 0;
   private celScrubStartOpacity = 0;
   private celScrubBeforeOpacities: Map<string, number> = new Map();
+  private celScrubContext: ProjectContext | null = null;
+  private celScrubSelectedKeys: string[] = [];
+  private context: ProjectContext = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("mousemove", this._handleCelScrubMove);
-    window.removeEventListener("mouseup", this._handleCelScrubEnd);
+    window.removeEventListener('mousemove', this._handleCelScrubMove);
+    window.removeEventListener('mouseup', this._handleCelScrubEnd);
   }
 
   render() {
+    const context = this.context;
+
     // Check if we're in transforming state - show transform controls instead
-    const selectionState = selectionStore.state.value;
-    if (selectionState.type === "transforming") {
-      return this._renderTransformControls();
+    const selectionState = context.selection.state.value;
+    if (selectionState.type === 'transforming') {
+      return this._renderTransformControls(context);
     }
 
     // Check if we have an active selection - show selection controls
-    if (selectionState.type === "selected") {
-      return this._renderSelectionControls(selectionState);
+    if (selectionState.type === 'selected') {
+      return this._renderSelectionControls(selectionState, context);
     }
 
     const tool = toolStore.activeTool.value;
@@ -241,7 +247,7 @@ export class PFContextBar extends BaseComponent {
     }
 
     // Check for selected cels
-    const selectedCelKeys = animationStore.selectedCelKeys.value;
+    const selectedCelKeys = context.animation.selectedCelKeys.value;
     const hasSelectedCels = selectedCelKeys.size > 0;
 
     return html`
@@ -250,18 +256,18 @@ export class PFContextBar extends BaseComponent {
 
       <div class="options-section">${this._renderOptions(meta.options)}</div>
       <!--
-      ${meta.alternatives.length > 0
-        ? html`
-            <div class="separator"></div>
-            <div class="alternatives-section">
-              <pf-alternative-tools
-                .alternatives=${meta.alternatives}
-              ></pf-alternative-tools>
-            </div>
-          `
-        : ""}
+      ${
+        meta.alternatives.length > 0
+          ? html`
+              <div class="separator"></div>
+              <div class="alternatives-section">
+                <pf-alternative-tools .alternatives=${meta.alternatives}></pf-alternative-tools>
+              </div>
+            `
+          : ''
+      }
     -->
-      ${hasSelectedCels ? this._renderCelControls(selectedCelKeys) : ""}
+      ${hasSelectedCels ? this._renderCelControls(selectedCelKeys, context) : ''}
 
       <div class="separator"></div>
       <div class="lightness-section">
@@ -270,10 +276,11 @@ export class PFContextBar extends BaseComponent {
     `;
   }
 
-  private _renderTransformControls() {
-    const rotation = selectionStore.rotation;
-    const scale = selectionStore.scale;
-    const transformState = selectionStore.getTransformState();
+  private _renderTransformControls(context: ProjectContext) {
+    const selection = context.selection;
+    const rotation = selection.rotation;
+    const scale = selection.scale;
+    const transformState = selection.getTransformState();
 
     // Calculate current dimensions
     const originalWidth = transformState?.originalBounds.width ?? 0;
@@ -293,20 +300,20 @@ export class PFContextBar extends BaseComponent {
             type="number"
             min="1"
             .value=${String(currentWidth)}
-            @input=${this._handleWidthInput}
-            @keydown=${this._handleTransformKeydown}
+            @input=${(e: Event) => this._handleWidthInput(e, context)}
+            @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
             style="width: 45px;"
           />
           <span style="color: var(--pf-color-text-muted); font-size: 11px;">px</span>
         </div>
 
         <button
-          class="toggle-btn ${this.lockAspectRatio ? "active" : ""}"
+          class="toggle-btn ${this.lockAspectRatio ? 'active' : ''}"
           @click=${this._toggleAspectRatioLock}
-          title="${this.lockAspectRatio ? "Unlock aspect ratio" : "Lock aspect ratio"}"
+          title="${this.lockAspectRatio ? 'Unlock aspect ratio' : 'Lock aspect ratio'}"
           style="padding: 2px 6px; font-size: 10px;"
         >
-          ${this.lockAspectRatio ? "🔗" : "🔓"}
+          ${this.lockAspectRatio ? '🔗' : '🔓'}
         </button>
 
         <div class="angle-control">
@@ -315,8 +322,8 @@ export class PFContextBar extends BaseComponent {
             type="number"
             min="1"
             .value=${String(currentHeight)}
-            @input=${this._handleHeightInput}
-            @keydown=${this._handleTransformKeydown}
+            @input=${(e: Event) => this._handleHeightInput(e, context)}
+            @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
             style="width: 45px;"
           />
           <span style="color: var(--pf-color-text-muted); font-size: 11px;">px</span>
@@ -337,33 +344,31 @@ export class PFContextBar extends BaseComponent {
             max="360"
             step="1"
             .value=${String(rotation)}
-            @input=${this._handleAngleSlider}
+            @input=${(e: Event) => this._handleAngleSlider(e, context)}
           />
           <input
             type="number"
             min="0"
             max="360"
             .value=${String(Math.round(rotation))}
-            @input=${this._handleAngleInput}
-            @keydown=${this._handleTransformKeydown}
+            @input=${(e: Event) => this._handleAngleInput(e, context)}
+            @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
           />
-          <span style="color: var(--pf-color-text-muted); font-size: 11px;"
-            >°</span
-          >
+          <span style="color: var(--pf-color-text-muted); font-size: 11px;">°</span>
         </div>
 
         <div class="separator"></div>
 
         <pf-button
           variant="primary"
-          @click=${this._commitTransform}
+          @click=${() => this._commitTransform(context)}
           ?disabled=${this.isCommitting}
           title="Apply transform (Enter)"
         >
-          ${this.isCommitting ? "Applying..." : "Apply"}
+          ${this.isCommitting ? 'Applying...' : 'Apply'}
         </pf-button>
         <pf-button
-          @click=${this._cancelTransform}
+          @click=${() => this._cancelTransform(context)}
           ?disabled=${this.isCommitting}
           title="Cancel transform (Escape)"
         >
@@ -373,35 +378,37 @@ export class PFContextBar extends BaseComponent {
     `;
   }
 
-  private _handleWidthInput(e: Event) {
+  private _handleWidthInput(e: Event, context: ProjectContext) {
+    const selection = context.selection;
     const input = e.target as HTMLInputElement;
     const newWidth = parseInt(input.value) || 1;
-    const transformState = selectionStore.getTransformState();
+    const transformState = selection.getTransformState();
     if (!transformState) return;
 
     const originalWidth = transformState.originalBounds.width;
     const newScaleX = newWidth / originalWidth;
 
     if (this.lockAspectRatio) {
-      selectionStore.updateScale(newScaleX, newScaleX);
+      selection.updateScale(newScaleX, newScaleX);
     } else {
-      selectionStore.updateScale(newScaleX, selectionStore.scale.y);
+      selection.updateScale(newScaleX, selection.scale.y);
     }
   }
 
-  private _handleHeightInput(e: Event) {
+  private _handleHeightInput(e: Event, context: ProjectContext) {
+    const selection = context.selection;
     const input = e.target as HTMLInputElement;
     const newHeight = parseInt(input.value) || 1;
-    const transformState = selectionStore.getTransformState();
+    const transformState = selection.getTransformState();
     if (!transformState) return;
 
     const originalHeight = transformState.originalBounds.height;
     const newScaleY = newHeight / originalHeight;
 
     if (this.lockAspectRatio) {
-      selectionStore.updateScale(newScaleY, newScaleY);
+      selection.updateScale(newScaleY, newScaleY);
     } else {
-      selectionStore.updateScale(selectionStore.scale.x, newScaleY);
+      selection.updateScale(selection.scale.x, newScaleY);
     }
   }
 
@@ -409,51 +416,55 @@ export class PFContextBar extends BaseComponent {
     this.lockAspectRatio = !this.lockAspectRatio;
   }
 
-  private _handleTransformKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter") {
+  private _handleTransformKeydown(e: KeyboardEvent, context: ProjectContext) {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      this._commitTransform();
-    } else if (e.key === "Escape") {
+      this._commitTransform(context);
+    } else if (e.key === 'Escape') {
       e.preventDefault();
-      this._cancelTransform();
+      this._cancelTransform(context);
     }
   }
 
-  private _handleAngleSlider(e: Event) {
+  private _handleAngleSlider(e: Event, context: ProjectContext) {
     const input = e.target as HTMLInputElement;
     const angle = parseFloat(input.value);
-    selectionStore.updateRotation(angle);
+    context.selection.updateRotation(angle);
   }
 
-  private _handleAngleInput(e: Event) {
+  private _handleAngleInput(e: Event, context: ProjectContext) {
     const input = e.target as HTMLInputElement;
     let angle = parseFloat(input.value) || 0;
     // Clamp to valid range
     angle = Math.max(0, Math.min(360, angle));
-    selectionStore.updateRotation(angle);
+    context.selection.updateRotation(angle);
   }
 
-  private _commitTransform() {
+  private _commitTransform(context: ProjectContext) {
     if (this.isCommitting) return;
 
     // Dispatch event for viewport to handle the commit
     // The viewport has access to the canvas and can perform the rotation
     this.dispatchEvent(
-      new CustomEvent("commit-transform", {
+      new CustomEvent('commit-transform', {
         bubbles: true,
         composed: true,
+        detail: { context },
       })
     );
   }
 
-  private _cancelTransform() {
+  private _cancelTransform(context: ProjectContext) {
     if (this.isCommitting) return;
-    selectionStore.cancelTransform();
+    context.selection.cancelTransform();
   }
 
-  private _renderSelectionControls(selectionState: {
-    bounds: { width: number; height: number };
-  }) {
+  private _renderSelectionControls(
+    selectionState: {
+      bounds: { width: number; height: number };
+    },
+    context: ProjectContext
+  ) {
     const bounds = selectionState.bounds;
 
     return html`
@@ -469,33 +480,33 @@ export class PFContextBar extends BaseComponent {
         </span>
         <div class="separator"></div>
         <pf-button
-          @click=${() => this._flipSelection("horizontal")}
+          @click=${() => this._flipSelection('horizontal', context)}
           title="Flip selection horizontally"
         >
           ↔ Flip H
         </pf-button>
         <pf-button
-          @click=${() => this._flipSelection("vertical")}
+          @click=${() => this._flipSelection('vertical', context)}
           title="Flip selection vertically"
         >
           ↕ Flip V
         </pf-button>
         <div class="separator"></div>
         <pf-button
-          @click=${this._shrinkToContent}
+          @click=${() => this._shrinkToContent(context)}
           title="Shrink selection to fit content (Ctrl+release during draw)"
         >
           Shrink to Content
         </pf-button>
-        <pf-button @click=${this._clearSelection} title="Deselect (Escape)">
+        <pf-button @click=${() => this._clearSelection(context)} title="Deselect (Escape)">
           Deselect
         </pf-button>
       </div>
     `;
   }
 
-  private _flipSelection(direction: "horizontal" | "vertical") {
-    const selected = getSelectedLayerSelection();
+  private _flipSelection(direction: 'horizontal' | 'vertical', context: ProjectContext) {
+    const selected = getSelectedLayerSelection(context);
     if (!selected) return;
 
     const command = new FlipSelectionCommand(
@@ -505,26 +516,26 @@ export class PFContextBar extends BaseComponent {
       direction,
       selected.mask
     );
-    historyStore.execute(command);
+    context.history.execute(command);
   }
 
-  private _shrinkToContent() {
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+  private _shrinkToContent(context: ProjectContext) {
+    const activeLayerId = context.layers.activeLayerId.value;
+    const layer = context.layers.layers.value.find((l) => l.id === activeLayerId);
     if (layer?.canvas) {
-      selectionStore.shrinkToContent(layer.canvas);
+      context.selection.shrinkToContent(layer.canvas);
     }
   }
 
-  private _clearSelection() {
-    selectionStore.clear();
+  private _clearSelection(context: ProjectContext) {
+    context.selection.clear();
   }
 
   _formatToolName(tool: string): string {
     return tool
-      .split("-")
+      .split('-')
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
+      .join(' ');
   }
 
   _renderOptions(options: ToolOption[]) {
@@ -535,16 +546,15 @@ export class PFContextBar extends BaseComponent {
     return options.map((option, index) => {
       const showSeparator = index < options.length - 1;
       return html`
-        ${this._renderOption(option)}
-        ${showSeparator ? html`<div class="separator"></div>` : ""}
+        ${this._renderOption(option)} ${showSeparator ? html`<div class="separator"></div>` : ''}
       `;
     });
   }
 
   _renderOption(option: ToolOption) {
     switch (option.type) {
-      case "slider": {
-        const isOpacity = option.storeKey === "opacity";
+      case 'slider': {
+        const isOpacity = option.storeKey === 'opacity';
         const multiplier = isOpacity ? 100 : 1;
         return html`
           <pf-option-slider
@@ -554,12 +564,12 @@ export class PFContextBar extends BaseComponent {
             min=${option.min}
             max=${option.max}
             step=${option.step || 1}
-            unit=${option.unit || ""}
+            unit=${option.unit || ''}
             multiplier=${multiplier}
           ></pf-option-slider>
         `;
       }
-      case "checkbox":
+      case 'checkbox':
         return html`
           <pf-option-checkbox
             label=${option.label}
@@ -567,7 +577,7 @@ export class PFContextBar extends BaseComponent {
             storeKey=${option.storeKey}
           ></pf-option-checkbox>
         `;
-      case "select":
+      case 'select':
         return html`
           <pf-option-select
             label=${option.label}
@@ -582,9 +592,9 @@ export class PFContextBar extends BaseComponent {
   }
 
   // Cel controls
-  private _renderCelControls(selectedCelKeys: Set<string>) {
+  private _renderCelControls(selectedCelKeys: Set<string>, context: ProjectContext) {
     const celKeys = Array.from(selectedCelKeys);
-    const cels = animationStore.cels.value;
+    const cels = context.animation.cels.value;
 
     // Get average opacity of selected cels
     let totalOpacity = 0;
@@ -608,120 +618,124 @@ export class PFContextBar extends BaseComponent {
 
     return html`
       <div class="cel-section">
-        <span class="cel-label"
-          >${celKeys.length} cel${celKeys.length > 1 ? "s" : ""}</span
-        >
+        <span class="cel-label">${celKeys.length} cel${celKeys.length > 1 ? 's' : ''}</span>
 
         <div class="cel-opacity">
           <span class="cel-label">Opacity:</span>
           <span
-            class="opacity-scrubber ${this.isCelScrubbing ? "scrubbing" : ""}"
-            @mousedown=${(e: MouseEvent) =>
-              this._handleCelScrubStart(e, avgOpacity)}
+            class="opacity-scrubber ${this.isCelScrubbing ? 'scrubbing' : ''}"
+            @mousedown=${(e: MouseEvent) => this._handleCelScrubStart(e, avgOpacity, context)}
             title="Drag to adjust opacity"
           >
             ${avgOpacity}%
           </span>
         </div>
 
-        ${celKeys.length >= 2
-          ? html`
-              <pf-button
-                @click=${this._linkSelectedCels}
-                ?disabled=${!canLink}
-                title="Link selected cels"
-              >
-                🔗 Link
-              </pf-button>
-              <pf-button
-                @click=${this._unlinkSelectedCels}
-                ?disabled=${!canUnlink}
-                title="Unlink selected cels"
-              >
-                ⛓️‍💥 Unlink
-              </pf-button>
-            `
-          : ""}
+        ${
+          celKeys.length >= 2
+            ? html`
+                <pf-button
+                  @click=${() => this._linkSelectedCels(context)}
+                  ?disabled=${!canLink}
+                  title="Link selected cels"
+                >
+                  🔗 Link
+                </pf-button>
+                <pf-button
+                  @click=${() => this._unlinkSelectedCels(context)}
+                  ?disabled=${!canUnlink}
+                  title="Unlink selected cels"
+                >
+                  ⛓️‍💥 Unlink
+                </pf-button>
+              `
+            : ''
+        }
       </div>
     `;
   }
 
-  private _handleCelScrubStart = (e: MouseEvent, currentOpacity: number) => {
+  private _handleCelScrubStart = (
+    e: MouseEvent,
+    currentOpacity: number,
+    context: ProjectContext
+  ) => {
     e.preventDefault();
     this.isCelScrubbing = true;
+    this.celScrubContext = context;
     this.celScrubStartX = e.clientX;
     this.celScrubStartOpacity = currentOpacity;
 
     // Capture before opacities for undo/redo
     this.celScrubBeforeOpacities.clear();
-    const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
-    const cels = animationStore.cels.value;
-    for (const celKey of selectedCelKeys) {
+    this.celScrubSelectedKeys = Array.from(context.animation.selectedCelKeys.value);
+    const cels = context.animation.cels.value;
+    for (const celKey of this.celScrubSelectedKeys) {
       const cel = cels.get(celKey);
       this.celScrubBeforeOpacities.set(celKey, cel?.opacity ?? 100);
     }
 
-    window.addEventListener("mousemove", this._handleCelScrubMove);
-    window.addEventListener("mouseup", this._handleCelScrubEnd);
+    window.addEventListener('mousemove', this._handleCelScrubMove);
+    window.addEventListener('mouseup', this._handleCelScrubEnd);
   };
 
   private _handleCelScrubMove = (e: MouseEvent) => {
     if (!this.isCelScrubbing) return;
+    const context = this.celScrubContext ?? this.context;
 
     const deltaX = e.clientX - this.celScrubStartX;
     const deltaPercent = Math.round(deltaX / 2);
-    const newOpacity = Math.max(
-      0,
-      Math.min(100, this.celScrubStartOpacity + deltaPercent)
-    );
+    const newOpacity = Math.max(0, Math.min(100, this.celScrubStartOpacity + deltaPercent));
 
-    const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
-    animationStore.setCelOpacity(selectedCelKeys, newOpacity);
+    context.animation.setCelOpacity(this.celScrubSelectedKeys, newOpacity);
   };
 
   private _handleCelScrubEnd = () => {
-    window.removeEventListener("mousemove", this._handleCelScrubMove);
-    window.removeEventListener("mouseup", this._handleCelScrubEnd);
+    window.removeEventListener('mousemove', this._handleCelScrubMove);
+    window.removeEventListener('mouseup', this._handleCelScrubEnd);
 
     // Create undo/redo command if opacity actually changed
-    const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
+    const context = this.celScrubContext ?? this.context;
+    const selectedCelKeys = this.celScrubSelectedKeys;
     if (selectedCelKeys.length > 0 && this.celScrubBeforeOpacities.size > 0) {
       // Get the current (final) opacity from any selected cel
-      const cels = animationStore.cels.value;
+      const cels = context.animation.cels.value;
       const firstCel = cels.get(selectedCelKeys[0]);
       const afterOpacity = firstCel?.opacity ?? 100;
 
       // Check if opacity actually changed
-      const firstBeforeOpacity =
-        this.celScrubBeforeOpacities.get(selectedCelKeys[0]) ?? 100;
+      const firstBeforeOpacity = this.celScrubBeforeOpacities.get(selectedCelKeys[0]) ?? 100;
       if (afterOpacity !== firstBeforeOpacity) {
         const command = new SetCelOpacityCommand(
           selectedCelKeys,
           new Map(this.celScrubBeforeOpacities),
-          afterOpacity
+          afterOpacity,
+          context
         );
         // Execute adds to history - value already applied so it's a no-op
-        historyStore.execute(command);
+        context.history.execute(command);
       }
     }
 
     this.isCelScrubbing = false;
+    this.celScrubContext = null;
+    this.celScrubSelectedKeys = [];
     this.celScrubBeforeOpacities.clear();
   };
 
-  private _linkSelectedCels = () => {
-    const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
+  private _linkSelectedCels = (context: ProjectContext) => {
+    const selectedCelKeys = Array.from(context.animation.selectedCelKeys.value);
     if (selectedCelKeys.length >= 2) {
-      const command = new LinkCelsCommand(selectedCelKeys);
-      historyStore.execute(command);
+      const command = new LinkCelsCommand(selectedCelKeys, context);
+      context.history.execute(command);
     }
   };
 
-  private _unlinkSelectedCels = () => {
-    const selectedCelKeys = Array.from(animationStore.selectedCelKeys.value);
+  private _unlinkSelectedCels = (context: ProjectContext) => {
+    const selectedCelKeys = Array.from(context.animation.selectedCelKeys.value);
     if (selectedCelKeys.length > 0) {
-      const command = new UnlinkCelsCommand(selectedCelKeys);
-      historyStore.execute(command);
+      const command = new UnlinkCelsCommand(selectedCelKeys, context);
+      context.history.execute(command);
     }
   };
 }
