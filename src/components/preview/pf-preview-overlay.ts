@@ -14,6 +14,8 @@ import {
   type CrtParamKey,
   type CrtPresetId,
 } from '../../services/view-effects';
+import type { Cel } from '../../types/animation';
+import type { Layer } from '../../types/layer';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -628,33 +630,9 @@ export class PFPreviewOverlay extends BaseComponent {
     // Clear at actual canvas size
     this.ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Render each visible layer
     for (const layer of visibleLayers) {
-      if (!layer.visible) continue;
-
       const key = `${layer.id}:${currentFrameId}`;
-      const cel = cels.get(key);
-      const canvasToUse = cel?.canvas ?? layer.canvas;
-
-      if (canvasToUse) {
-        // Calculate effective opacity: layer opacity * cel opacity
-        const layerOpacity = layer.opacity / 255;
-        const celOpacity = (cel?.opacity ?? 100) / 100;
-        this.ctx.globalAlpha = layerOpacity * celOpacity;
-
-        this.ctx.globalCompositeOperation =
-          layer.blendMode === 'normal'
-            ? 'source-over'
-            : (layer.blendMode as GlobalCompositeOperation);
-
-        if (previewScale >= 1) {
-          // Scaling UP: draw at native resolution, CSS handles pixelated scaling
-          this.ctx.drawImage(canvasToUse, 0, 0);
-        } else {
-          // Scaling DOWN: draw scaled to reduce canvas size for performance
-          this.ctx.drawImage(canvasToUse, 0, 0, canvas.width, canvas.height);
-        }
-      }
+      this.drawPreviewLayer(layer, cels.get(key), canvas, previewScale);
     }
 
     // Reset composite settings
@@ -662,6 +640,42 @@ export class PFPreviewOverlay extends BaseComponent {
     this.ctx.globalCompositeOperation = 'source-over';
 
     this.renderViewEffect(canvas, previewScale);
+  }
+
+  private drawPreviewLayer(
+    layer: Layer,
+    cel: Cel | undefined,
+    canvas: HTMLCanvasElement,
+    previewScale: number
+  ): void {
+    if (!layer.visible) return;
+
+    const canvasToUse = this.getLayerPreviewCanvas(layer, cel);
+    if (!canvasToUse || !this.ctx) return;
+
+    this.ctx.globalAlpha = (layer.opacity / 255) * this.getCelOpacity(cel);
+    this.ctx.globalCompositeOperation = this.getLayerCompositeOperation(layer);
+
+    if (previewScale >= 1) {
+      this.ctx.drawImage(canvasToUse, 0, 0);
+      return;
+    }
+    this.ctx.drawImage(canvasToUse, 0, 0, canvas.width, canvas.height);
+  }
+
+  private getLayerPreviewCanvas(layer: Layer, cel: Cel | undefined): HTMLCanvasElement | null {
+    if (cel) return cel.canvas;
+    return layer.canvas ?? null;
+  }
+
+  private getCelOpacity(cel: Cel | undefined): number {
+    return cel ? (cel.opacity ?? 100) / 100 : 1;
+  }
+
+  private getLayerCompositeOperation(layer: Layer): GlobalCompositeOperation {
+    return layer.blendMode === 'normal'
+      ? 'source-over'
+      : (layer.blendMode as GlobalCompositeOperation);
   }
 
   private renderViewEffect(source: HTMLCanvasElement, previewScale: number) {
@@ -738,6 +752,154 @@ export class PFPreviewOverlay extends BaseComponent {
     };
   }
 
+  private getContentStyle(): string {
+    if (this.collapsed) return '';
+    const extraHeight = this.effectsPanelOpen ? 300 : 100;
+    return `max-height: ${this.previewSize + extraHeight}px`;
+  }
+
+  private renderPreviewSurface(options: {
+    actualCanvasW: number;
+    actualCanvasH: number;
+    displayW: number;
+    displayH: number;
+    viewportStyle: ReturnType<PFPreviewOverlay['getViewportIndicatorStyle']>;
+  }) {
+    const { actualCanvasW, actualCanvasH, displayW, displayH, viewportStyle } = options;
+    const effectHidden = !settingsStore.activeViewEffect.value || !this.viewEffectsSupported;
+
+    return html`
+      <div class="preview-area" @click=${this.handlePreviewClick}>
+        <div class="preview-canvas-wrapper bg-${this.bgType}">
+          <canvas
+            class="preview-canvas"
+            width="${actualCanvasW}"
+            height="${actualCanvasH}"
+            style="width: ${displayW}px; height: ${displayH}px;"
+          ></canvas>
+          <canvas
+            class="effect-canvas"
+            aria-hidden="true"
+            ?hidden=${effectHidden}
+            style="width: ${displayW}px; height: ${displayH}px;"
+          ></canvas>
+          ${
+            viewportStyle
+              ? html`
+                  <div
+                    class="viewport-indicator"
+                    style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
+                  ></div>
+                `
+              : ''
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  private renderBackgroundControls() {
+    return html`
+      <div class="bg-selector">
+        <button
+          class="bg-btn white ${this.bgType === 'white' ? 'active' : ''}"
+          @click=${() => this.setBgType('white')}
+          title="White background"
+        ></button>
+        <button
+          class="bg-btn black ${this.bgType === 'black' ? 'active' : ''}"
+          @click=${() => this.setBgType('black')}
+          title="Black background"
+        ></button>
+        <button
+          class="bg-btn checker ${this.bgType === 'checker' ? 'active' : ''}"
+          @click=${() => this.setBgType('checker')}
+          title="Transparent (checker)"
+        ></button>
+      </div>
+    `;
+  }
+
+  private renderEffectActions(crtIsActive: boolean) {
+    if (!this.viewEffectsSupported) return '';
+
+    return html`
+      <div class="effect-actions">
+        <button
+          class="effect-button"
+          type="button"
+          aria-label="Toggle CRT effect"
+          aria-pressed=${crtIsActive}
+          @click=${this.toggleCrtEffect}
+        >
+          CRT
+        </button>
+        <button
+          class="effect-settings-button"
+          type="button"
+          aria-controls="crt-effect-panel"
+          aria-expanded=${this.effectsPanelOpen}
+          @click=${() => (this.effectsPanelOpen = !this.effectsPanelOpen)}
+        >
+          Tune
+        </button>
+      </div>
+    `;
+  }
+
+  private renderEffectPanel(
+    crtPreset: CrtPresetId | 'custom',
+    params: ReturnType<typeof getCrtParams>,
+    crtIsActive: boolean
+  ) {
+    if (!this.viewEffectsSupported || !this.effectsPanelOpen) return '';
+
+    return html`
+      <div class="effect-panel" id="crt-effect-panel">
+        <div class="effect-preset-row">
+          <label for="crt-preset">Preset</label>
+          <select
+            id="crt-preset"
+            .value=${crtPreset}
+            @change=${(event: Event) =>
+              this.setCrtPreset(
+                (event.target as HTMLSelectElement).value as CrtPresetId | 'custom'
+              )}
+          >
+            ${CRT_PRESET_OPTIONS.map(
+              ({ id, label }) => html`
+                <option value=${id} ?selected=${crtPreset === id}>${label}</option>
+              `
+            )}
+            ${crtPreset === 'custom' ? html`<option value="custom" selected>Custom</option>` : ''}
+          </select>
+        </div>
+        ${CRT_PARAM_CONTROLS.map(
+          ({ key, label }) => html`
+            <div class="effect-slider-row">
+              <label for="crt-${key}">${label}</label>
+              <input
+                id="crt-${key}"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                ?disabled=${!crtIsActive}
+                .value=${String(params[key])}
+                aria-valuetext="${Math.round(params[key] * 100)} percent"
+                @input=${(event: Event) =>
+                  this.setCrtParam(key, parseFloat((event.target as HTMLInputElement).value))}
+              />
+              <output class="effect-value" for="crt-${key}"
+                >${Math.round(params[key] * 100)}%</output
+              >
+            </div>
+          `
+        )}
+      </div>
+    `;
+  }
+
   render() {
     const { animation, project } = this.context;
     const isPlaying = animation.isPlaying.value;
@@ -767,143 +929,21 @@ export class PFPreviewOverlay extends BaseComponent {
           <span class="header-title">Preview</span>
         </div>
 
-        <div
-          class="content ${this.collapsed ? 'collapsed' : ''}"
-          style="${
-            !this.collapsed
-              ? `max-height: ${this.previewSize + (this.effectsPanelOpen ? 300 : 100)}px`
-              : ''
-          }"
-        >
-          <div class="preview-area" @click=${this.handlePreviewClick}>
-            <div class="preview-canvas-wrapper bg-${this.bgType}">
-              <canvas
-                class="preview-canvas"
-                width="${actualCanvasW}"
-                height="${actualCanvasH}"
-                style="width: ${displayW}px; height: ${displayH}px;"
-              ></canvas>
-              <canvas
-                class="effect-canvas"
-                aria-hidden="true"
-                ?hidden=${!settingsStore.activeViewEffect.value || !this.viewEffectsSupported}
-                style="width: ${displayW}px; height: ${displayH}px;"
-              ></canvas>
-              ${
-                viewportStyle
-                  ? html`
-                      <div
-                        class="viewport-indicator"
-                        style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
-                      ></div>
-                    `
-                  : ''
-              }
-            </div>
-          </div>
+        <div class="content ${this.collapsed ? 'collapsed' : ''}" style=${this.getContentStyle()}>
+          ${this.renderPreviewSurface({
+            actualCanvasW,
+            actualCanvasH,
+            displayW,
+            displayH,
+            viewportStyle,
+          })}
 
           <div class="controls">
-            <div class="bg-selector">
-              <button
-                class="bg-btn white ${this.bgType === 'white' ? 'active' : ''}"
-                @click=${() => this.setBgType('white')}
-                title="White background"
-              ></button>
-              <button
-                class="bg-btn black ${this.bgType === 'black' ? 'active' : ''}"
-                @click=${() => this.setBgType('black')}
-                title="Black background"
-              ></button>
-              <button
-                class="bg-btn checker ${this.bgType === 'checker' ? 'active' : ''}"
-                @click=${() => this.setBgType('checker')}
-                title="Transparent (checker)"
-              ></button>
-            </div>
-            ${
-              this.viewEffectsSupported
-                ? html`
-                    <div class="effect-actions">
-                      <button
-                        class="effect-button"
-                        type="button"
-                        aria-label="Toggle CRT effect"
-                        aria-pressed=${crtIsActive}
-                        @click=${this.toggleCrtEffect}
-                      >
-                        CRT
-                      </button>
-                      <button
-                        class="effect-settings-button"
-                        type="button"
-                        aria-controls="crt-effect-panel"
-                        aria-expanded=${this.effectsPanelOpen}
-                        @click=${() => (this.effectsPanelOpen = !this.effectsPanelOpen)}
-                      >
-                        Tune
-                      </button>
-                    </div>
-                  `
-                : ''
-            }
+            ${this.renderBackgroundControls()} ${this.renderEffectActions(crtIsActive)}
             <button class="play-btn" @click=${this.togglePlay}>${isPlaying ? '⏸' : '▶'}</button>
           </div>
 
-          ${
-            this.viewEffectsSupported && this.effectsPanelOpen
-              ? html`
-                  <div class="effect-panel" id="crt-effect-panel">
-                    <div class="effect-preset-row">
-                      <label for="crt-preset">Preset</label>
-                      <select
-                        id="crt-preset"
-                        .value=${crtPreset}
-                        @change=${(event: Event) =>
-                          this.setCrtPreset(
-                            (event.target as HTMLSelectElement).value as CrtPresetId | 'custom'
-                          )}
-                      >
-                        ${CRT_PRESET_OPTIONS.map(
-                          ({ id, label }) => html`
-                            <option value=${id} ?selected=${crtPreset === id}>${label}</option>
-                          `
-                        )}
-                        ${
-                          crtPreset === 'custom'
-                            ? html`<option value="custom" selected>Custom</option>`
-                            : ''
-                        }
-                      </select>
-                    </div>
-                    ${CRT_PARAM_CONTROLS.map(
-                      ({ key, label }) => html`
-                        <div class="effect-slider-row">
-                          <label for="crt-${key}">${label}</label>
-                          <input
-                            id="crt-${key}"
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            ?disabled=${!crtIsActive}
-                            .value=${String(displayedCrtParams[key])}
-                            aria-valuetext="${Math.round(displayedCrtParams[key] * 100)} percent"
-                            @input=${(event: Event) =>
-                              this.setCrtParam(
-                                key,
-                                parseFloat((event.target as HTMLInputElement).value)
-                              )}
-                          />
-                          <output class="effect-value" for="crt-${key}"
-                            >${Math.round(displayedCrtParams[key] * 100)}%</output
-                          >
-                        </div>
-                      `
-                    )}
-                  </div>
-                `
-              : ''
-          }
+          ${this.renderEffectPanel(crtPreset, displayedCrtParams, crtIsActive)}
         </div>
         <div
           class="resize-handle"

@@ -1,23 +1,22 @@
-import { CrtViewEffect, CRT_EFFECT_ID } from './crt';
-import { PassthroughViewEffect } from './passthrough';
+import { createCrtViewEffect, CRT_EFFECT_ID } from './crt';
+import { createPassthroughViewEffect } from './passthrough';
 import { registerViewEffect } from './registry';
 
 registerViewEffect({
   id: 'passthrough',
   name: 'Passthrough',
-  create: () => new PassthroughViewEffect(),
+  create: createPassthroughViewEffect,
 });
 
 registerViewEffect({
   id: CRT_EFFECT_ID,
   name: 'CRT',
-  create: () => new CrtViewEffect(),
+  create: createCrtViewEffect,
 });
 
 export { ViewEffectPipeline } from './pipeline';
-export type { ViewEffectRenderOptions } from './pipeline';
 export { getViewEffectDefinition, getViewEffectDefinitions, registerViewEffect } from './registry';
-export type { ViewEffect, ViewEffectDefinition, ViewEffectFrame, ViewEffectParams } from './types';
+export type { ViewEffect } from './types';
 export {
   CRT_EFFECT_ID,
   CRT_PARAM_CONTROLS,
@@ -26,10 +25,9 @@ export {
   getCrtParams,
   getCrtPresetId,
 } from './crt';
-export type { CrtParamKey, CrtParams, CrtPresetId } from './crt';
+export type { CrtParamKey, CrtPresetId } from './crt';
 export {
   MIN_VIEW_EFFECT_EXPORT_SCALE,
   getViewEffectExportBaseName,
   renderViewEffectToCanvas,
 } from './render-to-canvas';
-export type { ViewEffectCanvasRenderOptions } from './render-to-canvas';

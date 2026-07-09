@@ -64,8 +64,8 @@ interface CheckerSettings {
   tileSize: number;
 }
 
-export type ViewEffectParams = Record<string, number>;
-export type ViewEffectParamsMap = Record<string, ViewEffectParams>;
+type ViewEffectParams = Record<string, number>;
+type ViewEffectParamsMap = Record<string, ViewEffectParams>;
 
 interface SavedSettingsData {
   accentTheme?: AccentTheme;
@@ -92,33 +92,38 @@ class SettingsStore {
 
   private load() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const data = JSON.parse(saved) as SavedSettingsData | null;
-        if (!data || typeof data !== 'object') {
-          return;
-        }
-
-        if (data.accentTheme && ACCENT_THEMES[data.accentTheme]) {
-          this.accentTheme.value = data.accentTheme;
-        }
-        if (this.isHexColor(data.checkerLightColor)) {
-          this.checkerLightColor.value = data.checkerLightColor.toLowerCase();
-        }
-        if (this.isHexColor(data.checkerDarkColor)) {
-          this.checkerDarkColor.value = data.checkerDarkColor.toLowerCase();
-        }
-        if (this.isCheckerTileSize(data.checkerTileSize)) {
-          this.checkerTileSize.value = data.checkerTileSize;
-        }
-        if (data.activeViewEffect === null || typeof data.activeViewEffect === 'string') {
-          this.activeViewEffect.value = data.activeViewEffect;
-        }
-        this.viewEffectParams.value = this.sanitizeViewEffectParamsMap(data.viewEffectParams);
-      }
+      const data = this.readSavedSettings();
+      if (data) this.applySavedSettings(data);
     } catch (e) {
       log.warn('Failed to load settings:', e);
     }
+  }
+
+  private readSavedSettings(): SavedSettingsData | null {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+
+    const data = JSON.parse(saved) as SavedSettingsData | null;
+    return data && typeof data === 'object' ? data : null;
+  }
+
+  private applySavedSettings(data: SavedSettingsData): void {
+    if (data.accentTheme && ACCENT_THEMES[data.accentTheme]) {
+      this.accentTheme.value = data.accentTheme;
+    }
+    if (this.isHexColor(data.checkerLightColor)) {
+      this.checkerLightColor.value = data.checkerLightColor.toLowerCase();
+    }
+    if (this.isHexColor(data.checkerDarkColor)) {
+      this.checkerDarkColor.value = data.checkerDarkColor.toLowerCase();
+    }
+    if (this.isCheckerTileSize(data.checkerTileSize)) {
+      this.checkerTileSize.value = data.checkerTileSize;
+    }
+    if (data.activeViewEffect === null || typeof data.activeViewEffect === 'string') {
+      this.activeViewEffect.value = data.activeViewEffect;
+    }
+    this.viewEffectParams.value = this.sanitizeViewEffectParamsMap(data.viewEffectParams);
   }
 
   private save() {

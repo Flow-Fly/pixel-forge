@@ -13,34 +13,36 @@ void main() {
 }
 `;
 
-export class PassthroughViewEffect implements ViewEffect {
-  readonly id = 'passthrough';
-  readonly name = 'Passthrough';
+export function createPassthroughViewEffect(): ViewEffect {
+  let program: WebGLProgram | null = null;
+  let sourceLocation: WebGLUniformLocation | null = null;
 
-  private program: WebGLProgram | null = null;
-  private sourceLocation: WebGLUniformLocation | null = null;
+  return {
+    id: 'passthrough',
+    name: 'Passthrough',
 
-  init(gl: WebGL2RenderingContext): void {
-    this.program = createEffectProgram(gl, PASSTHROUGH_FRAGMENT_SHADER);
-    this.sourceLocation = gl.getUniformLocation(this.program, 'uSource');
-  }
+    init(gl: WebGL2RenderingContext): void {
+      program = createEffectProgram(gl, PASSTHROUGH_FRAGMENT_SHADER);
+      sourceLocation = gl.getUniformLocation(program, 'uSource');
+    },
 
-  render(
-    gl: WebGL2RenderingContext,
-    _sourceTexture: WebGLTexture,
-    _params: ViewEffectParams,
-    _frame: ViewEffectFrame
-  ): void {
-    if (!this.program) return;
+    render(
+      gl: WebGL2RenderingContext,
+      _sourceTexture: WebGLTexture,
+      _params: ViewEffectParams,
+      _frame: ViewEffectFrame
+    ): void {
+      if (!program) return;
 
-    gl.useProgram(this.program);
-    gl.uniform1i(this.sourceLocation, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
+      gl.useProgram(program);
+      gl.uniform1i(sourceLocation, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
 
-  dispose(gl: WebGL2RenderingContext): void {
-    if (this.program) gl.deleteProgram(this.program);
-    this.program = null;
-    this.sourceLocation = null;
-  }
+    dispose(gl: WebGL2RenderingContext): void {
+      if (program) gl.deleteProgram(program);
+      program = null;
+      sourceLocation = null;
+    },
+  };
 }

@@ -29,6 +29,24 @@ type ExportFormat =
   | "aseprite"
   | "pixelforge";
 type FrameSelection = "current" | "all" | "range";
+type SpritesheetDirection = "horizontal" | "vertical" | "grid";
+
+interface SpritesheetFrameMetadata {
+  frame: { x: number; y: number; w: number; h: number };
+  sourceSize: { w: number; h: number };
+  duration: number;
+}
+
+interface SpritesheetMetadata {
+  frames: Record<string, SpritesheetFrameMetadata>;
+  meta: {
+    app: string;
+    version: string;
+    image: string;
+    size: { w: number; h: number };
+    format: string;
+  };
+}
 
 const VIEW_EFFECT_EXPORT_FORMATS = new Set<ExportFormat>([
   "png",
@@ -182,8 +200,7 @@ export class PFExportDialog extends BaseComponent {
   @state() private backgroundColor: string = "#ffffff";
   @state() private filename: string = "";
   @state() private includeJson: boolean = true;
-  @state() private spritesheetDirection: "horizontal" | "vertical" | "grid" =
-    "horizontal";
+  @state() private spritesheetDirection: SpritesheetDirection = "horizontal";
   @state() private spritesheetColumns: number = 4;
   @state() private applyViewEffect: boolean = false;
   @state() private exportError: string = "";
@@ -322,34 +339,8 @@ export class PFExportDialog extends BaseComponent {
     let pipeline: ViewEffectPipeline | null = null;
 
     try {
-      if (this.shouldApplyViewEffect) {
-        pipeline = new ViewEffectPipeline();
-        if (!pipeline.isSupported) {
-          throw new Error("WebGL2 is unavailable");
-        }
-      }
-
-      switch (this.format) {
-        case "png":
-          this.exportImages(frameIds, "png", pipeline);
-          break;
-        case "webp":
-          this.exportImages(frameIds, "webp", pipeline);
-          break;
-        case "webp-animated":
-          await this.exportAnimatedWebP(frameIds, pipeline);
-          break;
-        case "spritesheet":
-          this.exportAsSpritesheet(frameIds, pipeline);
-          break;
-        case "aseprite":
-          await this.exportAsAseprite();
-          break;
-        case "pixelforge":
-          await this.exportAsPixelForge();
-          break;
-      }
-
+      pipeline = this.createExportPipeline();
+      await this.runExport(frameIds, pipeline);
       this.close();
     } catch (error) {
       log.error("Failed to export view-effect copy:", error);
@@ -358,6 +349,41 @@ export class PFExportDialog extends BaseComponent {
         : "Could not export this file.";
     } finally {
       pipeline?.dispose();
+    }
+  }
+
+  private createExportPipeline(): ViewEffectPipeline | null {
+    if (!this.shouldApplyViewEffect) return null;
+
+    const pipeline = new ViewEffectPipeline();
+    if (pipeline.isSupported) return pipeline;
+
+    pipeline.dispose();
+    throw new Error("WebGL2 is unavailable");
+  }
+
+  private async runExport(
+    frameIds: string[],
+    pipeline: ViewEffectPipeline | null
+  ): Promise<void> {
+    switch (this.format) {
+      case "png":
+        this.exportImages(frameIds, "png", pipeline);
+        return;
+      case "webp":
+        this.exportImages(frameIds, "webp", pipeline);
+        return;
+      case "webp-animated":
+        await this.exportAnimatedWebP(frameIds, pipeline);
+        return;
+      case "spritesheet":
+        this.exportAsSpritesheet(frameIds, pipeline);
+        return;
+      case "aseprite":
+        await this.exportAsAseprite();
+        return;
+      case "pixelforge":
+        await this.exportAsPixelForge();
     }
   }
 
@@ -447,7 +473,7 @@ export class PFExportDialog extends BaseComponent {
     const sheetCtx = sheetCanvas.getContext("2d")!;
     const exportBaseName = this.getExportBaseName();
 
-    const metadata: any = {
+    const metadata: SpritesheetMetadata = {
       frames: {},
       meta: {
         app: "PixelForge",
@@ -485,6 +511,47 @@ export class PFExportDialog extends BaseComponent {
       const blob = new Blob([jsonStr], { type: "application/json" });
       FileService.downloadBlob(blob, `${exportBaseName}.json`);
     }
+  }
+
+  private renderViewEffectExportOption() {
+    if (!this.canExportViewEffect) return "";
+
+    return html`
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input
+            type="checkbox"
+            id="apply-view-effect"
+            .checked=${this.applyViewEffect}
+            @change=${(e: Event) =>
+              this.handleViewEffectChange((e.target as HTMLInputElement).checked)}
+          />
+          <label for="apply-view-effect"
+            >Apply view effect (${this.activeViewEffectName})</label
+          >
+        </div>
+        <p class="effect-export-hint">
+          Creates a separate ${this.activeViewEffectId} copy at 4x scale or higher. The clean
+          export path stays unchanged.
+        </p>
+      </div>
+    `;
+  }
+
+  private renderExportSummary(width: number, height: number, frameCount: number) {
+    const exportsMultipleFiles =
+      frameCount > 1 &&
+      this.format !== "spritesheet" &&
+      this.format !== "webp-animated";
+
+    return html`
+      <div class="preview-info">
+        <strong>Output:</strong> ${width} x ${height} px
+        ${exportsMultipleFiles ? html` (${frameCount} files)` : ""}
+        ${this.format === "webp-animated" ? html` (${frameCount} frames)` : ""}
+        ${this.shouldApplyViewEffect ? html` · ${this.activeViewEffectName} copy` : ""}
+      </div>
+    `;
   }
 
   render() {
@@ -558,30 +625,7 @@ export class PFExportDialog extends BaseComponent {
           </div>
         </div>
 
-        ${this.canExportViewEffect
-          ? html`
-              <div class="form-group">
-                <div class="checkbox-group">
-                  <input
-                    type="checkbox"
-                    id="apply-view-effect"
-                    .checked=${this.applyViewEffect}
-                    @change=${(e: Event) =>
-                      this.handleViewEffectChange(
-                        (e.target as HTMLInputElement).checked
-                      )}
-                  />
-                  <label for="apply-view-effect"
-                    >Apply view effect (${this.activeViewEffectName})</label
-                  >
-                </div>
-                <p class="effect-export-hint">
-                  Creates a separate ${this.activeViewEffectId} copy at 4x scale or higher. The
-                  clean export path stays unchanged.
-                </p>
-              </div>
-            `
-          : ""}
+        ${this.renderViewEffectExportOption()}
 
         ${this.frameSelection === "range"
           ? html`
@@ -623,7 +667,7 @@ export class PFExportDialog extends BaseComponent {
                     @change=${(e: Event) =>
                       (this.spritesheetDirection = (
                         e.target as HTMLSelectElement
-                      ).value as any)}
+                      ).value as SpritesheetDirection)}
                   >
                     <option value="horizontal">Horizontal Strip</option>
                     <option value="vertical">Vertical Strip</option>
@@ -711,20 +755,7 @@ export class PFExportDialog extends BaseComponent {
           ? html`<p class="export-error" role="alert">${this.exportError}</p>`
           : ""}
 
-        <div class="preview-info">
-          <strong>Output:</strong> ${width} x ${height} px
-          ${frameCount > 1 &&
-          this.format !== "spritesheet" &&
-          this.format !== "webp-animated"
-            ? html` (${frameCount} files)`
-            : ""}
-          ${this.format === "webp-animated"
-            ? html` (${frameCount} frames)`
-            : ""}
-          ${this.shouldApplyViewEffect
-            ? html` · ${this.activeViewEffectName} copy`
-            : ""}
-        </div>
+        ${this.renderExportSummary(width, height, frameCount)}
 
         <div slot="actions">
           <button class="btn-cancel" @click=${this.close}>Cancel</button>

@@ -1,12 +1,18 @@
 import { log } from '../../utils/log';
 import { getViewEffectDefinition } from './registry';
-import type { ViewEffect, ViewEffectParams } from './types';
+import type { ViewEffect, ViewEffectFrame, ViewEffectParams } from './types';
 
 export interface ViewEffectRenderOptions {
   width?: number;
   height?: number;
   spritePixelScale?: number;
   time?: number;
+}
+
+interface PipelineResources {
+  gl: WebGL2RenderingContext;
+  sourceTexture: WebGLTexture;
+  vertexArray: WebGLVertexArrayObject;
 }
 
 export class ViewEffectPipeline {
@@ -32,39 +38,16 @@ export class ViewEffectPipeline {
     params: ViewEffectParams = {},
     options: ViewEffectRenderOptions = {}
   ): boolean {
-    const gl = this.gl;
-    const sourceTexture = this.sourceTexture;
-    const vertexArray = this.vertexArray;
-    if (!gl || !sourceTexture || !vertexArray) return false;
+    const resources = this.getResources();
+    if (!resources) return false;
 
     const effect = this.getEffect(effectId);
     if (!effect) return false;
 
-    const width = Math.max(1, Math.round(options.width ?? source.width));
-    const height = Math.max(1, Math.round(options.height ?? source.height));
-    if (this.canvas.width !== width) this.canvas.width = width;
-    if (this.canvas.height !== height) this.canvas.height = height;
-
-    gl.viewport(0, 0, width, height);
-    gl.disable(gl.BLEND);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.bindVertexArray(vertexArray);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-
-    effect.render(gl, sourceTexture, params, {
-      time: options.time ?? performance.now(),
-      sourceWidth: source.width,
-      sourceHeight: source.height,
-      outputWidth: width,
-      outputHeight: height,
-      spritePixelScale: options.spritePixelScale ?? width / source.width,
-    });
-
-    gl.bindVertexArray(null);
+    const frame = this.createFrame(source, options);
+    this.prepareRender(resources, source, frame);
+    effect.render(resources.gl, resources.sourceTexture, params, frame);
+    resources.gl.bindVertexArray(null);
     return true;
   }
 
@@ -107,6 +90,57 @@ export class ViewEffectPipeline {
     this.gl = gl;
     this.sourceTexture = sourceTexture;
     this.vertexArray = vertexArray;
+  }
+
+  private getResources(): PipelineResources | null {
+    if (!this.gl || !this.sourceTexture || !this.vertexArray) return null;
+    return {
+      gl: this.gl,
+      sourceTexture: this.sourceTexture,
+      vertexArray: this.vertexArray,
+    };
+  }
+
+  private createFrame(
+    source: HTMLCanvasElement,
+    options: ViewEffectRenderOptions
+  ): ViewEffectFrame {
+    const outputWidth = this.getOutputSize(options.width, source.width);
+    const outputHeight = this.getOutputSize(options.height, source.height);
+    const sourceWidth = Math.max(1, source.width);
+
+    return {
+      time: options.time ?? performance.now(),
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+      outputWidth,
+      outputHeight,
+      spritePixelScale: options.spritePixelScale ?? outputWidth / sourceWidth,
+    };
+  }
+
+  private getOutputSize(requested: number | undefined, fallback: number): number {
+    return Math.max(1, Math.round(requested ?? fallback));
+  }
+
+  private prepareRender(
+    resources: PipelineResources,
+    source: HTMLCanvasElement,
+    frame: ViewEffectFrame
+  ): void {
+    if (this.canvas.width !== frame.outputWidth) this.canvas.width = frame.outputWidth;
+    if (this.canvas.height !== frame.outputHeight) this.canvas.height = frame.outputHeight;
+
+    const { gl, sourceTexture, vertexArray } = resources;
+    gl.viewport(0, 0, frame.outputWidth, frame.outputHeight);
+    gl.disable(gl.BLEND);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindVertexArray(vertexArray);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
   }
 
   private getEffect(effectId: string): ViewEffect | null {

@@ -145,53 +145,56 @@ export function getCrtPresetId(params: CrtParams): CrtPresetId | 'custom' {
   return 'custom';
 }
 
-export class CrtViewEffect implements ViewEffect {
-  readonly id = CRT_EFFECT_ID;
-  readonly name = 'CRT';
+export function createCrtViewEffect(): ViewEffect {
+  let program: WebGLProgram | null = null;
+  const uniforms = new Map<string, WebGLUniformLocation | null>();
+  const uniform = (name: string) => uniforms.get(name) ?? null;
 
-  private program: WebGLProgram | null = null;
-  private uniforms = new Map<string, WebGLUniformLocation | null>();
+  return {
+    id: CRT_EFFECT_ID,
+    name: 'CRT',
 
-  init(gl: WebGL2RenderingContext): void {
-    this.program = createEffectProgram(gl, CRT_FRAGMENT_SHADER);
-    for (const name of [
-      'uSource',
-      'uResolution',
-      'uSpritePixelScale',
-      'uScanlines',
-      'uMask',
-      'uCurvature',
-      'uBloom',
-      'uVignette',
-    ]) {
-      this.uniforms.set(name, gl.getUniformLocation(this.program, name));
-    }
-  }
+    init(gl: WebGL2RenderingContext): void {
+      program = createEffectProgram(gl, CRT_FRAGMENT_SHADER);
+      for (const name of [
+        'uSource',
+        'uResolution',
+        'uSpritePixelScale',
+        'uScanlines',
+        'uMask',
+        'uCurvature',
+        'uBloom',
+        'uVignette',
+      ]) {
+        uniforms.set(name, gl.getUniformLocation(program, name));
+      }
+    },
 
-  render(
-    gl: WebGL2RenderingContext,
-    _sourceTexture: WebGLTexture,
-    params: ViewEffectParams,
-    frame: ViewEffectFrame
-  ): void {
-    if (!this.program) return;
+    render(
+      gl: WebGL2RenderingContext,
+      _sourceTexture: WebGLTexture,
+      params: ViewEffectParams,
+      frame: ViewEffectFrame
+    ): void {
+      if (!program) return;
 
-    const crt = getCrtParams(params);
-    gl.useProgram(this.program);
-    gl.uniform1i(this.uniforms.get('uSource') ?? null, 0);
-    gl.uniform2f(this.uniforms.get('uResolution') ?? null, frame.outputWidth, frame.outputHeight);
-    gl.uniform1f(this.uniforms.get('uSpritePixelScale') ?? null, frame.spritePixelScale);
-    gl.uniform1f(this.uniforms.get('uScanlines') ?? null, crt.scanlines);
-    gl.uniform1f(this.uniforms.get('uMask') ?? null, crt.mask);
-    gl.uniform1f(this.uniforms.get('uCurvature') ?? null, crt.curvature);
-    gl.uniform1f(this.uniforms.get('uBloom') ?? null, crt.bloom);
-    gl.uniform1f(this.uniforms.get('uVignette') ?? null, crt.vignette);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
+      const crt = getCrtParams(params);
+      gl.useProgram(program);
+      gl.uniform1i(uniform('uSource'), 0);
+      gl.uniform2f(uniform('uResolution'), frame.outputWidth, frame.outputHeight);
+      gl.uniform1f(uniform('uSpritePixelScale'), frame.spritePixelScale);
+      gl.uniform1f(uniform('uScanlines'), crt.scanlines);
+      gl.uniform1f(uniform('uMask'), crt.mask);
+      gl.uniform1f(uniform('uCurvature'), crt.curvature);
+      gl.uniform1f(uniform('uBloom'), crt.bloom);
+      gl.uniform1f(uniform('uVignette'), crt.vignette);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
 
-  dispose(gl: WebGL2RenderingContext): void {
-    if (this.program) gl.deleteProgram(this.program);
-    this.program = null;
-    this.uniforms.clear();
-  }
+    dispose(gl: WebGL2RenderingContext): void {
+      if (program) gl.deleteProgram(program);
+      program = null;
+      uniforms.clear();
+    },
+  };
 }
