@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, wip]
 
 permissions:
   contents: read
@@ -32,6 +32,9 @@ jobs:
 
       - name: Tests
         run: npm run test:run
+
+      - name: Build
+        run: npm run build
 
       - name: Fallow audit
         uses: fallow-rs/fallow@v2
