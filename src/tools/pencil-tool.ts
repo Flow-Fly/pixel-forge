@@ -1,10 +1,6 @@
 import { BaseTool, type Point, type ModifierKeys } from './base-tool';
-import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { toolSizes } from '../stores/tool-settings';
-import { guidesStore } from '../stores/guides';
-import { projectStore } from '../stores/project';
-import { paletteStore } from '../stores/palette';
 import {
   bresenhamLine,
   constrainWithStickyAngles,
@@ -117,15 +113,15 @@ export class PencilTool extends BaseTool {
   private beginStrokeSession() {
     if (!this.context) return;
 
-    this.strokeSession.begin(this.context);
+    this.strokeSession.begin(this.context, this.projectContext);
 
     if (!this.currentIndexBuffer) {
       return;
     }
 
     // Adds generated shades to the palette when needed.
-    const color = colorStore.primaryColor.value;
-    this.currentPaletteIndex = paletteStore.getOrAddColorForDrawing(color);
+    const color = this.projectContext.colors.primaryColor.value;
+    this.currentPaletteIndex = this.projectContext.palette.getOrAddColorForDrawing(color);
   }
 
   private drawShiftClickStroke(currentX: number, currentY: number, snapToAngles?: boolean) {
@@ -353,9 +349,14 @@ export class PencilTool extends BaseTool {
     this.restoreSingleStamp(x, y);
 
     // Also restore mirrored stamps
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+    const canvasWidth = this.projectContext.project.width.value;
+    const canvasHeight = this.projectContext.project.height.value;
+    const mirrorPositions = this.projectContext.guides.getMirrorPositions(
+      x,
+      y,
+      canvasWidth,
+      canvasHeight
+    );
 
     for (const pos of mirrorPositions) {
       this.restoreSingleStamp(pos.x, pos.y);
@@ -437,14 +438,19 @@ export class PencilTool extends BaseTool {
 
     const brush = brushStore.activeBrush.value;
     const canvasWidth = this.context.canvas.width;
-    const canvasHeight = projectStore.height.value;
+    const canvasHeight = this.projectContext.project.height.value;
 
     // Use custom brush stamping for custom brushes with image data
     if (brush.type === "custom" && brush.imageData) {
       this.stampCustomBrush(x, y, brush.imageData);
 
       // Mirror drawing for custom brushes
-      const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+      const mirrorPositions = this.projectContext.guides.getMirrorPositions(
+        x,
+        y,
+        canvasWidth,
+        canvasHeight
+      );
       for (const pos of mirrorPositions) {
         this.stampCustomBrush(pos.x, pos.y, brush.imageData);
       }
@@ -455,7 +461,7 @@ export class PencilTool extends BaseTool {
     const size = toolSizes.pencil.value;
 
     this.context.globalAlpha = brush.opacity;
-    this.context.fillStyle = colorStore.primaryColor.value;
+    this.context.fillStyle = this.projectContext.colors.primaryColor.value;
 
     // Always draw centered on x/y
     const halfSize = Math.floor(size / 2);
@@ -483,7 +489,12 @@ export class PencilTool extends BaseTool {
     this.markDirty(dirtyX, dirtyY, size);
 
     // Mirror drawing: draw at mirrored positions if guides are active
-    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+    const mirrorPositions = this.projectContext.guides.getMirrorPositions(
+      x,
+      y,
+      canvasWidth,
+      canvasHeight
+    );
 
     for (const pos of mirrorPositions) {
       this.context.fillRect(pos.x - halfSize, pos.y - halfSize, size, size);
@@ -526,7 +537,7 @@ export class PencilTool extends BaseTool {
     const halfH = Math.floor(height / 2);
 
     const brush = brushStore.activeBrush.value;
-    const fgColor = colorStore.primaryColor.value;
+    const fgColor = this.projectContext.colors.primaryColor.value;
     const useOriginalColors = brush.useOriginalColors ?? false;
 
     const canvasWidth = this.context.canvas.width;
@@ -607,9 +618,14 @@ export class PencilTool extends BaseTool {
     this.restoreSinglePixel(x, y);
 
     // Also restore mirrored positions
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+    const canvasWidth = this.projectContext.project.width.value;
+    const canvasHeight = this.projectContext.project.height.value;
+    const mirrorPositions = this.projectContext.guides.getMirrorPositions(
+      x,
+      y,
+      canvasWidth,
+      canvasHeight
+    );
 
     for (const pos of mirrorPositions) {
       this.restoreSinglePixel(pos.x, pos.y);

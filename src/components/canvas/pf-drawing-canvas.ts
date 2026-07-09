@@ -620,7 +620,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.strokeContext = context;
     this.captureStrokeSnapshot(target, currentTool, context);
     context.dirtyRect.resetStroke();
-    this.toolController.onDown(target.context, point, modifiers);
+    this.toolController.onDown(target.context, context, point, modifiers);
     this.attachDocumentListeners();
     this.scheduleCanvasRender(context);
   }

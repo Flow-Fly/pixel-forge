@@ -1,6 +1,4 @@
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
-import { paletteStore } from '../stores/palette';
+import type { ProjectContext } from '../stores/project-context';
 import { rgbToHex, setIndexBufferPixel } from '../utils/indexed-color';
 
 interface SnapshotPixel {
@@ -13,23 +11,26 @@ interface SnapshotPixel {
 export class StrokeSession {
   private startSnapshot: ImageData | null = null;
   private buffer: Uint8Array | null = null;
+  private projectContext: ProjectContext | null = null;
 
-  begin(context: CanvasRenderingContext2D) {
+  begin(context: CanvasRenderingContext2D, projectContext: ProjectContext) {
     const canvas = context.canvas;
     this.startSnapshot = context.getImageData(0, 0, canvas.width, canvas.height);
     this.buffer = null;
+    this.projectContext = projectContext;
 
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
+    const layerId = projectContext.layers.activeLayerId.value;
+    const frameId = projectContext.animation.currentFrameId.value;
 
     if (layerId) {
-      this.buffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
+      this.buffer = projectContext.animation.ensureCelIndexBuffer(layerId, frameId);
     }
   }
 
   clear() {
     this.startSnapshot = null;
     this.buffer = null;
+    this.projectContext = null;
   }
 
   get hasSnapshot(): boolean {
@@ -41,7 +42,7 @@ export class StrokeSession {
   }
 
   restorePixel(context: CanvasRenderingContext2D, x: number, y: number): boolean {
-    if (!this.startSnapshot) {
+    if (!this.startSnapshot || !this.projectContext) {
       return false;
     }
 
@@ -61,7 +62,12 @@ export class StrokeSession {
     context.fillRect(x, y, 1, 1);
 
     const hex = rgbToHex(previousPixel.r, previousPixel.g, previousPixel.b);
-    this.setIndexBufferPixel(context, x, y, paletteStore.getColorIndex(hex));
+    this.setIndexBufferPixel(
+      context,
+      x,
+      y,
+      this.projectContext.palette.getColorIndex(hex)
+    );
     return true;
   }
 
