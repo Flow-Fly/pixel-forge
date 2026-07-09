@@ -61,6 +61,54 @@ function makeReadableCanvas(width: number, height: number): HTMLCanvasElement {
   } as unknown as HTMLCanvasElement;
 }
 
+function makeImageData(width: number, height: number, pixels: number[][]): ImageData {
+  const data = new Uint8ClampedArray(width * height * 4);
+
+  pixels.forEach((pixel, index) => {
+    const offset = index * 4;
+    data[offset] = pixel[0];
+    data[offset + 1] = pixel[1];
+    data[offset + 2] = pixel[2];
+    data[offset + 3] = pixel[3];
+  });
+
+  return { width, height, data } as ImageData;
+}
+
+function pixelAt(imageData: ImageData, x: number, y: number): number[] {
+  const offset = (y * imageData.width + x) * 4;
+  return Array.from(imageData.data.slice(offset, offset + 4));
+}
+
+function installActiveCanvasLayer(
+  context: ReturnType<typeof createProjectContext>,
+  width = 4,
+  height = 4
+) {
+  const layerId = 'paste-layer';
+  const canvas = makeReadableCanvas(width, height);
+
+  context.layers.layers.value = [
+    {
+      id: layerId,
+      name: 'Paste Layer',
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 255,
+      blendMode: 'normal',
+      parentId: null,
+      canvas,
+    },
+  ];
+  context.layers.activeLayerId.value = layerId;
+}
+
+function shortcutAction(combo: string): (() => void) | undefined {
+  const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
+  return calls.find((call) => comboFromCall(call) === combo)?.[2];
+}
+
 describe('registerShortcuts', () => {
   beforeEach(() => {
     keyboardServiceMock.register.mockClear();
@@ -207,6 +255,133 @@ describe('registerShortcuts', () => {
       context.dispose();
       clipboardStore.clear();
       selectionStore.clear();
+    }
+  });
+
+  it('pastes remapped indexed clipboard data into the active project context', () => {
+    const sourceContext = createProjectContext();
+    const targetContext = createProjectContext();
+
+    try {
+      sourceContext.palette.setPalette(['#ff0000', '#00ff00']);
+      clipboardStore.setData({
+        imageData: makeImageData(2, 2, [
+          [9, 9, 9, 255],
+          [9, 9, 9, 255],
+          [9, 9, 9, 255],
+          [9, 9, 9, 255],
+        ]),
+        shape: 'rectangle',
+        width: 2,
+        height: 2,
+        indexedSelection: {
+          indexData: Uint8Array.from([1, 2, 0, 1]),
+          sourceColors: ['#ff0000', '#00ff00'],
+          usedIndices: [1, 2],
+          shape: 'rectangle',
+          width: 2,
+          height: 2,
+        },
+      });
+      sourceContext.dispose();
+
+      targetContext.project.setSize(4, 4);
+      targetContext.palette.setPalette(['#00ff00']);
+      targetContext.palette.clearAllNewFlags();
+      installActiveCanvasLayer(targetContext);
+      setActiveProjectContext(targetContext);
+
+      registerShortcuts();
+      shortcutAction(`${MOD_PRIMARY}+v`)?.();
+
+      const state = targetContext.selection.state.value;
+      expect(state.type).toBe('floating');
+      if (state.type !== 'floating') return;
+
+      expect(state.originalBounds).toEqual({ x: 1, y: 1, width: 2, height: 2 });
+      expect(pixelAt(state.imageData, 0, 0)).toEqual([255, 0, 0, 255]);
+      expect(pixelAt(state.imageData, 1, 0)).toEqual([0, 255, 0, 255]);
+      expect(pixelAt(state.imageData, 0, 1)).toEqual([0, 0, 0, 0]);
+      expect(pixelAt(state.imageData, 1, 1)).toEqual([255, 0, 0, 255]);
+      expect(targetContext.palette.mainColors.value).toEqual(['#00ff00', '#ff0000']);
+      expect(targetContext.palette.isNewColor('#ff0000')).toBe(true);
+    } finally {
+      restoreDefaultProjectContext();
+      sourceContext.dispose();
+      targetContext.dispose();
+      clipboardStore.clear();
+    }
+  });
+
+  it('keeps same-index palette paste on the original image data fast path', () => {
+    const context = createProjectContext();
+    const imageData = makeImageData(1, 1, [[10, 20, 30, 123]]);
+
+    try {
+      context.project.setSize(3, 3);
+      context.palette.setPalette(['#ff0000']);
+      context.palette.clearAllNewFlags();
+      installActiveCanvasLayer(context);
+      setActiveProjectContext(context);
+      clipboardStore.setData({
+        imageData,
+        shape: 'rectangle',
+        width: 1,
+        height: 1,
+        indexedSelection: {
+          indexData: Uint8Array.from([1]),
+          sourceColors: ['#ff0000'],
+          usedIndices: [1],
+          shape: 'rectangle',
+          width: 1,
+          height: 1,
+        },
+      });
+
+      registerShortcuts();
+      shortcutAction(`${MOD_PRIMARY}+v`)?.();
+
+      const state = context.selection.state.value;
+      expect(state.type).toBe('floating');
+      if (state.type !== 'floating') return;
+
+      expect(state.imageData).toBe(imageData);
+      expect(context.palette.mainColors.value).toEqual(['#ff0000']);
+      expect(context.palette.newColorFlags.value.size).toBe(0);
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+      clipboardStore.clear();
+    }
+  });
+
+  it('keeps imageData-only clipboard paste behavior unchanged', () => {
+    const context = createProjectContext();
+    const imageData = makeImageData(1, 1, [[1, 2, 3, 4]]);
+
+    try {
+      context.project.setSize(3, 3);
+      installActiveCanvasLayer(context);
+      setActiveProjectContext(context);
+      clipboardStore.setData({
+        imageData,
+        shape: 'rectangle',
+        width: 1,
+        height: 1,
+      });
+
+      registerShortcuts();
+      shortcutAction(`${MOD_PRIMARY}+v`)?.();
+
+      const state = context.selection.state.value;
+      expect(state.type).toBe('floating');
+      if (state.type !== 'floating') return;
+
+      expect(state.imageData).toBe(imageData);
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+      clipboardStore.clear();
     }
   });
 });
