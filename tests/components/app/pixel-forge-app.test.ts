@@ -1,6 +1,23 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+const projectRepositoryMock = vi.hoisted(() => ({
+  getLastOpenedProjectId: vi.fn(),
+  list: vi.fn(),
+  load: vi.fn(),
+  setLastOpenedProjectId: vi.fn(),
+  getWorkspaceState: vi.fn(),
+  setWorkspaceState: vi.fn(),
+}));
+
+const workspaceStoreMock = vi.hoisted(() => ({
+  items: { value: [] },
+  activeItemId: { value: '' },
+  activate: vi.fn(),
+  closeProject: vi.fn(),
+  restoreWorkspace: vi.fn(),
+}));
+
 const canvasContext = new Proxy(
   { imageSmoothingEnabled: false },
   {
@@ -20,17 +37,58 @@ HTMLElement.prototype.showPopover = vi.fn();
 HTMLElement.prototype.hidePopover = vi.fn();
 
 vi.mock('../../../src/services/persistence/indexed-db', () => ({
-  projectRepository: {
-    getLastOpenedProjectId: vi.fn().mockResolvedValue(null),
-    list: vi.fn().mockResolvedValue([]),
-    load: vi.fn(),
-    setLastOpenedProjectId: vi.fn(),
-  },
+  projectRepository: projectRepositoryMock,
+}));
+
+vi.mock('../../../src/stores/workspace', () => ({
+  workspaceStore: workspaceStoreMock,
 }));
 
 describe('pixel-forge-app project dialogs', () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    vi.clearAllMocks();
+    projectRepositoryMock.getWorkspaceState.mockResolvedValue(null);
+    projectRepositoryMock.getLastOpenedProjectId.mockResolvedValue(null);
+    projectRepositoryMock.list.mockResolvedValue([]);
+    projectRepositoryMock.load.mockResolvedValue(null);
+    projectRepositoryMock.setLastOpenedProjectId.mockResolvedValue(undefined);
+    projectRepositoryMock.setWorkspaceState.mockResolvedValue(undefined);
+    workspaceStoreMock.restoreWorkspace.mockResolvedValue(false);
+    workspaceStoreMock.activate.mockReturnValue({
+      ok: true,
+      item: null,
+    });
+    workspaceStoreMock.closeProject.mockResolvedValue({
+      ok: true,
+      closedItem: null,
+      activeItem: null,
+    });
+  });
+
+  it('restores saved workspace state during startup', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const workspaceState = {
+      openProjectIds: ['project-a', 'project-b'],
+      activeProjectId: 'project-b',
+    };
+    projectRepositoryMock.getWorkspaceState.mockResolvedValue(workspaceState);
+    workspaceStoreMock.restoreWorkspace.mockResolvedValue(true);
+
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      hasLibraryProject: boolean;
+      showProjectBrowser: boolean;
+      updateComplete: Promise<unknown>;
+    };
+
+    document.body.append(element);
+    await Promise.resolve();
+    await element.updateComplete;
+
+    expect(workspaceStoreMock.restoreWorkspace).toHaveBeenCalledWith(workspaceState);
+    expect(projectRepositoryMock.getLastOpenedProjectId).not.toHaveBeenCalled();
+    expect(element.hasLibraryProject).toBe(true);
+    expect(element.showProjectBrowser).toBe(false);
   });
 
   it('opens the project browser from the project tab strip', async () => {

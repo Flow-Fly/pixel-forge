@@ -14,6 +14,11 @@ export interface SaveProjectOptions {
   thumbnail?: Uint8Array;
 }
 
+export interface WorkspaceState {
+  openProjectIds: string[];
+  activeProjectId: string | null;
+}
+
 /**
  * Storage seam for projects.
  *
@@ -43,4 +48,10 @@ export interface ProjectRepository {
 
   /** Remember which project to reopen on startup. */
   setLastOpenedProjectId(id: string): Promise<void>;
+
+  /** The full open workspace to restore on startup, if any. */
+  getWorkspaceState(): Promise<WorkspaceState | null>;
+
+  /** Remember open tabs and the active project. */
+  setWorkspaceState(state: WorkspaceState): Promise<void>;
 }

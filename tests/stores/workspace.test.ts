@@ -110,6 +110,12 @@ function createAutoSaveMock() {
   };
 }
 
+function createWorkspaceStateMock() {
+  return {
+    setWorkspaceState: vi.fn(async () => {}),
+  };
+}
+
 function expectAdded(result: ReturnType<WorkspaceStore["addContext"]>) {
   expect(result.ok).toBe(true);
   if (!result.ok) {
@@ -272,6 +278,82 @@ describe("WorkspaceStore", () => {
       false,
     );
     expect(getActiveProjectContext()).not.toBe(overflowContext);
+  });
+
+  it("persists open project ids and the active project when workspace state changes", () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    const workspaceState = createWorkspaceStateMock();
+    contextA.project.id.value = "project-a";
+    contextB.project.id.value = "project-b";
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+      workspaceState,
+    });
+
+    workspace.addContext(contextB, { id: "project-b", activate: false });
+    workspace.activate("project-b");
+    workspace.close("project-a");
+
+    expect(workspaceState.setWorkspaceState).toHaveBeenNthCalledWith(1, {
+      openProjectIds: ["project-a", "project-b"],
+      activeProjectId: "project-a",
+    });
+    expect(workspaceState.setWorkspaceState).toHaveBeenNthCalledWith(2, {
+      openProjectIds: ["project-a", "project-b"],
+      activeProjectId: "project-b",
+    });
+    expect(workspaceState.setWorkspaceState).toHaveBeenNthCalledWith(3, {
+      openProjectIds: ["project-b"],
+      activeProjectId: "project-b",
+    });
+  });
+
+  it("restores workspace projects, skips missing ids, and keeps the active project selected", async () => {
+    const initialContext = createTestContext("Initial Project");
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspaceState = createWorkspaceStateMock();
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "initial-project",
+      projectLibrary,
+      autoSave,
+      workspaceState,
+    });
+    vi.mocked(projectLibrary.openProject).mockImplementation(
+      async (projectId, settings = {}) => {
+        if (projectId === "missing-project") {
+          throw new Error("Project not found");
+        }
+        rememberContext(settings.context);
+        if (settings.context) {
+          settings.context.project.id.value = projectId;
+          settings.context.project.name.value = `Project ${projectId}`;
+        }
+        return makeProjectFile(`Project ${projectId}`);
+      },
+    );
+
+    const didRestore = await workspace.restoreWorkspace({
+      openProjectIds: ["project-a", "missing-project", "project-b"],
+      activeProjectId: "project-b",
+    });
+
+    expect(didRestore).toBe(true);
+    expect(workspace.items.value.map((item) => item.context.project.id.value)).toEqual([
+      "project-a",
+      "project-b",
+    ]);
+    expect(workspace.activeItem.context.project.id.value).toBe("project-b");
+    expect(getActiveProjectContext()).toBe(workspace.activeItem.context);
+    expect(workspace.activeItem.context).toBe(initialContext);
+    expect(autoSave.start).toHaveBeenCalledTimes(2);
+    expect(workspaceState.setWorkspaceState).toHaveBeenCalledWith({
+      openProjectIds: ["project-a", "project-b"],
+      activeProjectId: "project-b",
+    });
   });
 
   it("opens project ids into separate contexts and activates the latest project", async () => {
