@@ -8,21 +8,29 @@ import type { ReferenceLayerRenderEntry } from '../../services/reference-render-
 import {
   createReferenceTransformBox,
   moveReferenceTransform,
+  scaleReferenceTransformUniformly,
   type ReferenceLayerTransform,
   type ReferenceTransformBox,
+  type ReferenceTransformHandlePosition,
 } from '../../services/reference-transform-geometry';
 import type { Layer } from '../../types/layer';
 import type { ReferenceLayerData } from '../../types/reference';
 
 type EditableReferenceLayer = Layer & { referenceData: ReferenceLayerData };
 
-interface ReferenceMoveDrag {
+type ReferenceDragMode =
+  | { type: 'move' }
+  | { type: 'scale'; handle: ReferenceTransformHandlePosition };
+
+interface ReferenceTransformDrag {
   context: ProjectContext;
   layerId: string;
   startPointer: { x: number; y: number };
   startTransform: ReferenceLayerTransform;
   currentTransform: ReferenceLayerTransform;
   zoom: number;
+  imageSize: { width: number; height: number };
+  mode: ReferenceDragMode;
 }
 
 @customElement('pf-reference-transform-handles')
@@ -58,14 +66,18 @@ export class PFReferenceTransformHandles extends BaseComponent {
       background: white;
       border: 1px solid #333;
       border-radius: 2px;
-      pointer-events: none;
+      pointer-events: auto;
+    }
+
+    .reference-handle:hover {
+      background: #4a9eff;
     }
   `;
 
   private context: ProjectContext = defaultProjectContext;
   private readonly bitmapCache = new ReferenceBitmapCache();
   private readonly pendingBitmapLoads = new Set<Promise<ImageBitmap>>();
-  private moveDrag: ReferenceMoveDrag | null = null;
+  private transformDrag: ReferenceTransformDrag | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -77,7 +89,7 @@ export class PFReferenceTransformHandles extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeMoveListeners();
+    this.removeTransformDragListeners();
     this.bitmapCache.clear();
     this.pendingBitmapLoads.clear();
   }
@@ -135,6 +147,15 @@ export class PFReferenceTransformHandles extends BaseComponent {
     );
   }
 
+  private getReferenceImageSize(
+    layer: EditableReferenceLayer
+  ): { width: number; height: number } | null {
+    const bitmap = this.bitmapCache.getCached(createRenderEntry(layer));
+    if (!bitmap) return null;
+
+    return { width: bitmap.width, height: bitmap.height };
+  }
+
   private handleReferenceMouseDown = (event: MouseEvent) => {
     if (event.button !== 0) return;
 
@@ -144,36 +165,59 @@ export class PFReferenceTransformHandles extends BaseComponent {
     event.preventDefault();
     event.stopPropagation();
 
+    this.startTransformDrag(event, layer, { type: 'move' });
+  };
+
+  private handleReferenceScaleMouseDown = (
+    event: MouseEvent,
+    handle: ReferenceTransformHandlePosition
+  ) => {
+    if (event.button !== 0) return;
+
+    const layer = this.getActiveReferenceLayer();
+    if (!layer) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.startTransformDrag(event, layer, { type: 'scale', handle });
+  };
+
+  private startTransformDrag(
+    event: MouseEvent,
+    layer: EditableReferenceLayer,
+    mode: ReferenceDragMode
+  ) {
+    const imageSize = this.getReferenceImageSize(layer);
+    if (!imageSize) return;
+
     const startTransform = pickReferenceTransform(layer.referenceData);
-    this.moveDrag = {
+    this.transformDrag = {
       context: this.context,
       layerId: layer.id,
       startPointer: { x: event.clientX, y: event.clientY },
       startTransform,
       currentTransform: startTransform,
       zoom: this.context.viewport.zoom.value,
+      imageSize,
+      mode,
     };
     document.addEventListener('mousemove', this.handleDocumentMouseMove);
     document.addEventListener('mouseup', this.handleDocumentMouseUp);
     this.requestUpdate();
-  };
+  }
 
   private handleDocumentMouseMove = (event: MouseEvent) => {
-    const drag = this.moveDrag;
+    const drag = this.transformDrag;
     if (!drag) return;
 
     const layer = this.getDragLayer(drag);
     if (!layer) {
-      this.cancelMoveDrag();
+      this.cancelTransformDrag();
       return;
     }
 
-    const nextTransform = moveReferenceTransform(
-      drag.startTransform,
-      drag.startPointer,
-      { x: event.clientX, y: event.clientY },
-      drag.zoom
-    );
+    const nextTransform = this.getNextDragTransform(drag, event);
     if (sameReferenceTransform(nextTransform, drag.currentTransform)) return;
 
     drag.currentTransform = nextTransform;
@@ -182,11 +226,11 @@ export class PFReferenceTransformHandles extends BaseComponent {
   };
 
   private handleDocumentMouseUp = () => {
-    const drag = this.moveDrag;
+    const drag = this.transformDrag;
     if (!drag) return;
 
-    this.removeMoveListeners();
-    this.moveDrag = null;
+    this.removeTransformDragListeners();
+    this.transformDrag = null;
     this.requestUpdate();
 
     const layer = this.getDragLayer(drag);
@@ -207,7 +251,32 @@ export class PFReferenceTransformHandles extends BaseComponent {
     );
   };
 
-  private getDragLayer(drag: ReferenceMoveDrag): EditableReferenceLayer | null {
+  private getNextDragTransform(
+    drag: ReferenceTransformDrag,
+    event: MouseEvent
+  ): ReferenceLayerTransform {
+    const currentPointer = { x: event.clientX, y: event.clientY };
+
+    if (drag.mode.type === 'move') {
+      return moveReferenceTransform(
+        drag.startTransform,
+        drag.startPointer,
+        currentPointer,
+        drag.zoom
+      );
+    }
+
+    return scaleReferenceTransformUniformly(
+      drag.startTransform,
+      drag.imageSize,
+      drag.mode.handle,
+      drag.startPointer,
+      currentPointer,
+      drag.zoom
+    );
+  }
+
+  private getDragLayer(drag: ReferenceTransformDrag): EditableReferenceLayer | null {
     if (drag.context.layers.activeLayerId.value !== drag.layerId) return null;
 
     const layer = drag.context.layers.layers.value.find((item) => item.id === drag.layerId);
@@ -230,24 +299,24 @@ export class PFReferenceTransformHandles extends BaseComponent {
     context.dirtyRect.requestFullRedraw();
   }
 
-  private restoreReferenceTransform(drag: ReferenceMoveDrag) {
+  private restoreReferenceTransform(drag: ReferenceTransformDrag) {
     const layer = drag.context.layers.layers.value.find((item) => item.id === drag.layerId);
     if (!isReferenceLayerWithData(layer)) return;
 
     this.applyReferenceTransform(drag.context, layer, drag.startTransform);
   }
 
-  private cancelMoveDrag() {
-    const drag = this.moveDrag;
+  private cancelTransformDrag() {
+    const drag = this.transformDrag;
     if (!drag) return;
 
-    this.removeMoveListeners();
-    this.moveDrag = null;
+    this.removeTransformDragListeners();
+    this.transformDrag = null;
     this.restoreReferenceTransform(drag);
     this.requestUpdate();
   }
 
-  private removeMoveListeners() {
+  private removeTransformDragListeners() {
     document.removeEventListener('mousemove', this.handleDocumentMouseMove);
     document.removeEventListener('mouseup', this.handleDocumentMouseUp);
   }
@@ -264,7 +333,7 @@ export class PFReferenceTransformHandles extends BaseComponent {
 
     return html`
       <div
-        class="reference-box ${this.moveDrag ? 'dragging' : ''}"
+        class="reference-box ${this.transformDrag ? 'dragging' : ''}"
         aria-hidden="true"
         style=${boxStyle(box)}
         @mousedown=${this.handleReferenceMouseDown}
@@ -276,6 +345,8 @@ export class PFReferenceTransformHandles extends BaseComponent {
             data-position=${handle.position}
             aria-hidden="true"
             style="left: ${handle.screenX}px; top: ${handle.screenY}px; cursor: ${handle.cursor};"
+            @mousedown=${(event: MouseEvent) =>
+              this.handleReferenceScaleMouseDown(event, handle.position)}
           ></div>
         `
       )}

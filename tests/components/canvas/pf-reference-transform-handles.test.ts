@@ -58,6 +58,12 @@ function visibleHandles(element: PFReferenceTransformHandles) {
   return [...(element.shadowRoot?.querySelectorAll<HTMLElement>('.reference-handle') ?? [])];
 }
 
+function visibleHandle(element: PFReferenceTransformHandles, position: string) {
+  return element.shadowRoot?.querySelector<HTMLElement>(
+    `.reference-handle[data-position="${position}"]`
+  ) ?? null;
+}
+
 function referenceTransform(context: ProjectContext, layerId: string) {
   const data = context.layers.layers.value.find((layer) => layer.id === layerId)?.referenceData;
   return data ? { x: data.x, y: data.y, scale: data.scale } : null;
@@ -69,6 +75,18 @@ function dispatchDocumentMouseMove(clientX: number, clientY: number) {
 
 function dispatchDocumentMouseUp() {
   document.dispatchEvent(new MouseEvent('mouseup'));
+}
+
+function expectReferenceTransform(
+  context: ProjectContext,
+  layerId: string,
+  expected: { x: number; y: number; scale: number }
+) {
+  const actual = referenceTransform(context, layerId);
+
+  expect(actual?.x).toBeCloseTo(expected.x);
+  expect(actual?.y).toBeCloseTo(expected.y);
+  expect(actual?.scale).toBeCloseTo(expected.scale);
 }
 
 async function flushHistoryCommand() {
@@ -190,10 +208,45 @@ describe('pf-reference-transform-handles', () => {
     expect(context.history.undoStack.value).toHaveLength(1);
 
     await context.history.undo();
-    expect(referenceTransform(context, layer.id)).toEqual({ x: 4, y: 8, scale: 2 });
+    expectReferenceTransform(context, layer.id, { x: 4, y: 8, scale: 2 });
 
     await context.history.redo();
-    expect(referenceTransform(context, layer.id)).toEqual({ x: 8, y: 5, scale: 2 });
+    expectReferenceTransform(context, layer.id, { x: 8, y: 5, scale: 2 });
+  });
+
+  it('scales the active reference layer uniformly from a corner handle', async () => {
+    const context = createContext();
+    context.viewport.zoom.value = 2;
+    const layer = context.layers.addReferenceLayer(referenceData(), 'Guide');
+    setActiveProjectContext(context);
+
+    const element = await createReferenceTransformHandles();
+    await waitForBitmapRender(element);
+
+    visibleHandle(element, 'top-left')?.dispatchEvent(
+      new MouseEvent('mousedown', {
+        button: 0,
+        clientX: 100,
+        clientY: 80,
+        bubbles: true,
+      })
+    );
+    dispatchDocumentMouseMove(88, 72);
+    await waitForContextRender(element);
+
+    expectReferenceTransform(context, layer.id, { x: -4, y: 4, scale: 2.4 });
+    expect(context.history.undoStack.value).toHaveLength(0);
+
+    dispatchDocumentMouseUp();
+    await flushHistoryCommand();
+
+    expect(context.history.undoStack.value).toHaveLength(1);
+
+    await context.history.undo();
+    expectReferenceTransform(context, layer.id, { x: 4, y: 8, scale: 2 });
+
+    await context.history.redo();
+    expectReferenceTransform(context, layer.id, { x: -4, y: 4, scale: 2.4 });
   });
 
   it('cancels movement if the reference layer is no longer active while dragging', async () => {
@@ -220,7 +273,7 @@ describe('pf-reference-transform-handles', () => {
     dispatchDocumentMouseUp();
     await flushHistoryCommand();
 
-    expect(referenceTransform(context, reference.id)).toEqual({ x: 4, y: 8, scale: 2 });
+    expectReferenceTransform(context, reference.id, { x: 4, y: 8, scale: 2 });
     expect(context.history.undoStack.value).toHaveLength(0);
   });
 });
