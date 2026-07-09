@@ -1,8 +1,4 @@
 import { BaseTool, type ModifierKeys } from './base-tool';
-import { colorStore } from '../stores/colors';
-import { paletteStore } from '../stores/palette';
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
 import { isReferenceLayer } from '../utils/layer-capabilities';
 
 export class EyedropperTool extends BaseTool {
@@ -42,22 +38,26 @@ export class EyedropperTool extends BaseTool {
   }
 
   private canSampleActiveLayer(): boolean {
-    const layerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((candidate) => candidate.id === layerId);
+    const layerId = this.projectContext.layers.activeLayerId.value;
+    const layer = this.projectContext.layers.layers.value.find(
+      (candidate) => candidate.id === layerId
+    );
     return !isReferenceLayer(layer);
   }
 
   private indexedColorAt(pixelX: number, pixelY: number, width: number): string | null {
-    const layerId = layerStore.activeLayerId.value;
+    const layerId = this.projectContext.layers.activeLayerId.value;
     if (!layerId) return null;
 
-    const frameId = animationStore.currentFrameId.value;
-    const indexBuffer = animationStore.getCelIndexBuffer(layerId, frameId);
+    const frameId = this.projectContext.animation.currentFrameId.value;
+    const indexBuffer = this.projectContext.animation.getCelIndexBuffer(layerId, frameId);
     if (!indexBuffer) return null;
 
     const pixelIndex = pixelY * width + pixelX;
     const paletteIndex = indexBuffer[pixelIndex];
-    return paletteIndex > 0 ? paletteStore.getColorByIndex(paletteIndex) : null;
+    return paletteIndex > 0
+      ? this.projectContext.palette.getColorByIndex(paletteIndex)
+      : null;
   }
 
   private canvasColorAt(pixelX: number, pixelY: number): string | null {
@@ -74,11 +74,11 @@ export class EyedropperTool extends BaseTool {
 
   private applyPickedColor(hex: string, modifiers?: ModifierKeys) {
     if (modifiers?.button === 2) {
-      colorStore.setSecondaryColor(hex);
+      this.projectContext.colors.setSecondaryColor(hex);
       return;
     }
 
-    colorStore.setPrimaryColor(hex);
-    colorStore.updateLightnessVariations(hex);
+    this.projectContext.colors.setPrimaryColor(hex);
+    this.projectContext.colors.updateLightnessVariations(hex);
   }
 }
