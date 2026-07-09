@@ -9,6 +9,8 @@ import {
   UpdateLayerCommand,
 } from '../../commands/layer-commands';
 import { openReferenceImagePicker } from '../../services/reference-image-picker';
+import type { Layer } from '../../types/layer';
+import type { ReferenceLayerData } from '../../types/reference';
 import { log } from '../../utils/log';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
@@ -424,6 +426,65 @@ export class PFTimelineLayers extends BaseComponent {
     }
   }
 
+  private createReferenceDisplayItems(
+    layer: Layer,
+    context: ProjectContext
+  ): ContextMenuItem[] {
+    if (layer.type !== 'reference' || !layer.referenceData) return [];
+
+    const isDesaturated = layer.referenceData.desaturate === true;
+    const position = layer.referenceData.position ?? 'below';
+
+    return [
+      {
+        type: 'item',
+        icon: '◐',
+        label: isDesaturated ? 'Show reference in color' : 'Desaturate reference',
+        action: () => {
+          this.updateReferenceDisplay(layer.id, context, {
+            desaturate: !isDesaturated,
+          });
+        },
+      },
+      {
+        type: 'item',
+        icon: position === 'above' ? '↓' : '↑',
+        label:
+          position === 'above'
+            ? 'Move reference below artwork'
+            : 'Move reference above artwork',
+        action: () => {
+          this.updateReferenceDisplay(layer.id, context, {
+            position: position === 'above' ? 'below' : 'above',
+          });
+        },
+      },
+      { type: 'divider' },
+    ];
+  }
+
+  private updateReferenceDisplay(
+    layerId: string,
+    context: ProjectContext,
+    updates: Partial<Pick<ReferenceLayerData, 'desaturate' | 'position'>>
+  ): void {
+    const layer = context.layers.layers.value.find((item) => item.id === layerId);
+    if (layer?.type !== 'reference' || !layer.referenceData) return;
+
+    void context.history.execute(
+      new UpdateLayerCommand(
+        layerId,
+        {
+          referenceData: {
+            ...layer.referenceData,
+            ...updates,
+          },
+        },
+        context
+      )
+    );
+  }
+
   private handleLayerContextMenu(e: MouseEvent, layerId: string) {
     e.preventDefault();
     e.stopPropagation();
@@ -467,6 +528,7 @@ export class PFTimelineLayers extends BaseComponent {
         },
       },
       { type: 'divider' },
+      ...this.createReferenceDisplayItems(layer, context),
       {
         type: 'item',
         label: layer.continuous ? '◯ Make Non-Continuous' : '∞ Make Continuous',

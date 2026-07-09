@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import '../../../src/components/timeline/pf-timeline-layers';
 import type { PFTimelineLayers } from '../../../src/components/timeline/pf-timeline-layers';
+import type {
+  ContextMenuItem,
+  PFContextMenu,
+} from '../../../src/components/ui/pf-context-menu';
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -67,6 +71,31 @@ function clickButton(row: HTMLElement, title: string) {
   button!.click();
 }
 
+function openLayerContextMenu(element: PFTimelineLayers, type: LayerType) {
+  layerRow(element, type).dispatchEvent(
+    new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: 10,
+      clientY: 10,
+    })
+  );
+
+  const menu = element.shadowRoot?.querySelector<PFContextMenu>('pf-context-menu');
+  expect(menu).toBeTruthy();
+  return menu!;
+}
+
+function menuItem(menu: PFContextMenu, label: string): ContextMenuItem {
+  const item = menu.items.find((candidate) => candidate.label === label);
+  expect(item).toBeTruthy();
+  return item!;
+}
+
+async function runMenuItem(menu: PFContextMenu, label: string) {
+  menuItem(menu, label).action?.();
+  await Promise.resolve();
+}
+
 describe('pf-timeline-layers reference identity', () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -130,5 +159,61 @@ describe('pf-timeline-layers reference identity', () => {
 
     expect(referenceLayer()?.opacity).toBe(191);
     expect(context.history.undoStack.value.at(-1)?.name).toBe('Update Layer');
+  });
+
+  it('shows display controls only for reference layers', async () => {
+    const context = createContext();
+    setActiveProjectContext(context);
+    const element = await createTimelineLayers();
+
+    const referenceMenu = openLayerContextMenu(element, 'reference');
+    expect(referenceMenu.items.map((item) => item.label).filter(Boolean)).toEqual(
+      expect.arrayContaining([
+        'Desaturate reference',
+        'Move reference above artwork',
+      ])
+    );
+
+    const imageMenu = openLayerContextMenu(element, 'image');
+    const imageLabels = imageMenu.items.map((item) => item.label).filter(Boolean);
+    expect(imageLabels).not.toContain('Desaturate reference');
+    expect(imageLabels).not.toContain('Move reference above artwork');
+  });
+
+  it('makes reference display changes undoable and redoable', async () => {
+    const context = createContext();
+    setActiveProjectContext(context);
+    const element = await createTimelineLayers();
+    const referenceData = () =>
+      context.layers.layers.value.find((layer) => layer.id === 'reference-layer')?.referenceData;
+
+    let menu = openLayerContextMenu(element, 'reference');
+    await runMenuItem(menu, 'Desaturate reference');
+    expect(referenceData()?.desaturate).toBe(true);
+
+    await context.history.undo();
+    expect(referenceData()?.desaturate).toBeUndefined();
+    await context.history.redo();
+    expect(referenceData()?.desaturate).toBe(true);
+
+    menu = openLayerContextMenu(element, 'reference');
+    await runMenuItem(menu, 'Show reference in color');
+    expect(referenceData()?.desaturate).toBe(false);
+
+    menu = openLayerContextMenu(element, 'reference');
+    await runMenuItem(menu, 'Move reference above artwork');
+    expect(referenceData()?.position).toBe('above');
+
+    await context.history.undo();
+    expect(referenceData()?.position).toBeUndefined();
+    await context.history.redo();
+    expect(referenceData()?.position).toBe('above');
+
+    menu = openLayerContextMenu(element, 'reference');
+    await runMenuItem(menu, 'Move reference below artwork');
+    expect(referenceData()?.position).toBe('below');
+    expect(
+      context.history.undoStack.value.every((command) => command.name === 'Update Layer')
+    ).toBe(true);
   });
 });
