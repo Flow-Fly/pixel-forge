@@ -198,6 +198,35 @@ export class PFTimelineLayers extends BaseComponent {
       color: var(--pf-color-bg-dark);
     }
 
+    .reference-layer-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .reference-layer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--pf-color-bg-tertiary);
+      border: 1px solid var(--pf-color-accent-cyan, #91b8c5);
+      color: var(--pf-color-accent-cyan, #91b8c5);
+      letter-spacing: 0.04em;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+
     .layer-name-input {
       flex: 1;
       background: var(--pf-color-bg-surface);
@@ -659,6 +688,7 @@ export class PFTimelineLayers extends BaseComponent {
               class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${
                 this.draggedLayerId === layer.id ? 'dragging' : ''
               } ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
+              data-layer-type=${layer.type}
               @click=${() => this.selectLayer(layer.id)}
               @contextmenu=${(e: MouseEvent) => this.handleLayerContextMenu(e, layer.id)}
               @mouseenter=${(e: MouseEvent) => this.handleLayerMouseEnter(e, layer.id, layer.name)}
@@ -710,7 +740,18 @@ export class PFTimelineLayers extends BaseComponent {
                         class="layer-name"
                         @dblclick=${(e: Event) => this.startRename(layer.id, layer.name, e)}
                       >
-                        ${layer.type === 'text' ? html`<span class="layer-type-badge">T</span>` : ''}${layer.name}
+                        ${layer.type === 'text' ? html`<span class="layer-type-badge">T</span>` : ''}
+                        ${
+                          layer.type === 'reference'
+                            ? html`
+                                <span class="layer-type-badge reference-layer-badge" title="Reference layer">
+                                  <span class="reference-layer-icon" aria-hidden="true">▧</span>
+                                  <span class="reference-layer-label visually-hidden">reference</span>
+                                  <span class="reference-layer-abbreviation" aria-hidden="true">REF</span>
+                                </span>
+                              `
+                            : ''
+                        }${layer.name}
                       </span>
                     `
               }
