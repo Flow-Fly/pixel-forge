@@ -2,6 +2,8 @@ import { html, css } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { settingsStore } from '../../stores/settings';
+import { ViewEffectPipeline } from '../../services/view-effects';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -112,6 +114,16 @@ export class PFPreviewOverlay extends BaseComponent {
       display: block;
       image-rendering: pixelated;
       background: transparent;
+    }
+
+    .effect-canvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .effect-canvas[hidden] {
+      display: none;
     }
 
     .preview-canvas-wrapper.bg-white {
@@ -256,7 +268,8 @@ export class PFPreviewOverlay extends BaseComponent {
     }
   `;
 
-  @query('canvas') previewCanvas!: HTMLCanvasElement;
+  @query('.preview-canvas') previewCanvas!: HTMLCanvasElement;
+  @query('.effect-canvas') effectCanvas!: HTMLCanvasElement;
 
   @state() private collapsed = false;
   @state() private bgType: BackgroundType = 'checker';
@@ -267,6 +280,7 @@ export class PFPreviewOverlay extends BaseComponent {
   @state() private dragOffsetY = 0;
   @state() private previewSize = 128; // User-configurable preview size
   @state() private isResizing = false;
+  @state() private viewEffectsSupported = false;
   private resizeStartX = 0;
   private resizeStartY = 0;
   private resizeStartSize = 0;
@@ -274,6 +288,7 @@ export class PFPreviewOverlay extends BaseComponent {
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number = 0;
   private context: ProjectContext = defaultProjectContext;
+  private viewEffectPipeline: ViewEffectPipeline | null = null;
 
   // Preview sizing constraints
   private readonly MAX_PREVIEW_SIZE = 300; // Max user-resizable size
@@ -296,11 +311,16 @@ export class PFPreviewOverlay extends BaseComponent {
     window.removeEventListener('mouseup', this.handleMouseUp);
     window.removeEventListener('mousemove', this.handleResizeMouseMove);
     window.removeEventListener('mouseup', this.handleResizeMouseUp);
+    this.viewEffectPipeline?.dispose();
   }
 
   firstUpdated() {
     if (this.previewCanvas) {
       this.ctx = this.previewCanvas.getContext('2d');
+    }
+    if (this.effectCanvas) {
+      this.viewEffectPipeline = new ViewEffectPipeline(this.effectCanvas);
+      this.viewEffectsSupported = this.viewEffectPipeline.isSupported;
     }
     // Set default position if not loaded
     if (this.posX === 0 && this.posY === 0) {
@@ -511,6 +531,26 @@ export class PFPreviewOverlay extends BaseComponent {
     // Reset composite settings
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
+
+    this.renderViewEffect(canvas, previewScale);
+  }
+
+  private renderViewEffect(source: HTMLCanvasElement, previewScale: number) {
+    const effectId = settingsStore.activeViewEffect.value;
+    const pipeline = this.viewEffectPipeline;
+    if (!effectId || !pipeline?.isSupported) return;
+
+    const projectWidth = this.context.project.width.value;
+    const projectHeight = this.context.project.height.value;
+    const displayWidth = Math.max(1, Math.round(projectWidth * previewScale));
+    const displayHeight = Math.max(1, Math.round(projectHeight * previewScale));
+    const pixelRatio = window.devicePixelRatio || 1;
+
+    pipeline.render(effectId, source, settingsStore.getViewEffectParams(effectId), {
+      width: displayWidth * pixelRatio,
+      height: displayHeight * pixelRatio,
+      spritePixelScale: previewScale * pixelRatio,
+    });
   }
 
   /**
@@ -601,8 +641,15 @@ export class PFPreviewOverlay extends BaseComponent {
           <div class="preview-area" @click=${this.handlePreviewClick}>
             <div class="preview-canvas-wrapper bg-${this.bgType}">
               <canvas
+                class="preview-canvas"
                 width="${actualCanvasW}"
                 height="${actualCanvasH}"
+                style="width: ${displayW}px; height: ${displayH}px;"
+              ></canvas>
+              <canvas
+                class="effect-canvas"
+                aria-hidden="true"
+                ?hidden=${!settingsStore.activeViewEffect.value || !this.viewEffectsSupported}
                 style="width: ${displayW}px; height: ${displayH}px;"
               ></canvas>
               ${
