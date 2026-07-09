@@ -1,7 +1,8 @@
 import type { Command } from './index';
 import type { Rect } from '../types/geometry';
-import { layerStore } from '../stores/layers';
-import { dirtyRectStore } from '../stores/dirty-rect';
+import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
+
+type PatchCommandContext = Pick<ProjectContext, 'dirtyRect' | 'layers'>;
 
 /**
  * Command for selective undo (patching out a specific change).
@@ -17,26 +18,37 @@ export class PatchCommand implements Command {
   private layerId: string;
   private bounds: Rect;
   private beforeData: Uint8ClampedArray; // Canvas state before patch
-  private afterData: Uint8ClampedArray;  // Canvas state after patch (with pixels restored)
+  private afterData: Uint8ClampedArray; // Canvas state after patch (with pixels restored)
+  private readonly context: PatchCommandContext;
 
   // Estimated memory usage in bytes (for history limit tracking)
   readonly memorySize: number;
 
   // Public getters for history preview (same interface as OptimizedDrawingCommand)
-  get drawBounds(): Rect { return { ...this.bounds }; }
-  get drawPreviousData(): Uint8ClampedArray { return this.beforeData; }
-  get drawNewData(): Uint8ClampedArray { return this.afterData; }
-  get drawLayerId(): string { return this.layerId; }
+  get drawBounds(): Rect {
+    return { ...this.bounds };
+  }
+  get drawPreviousData(): Uint8ClampedArray {
+    return this.beforeData;
+  }
+  get drawNewData(): Uint8ClampedArray {
+    return this.afterData;
+  }
+  get drawLayerId(): string {
+    return this.layerId;
+  }
 
   constructor(
     layerId: string,
     bounds: Rect,
     beforeData: Uint8ClampedArray,
     afterData: Uint8ClampedArray,
-    originalCommandName: string
+    originalCommandName: string,
+    context: PatchCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.name = `Patch out: ${originalCommandName}`;
+    this.context = context;
     this.layerId = layerId;
     this.bounds = { ...bounds };
     this.beforeData = beforeData;
@@ -48,40 +60,29 @@ export class PatchCommand implements Command {
   }
 
   execute(): void {
-    const layer = layerStore.layers.value.find(l => l.id === this.layerId);
-    if (!layer?.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Apply the patched state (afterData has the pixels restored)
-    const imageData = new ImageData(
-      new Uint8ClampedArray(this.afterData),
-      this.bounds.width,
-      this.bounds.height
-    );
-    ctx.putImageData(imageData, this.bounds.x, this.bounds.y);
-
-    // Mark dirty for re-render
-    dirtyRectStore.markDirty(this.bounds);
+    this.applyData(this.afterData);
   }
 
   undo(): void {
-    const layer = layerStore.layers.value.find(l => l.id === this.layerId);
+    this.applyData(this.beforeData);
+  }
+
+  private applyData(data: Uint8ClampedArray): void {
+    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
     if (!layer?.canvas) return;
 
     const ctx = layer.canvas.getContext('2d');
     if (!ctx) return;
 
-    // Revert to the state before the patch
+    // Rebuild ImageData from the stored array before writing it back.
     const imageData = new ImageData(
-      new Uint8ClampedArray(this.beforeData),
+      new Uint8ClampedArray(data),
       this.bounds.width,
       this.bounds.height
     );
     ctx.putImageData(imageData, this.bounds.x, this.bounds.y);
 
     // Mark dirty for re-render
-    dirtyRectStore.markDirty(this.bounds);
+    this.context.dirtyRect.markDirty(this.bounds);
   }
 }
