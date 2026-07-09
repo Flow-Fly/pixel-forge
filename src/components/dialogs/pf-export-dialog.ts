@@ -5,6 +5,7 @@ import { projectStore } from "../../stores/project";
 import { layerStore } from "../../stores/layers";
 import { animationStore } from "../../stores/animation";
 import { FileService } from "../../services/file-service";
+import { composeExportFrame } from "../../services/export-composition";
 // Dynamic imports for export services - loaded on demand to reduce initial bundle
 // import { exportSpritesheet } from "../../services/spritesheet-export";
 // import { exportAnimatedWebP } from "../../services/webp-animation";
@@ -173,17 +174,7 @@ export class PFExportDialog extends BaseComponent {
     const frameCount = this.getFrameCount();
 
     if (this.format === "spritesheet") {
-      let cols: number, rows: number;
-      if (this.spritesheetDirection === "horizontal") {
-        cols = frameCount;
-        rows = 1;
-      } else if (this.spritesheetDirection === "vertical") {
-        cols = 1;
-        rows = frameCount;
-      } else {
-        cols = Math.min(frameCount, this.spritesheetColumns);
-        rows = Math.ceil(frameCount / cols);
-      }
+      const { cols, rows } = this.getSpritesheetGrid(frameCount);
       return {
         width: cols * baseWidth * this.scale,
         height: rows * baseHeight * this.scale,
@@ -203,42 +194,36 @@ export class PFExportDialog extends BaseComponent {
     return Math.max(1, this.frameEnd - this.frameStart + 1);
   }
 
+  private getSpritesheetGrid(frameCount: number): { cols: number; rows: number } {
+    if (this.spritesheetDirection === "horizontal") {
+      return { cols: frameCount, rows: 1 };
+    }
+
+    if (this.spritesheetDirection === "vertical") {
+      return { cols: 1, rows: frameCount };
+    }
+
+    const cols = Math.min(frameCount, this.spritesheetColumns);
+    return { cols, rows: Math.ceil(frameCount / cols) };
+  }
+
   private close() {
     this.open = false;
     this.dispatchEvent(new CustomEvent("close"));
   }
 
   private compositeFrame(frameId: string, scale: number): HTMLCanvasElement {
-    const width = projectStore.width.value;
-    const height = projectStore.height.value;
-    const canvas = document.createElement("canvas");
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    const ctx = canvas.getContext("2d")!;
-
-    // Disable smoothing for pixel art
-    ctx.imageSmoothingEnabled = false;
-
-    // Background
-    if (this.useBackground) {
-      ctx.fillStyle = this.backgroundColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-
-    // Scale and draw layers
-    ctx.scale(scale, scale);
-    const layers = layerStore.layers.value;
-    for (const layer of layers) {
-      if (!layer.visible) continue;
-      const celCanvas = animationStore.getCelCanvas(frameId, layer.id);
-      if (celCanvas) {
-        ctx.globalAlpha = layer.opacity / 255;
-        ctx.drawImage(celCanvas, 0, 0);
-      }
-    }
-    ctx.globalAlpha = 1;
-
-    return canvas;
+    return composeExportFrame({
+      frameId,
+      scale,
+      width: projectStore.width.value,
+      height: projectStore.height.value,
+      layers: layerStore.layers.value,
+      getCelCanvas: (currentFrameId, layerId) =>
+        animationStore.getCelCanvas(currentFrameId, layerId),
+      useBackground: this.useBackground,
+      backgroundColor: this.backgroundColor,
+    });
   }
 
   private getSelectedFrameIds(): string[] {
@@ -326,18 +311,7 @@ export class PFExportDialog extends BaseComponent {
     const width = projectStore.width.value * this.scale;
     const height = projectStore.height.value * this.scale;
     const frameCount = frameIds.length;
-
-    let cols: number, rows: number;
-    if (this.spritesheetDirection === "horizontal") {
-      cols = frameCount;
-      rows = 1;
-    } else if (this.spritesheetDirection === "vertical") {
-      cols = 1;
-      rows = frameCount;
-    } else {
-      cols = Math.min(frameCount, this.spritesheetColumns);
-      rows = Math.ceil(frameCount / cols);
-    }
+    const { cols, rows } = this.getSpritesheetGrid(frameCount);
 
     const sheetCanvas = document.createElement("canvas");
     sheetCanvas.width = cols * width;
