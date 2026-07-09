@@ -46,12 +46,38 @@ describe('ReferenceBitmapCache', () => {
     const cache = new ReferenceBitmapCache(decoder);
     const entry = createEntry();
 
+    expect(cache.getCached(entry)).toBeNull();
     await expect(cache.get(entry)).resolves.toBe(bitmap);
     await expect(cache.get(entry)).resolves.toBe(bitmap);
 
     expect(decoder).toHaveBeenCalledOnce();
+    expect(cache.getCached(entry)).toBe(bitmap);
     expect(cache.size).toBe(1);
     expect(fakeBitmap(bitmap).close).not.toHaveBeenCalled();
+  });
+
+  it('reuses a pending decode for matching reference data', async () => {
+    let resolveDecode: ((bitmap: ImageBitmap) => void) | undefined;
+    const decoder = vi.fn<ReferenceBitmapDecoder>(
+      () =>
+        new Promise((resolve) => {
+          resolveDecode = resolve;
+        })
+    );
+    const cache = new ReferenceBitmapCache(decoder);
+    const entry = createEntry();
+
+    const firstRequest = cache.get(entry);
+    const secondRequest = cache.get(entry);
+    const bitmap = createFakeBitmap('decoded');
+
+    expect(firstRequest).toBe(secondRequest);
+    expect(decoder).toHaveBeenCalledOnce();
+    expect(cache.getCached(entry)).toBeNull();
+
+    resolveDecode?.(bitmap);
+    await expect(firstRequest).resolves.toBe(bitmap);
+    expect(cache.getCached(entry)).toBe(bitmap);
   });
 
   it('decodes again and closes stale bitmaps when image identity changes', async () => {
@@ -62,15 +88,47 @@ describe('ReferenceBitmapCache', () => {
       .mockResolvedValueOnce(firstBitmap)
       .mockResolvedValueOnce(secondBitmap);
     const cache = new ReferenceBitmapCache(decoder);
+    const firstEntry = createEntry();
+    const secondEntry = createEntry({ bytes: Uint8Array.from([4, 5, 6]) });
 
-    await expect(cache.get(createEntry())).resolves.toBe(firstBitmap);
-    await expect(cache.get(createEntry({ bytes: Uint8Array.from([4, 5, 6]) }))).resolves.toBe(
-      secondBitmap
-    );
+    await expect(cache.get(firstEntry)).resolves.toBe(firstBitmap);
+    await expect(cache.get(secondEntry)).resolves.toBe(secondBitmap);
 
     expect(decoder).toHaveBeenCalledTimes(2);
     expect(fakeBitmap(firstBitmap).close).toHaveBeenCalledOnce();
     expect(fakeBitmap(secondBitmap).close).not.toHaveBeenCalled();
+    expect(cache.getCached(firstEntry)).toBeNull();
+    expect(cache.getCached(secondEntry)).toBe(secondBitmap);
+  });
+
+  it('does not let stale pending decodes replace newer cached data', async () => {
+    const resolvers: Array<(bitmap: ImageBitmap) => void> = [];
+    const decoder = vi.fn<ReferenceBitmapDecoder>(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+    const cache = new ReferenceBitmapCache(decoder);
+    const staleEntry = createEntry();
+    const currentEntry = createEntry({ bytes: Uint8Array.from([4, 5, 6]) });
+
+    const staleRequest = cache.get(staleEntry);
+    const currentRequest = cache.get(currentEntry);
+    const staleBitmap = createFakeBitmap('stale');
+    const currentBitmap = createFakeBitmap('current');
+
+    resolvers[1](currentBitmap);
+    await expect(currentRequest).resolves.toBe(currentBitmap);
+    expect(cache.getCached(currentEntry)).toBe(currentBitmap);
+
+    resolvers[0](staleBitmap);
+    await expect(staleRequest).resolves.toBe(staleBitmap);
+
+    expect(fakeBitmap(staleBitmap).close).toHaveBeenCalledOnce();
+    expect(fakeBitmap(currentBitmap).close).not.toHaveBeenCalled();
+    expect(cache.getCached(currentEntry)).toBe(currentBitmap);
+    expect(cache.size).toBe(1);
   });
 
   it('treats MIME type and layer id as part of the cache identity', async () => {
@@ -110,9 +168,11 @@ describe('ReferenceBitmapCache', () => {
     const entry = createEntry();
 
     await expect(cache.get(entry)).rejects.toThrow(error);
+    expect(cache.getCached(entry)).toBeNull();
     await expect(cache.get(entry)).resolves.toBe(bitmap);
 
     expect(decoder).toHaveBeenCalledTimes(2);
+    expect(cache.getCached(entry)).toBe(bitmap);
     expect(cache.size).toBe(1);
   });
 

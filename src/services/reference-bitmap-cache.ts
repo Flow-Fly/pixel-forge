@@ -2,14 +2,15 @@ import type { ReferenceLayerRenderEntry } from './reference-render-plan';
 
 export type ReferenceBitmapDecoder = (entry: ReferenceLayerRenderEntry) => Promise<ImageBitmap>;
 
-interface CachedReferenceBitmap {
+interface ReferenceBitmapRecord {
   key: string;
-  bitmap: ImageBitmap;
+  bitmap?: ImageBitmap;
+  promise?: Promise<ImageBitmap>;
 }
 
 export class ReferenceBitmapCache {
   private readonly decoder: ReferenceBitmapDecoder;
-  private readonly cachedByLayer = new Map<string, CachedReferenceBitmap>();
+  private readonly cachedByLayer = new Map<string, ReferenceBitmapRecord>();
   private readonly byteIds = new WeakMap<Uint8Array, number>();
   private nextByteId = 1;
 
@@ -17,30 +18,39 @@ export class ReferenceBitmapCache {
     this.decoder = decoder;
   }
 
-  async get(entry: ReferenceLayerRenderEntry): Promise<ImageBitmap> {
+  get(entry: ReferenceLayerRenderEntry): Promise<ImageBitmap> {
     const key = this.getCacheKey(entry);
     const cached = this.cachedByLayer.get(entry.layerId);
 
     if (cached?.key === key) {
-      return cached.bitmap;
+      if (cached.bitmap) return Promise.resolve(cached.bitmap);
+      if (cached.promise) return cached.promise;
     }
 
-    const bitmap = await this.decoder(entry);
-    this.replaceCachedBitmap(entry.layerId, key, bitmap);
-    return bitmap;
+    const record = this.createPendingRecord(entry.layerId, key, entry);
+    this.replaceCachedRecord(entry.layerId, record);
+    return record.promise!;
+  }
+
+  getCached(entry: ReferenceLayerRenderEntry): ImageBitmap | null {
+    const key = this.getCacheKey(entry);
+    const cached = this.cachedByLayer.get(entry.layerId);
+
+    if (cached?.key !== key) return null;
+    return cached.bitmap ?? null;
   }
 
   invalidateLayer(layerId: string): void {
     const cached = this.cachedByLayer.get(layerId);
     if (!cached) return;
 
-    closeReferenceBitmap(cached.bitmap);
+    closeCachedBitmap(cached);
     this.cachedByLayer.delete(layerId);
   }
 
   clear(): void {
     for (const cached of this.cachedByLayer.values()) {
-      closeReferenceBitmap(cached.bitmap);
+      closeCachedBitmap(cached);
     }
     this.cachedByLayer.clear();
   }
@@ -49,13 +59,42 @@ export class ReferenceBitmapCache {
     return this.cachedByLayer.size;
   }
 
-  private replaceCachedBitmap(layerId: string, key: string, bitmap: ImageBitmap): void {
+  private createPendingRecord(
+    layerId: string,
+    key: string,
+    entry: ReferenceLayerRenderEntry
+  ): ReferenceBitmapRecord {
+    const record: ReferenceBitmapRecord = { key };
+
+    record.promise = this.decoder(entry)
+      .then((bitmap) => {
+        if (this.cachedByLayer.get(layerId) !== record) {
+          closeReferenceBitmap(bitmap);
+          return bitmap;
+        }
+
+        record.bitmap = bitmap;
+        record.promise = undefined;
+        return bitmap;
+      })
+      .catch((error: unknown) => {
+        if (this.cachedByLayer.get(layerId) === record) {
+          this.cachedByLayer.delete(layerId);
+        }
+
+        throw error;
+      });
+
+    return record;
+  }
+
+  private replaceCachedRecord(layerId: string, record: ReferenceBitmapRecord): void {
     const cached = this.cachedByLayer.get(layerId);
-    if (cached && cached.bitmap !== bitmap) {
-      closeReferenceBitmap(cached.bitmap);
+    if (cached && cached !== record) {
+      closeCachedBitmap(cached);
     }
 
-    this.cachedByLayer.set(layerId, { key, bitmap });
+    this.cachedByLayer.set(layerId, record);
   }
 
   private getCacheKey(entry: ReferenceLayerRenderEntry): string {
@@ -83,6 +122,12 @@ async function decodeReferenceBitmap(
 function copyBytes(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes);
   return copy.buffer;
+}
+
+function closeCachedBitmap(record: ReferenceBitmapRecord): void {
+  if (record.bitmap) {
+    closeReferenceBitmap(record.bitmap);
+  }
 }
 
 function closeReferenceBitmap(bitmap: ImageBitmap): void {
