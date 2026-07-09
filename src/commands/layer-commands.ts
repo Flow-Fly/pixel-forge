@@ -7,6 +7,10 @@ import type { ReferenceLayerTransform } from '../services/reference-transform-ge
 type LayerCommandContext = Pick<ProjectContext, 'animation' | 'layers' | 'project'>;
 type ReferenceTransformCommandContext = Pick<ProjectContext, 'dirtyRect' | 'layers'>;
 
+function layerCanOwnCels(layer: Layer): boolean {
+  return layer.type !== 'reference';
+}
+
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
   name = 'Add Layer';
@@ -48,7 +52,7 @@ export class DuplicateLayerCommand implements Command {
     const newLayer = this.context.layers.duplicateLayer(this.sourceLayerId);
     this.newLayerId = newLayer?.id ?? null;
 
-    if (this.newLayerId) {
+    if (this.newLayerId && newLayer && layerCanOwnCels(newLayer)) {
       // Duplicate all cels for this layer
       this.duplicateCels(this.sourceLayerId, this.newLayerId);
     }
