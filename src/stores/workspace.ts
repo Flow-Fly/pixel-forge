@@ -287,6 +287,16 @@ export class WorkspaceStore {
     };
   }
 
+  async closeProject(itemId: string): Promise<WorkspaceCloseResult> {
+    const item = this.findItem(itemId);
+    if (!item || this.items.value.length === 1) {
+      return this.close(itemId);
+    }
+
+    await this.autoSave.saveNow(item.context);
+    return this.close(itemId);
+  }
+
   private findItem(itemId: string): WorkspaceItem | undefined {
     return this.items.value.find((item) => item.id === itemId);
   }

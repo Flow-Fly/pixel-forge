@@ -24,6 +24,7 @@ import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-panel";
 import "../layers/pf-layers-panel";
+import "./pf-project-tabs";
 import { projectStore } from "../../stores/project";
 import { viewportStore } from "../../stores/viewport";
 import { historyStore } from "../../stores/history";
@@ -564,6 +565,9 @@ export class PixelForgeApp extends BaseComponent {
       </aside>
 
       <main class="workspace">
+        <pf-project-tabs
+          @show-project-browser=${this.handleShowProjectBrowser}
+        ></pf-project-tabs>
         <pf-canvas-viewport @canvas-cursor=${this.handleCanvasCursor}>
           <pf-drawing-canvas
             .width=${projectStore.width.value}

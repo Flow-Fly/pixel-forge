@@ -1,4 +1,4 @@
-import { effect } from '../core/signal';
+import { effect, signal } from '../core/signal';
 import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { projectRepository } from './persistence/indexed-db';
 import { createProjectThumbnail } from './project-thumbnail';
@@ -23,7 +23,10 @@ interface AutoSaveContextState {
  * `historyStore.version` instead, which bumps on every execute/undo/redo.
  */
 class AutoSaveService {
+  readonly dirtyContexts = signal<ReadonlySet<ProjectContext>>(new Set());
+
   private contextState = new Map<ProjectContext, AutoSaveContextState>();
+  private dirtyContextSet = new Set<ProjectContext>();
   private hasDocumentListeners = false;
 
   /** Start observing history changes. Idempotent. */
@@ -67,6 +70,7 @@ class AutoSaveService {
     if (state.suppressSaveCount > 0) return;
 
     state.isDirty = true;
+    this.setDirtyContext(context, true);
 
     this.clearSaveTimeout(state);
     state.saveTimeout = setTimeout(() => {
@@ -91,11 +95,16 @@ class AutoSaveService {
     await this.performSave(context, { force: true, rethrow: true });
   }
 
+  isDirty(context: ProjectContext = defaultProjectContext): boolean {
+    return this.dirtyContexts.value.has(context);
+  }
+
   /** Drop a pending debounce without writing. Used when the open project is deleted. */
   clearPendingSave(context: ProjectContext = defaultProjectContext) {
     const state = this.getState(context);
     this.clearSaveTimeout(state);
     state.isDirty = false;
+    this.setDirtyContext(context, false);
   }
 
   /** Run project load/reset work without treating reset signals as user edits. */
@@ -129,6 +138,7 @@ class AutoSaveService {
 
     const wasDirty = state.isDirty;
     state.isDirty = false;
+    this.setDirtyContext(context, false);
 
     try {
       const projectData = await context.project.saveProject();
@@ -139,6 +149,7 @@ class AutoSaveService {
       context.project.lastSaved.value = Date.now();
     } catch (error) {
       state.isDirty = wasDirty || state.isDirty;
+      this.setDirtyContext(context, state.isDirty);
       log.error('Auto-save failed:', error);
       if (options.rethrow) throw error;
     }
@@ -166,6 +177,7 @@ class AutoSaveService {
     state.dispose = null;
     this.clearSaveTimeout(state);
     this.contextState.delete(context);
+    this.setDirtyContext(context, false);
   }
 
   private hasStartedContexts(): boolean {
@@ -195,6 +207,17 @@ class AutoSaveService {
     if (!state.saveTimeout) return;
     clearTimeout(state.saveTimeout);
     state.saveTimeout = null;
+  }
+
+  private setDirtyContext(context: ProjectContext, isDirty: boolean) {
+    if (isDirty) {
+      if (this.dirtyContextSet.has(context)) return;
+      this.dirtyContextSet.add(context);
+    } else {
+      if (!this.dirtyContextSet.delete(context)) return;
+    }
+
+    this.dirtyContexts.value = new Set(this.dirtyContextSet);
   }
 }
 
