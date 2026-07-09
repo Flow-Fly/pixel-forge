@@ -1,13 +1,14 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { v4 as uuidv4 } from 'uuid';
 import type { ProjectFile } from '../../types/project';
-import type { ProjectMeta, ProjectRepository } from './project-repository';
+import type { ProjectMeta, ProjectRepository, WorkspaceState } from './project-repository';
 import { log } from '../../utils/log';
 
 /** Key of the single-project slot used before multi-project support. */
 const LEGACY_CURRENT_PROJECT_KEY = 'current-project';
 
 const LAST_OPENED_SETTING_KEY = 'last-opened-project-id';
+const WORKSPACE_STATE_SETTING_KEY = 'workspace-state';
 
 interface StoredProject {
   id: string;
@@ -130,7 +131,41 @@ class IndexedDbProjectRepository implements ProjectRepository {
     const db = await this.dbPromise;
     await db.put('settings', { key: LAST_OPENED_SETTING_KEY, value: id });
   }
+
+  async getWorkspaceState(): Promise<WorkspaceState | null> {
+    const db = await this.dbPromise;
+    const setting = await db.get('settings', WORKSPACE_STATE_SETTING_KEY);
+    return parseWorkspaceState(setting?.value);
+  }
+
+  async setWorkspaceState(state: WorkspaceState): Promise<void> {
+    const db = await this.dbPromise;
+    await db.put('settings', { key: WORKSPACE_STATE_SETTING_KEY, value: state });
+    if (state.activeProjectId) {
+      await db.put('settings', {
+        key: LAST_OPENED_SETTING_KEY,
+        value: state.activeProjectId,
+      });
+    }
+  }
 }
 
 export const projectRepository: ProjectRepository =
   new IndexedDbProjectRepository();
+
+function parseWorkspaceState(value: unknown): WorkspaceState | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const data = value as Partial<WorkspaceState>;
+  if (!Array.isArray(data.openProjectIds)) return null;
+
+  const openProjectIds = data.openProjectIds.filter(
+    (projectId): projectId is string => typeof projectId === 'string' && projectId.length > 0
+  );
+  const activeProjectId =
+    typeof data.activeProjectId === 'string' && data.activeProjectId.length > 0
+      ? data.activeProjectId
+      : null;
+
+  return { openProjectIds, activeProjectId };
+}

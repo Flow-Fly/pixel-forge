@@ -26,6 +26,7 @@ import "../ui/pf-panel";
 import "../layers/pf-layers-panel";
 import "./pf-project-tabs";
 import { projectStore } from "../../stores/project";
+import { workspaceStore } from "../../stores/workspace";
 import { viewportStore } from "../../stores/viewport";
 import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
@@ -428,6 +429,16 @@ export class PixelForgeApp extends BaseComponent {
 
   private async loadSavedProject() {
     try {
+      const workspaceState = await projectRepository.getWorkspaceState();
+      if (
+        workspaceState &&
+        (await workspaceStore.restoreWorkspace(workspaceState))
+      ) {
+        this.hasLibraryProject = true;
+        this.showProjectBrowser = false;
+        return;
+      }
+
       let projectId = await projectRepository.getLastOpenedProjectId();
       if (!projectId) {
         // No last-opened marker — fall back to the most recent project
@@ -435,15 +446,13 @@ export class PixelForgeApp extends BaseComponent {
         projectId = all[0]?.id ?? null;
       }
 
-      const savedProject = projectId
-        ? await projectRepository.load(projectId)
-        : null;
-      if (savedProject && projectId) {
-        projectStore.id.value = projectId;
-        // fromAutoSave = true: palette is already loaded from localStorage,
-        // don't overwrite with stale palette data from IndexedDB
-        await projectStore.loadProject(savedProject, true);
-        await projectRepository.setLastOpenedProjectId(projectId);
+      if (
+        projectId &&
+        (await workspaceStore.restoreWorkspace({
+          openProjectIds: [projectId],
+          activeProjectId: projectId,
+        }))
+      ) {
         historyStore.clear();
         this.hasLibraryProject = true;
         this.showProjectBrowser = false;

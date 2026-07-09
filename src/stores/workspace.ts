@@ -1,5 +1,10 @@
 import { signal } from "../core/signal";
 import { autoSaveService } from "../services/auto-save";
+import { projectRepository } from "../services/persistence/indexed-db";
+import type {
+  ProjectRepository,
+  WorkspaceState,
+} from "../services/persistence/project-repository";
 import {
   projectLibrary,
   type CreateProjectOptions,
@@ -11,6 +16,7 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from "./project-context";
+import { log } from "../utils/log";
 
 export const WORKSPACE_OPEN_ITEM_LIMIT = 8;
 export const DEFAULT_WORKSPACE_ITEM_ID = "workspace-default";
@@ -38,6 +44,7 @@ type WorkspaceAutoSave = Pick<
   typeof autoSaveService,
   "saveNow" | "start" | "stop"
 >;
+type WorkspaceStatePersistence = Pick<ProjectRepository, "setWorkspaceState">;
 
 export interface WorkspaceProjectOptions {
   activate?: boolean;
@@ -82,6 +89,7 @@ interface WorkspaceStoreOptions {
   itemLimit?: number;
   projectLibrary?: WorkspaceProjectLibrary;
   autoSave?: WorkspaceAutoSave;
+  workspaceState?: WorkspaceStatePersistence;
 }
 
 interface AddContextOptions {
@@ -103,6 +111,8 @@ export class WorkspaceStore {
   private readonly itemLimit: number;
   private readonly projectLibrary: WorkspaceProjectLibrary;
   private readonly autoSave: WorkspaceAutoSave;
+  private readonly workspaceState: WorkspaceStatePersistence;
+  private isRestoringWorkspace = false;
 
   constructor(options: WorkspaceStoreOptions = {}) {
     const initialItem = {
@@ -115,6 +125,7 @@ export class WorkspaceStore {
     this.itemLimit = options.itemLimit ?? WORKSPACE_OPEN_ITEM_LIMIT;
     this.projectLibrary = options.projectLibrary ?? projectLibrary;
     this.autoSave = options.autoSave ?? autoSaveService;
+    this.workspaceState = options.workspaceState ?? noopWorkspaceState;
 
     setActiveProjectContext(initialItem.context);
   }
@@ -228,6 +239,9 @@ export class WorkspaceStore {
 
     this.items.value = [...this.items.value, item];
     this.activateIfRequested(item, options.activate);
+    if (options.activate === false) {
+      this.persistWorkspaceState();
+    }
 
     return { ok: true, item };
   }
@@ -244,6 +258,7 @@ export class WorkspaceStore {
 
     this.activeItemId.value = item.id;
     setActiveProjectContext(item.context);
+    this.persistWorkspaceState();
     return { ok: true, item };
   }
 
@@ -279,6 +294,7 @@ export class WorkspaceStore {
 
     this.autoSave.stop(closedItem.context);
     closedItem.context.dispose();
+    this.persistWorkspaceState();
 
     return {
       ok: true,
@@ -295,6 +311,43 @@ export class WorkspaceStore {
 
     await this.autoSave.saveNow(item.context);
     return this.close(itemId);
+  }
+
+  async restoreWorkspace(state: WorkspaceState): Promise<boolean> {
+    const restorePlan = this.createRestorePlan(state);
+    if (restorePlan.loadProjectIds.length === 0) return false;
+
+    const previousItems = this.items.value;
+    const reusableContext = this.activeItem.context;
+    let didRestore = false;
+
+    this.isRestoringWorkspace = true;
+    try {
+      const loadedItemsById = await this.loadWorkspaceItems(
+        restorePlan.loadProjectIds,
+        reusableContext,
+      );
+      const loadedItems = this.orderedLoadedItems(
+        restorePlan.displayProjectIds,
+        loadedItemsById,
+      );
+      if (loadedItems.length === 0) return false;
+
+      const activeItem = this.restoredActiveItem(
+        state.activeProjectId,
+        loadedItemsById,
+        loadedItems,
+      );
+      this.disposeReplacedItems(previousItems, loadedItems, reusableContext);
+      this.applyRestoredWorkspace(loadedItems, activeItem);
+      didRestore = true;
+      return true;
+    } finally {
+      this.isRestoringWorkspace = false;
+      if (didRestore) {
+        this.persistWorkspaceState();
+      }
+    }
   }
 
   private findItem(itemId: string): WorkspaceItem | undefined {
@@ -336,6 +389,146 @@ export class WorkspaceStore {
     this.autoSave.start(context);
     return { ok: true, item: result.item, projectId };
   }
+
+  private createRestorePlan(state: WorkspaceState) {
+    const displayProjectIds = this.uniqueProjectIds(state.openProjectIds);
+    if (state.activeProjectId && !displayProjectIds.includes(state.activeProjectId)) {
+      displayProjectIds.unshift(state.activeProjectId);
+    }
+
+    const loadProjectIds = state.activeProjectId
+      ? [
+          state.activeProjectId,
+          ...displayProjectIds.filter(
+            (projectId) => projectId !== state.activeProjectId,
+          ),
+        ]
+      : displayProjectIds;
+
+    return {
+      displayProjectIds: displayProjectIds.slice(0, this.itemLimit),
+      loadProjectIds: loadProjectIds.slice(0, this.itemLimit),
+    };
+  }
+
+  private async loadWorkspaceItems(
+    projectIds: string[],
+    reusableContext: ProjectContext,
+  ): Promise<Map<string, WorkspaceItem>> {
+    const loadedItemsById = new Map<string, WorkspaceItem>();
+    let didUseReusableContext = false;
+
+    for (const projectId of projectIds) {
+      const context = didUseReusableContext
+        ? createProjectContext()
+        : reusableContext;
+      const item = await this.loadWorkspaceItem(projectId, context, reusableContext);
+      if (!item) continue;
+
+      didUseReusableContext = true;
+      loadedItemsById.set(projectId, item);
+    }
+
+    return loadedItemsById;
+  }
+
+  private async loadWorkspaceItem(
+    projectId: string,
+    context: ProjectContext,
+    reusableContext: ProjectContext,
+  ): Promise<WorkspaceItem | null> {
+    try {
+      await this.projectLibrary.openProject(projectId, {
+        context,
+        saveCurrent: false,
+      });
+    } catch (error) {
+      if (context !== reusableContext) {
+        context.dispose();
+      }
+      log.warn("Skipping workspace project during restore:", error);
+      return null;
+    }
+
+    this.autoSave.start(context);
+    return { id: projectId, context };
+  }
+
+  private orderedLoadedItems(
+    displayProjectIds: string[],
+    loadedItemsById: Map<string, WorkspaceItem>,
+  ): WorkspaceItem[] {
+    return displayProjectIds
+      .map((projectId) => loadedItemsById.get(projectId))
+      .filter((item): item is WorkspaceItem => Boolean(item));
+  }
+
+  private restoredActiveItem(
+    activeProjectId: string | null,
+    loadedItemsById: Map<string, WorkspaceItem>,
+    loadedItems: WorkspaceItem[],
+  ): WorkspaceItem {
+    return activeProjectId
+      ? loadedItemsById.get(activeProjectId) ?? loadedItems[0]
+      : loadedItems[0];
+  }
+
+  private disposeReplacedItems(
+    previousItems: WorkspaceItem[],
+    loadedItems: WorkspaceItem[],
+    reusableContext: ProjectContext,
+  ) {
+    for (const item of previousItems) {
+      const isStillOpen = loadedItems.some(
+        (loadedItem) => loadedItem.context === item.context,
+      );
+      if (!isStillOpen && item.context !== reusableContext) {
+        this.autoSave.stop(item.context);
+        item.context.dispose();
+      }
+    }
+  }
+
+  private applyRestoredWorkspace(
+    loadedItems: WorkspaceItem[],
+    activeItem: WorkspaceItem,
+  ) {
+    this.items.value = loadedItems;
+    this.activeItemId.value = activeItem.id;
+    setActiveProjectContext(activeItem.context);
+  }
+
+  private uniqueProjectIds(projectIdsToDeduplicate: string[]): string[] {
+    const projectIds: string[] = [];
+
+    for (const projectId of projectIdsToDeduplicate) {
+      if (!projectId || projectIds.includes(projectId)) continue;
+      projectIds.push(projectId);
+      if (projectIds.length >= this.itemLimit) break;
+    }
+
+    return projectIds;
+  }
+
+  private persistWorkspaceState() {
+    if (this.isRestoringWorkspace) return;
+
+    void this.workspaceState
+      .setWorkspaceState(this.currentWorkspaceState())
+      .catch((error) => log.warn("Failed to persist workspace state:", error));
+  }
+
+  private currentWorkspaceState(): WorkspaceState {
+    const openProjectIds = this.items.value.map((item) => item.context.project.id.value);
+    const activeProjectId = this.activeItem.context.project.id.value || null;
+    return { openProjectIds, activeProjectId };
+  }
 }
 
-export const workspaceStore = new WorkspaceStore();
+const noopWorkspaceState: WorkspaceStatePersistence = {
+  async setWorkspaceState() {},
+};
+
+export const workspaceStore = new WorkspaceStore({
+  workspaceState: projectRepository,
+});

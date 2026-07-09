@@ -8,6 +8,8 @@ const repositoryMock = vi.hoisted(() => ({
   delete: vi.fn(),
   getLastOpenedProjectId: vi.fn(),
   setLastOpenedProjectId: vi.fn(),
+  getWorkspaceState: vi.fn(),
+  setWorkspaceState: vi.fn(),
 }));
 
 vi.mock('../../src/services/persistence/indexed-db', () => ({
@@ -153,6 +155,8 @@ beforeEach(async () => {
   });
   repository.getLastOpenedProjectId.mockResolvedValue(null);
   repository.setLastOpenedProjectId.mockResolvedValue(undefined);
+  repository.getWorkspaceState.mockResolvedValue(null);
+  repository.setWorkspaceState.mockResolvedValue(undefined);
 
   autoSaveService.stop();
   await openProjectInStore('current', makeProject('Current'));
