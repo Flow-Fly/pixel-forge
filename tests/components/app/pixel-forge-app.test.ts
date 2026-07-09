@@ -1,5 +1,11 @@
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  createProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../../../src/stores/project-context';
 
 const projectRepositoryMock = vi.hoisted(() => ({
   getLastOpenedProjectId: vi.fn(),
@@ -36,11 +42,15 @@ HTMLCanvasElement.prototype.getContext = vi.fn(() => canvasContext);
 HTMLElement.prototype.showPopover = vi.fn();
 HTMLElement.prototype.hidePopover = vi.fn();
 
+const createdContexts: ProjectContext[] = [];
+
 vi.mock('../../../src/services/persistence/indexed-db', () => ({
   projectRepository: projectRepositoryMock,
 }));
 
 vi.mock('../../../src/stores/workspace', () => ({
+  WORKSPACE_OPEN_ITEM_LIMIT: 8,
+  workspaceItemLimitMessage: () => 'The workspace can keep up to 8 projects open at once.',
   workspaceStore: workspaceStoreMock,
 }));
 
@@ -64,6 +74,13 @@ describe('pixel-forge-app project dialogs', () => {
       closedItem: null,
       activeItem: null,
     });
+  });
+
+  afterEach(() => {
+    restoreDefaultProjectContext();
+    for (const context of createdContexts.splice(0)) {
+      context.dispose();
+    }
   });
 
   it('restores saved workspace state during startup', async () => {
@@ -113,6 +130,29 @@ describe('pixel-forge-app project dialogs', () => {
 
     expect(element.showProjectBrowser).toBe(true);
     expect(element.shadowRoot?.querySelector('pf-project-browser')).toBeTruthy();
+  });
+
+  it('renders the canvas surface from the active project context', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const context = createProjectContext();
+    createdContexts.push(context);
+    context.project.width.value = 37;
+    context.project.height.value = 29;
+    setActiveProjectContext(context);
+
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+
+    document.body.append(element);
+    await element.updateComplete;
+
+    const drawingCanvas = element.shadowRoot?.querySelector('pf-drawing-canvas') as
+      | (HTMLElement & { width: number; height: number })
+      | null;
+
+    expect(drawingCanvas?.width).toBe(37);
+    expect(drawingCanvas?.height).toBe(29);
   });
 
   it('opens the new-project dialog when the project browser requests it', async () => {

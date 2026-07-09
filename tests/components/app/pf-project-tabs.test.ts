@@ -26,6 +26,8 @@ const autoSaveServiceMock = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/stores/workspace', () => ({
+  WORKSPACE_OPEN_ITEM_LIMIT: 8,
+  workspaceItemLimitMessage: () => 'The workspace can keep up to 8 projects open at once.',
   workspaceStore: workspaceStoreMock,
 }));
 
@@ -124,6 +126,22 @@ describe('pf-project-tabs', () => {
     expect(workspaceStoreMock.closeProject).toHaveBeenCalledWith('project-a');
   });
 
+  it('closes a tab through the same path on middle click', async () => {
+    const element = await createTabs();
+    const tabButton = buttonWithLabel(element.shadowRoot!, 'Project A');
+
+    tabButton?.dispatchEvent(
+      new MouseEvent('auxclick', {
+        bubbles: true,
+        composed: true,
+        button: 1,
+      })
+    );
+    await settle(element);
+
+    expect(workspaceStoreMock.closeProject).toHaveBeenCalledWith('project-a');
+  });
+
   it('emits the project browser event from the plus button', async () => {
     const element = await createTabs();
     let didOpenBrowser = false;
@@ -135,5 +153,24 @@ describe('pf-project-tabs', () => {
     await settle(element);
 
     expect(didOpenBrowser).toBe(true);
+  });
+
+  it('shows a message instead of opening the browser at the tab cap', async () => {
+    workspaceStoreMock.items.value = Array.from({ length: 8 }, (_, index) =>
+      createWorkspaceItem(`project-${index + 1}`, `Project ${index + 1}`)
+    );
+    const element = await createTabs();
+    let didOpenBrowser = false;
+    element.addEventListener('show-project-browser', () => {
+      didOpenBrowser = true;
+    });
+
+    buttonWithLabel(element.shadowRoot!, 'Open project')?.click();
+    await settle(element);
+
+    expect(didOpenBrowser).toBe(false);
+    expect(element.shadowRoot?.textContent).toContain(
+      'The workspace can keep up to 8 projects open at once.'
+    );
   });
 });
