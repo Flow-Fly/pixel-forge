@@ -1,4 +1,7 @@
-import { dirtyRectStore } from '../stores/dirty-rect';
+import {
+  defaultProjectContext,
+  type ProjectContext,
+} from '../stores/project-context';
 import { rectExpand, type Rect } from '../types/geometry';
 
 export type { Point } from '../types/geometry';
@@ -33,9 +36,14 @@ export abstract class BaseTool {
   onKeyUp(_e: KeyboardEvent): void {}
 
   protected context: CanvasRenderingContext2D | null = null;
+  protected projectContext: ProjectContext = defaultProjectContext;
 
   setContext(ctx: CanvasRenderingContext2D) {
     this.context = ctx;
+  }
+
+  setProjectContext(context: ProjectContext) {
+    this.projectContext = context;
   }
 
   get ctx(): CanvasRenderingContext2D | null {
@@ -52,6 +60,6 @@ export abstract class BaseTool {
    */
   protected markDirty(x: number, y: number, width: number = 1, height: number = width): void {
     const rect: Rect = { x, y, width, height };
-    dirtyRectStore.markDirty(rectExpand(rect, 1)); // +1 for safety margin
+    this.projectContext.dirtyRect.markDirty(rectExpand(rect, 1)); // +1 for safety margin
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ProjectContext } from '../../src/stores/project-context';
 import { BaseTool, type ModifierKeys } from '../../src/tools/base-tool';
 import { ToolController } from '../../src/tools/tool-controller';
 
@@ -14,6 +15,10 @@ class FakeTool extends BaseTool {
     super();
     this.setContext(ctx);
     fakeToolInstances.push(this);
+  }
+
+  get activeProjectContext() {
+    return this.projectContext;
   }
 }
 
@@ -64,6 +69,7 @@ describe('ToolController', () => {
   it('forwards pointer lifecycle calls to the active tool', async () => {
     const controller = createController();
     const strokeContext = createContext();
+    const projectContext = {} as ProjectContext;
     const modifiers: ModifierKeys = {
       shift: true,
       ctrl: false,
@@ -74,12 +80,13 @@ describe('ToolController', () => {
     await controller.load('pencil');
     const tool = fakeToolInstances[0];
 
-    controller.onDown(strokeContext, { x: 1, y: 2 }, modifiers);
+    controller.onDown(strokeContext, projectContext, { x: 1, y: 2 }, modifiers);
     controller.onDrag({ x: 3, y: 4 }, modifiers);
     controller.onUp({ x: 5, y: 6 }, modifiers);
     controller.onMove({ x: 7, y: 8 }, modifiers);
 
     expect(tool.ctx).toBe(strokeContext);
+    expect(tool.activeProjectContext).toBe(projectContext);
     expect(tool.onDown).toHaveBeenCalledWith(1, 2, modifiers);
     expect(tool.onDrag).toHaveBeenCalledWith(3, 4, modifiers);
     expect(tool.onUp).toHaveBeenCalledWith(5, 6, modifiers);

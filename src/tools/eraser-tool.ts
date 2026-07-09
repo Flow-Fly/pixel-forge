@@ -1,10 +1,6 @@
 import { BaseTool, type Point, type ModifierKeys } from './base-tool';
-import { colorStore } from '../stores/colors';
 import { brushStore } from '../stores/brush';
 import { eraserSettings, toolSizes, type EraserMode } from '../stores/tool-settings';
-import { guidesStore } from '../stores/guides';
-import { projectStore } from '../stores/project';
-import { paletteStore } from '../stores/palette';
 import {
   bresenhamLine,
   isLShape,
@@ -91,14 +87,14 @@ export class EraserTool extends BaseTool {
   private beginStrokeSession() {
     if (!this.context) return;
 
-    this.strokeSession.begin(this.context);
+    this.strokeSession.begin(this.context, this.projectContext);
 
     if (!this.currentIndexBuffer || eraserSettings.mode.value !== 'background') {
       return;
     }
 
-    const bgColor = colorStore.secondaryColor.value;
-    this.backgroundPaletteIndex = paletteStore.getOrAddColorForDrawing(bgColor);
+    const bgColor = this.projectContext.colors.secondaryColor.value;
+    this.backgroundPaletteIndex = this.projectContext.palette.getOrAddColorForDrawing(bgColor);
   }
 
   private eraseShiftClickStroke(currentX: number, currentY: number) {
@@ -280,9 +276,14 @@ export class EraserTool extends BaseTool {
     this.eraseSinglePoint(x, y, size, halfSize, brush.opacity);
 
     // Mirror erasing: erase at mirrored positions if guides are active
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+    const canvasWidth = this.projectContext.project.width.value;
+    const canvasHeight = this.projectContext.project.height.value;
+    const mirrorPositions = this.projectContext.guides.getMirrorPositions(
+      x,
+      y,
+      canvasWidth,
+      canvasHeight
+    );
 
     for (const pos of mirrorPositions) {
       this.eraseSinglePoint(pos.x, pos.y, size, halfSize, brush.opacity);
@@ -300,7 +301,7 @@ export class EraserTool extends BaseTool {
 
     if (eraserSettings.mode.value === 'background') {
       // Fill with secondary (background) color
-      this.context.fillStyle = colorStore.secondaryColor.value;
+      this.context.fillStyle = this.projectContext.colors.secondaryColor.value;
       this.context.globalAlpha = opacity;
       this.context.fillRect(x - halfSize, y - halfSize, size, size);
       this.context.globalAlpha = 1;
@@ -368,9 +369,14 @@ export class EraserTool extends BaseTool {
     this.restoreSinglePixel(x, y);
 
     // Also restore mirrored positions
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
-    const mirrorPositions = guidesStore.getMirrorPositions(x, y, canvasWidth, canvasHeight);
+    const canvasWidth = this.projectContext.project.width.value;
+    const canvasHeight = this.projectContext.project.height.value;
+    const mirrorPositions = this.projectContext.guides.getMirrorPositions(
+      x,
+      y,
+      canvasWidth,
+      canvasHeight
+    );
 
     for (const pos of mirrorPositions) {
       this.restoreSinglePixel(pos.x, pos.y);
