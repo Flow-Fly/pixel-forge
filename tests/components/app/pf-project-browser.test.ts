@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const projectLibraryMock = vi.hoisted(() => ({
   listProjects: vi.fn(),
-  openProject: vi.fn(),
-  createProject: vi.fn(),
   duplicateProject: vi.fn(),
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
@@ -13,9 +11,15 @@ const autoSaveServiceMock = vi.hoisted(() => ({
   saveNow: vi.fn(),
 }));
 
-const projectStoreMock = vi.hoisted(() => ({
-  id: { value: 'open-project' },
-  name: { value: 'Open Project' },
+const activeProjectContextMock = vi.hoisted(() => ({
+  project: {
+    id: { value: 'open-project' },
+    name: { value: 'Open Project' },
+  },
+}));
+
+const workspaceStoreMock = vi.hoisted(() => ({
+  openProject: vi.fn(),
 }));
 
 vi.mock('../../../src/services/project-library', () => ({
@@ -26,8 +30,12 @@ vi.mock('../../../src/services/auto-save', () => ({
   autoSaveService: autoSaveServiceMock,
 }));
 
-vi.mock('../../../src/stores/project', () => ({
-  projectStore: projectStoreMock,
+vi.mock('../../../src/stores/project-context', () => ({
+  getActiveProjectContext: vi.fn(() => activeProjectContextMock),
+}));
+
+vi.mock('../../../src/stores/workspace', () => ({
+  workspaceStore: workspaceStoreMock,
 }));
 
 import '../../../src/components/app/pf-project-browser';
@@ -161,14 +169,18 @@ describe('pf-project-browser', () => {
     document.body.replaceChildren();
     installDialogMocks();
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_030_000);
-    projectStoreMock.id.value = 'open-project';
-    projectStoreMock.name.value = 'Open Project';
+    activeProjectContextMock.project.id.value = 'open-project';
+    activeProjectContextMock.project.name.value = 'Open Project';
     projectLibraryMock.listProjects.mockResolvedValue([...PROJECTS]);
-    projectLibraryMock.openProject.mockResolvedValue(undefined);
     projectLibraryMock.duplicateProject.mockResolvedValue('copy-id');
     projectLibraryMock.renameProject.mockResolvedValue(undefined);
     projectLibraryMock.deleteProject.mockResolvedValue(undefined);
     autoSaveServiceMock.saveNow.mockResolvedValue(undefined);
+    workspaceStoreMock.openProject.mockResolvedValue({
+      ok: true,
+      item: {},
+      projectId: 'open-project',
+    });
   });
 
   afterEach(() => {
@@ -291,7 +303,9 @@ describe('pf-project-browser', () => {
     buttonWithText(element.shadowRoot!, 'Open Project')?.click();
     await settle(element);
 
-    expect(projectLibraryMock.openProject).toHaveBeenCalledWith('open-project');
+    expect(workspaceStoreMock.openProject).toHaveBeenCalledWith('open-project', {
+      saveActiveContext: false,
+    });
     expect(opened).toBe(true);
   });
 
@@ -311,8 +325,8 @@ describe('pf-project-browser', () => {
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle(element);
 
-    expect(projectStoreMock.name.value).toBe('Renamed Project');
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledOnce();
+    expect(activeProjectContextMock.project.name.value).toBe('Renamed Project');
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(activeProjectContextMock);
     expect(projectLibraryMock.renameProject).not.toHaveBeenCalled();
   });
 
@@ -322,13 +336,13 @@ describe('pf-project-browser', () => {
     buttonWithText(element.shadowRoot!, 'Duplicate')?.click();
     await settle(element);
 
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledOnce();
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(activeProjectContextMock);
     expect(projectLibraryMock.duplicateProject).toHaveBeenCalledWith('open-project');
     expect(projectLibraryMock.listProjects).toHaveBeenCalledTimes(2);
   });
 
   it('confirms deletion before deleting a project', async () => {
-    projectStoreMock.id.value = 'different-project';
+    activeProjectContextMock.project.id.value = 'different-project';
     const element = await createBrowser();
 
     buttonWithText(element.shadowRoot!, 'Delete')?.click();
@@ -339,7 +353,9 @@ describe('pf-project-browser', () => {
     confirmDeleteButton(element.shadowRoot!)?.click();
     await settle(element);
 
-    expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('open-project');
+    expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('open-project', {
+      context: activeProjectContextMock,
+    });
   });
 
   it('emits current-project-deleted when the open project is deleted', async () => {

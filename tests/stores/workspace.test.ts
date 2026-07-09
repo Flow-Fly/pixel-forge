@@ -4,6 +4,7 @@ import {
   WORKSPACE_OPEN_ITEM_LIMIT,
   WorkspaceStore,
 } from "../../src/stores/workspace";
+import type { ProjectLibraryService } from "../../src/services/project-library";
 import {
   createProjectContext,
   defaultProjectContext,
@@ -11,6 +12,54 @@ import {
   restoreDefaultProjectContext,
   type ProjectContext,
 } from "../../src/stores/project-context";
+import { PROJECT_VERSION, type ProjectFile } from "../../src/types/project";
+
+type WorkspaceProjectLibrary = Pick<
+  ProjectLibraryService,
+  "openProject" | "createProject"
+>;
+
+function makeProjectFile(name: string): ProjectFile {
+  const layerId = `${name}-layer`;
+  const frameId = `${name}-frame`;
+
+  return {
+    version: PROJECT_VERSION,
+    name,
+    width: 8,
+    height: 8,
+    palette: ["#000000", "#ffffff"],
+    layers: [
+      {
+        id: layerId,
+        name: "Layer 1",
+        type: "image",
+        visible: true,
+        opacity: 255,
+        blendMode: "normal",
+        continuous: false,
+        data: new Uint8Array(0),
+      },
+    ],
+    frames: [
+      {
+        id: frameId,
+        duration: 100,
+        cels: [
+          {
+            layerId,
+            data: new Uint8Array(0),
+          },
+        ],
+      },
+    ],
+    animation: {
+      fps: 12,
+      currentFrameIndex: 0,
+    },
+    tags: [],
+  };
+}
 
 const createdContexts: ProjectContext[] = [];
 
@@ -19,6 +68,46 @@ function createTestContext(name: string) {
   context.project.name.value = name;
   createdContexts.push(context);
   return context;
+}
+
+function rememberContext(context: ProjectContext | undefined) {
+  if (context && !createdContexts.includes(context)) {
+    createdContexts.push(context);
+  }
+}
+
+function createProjectLibraryMock() {
+  let nextProjectNumber = 1;
+  const projectLibrary: WorkspaceProjectLibrary = {
+    openProject: vi.fn(async (projectId, settings = {}) => {
+      rememberContext(settings.context);
+      if (settings.context) {
+        settings.context.project.id.value = projectId;
+        settings.context.project.name.value = `Project ${projectId}`;
+      }
+      return makeProjectFile(`Project ${projectId}`);
+    }),
+    createProject: vi.fn(async (options, settings = {}) => {
+      const projectId = `created-project-${nextProjectNumber}`;
+      nextProjectNumber += 1;
+      rememberContext(settings.context);
+      if (settings.context) {
+        settings.context.project.id.value = projectId;
+        settings.context.project.name.value = options.name ?? "Untitled";
+      }
+      return projectId;
+    }),
+  };
+
+  return projectLibrary;
+}
+
+function createAutoSaveMock() {
+  return {
+    saveNow: vi.fn(async () => {}),
+    start: vi.fn(),
+    stop: vi.fn(),
+  };
 }
 
 function expectAdded(result: ReturnType<WorkspaceStore["addContext"]>) {
@@ -164,5 +253,164 @@ describe("WorkspaceStore", () => {
       false,
     );
     expect(getActiveProjectContext()).not.toBe(overflowContext);
+  });
+
+  it("opens project ids into separate contexts and activates the latest project", async () => {
+    const initialContext = createTestContext("Initial Project");
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "initial-project",
+      projectLibrary,
+      autoSave,
+    });
+
+    const firstResult = await workspace.openProject("project-a");
+    const secondResult = await workspace.openProject("project-b");
+
+    expect(firstResult.ok).toBe(true);
+    expect(secondResult.ok).toBe(true);
+    if (!firstResult.ok || !secondResult.ok) return;
+
+    expect(firstResult.item.context).not.toBe(secondResult.item.context);
+    expect(firstResult.item.context.project.id.value).toBe("project-a");
+    expect(secondResult.item.context.project.id.value).toBe("project-b");
+    expect(workspace.activeItem).toBe(secondResult.item);
+    expect(getActiveProjectContext()).toBe(secondResult.item.context);
+    expect(projectLibrary.openProject).toHaveBeenCalledTimes(2);
+    expect(projectLibrary.openProject).toHaveBeenNthCalledWith(
+      1,
+      "project-a",
+      {
+        context: firstResult.item.context,
+        saveCurrent: false,
+      },
+    );
+    expect(projectLibrary.openProject).toHaveBeenNthCalledWith(
+      2,
+      "project-b",
+      {
+        context: secondResult.item.context,
+        saveCurrent: false,
+      },
+    );
+    expect(autoSave.start).toHaveBeenCalledWith(firstResult.item.context);
+    expect(autoSave.start).toHaveBeenCalledWith(secondResult.item.context);
+  });
+
+  it("activates an already-open project without creating a duplicate context", async () => {
+    const initialContext = createTestContext("Initial Project");
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "initial-project",
+      projectLibrary,
+      autoSave,
+    });
+    const firstResult = await workspace.openProject("project-a");
+    await workspace.openProject("project-b");
+
+    const reopenedResult = await workspace.openProject("project-a");
+
+    expect(reopenedResult.ok).toBe(true);
+    if (!firstResult.ok || !reopenedResult.ok) return;
+
+    expect(reopenedResult.item).toBe(firstResult.item);
+    expect(
+      workspace.items.value.filter((item) => item.context.project.id.value === "project-a"),
+    ).toHaveLength(1);
+    expect(workspace.activeItem).toBe(firstResult.item);
+    expect(projectLibrary.openProject).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates a project in a new active workspace item", async () => {
+    const initialContext = createTestContext("Initial Project");
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "initial-project",
+      projectLibrary,
+      autoSave,
+    });
+
+    const result = await workspace.createProject({ name: "Fresh Project" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.projectId).toBe("created-project-1");
+    expect(result.item.context.project.id.value).toBe("created-project-1");
+    expect(result.item.context.project.name.value).toBe("Fresh Project");
+    expect(workspace.activeItem).toBe(result.item);
+    expect(getActiveProjectContext()).toBe(result.item.context);
+    expect(projectLibrary.createProject).toHaveBeenCalledWith(
+      { name: "Fresh Project" },
+      {
+        context: result.item.context,
+        saveCurrent: false,
+      },
+    );
+    expect(autoSave.start).toHaveBeenCalledWith(result.item.context);
+  });
+
+  it("saves the active context before opening another project when requested", async () => {
+    const initialContext = createTestContext("Project A");
+    initialContext.project.id.value = "project-a";
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "project-a",
+      projectLibrary,
+      autoSave,
+    });
+
+    const result = await workspace.openProject("project-b", {
+      saveActiveContext: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(autoSave.saveNow).toHaveBeenCalledWith(initialContext);
+    expect(projectLibrary.openProject).toHaveBeenCalledWith("project-b", {
+      context: result.item.context,
+      saveCurrent: false,
+    });
+    expect(initialContext.project.id.value).toBe("project-a");
+    expect(result.item.context.project.id.value).toBe("project-b");
+  });
+
+  it("refuses to open or create project items past the workspace cap", async () => {
+    const firstContext = createTestContext("Project 1");
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext: firstContext,
+      initialItemId: "project-1",
+      projectLibrary,
+      autoSave,
+    });
+
+    for (let index = 2; index <= WORKSPACE_OPEN_ITEM_LIMIT; index += 1) {
+      const context = createTestContext(`Project ${index}`);
+      expectAdded(workspace.addContext(context, { id: `project-${index}` }));
+    }
+
+    const openResult = await workspace.openProject("overflow-project");
+    const createResult = await workspace.createProject({ name: "Overflow Project" });
+
+    expect(openResult).toEqual({
+      ok: false,
+      reason: "tab-limit-reached",
+      message: `The workspace can keep up to ${WORKSPACE_OPEN_ITEM_LIMIT} projects open at once.`,
+    });
+    expect(createResult).toEqual(openResult);
+    expect(projectLibrary.openProject).not.toHaveBeenCalled();
+    expect(projectLibrary.createProject).not.toHaveBeenCalled();
+    expect(workspace.items.value).toHaveLength(WORKSPACE_OPEN_ITEM_LIMIT);
   });
 });

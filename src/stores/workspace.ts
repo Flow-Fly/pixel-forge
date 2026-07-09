@@ -1,4 +1,10 @@
 import { signal } from "../core/signal";
+import { autoSaveService } from "../services/auto-save";
+import {
+  projectLibrary,
+  type CreateProjectOptions,
+  type ProjectLibraryService,
+} from "../services/project-library";
 import {
   createProjectContext,
   defaultProjectContext,
@@ -14,17 +20,33 @@ export interface WorkspaceItem {
   context: ProjectContext;
 }
 
-export type WorkspaceAddFailureReason = "tab-limit-reached";
-export type WorkspaceActivateFailureReason = "not-found";
-export type WorkspaceCloseFailureReason = "not-found" | "last-item";
+type WorkspaceAddFailureReason = "tab-limit-reached";
+type WorkspaceActivateFailureReason = "not-found";
+type WorkspaceCloseFailureReason = "not-found" | "last-item";
+
+type WorkspaceLimitFailure = {
+  ok: false;
+  reason: WorkspaceAddFailureReason;
+  message: string;
+};
+
+type WorkspaceProjectLibrary = Pick<
+  ProjectLibraryService,
+  "openProject" | "createProject"
+>;
+type WorkspaceAutoSave = Pick<
+  typeof autoSaveService,
+  "saveNow" | "start" | "stop"
+>;
+
+export interface WorkspaceProjectOptions {
+  activate?: boolean;
+  saveActiveContext?: boolean;
+}
 
 export type WorkspaceAddResult =
   | { ok: true; item: WorkspaceItem }
-  | {
-      ok: false;
-      reason: WorkspaceAddFailureReason;
-      message: string;
-    };
+  | WorkspaceLimitFailure;
 
 export type WorkspaceActivateResult =
   | { ok: true; item: WorkspaceItem }
@@ -46,10 +68,20 @@ export type WorkspaceCloseResult =
       message: string;
     };
 
+export type WorkspaceProjectResult =
+  | {
+      ok: true;
+      item: WorkspaceItem;
+      projectId: string;
+    }
+  | WorkspaceLimitFailure;
+
 interface WorkspaceStoreOptions {
   initialContext?: ProjectContext;
   initialItemId?: string;
   itemLimit?: number;
+  projectLibrary?: WorkspaceProjectLibrary;
+  autoSave?: WorkspaceAutoSave;
 }
 
 interface AddContextOptions {
@@ -69,6 +101,8 @@ export class WorkspaceStore {
   readonly activeItemId;
 
   private readonly itemLimit: number;
+  private readonly projectLibrary: WorkspaceProjectLibrary;
+  private readonly autoSave: WorkspaceAutoSave;
 
   constructor(options: WorkspaceStoreOptions = {}) {
     const initialItem = {
@@ -79,6 +113,8 @@ export class WorkspaceStore {
     this.items = signal<WorkspaceItem[]>([initialItem]);
     this.activeItemId = signal<string>(initialItem.id);
     this.itemLimit = options.itemLimit ?? WORKSPACE_OPEN_ITEM_LIMIT;
+    this.projectLibrary = options.projectLibrary ?? projectLibrary;
+    this.autoSave = options.autoSave ?? autoSaveService;
 
     setActiveProjectContext(initialItem.context);
   }
@@ -109,6 +145,62 @@ export class WorkspaceStore {
     return this.addNewContext(context ?? createProjectContext(), options);
   }
 
+  async openProject(
+    projectId: string,
+    options: WorkspaceProjectOptions = {},
+  ): Promise<WorkspaceProjectResult> {
+    const existingItem = this.findProjectItem(projectId);
+    if (existingItem) {
+      await this.saveActiveContextIfRequested(options.saveActiveContext);
+      this.activateIfRequested(existingItem, options.activate);
+      return { ok: true, item: existingItem, projectId };
+    }
+
+    if (this.items.value.length >= this.itemLimit) {
+      return this.createLimitFailure();
+    }
+
+    await this.saveActiveContextIfRequested(options.saveActiveContext);
+
+    const context = createProjectContext();
+    try {
+      await this.projectLibrary.openProject(projectId, {
+        context,
+        saveCurrent: false,
+      });
+    } catch (error) {
+      context.dispose();
+      throw error;
+    }
+
+    return this.addLoadedProject(projectId, context, options);
+  }
+
+  async createProject(
+    projectOptions: CreateProjectOptions,
+    options: WorkspaceProjectOptions = {},
+  ): Promise<WorkspaceProjectResult> {
+    if (this.items.value.length >= this.itemLimit) {
+      return this.createLimitFailure();
+    }
+
+    await this.saveActiveContextIfRequested(options.saveActiveContext);
+
+    const context = createProjectContext();
+    let projectId: string;
+    try {
+      projectId = await this.projectLibrary.createProject(projectOptions, {
+        context,
+        saveCurrent: false,
+      });
+    } catch (error) {
+      context.dispose();
+      throw error;
+    }
+
+    return this.addLoadedProject(projectId, context, options);
+  }
+
   private useExistingItem(
     item: WorkspaceItem,
     options: AddContextOptions,
@@ -117,7 +209,7 @@ export class WorkspaceStore {
     return { ok: true, item };
   }
 
-  private createLimitFailure(): WorkspaceAddResult {
+  private createLimitFailure(): WorkspaceLimitFailure {
     return {
       ok: false,
       reason: "tab-limit-reached",
@@ -185,6 +277,7 @@ export class WorkspaceStore {
       setActiveProjectContext(activeItem.context);
     }
 
+    this.autoSave.stop(closedItem.context);
     closedItem.context.dispose();
 
     return {
@@ -198,6 +291,10 @@ export class WorkspaceStore {
     return this.items.value.find((item) => item.id === itemId);
   }
 
+  private findProjectItem(projectId: string): WorkspaceItem | undefined {
+    return this.items.value.find((item) => item.context.project.id.value === projectId);
+  }
+
   private findContextItem(context?: ProjectContext): WorkspaceItem | undefined {
     if (!context) return undefined;
     return this.items.value.find((item) => item.context === context);
@@ -207,6 +304,27 @@ export class WorkspaceStore {
     if (activate) {
       this.activate(item.id);
     }
+  }
+
+  private async saveActiveContextIfRequested(saveActiveContext = false) {
+    if (saveActiveContext) {
+      await this.autoSave.saveNow(this.activeItem.context);
+    }
+  }
+
+  private addLoadedProject(
+    projectId: string,
+    context: ProjectContext,
+    options: WorkspaceProjectOptions,
+  ): WorkspaceProjectResult {
+    const result = this.addContext(context, {
+      id: projectId,
+      activate: options.activate,
+    });
+    if (!result.ok) return result;
+
+    this.autoSave.start(context);
+    return { ok: true, item: result.item, projectId };
   }
 }
 
