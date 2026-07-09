@@ -12,6 +12,7 @@ import {
   FillSelectionCommand,
 } from '../../commands/selection-commands';
 import { colorStore } from '../../stores/colors';
+import { paletteStore } from '../../stores/palette';
 import { animationStore } from '../../stores/animation';
 import { viewportStore } from '../../stores/viewport';
 import { panelStore } from '../../stores/panels';
@@ -28,6 +29,7 @@ import { clipboardStore } from '../../stores/clipboard';
 import { log } from '../../utils/log';
 import type { Layer } from '../../types/layer';
 import type { SelectionState } from '../../types/selection';
+import { createClipboardIndexedSelection } from '../clipboard-snapshot';
 
 type ShortcutAction = () => void;
 
@@ -260,22 +262,37 @@ function copySelection() {
 
   const { bounds, shape } = state;
   const imageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+  const mask = shape === 'freeform' ? new Uint8Array(state.mask) : undefined;
 
-  if (shape === 'freeform') {
+  if (mask) {
     const data = imageData.data;
-    for (let i = 0; i < state.mask.length; i++) {
-      if (state.mask[i] === 0) {
+    for (let i = 0; i < mask.length; i++) {
+      if (mask[i] === 0) {
         data[i * 4 + 3] = 0;
       }
     }
   }
 
+  const indexBuffer = animationStore.getCelIndexBuffer(
+    layer.id,
+    animationStore.currentFrameId.value
+  );
+  const indexedSelection = createClipboardIndexedSelection({
+    bounds,
+    shape,
+    mask,
+    indexBuffer,
+    canvasWidth: layer.canvas.width,
+    sourceColors: paletteStore.mainColors.value,
+  });
+
   clipboardStore.setData({
     imageData,
     shape,
-    mask: shape === 'freeform' ? state.mask : undefined,
+    mask,
     width: bounds.width,
     height: bounds.height,
+    indexedSelection,
   });
 }
 
