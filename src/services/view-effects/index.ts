@@ -27,3 +27,9 @@ export {
   getCrtPresetId,
 } from './crt';
 export type { CrtParamKey, CrtParams, CrtPresetId } from './crt';
+export {
+  MIN_VIEW_EFFECT_EXPORT_SCALE,
+  getViewEffectExportBaseName,
+  renderViewEffectToCanvas,
+} from './render-to-canvas';
+export type { ViewEffectCanvasRenderOptions } from './render-to-canvas';
