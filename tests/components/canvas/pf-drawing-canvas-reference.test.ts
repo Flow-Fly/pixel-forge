@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectContext } from '../../../src/stores/project-context';
+import { toolStore } from '../../../src/stores/tools';
 import type { Layer } from '../../../src/types/layer';
 import type { ReferenceLayerData } from '../../../src/types/reference';
 
@@ -59,6 +60,24 @@ function referenceLayer(
   };
 }
 
+function editableLayer(id: string, type: 'image' | 'text' = 'image'): Layer {
+  const canvas = document.createElement('canvas');
+  const context = createCanvasContext();
+  vi.spyOn(canvas, 'getContext').mockReturnValue(context);
+
+  return {
+    id,
+    name: id,
+    type,
+    visible: true,
+    locked: false,
+    opacity: 255,
+    blendMode: 'normal',
+    parentId: null,
+    canvas,
+  };
+}
+
 function createCanvasContext(): CanvasRenderingContext2D {
   return new Proxy(
     { imageSmoothingEnabled: false },
@@ -80,8 +99,11 @@ function createContext(layers: Layer[]): ProjectContext {
     animation: {
       cels: { value: new Map() },
       currentFrameId: { value: 'frame-1' },
+      ensureUnlinkedForEdit: vi.fn(() => false),
       frames: { value: [] },
+      getCelIndexBuffer: vi.fn(() => null),
       getCelKey: vi.fn((layerId: string, frameId: string) => `${layerId}:${frameId}`),
+      ensureCelIndexBuffer: vi.fn(() => null),
       onionSkin: {
         value: {
           enabled: false,
@@ -96,9 +118,15 @@ function createContext(layers: Layer[]): ProjectContext {
       consumeFullRedraw: vi.fn(() => true),
       consumePendingDirty: vi.fn(() => null),
       requestFullRedraw: vi.fn(),
+      resetStroke: vi.fn(),
     },
     layers: {
+      activeLayerId: { value: layers[0]?.id ?? null },
       layers: { value: layers },
+    },
+    viewport: {
+      isPanning: { value: false },
+      isSpacebarDown: { value: false },
     },
   } as unknown as ProjectContext;
 }
@@ -117,6 +145,7 @@ describe('pf-drawing-canvas reference rendering', () => {
   beforeEach(() => {
     rendererMock.instances.length = 0;
     rendererMock.ReferenceViewportRenderer.mockClear();
+    toolStore.activeTool.value = 'pencil';
   });
 
   it('renders below and above reference entries around artwork rendering', async () => {
@@ -161,5 +190,47 @@ describe('pf-drawing-canvas reference rendering', () => {
 
     expect(context.dirtyRect.requestFullRedraw).toHaveBeenCalledOnce();
     expect((element as any).scheduleCanvasRender).toHaveBeenCalledWith(context);
+  });
+
+  it('does not start drawing strokes on active reference layers', async () => {
+    const element = await createDrawingCanvas();
+    const reference = referenceLayer('reference');
+    const context = createContext([reference]);
+    const onDown = vi.fn();
+    const warningListener = vi.fn();
+
+    (element as any).context = context;
+    (element as any).toolController = { hasActiveTool: true, onDown };
+    window.addEventListener('show-warning-toast', warningListener);
+
+    (element as any).handleMouseDown(new MouseEvent('mousedown', { button: 0 }));
+
+    expect(onDown).not.toHaveBeenCalled();
+    expect(context.dirtyRect.resetStroke).not.toHaveBeenCalled();
+    expect(context.animation.ensureUnlinkedForEdit).not.toHaveBeenCalled();
+    expect(warningListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: { message: 'Reference layers cannot be painted' },
+      })
+    );
+
+    window.removeEventListener('show-warning-toast', warningListener);
+  });
+
+  it('keeps image and text layers paintable', async () => {
+    const element = await createDrawingCanvas();
+
+    for (const layerType of ['image', 'text'] as const) {
+      const layer = editableLayer(`${layerType}-layer`, layerType);
+      const context = createContext([layer]);
+      const target = (element as any).getStrokeTarget(context);
+
+      expect(target).toEqual(
+        expect.objectContaining({
+          layerId: layer.id,
+          layer,
+        })
+      );
+    }
   });
 });

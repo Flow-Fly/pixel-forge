@@ -590,6 +590,7 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private isEditableLayer(layer: Layer | undefined): layer is EditableLayer {
+    if (layer?.type === 'reference') return false;
     if (!layer?.canvas) return false;
     return !layer.locked && layer.visible;
   }
@@ -675,6 +676,7 @@ export class PFDrawingCanvas extends BaseComponent {
   private getBlockedLayerWarning(layer: Layer): string | null {
     if (layer.locked) return 'Layer is locked';
     if (!layer.visible) return 'Layer is hidden';
+    if (layer.type === 'reference') return 'Reference layers cannot be painted';
     return null;
   }
 
