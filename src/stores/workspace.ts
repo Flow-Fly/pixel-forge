@@ -21,6 +21,10 @@ import { log } from "../utils/log";
 export const WORKSPACE_OPEN_ITEM_LIMIT = 8;
 export const DEFAULT_WORKSPACE_ITEM_ID = "workspace-default";
 
+export function workspaceItemLimitMessage(itemLimit = WORKSPACE_OPEN_ITEM_LIMIT): string {
+  return `The workspace can keep up to ${itemLimit} projects open at once.`;
+}
+
 export interface WorkspaceItem {
   id: string;
   context: ProjectContext;
@@ -224,7 +228,7 @@ export class WorkspaceStore {
     return {
       ok: false,
       reason: "tab-limit-reached",
-      message: `The workspace can keep up to ${this.itemLimit} projects open at once.`,
+      message: workspaceItemLimitMessage(this.itemLimit),
     };
   }
 
@@ -260,6 +264,14 @@ export class WorkspaceStore {
     setActiveProjectContext(item.context);
     this.persistWorkspaceState();
     return { ok: true, item };
+  }
+
+  activateNext(): WorkspaceActivateResult {
+    return this.activateByOffset(1);
+  }
+
+  activatePrevious(): WorkspaceActivateResult {
+    return this.activateByOffset(-1);
   }
 
   close(itemId: string): WorkspaceCloseResult {
@@ -361,6 +373,16 @@ export class WorkspaceStore {
   private findContextItem(context?: ProjectContext): WorkspaceItem | undefined {
     if (!context) return undefined;
     return this.items.value.find((item) => item.context === context);
+  }
+
+  private activateByOffset(offset: number): WorkspaceActivateResult {
+    const items = this.items.value;
+    const activeIndex = items.findIndex((item) => item.id === this.activeItemId.value);
+    const nextIndex = activeIndex === -1
+      ? 0
+      : (activeIndex + offset + items.length) % items.length;
+
+    return this.activate(items[nextIndex].id);
   }
 
   private activateIfRequested(item: WorkspaceItem, activate = true) {

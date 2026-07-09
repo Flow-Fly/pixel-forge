@@ -17,6 +17,7 @@ import { viewportStore } from '../../stores/viewport';
 import { panelStore } from '../../stores/panels';
 import { shapeSettings } from '../../stores/tool-settings';
 import { guidesStore } from '../../stores/guides';
+import { workspaceStore } from '../../stores/workspace';
 import { AddFrameCommand } from '../../commands/animation-commands';
 import { GroupLayersCommand, UngroupLayersCommand } from '../../commands/layer-commands';
 import { toolRegistry } from '../../tools/tool-registry';
@@ -688,6 +689,27 @@ const fileShortcuts: ShortcutGroup = [
   },
 ];
 
+const workspaceShortcuts: ShortcutGroup = [
+  {
+    key: 'Tab',
+    modifiers: [MOD_PRIMARY],
+    action: () => workspaceStore.activateNext(),
+    description: 'Next project tab',
+  },
+  {
+    key: 'PageDown',
+    modifiers: ['ctrl'],
+    action: () => workspaceStore.activateNext(),
+    description: 'Next project tab',
+  },
+  {
+    key: 'PageUp',
+    modifiers: ['ctrl'],
+    action: () => workspaceStore.activatePrevious(),
+    description: 'Previous project tab',
+  },
+];
+
 const brushShortcuts: ShortcutGroup = [
   {
     key: 'b',
@@ -734,6 +756,7 @@ export function registerShortcuts() {
     selectionShortcuts,
     clipboardShortcuts,
     fileShortcuts,
+    workspaceShortcuts,
     brushShortcuts,
     layerShortcuts,
     helpShortcuts,

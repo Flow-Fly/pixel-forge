@@ -7,8 +7,17 @@ const keyboardServiceMock = vi.hoisted(() => ({
   register: vi.fn(),
 }));
 
+const workspaceStoreMock = vi.hoisted(() => ({
+  activateNext: vi.fn(),
+  activatePrevious: vi.fn(),
+}));
+
 vi.mock('../../../src/services/keyboard/shortcuts', () => ({
   keyboardService: keyboardServiceMock,
+}));
+
+vi.mock('../../../src/stores/workspace', () => ({
+  workspaceStore: workspaceStoreMock,
 }));
 
 import { registerShortcuts } from '../../../src/services/keyboard/register-shortcuts';
@@ -28,6 +37,8 @@ function comboFromCall([key, modifiers]: RegisterCall): string {
 describe('registerShortcuts', () => {
   beforeEach(() => {
     keyboardServiceMock.register.mockClear();
+    workspaceStoreMock.activateNext.mockClear();
+    workspaceStoreMock.activatePrevious.mockClear();
   });
 
   it('registers tool shortcuts from the registry first', () => {
@@ -50,7 +61,7 @@ describe('registerShortcuts', () => {
     const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
     const descriptionsByCombo = new Map(calls.map((call) => [comboFromCall(call), call[3]]));
 
-    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(77);
+    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(80);
     expect(descriptionsByCombo.get('Alt')).toBe('Quick eyedropper');
     expect(descriptionsByCombo.get('0')).toBe('Fit to window');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+0`)).toBe('Opacity 100%');
@@ -59,6 +70,9 @@ describe('registerShortcuts', () => {
     expect(descriptionsByCombo.get('ctrl+y')).toBe('Redo');
     expect(descriptionsByCombo.get('ctrl+n')).toBe('New project');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+o`)).toBe('Open project');
+    expect(descriptionsByCombo.get(`${MOD_PRIMARY}+Tab`)).toBe('Next project tab');
+    expect(descriptionsByCombo.get('ctrl+PageDown')).toBe('Next project tab');
+    expect(descriptionsByCombo.get('ctrl+PageUp')).toBe('Previous project tab');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+g`)).toBe('Group layers');
     expect(descriptionsByCombo.get('?')).toBe('Keyboard shortcuts');
 
@@ -82,5 +96,21 @@ describe('registerShortcuts', () => {
     openProjectCall?.[2]();
 
     expect(browserRequested).toBe(true);
+  });
+
+  it('routes project tab shortcuts through the workspace store', () => {
+    registerShortcuts();
+
+    const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
+    const nextByTab = calls.find((call) => comboFromCall(call) === `${MOD_PRIMARY}+Tab`);
+    const nextByPageDown = calls.find((call) => comboFromCall(call) === 'ctrl+PageDown');
+    const previousByPageUp = calls.find((call) => comboFromCall(call) === 'ctrl+PageUp');
+
+    nextByTab?.[2]();
+    nextByPageDown?.[2]();
+    previousByPageUp?.[2]();
+
+    expect(workspaceStoreMock.activateNext).toHaveBeenCalledTimes(2);
+    expect(workspaceStoreMock.activatePrevious).toHaveBeenCalledTimes(1);
   });
 });

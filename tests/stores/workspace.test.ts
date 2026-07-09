@@ -172,6 +172,34 @@ describe("WorkspaceStore", () => {
     expect(getActiveProjectContext()).toBe(contextB);
   });
 
+  it("cycles project tabs through the active project context", () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    const contextC = createTestContext("Project C");
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+    });
+    workspace.addContext(contextB, { id: "project-b", activate: false });
+    workspace.addContext(contextC, { id: "project-c", activate: false });
+
+    workspace.activateNext();
+    expect(workspace.activeItem.context).toBe(contextB);
+    expect(getActiveProjectContext()).toBe(contextB);
+
+    workspace.activateNext();
+    expect(workspace.activeItem.context).toBe(contextC);
+    expect(getActiveProjectContext()).toBe(contextC);
+
+    workspace.activateNext();
+    expect(workspace.activeItem.context).toBe(contextA);
+    expect(getActiveProjectContext()).toBe(contextA);
+
+    workspace.activatePrevious();
+    expect(workspace.activeItem.context).toBe(contextC);
+    expect(getActiveProjectContext()).toBe(contextC);
+  });
+
   it("closes the active item, activates a neighbor, and disposes the closed context", () => {
     const contextA = createTestContext("Project A");
     const contextB = createTestContext("Project B");

@@ -2,7 +2,12 @@ import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
-import { workspaceStore, type WorkspaceItem } from '../../stores/workspace';
+import {
+  WORKSPACE_OPEN_ITEM_LIMIT,
+  workspaceItemLimitMessage,
+  workspaceStore,
+  type WorkspaceItem,
+} from '../../stores/workspace';
 
 @customElement('pf-project-tabs')
 export class PFProjectTabs extends BaseComponent {
@@ -148,7 +153,25 @@ export class PFProjectTabs extends BaseComponent {
     }
   }
 
+  private closeItemOnMiddleClick(event: MouseEvent, itemId: string) {
+    if (event.button !== 1) return;
+
+    event.preventDefault();
+    void this.closeItem(itemId);
+  }
+
+  private preventMiddleMouseDefault(event: MouseEvent) {
+    if (event.button === 1) {
+      event.preventDefault();
+    }
+  }
+
   private openProjectBrowser() {
+    if (workspaceStore.items.value.length >= WORKSPACE_OPEN_ITEM_LIMIT) {
+      this.errorMessage = workspaceItemLimitMessage();
+      return;
+    }
+
     this.errorMessage = '';
     this.dispatchEvent(new CustomEvent('show-project-browser', { bubbles: true, composed: true }));
   }
@@ -165,6 +188,7 @@ export class PFProjectTabs extends BaseComponent {
     const items = workspaceStore.items.value;
     const activeItemId = workspaceStore.activeItemId.value;
     const canClose = items.length > 1;
+    const canOpenAnotherProject = items.length < WORKSPACE_OPEN_ITEM_LIMIT;
 
     return html`
       <nav class="tabs" aria-label="Open projects">
@@ -182,6 +206,8 @@ export class PFProjectTabs extends BaseComponent {
                   aria-current=${isActive ? 'page' : 'false'}
                   aria-label=${this.tabLabel(name, isDirty)}
                   @click=${() => this.activateItem(item.id)}
+                  @mousedown=${this.preventMiddleMouseDefault}
+                  @auxclick=${(event: MouseEvent) => this.closeItemOnMiddleClick(event, item.id)}
                 >
                   ${isDirty ? html`<span class="dirty-dot" aria-hidden="true"></span>` : ''}
                   <span class="tab-name">${name}</span>
@@ -204,7 +230,7 @@ export class PFProjectTabs extends BaseComponent {
           class="add-button"
           type="button"
           aria-label="Open project"
-          title="Open project"
+          title=${canOpenAnotherProject ? 'Open project' : workspaceItemLimitMessage()}
           @click=${this.openProjectBrowser}
         >
           +
