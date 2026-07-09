@@ -2,6 +2,14 @@ import { type Rect } from './geometry';
 
 export type SelectionShape = 'rectangle' | 'ellipse' | 'freeform';
 
+export interface FloatingIndexedPaste {
+  remappedIndexData: Uint8Array;
+  paletteBeforeCommit: {
+    colors: string[];
+    newColorFlags: Set<string>;
+  };
+}
+
 export type SelectionState =
   | { type: 'none' }
   | {
@@ -29,6 +37,7 @@ export type SelectionState =
       currentOffset: { x: number; y: number };
       shape: SelectionShape;
       mask?: Uint8Array;
+      indexedPaste?: FloatingIndexedPaste;
     }
   | {
       type: 'transforming';
@@ -42,4 +51,3 @@ export type SelectionState =
       shape: SelectionShape;
       mask?: Uint8Array;              // Original mask (for freeform)
     };
-

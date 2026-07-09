@@ -2,7 +2,7 @@ import { type Command } from '../../stores/history';
 import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import type { ClipboardIndexPasteRegionPlan } from '../../services/clipboard-index-paste-region';
 import { type Rect } from '../../types/geometry';
-import { type SelectionShape } from '../../types/selection';
+import { type FloatingIndexedPaste, type SelectionShape } from '../../types/selection';
 import { writeIndexRegion } from '../../utils/buffer-region';
 import { trimTransparentPixels } from './image-data';
 import {
@@ -26,6 +26,7 @@ export interface CommitIndexedFloatCommandOptions {
   indexRegionPlan: ClipboardIndexPasteRegionPlan;
   paletteBeforeCommit: IndexedFloatPaletteState;
   mask?: Uint8Array;
+  indexedPaste?: FloatingIndexedPaste;
 }
 
 function clonePaletteState(state: IndexedFloatPaletteState): IndexedFloatPaletteState {
@@ -63,7 +64,8 @@ function restoreFloatingSelection(
   imageData: ImageData,
   bounds: Rect,
   shape: SelectionShape,
-  mask?: Uint8Array
+  mask?: Uint8Array,
+  indexedPaste?: FloatingIndexedPaste
 ): void {
   context.selection.setFloating(
     imageData,
@@ -74,7 +76,8 @@ function restoreFloatingSelection(
       height: bounds.height,
     },
     shape,
-    mask
+    mask,
+    indexedPaste
   );
 }
 
@@ -85,11 +88,12 @@ function restoreCommittedFloat(
   floatingImageData: ImageData,
   destinationBounds: Rect,
   shape: SelectionShape,
-  mask?: Uint8Array
+  mask?: Uint8Array,
+  indexedPaste?: FloatingIndexedPaste
 ): void {
   const ctx = canvas.getContext('2d')!;
   ctx.putImageData(overwrittenImageData, destinationBounds.x, destinationBounds.y);
-  restoreFloatingSelection(context, floatingImageData, destinationBounds, shape, mask);
+  restoreFloatingSelection(context, floatingImageData, destinationBounds, shape, mask, indexedPaste);
 }
 
 /**
@@ -292,6 +296,7 @@ export class CommitIndexedFloatCommand implements Command {
   private indexRegionPlan: ClipboardIndexPasteRegionPlan;
   private paletteBeforeCommit: IndexedFloatPaletteState;
   private paletteAfterCommit: IndexedFloatPaletteState;
+  private indexedPaste?: FloatingIndexedPaste;
   private mask?: Uint8Array;
   private readonly context: IndexedSelectionCommandContext;
 
@@ -320,6 +325,12 @@ export class CommitIndexedFloatCommand implements Command {
     };
     this.paletteBeforeCommit = clonePaletteState(options.paletteBeforeCommit);
     this.paletteAfterCommit = currentPaletteState(context);
+    this.indexedPaste = options.indexedPaste
+      ? {
+          remappedIndexData: new Uint8Array(options.indexedPaste.remappedIndexData),
+          paletteBeforeCommit: clonePaletteState(options.indexedPaste.paletteBeforeCommit),
+        }
+      : undefined;
     this.mask = options.mask;
 
     const ctx = canvas.getContext('2d')!;
@@ -367,7 +378,8 @@ export class CommitIndexedFloatCommand implements Command {
       this.floatingImageData,
       this.destinationBounds,
       this.shape,
-      this.mask
+      this.mask,
+      this.indexedPaste
     );
   }
 
