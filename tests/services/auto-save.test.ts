@@ -92,6 +92,7 @@ describe('AutoSaveService', () => {
     await Promise.resolve();
 
     expect(projectRepository.save).not.toHaveBeenCalled();
+    expect(autoSaveService.isDirty()).toBe(true);
 
     await vi.advanceTimersByTimeAsync(2500);
     expect(projectRepository.save).toHaveBeenCalledTimes(1);
@@ -99,6 +100,7 @@ describe('AutoSaveService', () => {
       thumbnail: new Uint8Array([9, 9]),
     });
     expect(createProjectThumbnail).toHaveBeenCalled();
+    expect(autoSaveService.isDirty()).toBe(false);
   });
 
   it('coalesces rapid commands into a single save', async () => {

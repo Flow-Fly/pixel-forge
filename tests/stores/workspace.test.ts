@@ -205,6 +205,25 @@ describe("WorkspaceStore", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("saves a project before closing it through the project close path", async () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+      autoSave,
+    });
+    workspace.addContext(contextB, { id: "project-b" });
+
+    const result = await workspace.closeProject("project-b");
+
+    expect(result.ok).toBe(true);
+    expect(autoSave.saveNow).toHaveBeenCalledWith(contextB);
+    expect(autoSave.stop).toHaveBeenCalledWith(contextB);
+    expect(workspace.items.value.map((item) => item.id)).toEqual(["project-a"]);
+  });
+
   it("refuses to close the last workspace item", () => {
     const context = createTestContext("Only Project");
     const workspace = new WorkspaceStore({
