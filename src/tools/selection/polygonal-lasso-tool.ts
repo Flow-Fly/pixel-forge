@@ -1,7 +1,5 @@
 import type { Point, ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
-import { selectionStore } from '../../stores/selection';
-import { projectStore } from '../../stores/project';
 import { polygonToMask } from '../../utils/mask-utils';
 
 /**
@@ -25,7 +23,7 @@ export class PolygonalLassoTool extends BaseSelectionTool {
     // If not actively drawing a polygon, check if clicking inside selection (for dragging)
     // Only drag if no add/subtract modifiers are pressed
     const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
-    if (!this.isActive && !isAddOrSubtract && selectionStore.isPointInSelection(point.x, point.y)) {
+    if (!this.isActive && !isAddOrSubtract && this.projectContext.selection.isPointInSelection(point.x, point.y)) {
       this.startDragging(point.x, point.y);
       return;
     }
@@ -88,17 +86,18 @@ export class PolygonalLassoTool extends BaseSelectionTool {
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
+    const selection = this.projectContext.selection;
     const canvasX = Math.floor(x);
     const canvasY = Math.floor(y);
 
     if (this.mode === 'dragging') {
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      const state = selectionStore.state.value;
+      const state = selection.state.value;
       if (state.type === 'transforming') {
-        selectionStore.moveTransform(dx, dy);
+        selection.moveTransform(dx, dy);
       } else {
-        selectionStore.moveFloat(dx, dy);
+        selection.moveFloat(dx, dy);
       }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
@@ -165,8 +164,8 @@ export class PolygonalLassoTool extends BaseSelectionTool {
     this.vertices = [];
     this.currentMousePos = null;
     this.clearPreviousSelection();
-    selectionStore.clear();
-    selectionStore.resetMode();
+    this.projectContext.selection.clear();
+    this.projectContext.selection.resetMode();
   }
 
   private closePolygon(shrinkToContent: boolean = false) {
@@ -176,8 +175,8 @@ export class PolygonalLassoTool extends BaseSelectionTool {
     }
 
     // Get canvas dimensions
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
+    const canvasWidth = this.projectContext.project.width.value;
+    const canvasHeight = this.projectContext.project.height.value;
 
     // Convert polygon to mask
     const result = polygonToMask(this.vertices, canvasWidth, canvasHeight);
@@ -215,7 +214,7 @@ export class PolygonalLassoTool extends BaseSelectionTool {
     const maxX = Math.max(...xs);
     const maxY = Math.max(...ys);
 
-    selectionStore.state.value = {
+    this.projectContext.selection.state.value = {
       type: 'selecting',
       shape: 'freeform',
       startPoint: this.vertices[0],

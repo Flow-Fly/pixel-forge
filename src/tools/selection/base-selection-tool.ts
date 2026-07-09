@@ -1,8 +1,5 @@
 import { BaseTool, type ModifierKeys } from '../base-tool';
-import { selectionStore } from '../../stores/selection';
 import { getSelectedLayerSelection } from '../../stores/selection/selected-layer';
-import { layerStore } from '../../stores/layers';
-import { historyStore } from '../../stores/history';
 import type { Rect } from '../../types/geometry';
 import type { SelectionShape } from '../../types/selection';
 import {
@@ -41,14 +38,15 @@ export abstract class BaseSelectionTool extends BaseTool {
    * Shift+Alt = intersect, Shift = add, Alt = subtract.
    */
   protected applySelectionModeFromModifiers(modifiers?: ModifierKeys) {
+    const selection = this.projectContext.selection;
     if (modifiers?.shift && modifiers?.alt) {
-      selectionStore.setMode('intersect');
+      selection.setMode('intersect');
     } else if (modifiers?.shift) {
-      selectionStore.setMode('add');
+      selection.setMode('add');
     } else if (modifiers?.alt) {
-      selectionStore.setMode('subtract');
+      selection.setMode('subtract');
     } else {
-      selectionStore.setMode('replace');
+      selection.setMode('replace');
     }
   }
 
@@ -57,8 +55,9 @@ export abstract class BaseSelectionTool extends BaseTool {
    * marching-ants overlay while the new selection is drawn.
    */
   protected capturePreviousSelection() {
-    const currentState = selectionStore.state.value;
-    const mode = selectionStore.mode.value;
+    const selection = this.projectContext.selection;
+    const currentState = selection.state.value;
+    const mode = selection.mode.value;
     if (currentState.type === 'selected') {
       this.previousSelection = {
         bounds: { ...currentState.bounds },
@@ -69,7 +68,7 @@ export abstract class BaseSelectionTool extends BaseTool {
       };
       // Set visual signal for marching ants overlay (only in add/subtract mode)
       if (mode !== 'replace') {
-        selectionStore.previousSelectionForVisual.value = this.previousSelection;
+        selection.previousSelectionForVisual.value = this.previousSelection;
       }
     } else {
       this.clearPreviousSelection();
@@ -79,7 +78,7 @@ export abstract class BaseSelectionTool extends BaseTool {
   /** Forget the saved selection and hide its overlay visual. */
   protected clearPreviousSelection() {
     this.previousSelection = null;
-    selectionStore.previousSelectionForVisual.value = null;
+    this.projectContext.selection.previousSelectionForVisual.value = null;
   }
 
   /**
@@ -113,8 +112,9 @@ export abstract class BaseSelectionTool extends BaseTool {
     canvasY: number,
     modifiers?: ModifierKeys
   ): boolean {
+    const selection = this.projectContext.selection;
     const isAddOrSubtract = modifiers?.shift || modifiers?.alt;
-    if (!isAddOrSubtract && selectionStore.isPointInSelection(canvasX, canvasY)) {
+    if (!isAddOrSubtract && selection.isPointInSelection(canvasX, canvasY)) {
       this.startDragging(canvasX, canvasY);
       return true;
     }
@@ -135,31 +135,32 @@ export abstract class BaseSelectionTool extends BaseTool {
    * combine mode and the saved selection.
    */
   protected finalizeMaskSelection(bounds: Rect, mask: Uint8Array, shrinkToContent: boolean) {
+    const { layers, selection } = this.projectContext;
     // Get active layer canvas for content-aware trimming
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    const activeLayerId = layers.activeLayerId.value;
+    const layer = layers.layers.value.find((l) => l.id === activeLayerId);
     const canvas = isPaintableLayer(layer) ? layer.canvas : undefined;
 
-    const mode = selectionStore.mode.value;
+    const mode = selection.mode.value;
 
     // For add/subtract, combine with the saved previous selection
     if (mode !== 'replace' && this.previousSelection) {
       const combined = this.combineMasks(this.previousSelection, bounds, mask, mode);
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
+        selection.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
-        selectionStore.clear();
+        selection.clear();
       }
     } else {
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
+      selection.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
     }
 
-    selectionStore.resetMode();
+    selection.resetMode();
     this.clearPreviousSelection();
   }
 
   protected startDragging(x: number, y: number) {
-    const state = selectionStore.state.value;
+    const state = this.projectContext.selection.state.value;
 
     // If selected (not floating or transforming), cut to float first
     if (state.type === 'selected') {
@@ -173,7 +174,7 @@ export abstract class BaseSelectionTool extends BaseTool {
   }
 
   protected cutToFloat() {
-    const selected = getSelectedLayerSelection();
+    const selected = getSelectedLayerSelection(this.projectContext);
     if (!selected) return;
 
     const command = new CutToFloatCommand(
@@ -181,14 +182,15 @@ export abstract class BaseSelectionTool extends BaseTool {
       selected.layer.id,
       selected.bounds,
       selected.shape,
-      selected.mask
+      selected.mask,
+      this.projectContext
     );
 
-    historyStore.execute(command);
+    this.projectContext.history.execute(command);
   }
 
   protected commitIfTransforming(): boolean {
-    const state = selectionStore.state.value;
+    const state = this.projectContext.selection.state.value;
     if (state.type !== 'transforming') return false;
 
     // Dispatch event to trigger commit in viewport
@@ -197,11 +199,12 @@ export abstract class BaseSelectionTool extends BaseTool {
   }
 
   protected commitIfFloating(): boolean {
-    const state = selectionStore.state.value;
+    const { history, layers, selection } = this.projectContext;
+    const state = selection.state.value;
     if (state.type !== 'floating') return false;
 
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    const activeLayerId = layers.activeLayerId.value;
+    const layer = layers.layers.value.find((l) => l.id === activeLayerId);
     if (!isPaintableLayer(layer)) return false;
 
     const command = new CommitFloatCommand(
@@ -211,10 +214,11 @@ export abstract class BaseSelectionTool extends BaseTool {
       state.originalBounds,
       state.currentOffset,
       state.shape,
-      state.mask
+      state.mask,
+      this.projectContext
     );
 
-    historyStore.execute(command);
+    history.execute(command);
     return true;
   }
 
