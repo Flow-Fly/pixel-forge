@@ -8,7 +8,7 @@ import {
   RemoveLayerCommand,
   UpdateLayerCommand,
 } from '../../commands/layer-commands';
-import { importReferenceImageFile } from '../../services/reference-import-action';
+import { openReferenceImagePicker } from '../../services/reference-image-picker';
 import { log } from '../../utils/log';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
@@ -304,24 +304,13 @@ export class PFTimelineLayers extends BaseComponent {
   }
 
   private importReferenceImage() {
-    const context = this.context;
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/png,image/jpeg,image/webp';
-
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-
-      try {
-        await importReferenceImageFile(context, file);
-        this.requestUpdate();
-      } catch (error) {
+    openReferenceImagePicker(
+      this.context,
+      (error) => {
         log.error('Failed to import reference image:', error);
-      }
-    };
-
-    input.click();
+      },
+      () => this.requestUpdate()
+    );
   }
 
   private deleteLayer() {
