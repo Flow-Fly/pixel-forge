@@ -20,6 +20,7 @@ const activeProjectContextMock = vi.hoisted(() => ({
 
 const workspaceStoreMock = vi.hoisted(() => ({
   openProject: vi.fn(),
+  getProjectItem: vi.fn(),
 }));
 
 vi.mock('../../../src/services/project-library', () => ({
@@ -84,6 +85,16 @@ async function createBrowser() {
 function buttonWithText(root: ShadowRoot, text: string) {
   return [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
     button.textContent?.includes(text)
+  );
+}
+
+function projectAction(root: ShadowRoot, projectName: string, action: string) {
+  const projectCard = [...root.querySelectorAll<HTMLElement>('article')].find(
+    (article) => article.querySelector('.project-name')?.textContent === projectName
+  );
+
+  return [...(projectCard?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+    (button) => button.textContent?.trim() === action
   );
 }
 
@@ -181,6 +192,9 @@ describe('pf-project-browser', () => {
       item: {},
       projectId: 'open-project',
     });
+    workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) =>
+      projectId === 'open-project' ? { context: activeProjectContextMock } : undefined
+    );
   });
 
   afterEach(() => {
@@ -309,7 +323,7 @@ describe('pf-project-browser', () => {
     expect(opened).toBe(true);
   });
 
-  it('renames a stored project through the library service', async () => {
+  it('renames the active open project through its context', async () => {
     const element = await createBrowser();
 
     buttonWithText(element.shadowRoot!, 'Rename')?.click();
@@ -328,6 +342,59 @@ describe('pf-project-browser', () => {
     expect(activeProjectContextMock.project.name.value).toBe('Renamed Project');
     expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(activeProjectContextMock);
     expect(projectLibraryMock.renameProject).not.toHaveBeenCalled();
+  });
+
+  it('renames the targeted open project while another project is active', async () => {
+    const inactiveProjectContext = {
+      project: {
+        id: { value: 'second-project' },
+        name: { value: 'Second Project' },
+      },
+    };
+    workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) => {
+      if (projectId === 'open-project') return { context: activeProjectContextMock };
+      if (projectId === 'second-project') return { context: inactiveProjectContext };
+      return undefined;
+    });
+    const element = await createBrowser();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Rename')?.click();
+    await element.updateComplete;
+
+    const input = element.shadowRoot?.querySelector<HTMLInputElement>('input[name="project-name"]');
+    expect(input).toBeTruthy();
+    input!.value = 'Renamed Second Project';
+    input!.dispatchEvent(new Event('input'));
+
+    element.shadowRoot
+      ?.querySelector<HTMLFormElement>('.rename-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle(element);
+
+    expect(inactiveProjectContext.project.name.value).toBe('Renamed Second Project');
+    expect(activeProjectContextMock.project.name.value).toBe('Open Project');
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(inactiveProjectContext);
+    expect(projectLibraryMock.renameProject).not.toHaveBeenCalled();
+  });
+
+  it('renames a closed project through the library service', async () => {
+    const element = await createBrowser();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Rename')?.click();
+    await element.updateComplete;
+
+    const input = element.shadowRoot?.querySelector<HTMLInputElement>('input[name="project-name"]');
+    input!.value = 'Stored Project Rename';
+    input!.dispatchEvent(new Event('input'));
+    element.shadowRoot
+      ?.querySelector<HTMLFormElement>('.rename-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle(element);
+
+    expect(projectLibraryMock.renameProject).toHaveBeenCalledWith(
+      'second-project',
+      'Stored Project Rename'
+    );
   });
 
   it('duplicates a project and refreshes the list', async () => {

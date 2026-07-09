@@ -164,7 +164,7 @@ export class WorkspaceStore {
     projectId: string,
     options: WorkspaceProjectOptions = {},
   ): Promise<WorkspaceProjectResult> {
-    const existingItem = this.findProjectItem(projectId);
+    const existingItem = this.getProjectItem(projectId);
     if (existingItem) {
       await this.saveActiveContextIfRequested(options.saveActiveContext);
       this.activateIfRequested(existingItem, options.activate);
@@ -366,7 +366,7 @@ export class WorkspaceStore {
     return this.items.value.find((item) => item.id === itemId);
   }
 
-  private findProjectItem(projectId: string): WorkspaceItem | undefined {
+  getProjectItem(projectId: string): WorkspaceItem | undefined {
     return this.items.value.find((item) => item.context.project.id.value === projectId);
   }
 

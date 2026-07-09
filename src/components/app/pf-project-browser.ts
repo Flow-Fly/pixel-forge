@@ -554,10 +554,10 @@ export class PFProjectBrowser extends BaseComponent {
 
     this.errorMessage = '';
     try {
-      const activeContext = getActiveProjectContext();
-      if (project.id === activeContext.project.id.value) {
-        activeContext.project.name.value = name;
-        await autoSaveService.saveNow(activeContext);
+      const openItem = workspaceStore.getProjectItem(project.id);
+      if (openItem) {
+        openItem.context.project.name.value = name;
+        await autoSaveService.saveNow(openItem.context);
       } else {
         await projectLibrary.renameProject(project.id, name);
       }
