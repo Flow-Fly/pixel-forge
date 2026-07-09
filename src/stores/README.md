@@ -129,6 +129,7 @@ These stores belong to the editor session, user, or shell rather than one
 project:
 
 - `settings.ts` - app theme and checkerboard preferences.
+- `workspace.ts` - open project contexts and the active workspace item.
 - `tools.ts` - active tool and brush-editing override mode.
 - `tool-settings.ts` - shared tool size and option values.
 - `tool-groups.ts` - toolbar grouping preferences.
