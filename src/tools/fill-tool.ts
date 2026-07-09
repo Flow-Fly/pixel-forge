@@ -29,12 +29,10 @@ export class FillTool extends BaseTool {
     // Get index buffer for indexed color mode
     const frameId = animationStore.currentFrameId.value;
     const hex = colorStore.primaryColor.value;
-    let indexBuffer: Uint8Array | undefined;
-    let fillPaletteIndex = 0;
 
-    indexBuffer = animationStore.ensureCelIndexBuffer(layer.id, frameId);
+    const indexBuffer = animationStore.ensureCelIndexBuffer(layer.id, frameId);
     // Get palette index for drawing - adds to the palette if needed
-    fillPaletteIndex = paletteStore.getOrAddColorForDrawing(hex);
+    const fillPaletteIndex = paletteStore.getOrAddColorForDrawing(hex);
 
     const bounds = floodFill(
       imageData.data,
