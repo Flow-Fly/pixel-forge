@@ -3,7 +3,17 @@ import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import { settingsStore } from '../../stores/settings';
-import { ViewEffectPipeline } from '../../services/view-effects';
+import {
+  CRT_EFFECT_ID,
+  CRT_PARAM_CONTROLS,
+  CRT_PRESETS,
+  CRT_PRESET_OPTIONS,
+  getCrtParams,
+  getCrtPresetId,
+  ViewEffectPipeline,
+  type CrtParamKey,
+  type CrtPresetId,
+} from '../../services/view-effects';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -165,6 +175,91 @@ export class PFPreviewOverlay extends BaseComponent {
       gap: 4px;
     }
 
+    .effect-actions {
+      display: flex;
+      gap: 2px;
+    }
+
+    .effect-button,
+    .effect-settings-button {
+      background: var(--pf-color-bg-input);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      color: var(--pf-color-text-muted);
+      cursor: pointer;
+      font-size: 10px;
+      min-height: 20px;
+      padding: 2px 6px;
+    }
+
+    .effect-button:hover,
+    .effect-settings-button:hover {
+      background: var(--pf-color-bg-hover);
+      color: var(--pf-color-text-main);
+    }
+
+    .effect-button[aria-pressed='true'],
+    .effect-settings-button[aria-expanded='true'] {
+      border-color: var(--pf-color-accent);
+      color: var(--pf-color-accent);
+    }
+
+    .effect-button:focus-visible,
+    .effect-settings-button:focus-visible,
+    .effect-panel select:focus-visible,
+    .effect-panel input:focus-visible {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: 1px;
+    }
+
+    .effect-panel {
+      border-top: 1px solid var(--pf-color-border);
+      display: grid;
+      gap: 8px;
+      min-width: 220px;
+      padding: 8px;
+    }
+
+    .effect-preset-row,
+    .effect-slider-row {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 84px minmax(80px, 1fr) 34px;
+    }
+
+    .effect-preset-row {
+      grid-template-columns: 84px minmax(120px, 1fr);
+    }
+
+    .effect-panel label,
+    .effect-value {
+      color: var(--pf-color-text-muted);
+      font-size: 10px;
+    }
+
+    .effect-value {
+      color: var(--pf-color-text-main);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .effect-panel select {
+      background: var(--pf-color-bg-input);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      color: var(--pf-color-text-main);
+      font: inherit;
+      font-size: 11px;
+      min-height: 24px;
+    }
+
+    .effect-panel input[type='range'] {
+      accent-color: var(--pf-color-accent);
+      min-width: 0;
+      width: 100%;
+    }
+
     .bg-selector {
       display: flex;
       gap: 2px;
@@ -281,6 +376,7 @@ export class PFPreviewOverlay extends BaseComponent {
   @state() private previewSize = 128; // User-configurable preview size
   @state() private isResizing = false;
   @state() private viewEffectsSupported = false;
+  @state() private effectsPanelOpen = false;
   private resizeStartX = 0;
   private resizeStartY = 0;
   private resizeStartSize = 0;
@@ -477,6 +573,39 @@ export class PFPreviewOverlay extends BaseComponent {
     this.context.animation.togglePlayback();
   }
 
+  private toggleCrtEffect() {
+    if (settingsStore.activeViewEffect.value === CRT_EFFECT_ID) {
+      settingsStore.setActiveViewEffect(null);
+      return;
+    }
+
+    const storedParams = settingsStore.getViewEffectParams(CRT_EFFECT_ID);
+    if (Object.keys(storedParams).length === 0) {
+      settingsStore.setViewEffectParams(CRT_EFFECT_ID, { ...CRT_PRESETS.subtle });
+    }
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
+  private setCrtPreset(presetId: CrtPresetId | 'custom') {
+    if (presetId === 'custom') return;
+    if (presetId === 'off') {
+      settingsStore.setActiveViewEffect(null);
+      return;
+    }
+
+    settingsStore.setViewEffectParams(CRT_EFFECT_ID, { ...CRT_PRESETS[presetId] });
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
+  private setCrtParam(key: CrtParamKey, value: number) {
+    const params = getCrtParams(settingsStore.getViewEffectParams(CRT_EFFECT_ID));
+    settingsStore.setViewEffectParams(CRT_EFFECT_ID, {
+      ...params,
+      [key]: value,
+    });
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
   private startAnimationLoop() {
     // This loop only handles rendering; playback state lives in the active context.
     const loop = () => {
@@ -624,6 +753,10 @@ export class PFPreviewOverlay extends BaseComponent {
     const actualCanvasH = previewScale >= 1 ? canvasH : displayH;
 
     const viewportStyle = this.getViewportIndicatorStyle();
+    const crtIsActive = settingsStore.activeViewEffect.value === CRT_EFFECT_ID;
+    const crtParams = getCrtParams(settingsStore.getViewEffectParams(CRT_EFFECT_ID));
+    const displayedCrtParams = crtIsActive ? crtParams : CRT_PRESETS.off;
+    const crtPreset = crtIsActive ? getCrtPresetId(crtParams) : 'off';
 
     return html`
       <div class="container" style="transform: translate(${this.posX}px, ${this.posY}px)">
@@ -636,7 +769,11 @@ export class PFPreviewOverlay extends BaseComponent {
 
         <div
           class="content ${this.collapsed ? 'collapsed' : ''}"
-          style="${!this.collapsed ? `max-height: ${this.previewSize + 100}px` : ''}"
+          style="${
+            !this.collapsed
+              ? `max-height: ${this.previewSize + (this.effectsPanelOpen ? 300 : 100)}px`
+              : ''
+          }"
         >
           <div class="preview-area" @click=${this.handlePreviewClick}>
             <div class="preview-canvas-wrapper bg-${this.bgType}">
@@ -683,8 +820,90 @@ export class PFPreviewOverlay extends BaseComponent {
                 title="Transparent (checker)"
               ></button>
             </div>
+            ${
+              this.viewEffectsSupported
+                ? html`
+                    <div class="effect-actions">
+                      <button
+                        class="effect-button"
+                        type="button"
+                        aria-label="Toggle CRT effect"
+                        aria-pressed=${crtIsActive}
+                        @click=${this.toggleCrtEffect}
+                      >
+                        CRT
+                      </button>
+                      <button
+                        class="effect-settings-button"
+                        type="button"
+                        aria-controls="crt-effect-panel"
+                        aria-expanded=${this.effectsPanelOpen}
+                        @click=${() => (this.effectsPanelOpen = !this.effectsPanelOpen)}
+                      >
+                        Tune
+                      </button>
+                    </div>
+                  `
+                : ''
+            }
             <button class="play-btn" @click=${this.togglePlay}>${isPlaying ? '⏸' : '▶'}</button>
           </div>
+
+          ${
+            this.viewEffectsSupported && this.effectsPanelOpen
+              ? html`
+                  <div class="effect-panel" id="crt-effect-panel">
+                    <div class="effect-preset-row">
+                      <label for="crt-preset">Preset</label>
+                      <select
+                        id="crt-preset"
+                        .value=${crtPreset}
+                        @change=${(event: Event) =>
+                          this.setCrtPreset(
+                            (event.target as HTMLSelectElement).value as CrtPresetId | 'custom'
+                          )}
+                      >
+                        ${CRT_PRESET_OPTIONS.map(
+                          ({ id, label }) => html`
+                            <option value=${id} ?selected=${crtPreset === id}>${label}</option>
+                          `
+                        )}
+                        ${
+                          crtPreset === 'custom'
+                            ? html`<option value="custom" selected>Custom</option>`
+                            : ''
+                        }
+                      </select>
+                    </div>
+                    ${CRT_PARAM_CONTROLS.map(
+                      ({ key, label }) => html`
+                        <div class="effect-slider-row">
+                          <label for="crt-${key}">${label}</label>
+                          <input
+                            id="crt-${key}"
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            ?disabled=${!crtIsActive}
+                            .value=${String(displayedCrtParams[key])}
+                            aria-valuetext="${Math.round(displayedCrtParams[key] * 100)} percent"
+                            @input=${(event: Event) =>
+                              this.setCrtParam(
+                                key,
+                                parseFloat((event.target as HTMLInputElement).value)
+                              )}
+                          />
+                          <output class="effect-value" for="crt-${key}"
+                            >${Math.round(displayedCrtParams[key] * 100)}%</output
+                          >
+                        </div>
+                      `
+                    )}
+                  </div>
+                `
+              : ''
+          }
         </div>
         <div
           class="resize-handle"

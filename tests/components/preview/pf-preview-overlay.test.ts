@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PFPreviewOverlay } from '../../../src/components/preview/pf-preview-overlay';
+import { CRT_PRESETS } from '../../../src/services/view-effects';
 import { DEFAULT_CHECKER_SETTINGS, settingsStore } from '../../../src/stores/settings';
 
 const STORAGE_KEY_BG = 'pf-preview-bg';
@@ -83,6 +84,7 @@ describe('pf-preview-overlay background modes', () => {
     document.body.innerHTML = '';
     localStorage.clear();
     settingsStore.setCheckerSettings(DEFAULT_CHECKER_SETTINGS);
+    settingsStore.setActiveViewEffect(null);
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
@@ -138,5 +140,27 @@ describe('pf-preview-overlay background modes', () => {
 
     expect(effectCanvas).toBeTruthy();
     expect(effectCanvas?.hidden).toBe(true);
+  });
+
+  it('toggles the CRT preset without touching project state', async () => {
+    const overlay = createOverlay();
+    await overlay.updateComplete;
+    (overlay as unknown as { viewEffectsSupported: boolean }).viewEffectsSupported = true;
+    overlay.requestUpdate();
+    await overlay.updateComplete;
+
+    const toggle = overlay.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle CRT effect"]'
+    );
+    expect(toggle).toBeTruthy();
+
+    toggle?.click();
+    await overlay.updateComplete;
+    expect(settingsStore.activeViewEffect.value).toBe('crt');
+    expect(settingsStore.getViewEffectParams('crt')).toEqual(CRT_PRESETS.subtle);
+
+    toggle?.click();
+    await overlay.updateComplete;
+    expect(settingsStore.activeViewEffect.value).toBeNull();
   });
 });
