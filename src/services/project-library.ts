@@ -10,9 +10,8 @@ import {
   clampProjectDimension,
   normalizeProjectName,
 } from './project-defaults';
-import { projectStore } from '../stores/project';
+import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { DB32_COLORS, PALETTE_BY_ID } from '../stores/palette/types';
-import { viewportStore } from '../stores/viewport';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 
 export type CreateProjectOptions = {
@@ -23,6 +22,16 @@ export type CreateProjectOptions = {
 
 export type CreateProjectSettings = {
   saveCurrent?: boolean;
+  context?: ProjectContext;
+};
+
+export type OpenProjectSettings = {
+  saveCurrent?: boolean;
+  context?: ProjectContext;
+};
+
+export type DeleteProjectSettings = {
+  context?: ProjectContext;
 };
 
 export class ProjectLibraryService {
@@ -36,23 +45,27 @@ export class ProjectLibraryService {
     return await this.repository.list();
   }
 
-  async openProject(id: string): Promise<ProjectFile> {
-    await autoSaveService.saveNow();
-    return await this.loadStoredProject(id);
+  async openProject(id: string, settings: OpenProjectSettings = {}): Promise<ProjectFile> {
+    const context = settings.context ?? defaultProjectContext;
+    if (settings.saveCurrent ?? true) {
+      await autoSaveService.saveNow(context);
+    }
+    return await this.loadStoredProject(id, context);
   }
 
   async createProject(
     options: CreateProjectOptions,
     settings: CreateProjectSettings = {}
   ): Promise<string> {
+    const context = settings.context ?? defaultProjectContext;
     if (settings.saveCurrent ?? true) {
-      await autoSaveService.saveNow();
+      await autoSaveService.saveNow(context);
     }
 
     const id = uuidv4();
     const project = createBlankProjectFile(options);
     await this.repository.save(id, project);
-    await this.loadStoredProject(id);
+    await this.loadStoredProject(id, context);
 
     return id;
   }
@@ -78,23 +91,24 @@ export class ProjectLibraryService {
     });
   }
 
-  async deleteProject(id: string): Promise<void> {
-    if (id === projectStore.id.value) {
-      autoSaveService.clearPendingSave();
+  async deleteProject(id: string, settings: DeleteProjectSettings = {}): Promise<void> {
+    const context = settings.context ?? defaultProjectContext;
+    if (id === context.project.id.value) {
+      autoSaveService.clearPendingSave(context);
     }
 
     await this.repository.delete(id);
   }
 
-  private async loadStoredProject(id: string): Promise<ProjectFile> {
+  private async loadStoredProject(id: string, context: ProjectContext): Promise<ProjectFile> {
     const project = await this.getProjectOrThrow(id);
 
     await autoSaveService.runWithoutSaving(async () => {
-      projectStore.id.value = id;
-      await projectStore.loadProject(project);
-      projectStore.lastSaved.value = Date.now();
-      viewportStore.resetView();
-    });
+      context.project.id.value = id;
+      await context.project.loadProject(project);
+      context.project.lastSaved.value = Date.now();
+      context.viewport.resetView();
+    }, context);
 
     await this.repository.setLastOpenedProjectId(id);
     return project;

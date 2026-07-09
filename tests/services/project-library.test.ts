@@ -32,6 +32,12 @@ import { ProjectLibraryService } from '../../src/services/project-library';
 import { projectRepository } from '../../src/services/persistence/indexed-db';
 import { historyStore, type Command } from '../../src/stores/history';
 import { projectStore } from '../../src/stores/project';
+import {
+  createProjectContext,
+  defaultProjectContext,
+  restoreDefaultProjectContext,
+  type ProjectContext,
+} from '../../src/stores/project-context';
 import { viewportStore } from '../../src/stores/viewport';
 import { PROJECT_VERSION } from '../../src/types/project';
 
@@ -40,6 +46,7 @@ const service = new ProjectLibraryService(projectRepository);
 
 let projects: Map<string, ProjectFile>;
 let savedProjects: Array<{ id: string; project: ProjectFile }>;
+const createdContexts: ProjectContext[] = [];
 
 function cloneProject(project: ProjectFile): ProjectFile {
   return structuredClone(project);
@@ -101,11 +108,21 @@ function makeCommand(run?: () => void, undo?: () => void): Command {
 }
 
 async function openProjectInStore(id: string, project: ProjectFile) {
+  await openProjectInContext(defaultProjectContext, id, project);
+}
+
+async function openProjectInContext(context: ProjectContext, id: string, project: ProjectFile) {
   await autoSaveService.runWithoutSaving(async () => {
-    projectStore.id.value = id;
-    await projectStore.loadProject(project);
-  });
-  historyStore.clear();
+    context.project.id.value = id;
+    await context.project.loadProject(project);
+  }, context);
+  context.history.clear();
+}
+
+function createContext(): ProjectContext {
+  const context = createProjectContext();
+  createdContexts.push(context);
+  return context;
 }
 
 beforeEach(async () => {
@@ -146,6 +163,10 @@ afterEach(async () => {
   autoSaveService.stop();
   historyStore.clear();
   await vi.runAllTimersAsync();
+  restoreDefaultProjectContext();
+  for (const context of createdContexts.splice(0)) {
+    context.dispose();
+  }
   vi.useRealTimers();
 });
 
@@ -267,5 +288,61 @@ describe('ProjectLibraryService', () => {
     expect(projects.get('b')?.name).toBe('Project B');
     expect(savesForA).toHaveLength(1);
     expect(savesForB).toHaveLength(0);
+  });
+
+  it('opens a project into a provided context without mutating the default context', async () => {
+    const context = createContext();
+    projects.set('target', makeProject('Target project', 12, 10));
+    projectStore.name.value = 'Default project';
+
+    await service.openProject('target', {
+      context,
+      saveCurrent: false,
+    });
+
+    expect(context.project.id.value).toBe('target');
+    expect(context.project.name.value).toBe('Target project');
+    expect(context.project.width.value).toBe(12);
+    expect(context.project.height.value).toBe(10);
+    expect(projectStore.id.value).toBe('current');
+    expect(projectStore.name.value).toBe('Default project');
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(repository.setLastOpenedProjectId).toHaveBeenCalledWith('target');
+  });
+
+  it('saves a provided context before loading another project into it', async () => {
+    const context = createContext();
+    projects.set('a', makeProject('Project A'));
+    projects.set('b', makeProject('Project B'));
+    await openProjectInContext(context, 'a', makeProject('Project A'));
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Project A edited';
+      })
+    );
+
+    await service.openProject('b', { context });
+
+    expect(projects.get('a')?.name).toBe('Project A edited');
+    expect(projects.get('b')?.name).toBe('Project B');
+    expect(context.project.id.value).toBe('b');
+    expect(context.project.name.value).toBe('Project B');
+    expect(projectStore.id.value).toBe('current');
+  });
+
+  it('does not auto-save reset signals while loading a provided context', async () => {
+    const context = createContext();
+    projects.set('loaded', makeProject('Loaded project'));
+    autoSaveService.start(context);
+
+    await service.openProject('loaded', {
+      context,
+      saveCurrent: false,
+    });
+    await vi.advanceTimersByTimeAsync(2500);
+
+    expect(context.project.id.value).toBe('loaded');
+    expect(repository.save).not.toHaveBeenCalled();
   });
 });
