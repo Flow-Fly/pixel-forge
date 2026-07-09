@@ -5,6 +5,7 @@ import { brushStore } from "../stores/brush";
 import type { Brush, BrushImageData } from "../types/brush";
 import { BRUSH_SIZE_LIMITS } from "../types/brush";
 import { log } from "../utils/log";
+import { isReferenceLayer } from "../utils/layer-capabilities";
 
 /**
  * Check if a brush can be captured from the current selection
@@ -65,61 +66,10 @@ function captureBrushFromSelection(name?: string): Brush | null {
 
   const { bounds, mask } = info;
 
-  // Validate size
-  if (
-    bounds.width > BRUSH_SIZE_LIMITS.hardMax ||
-    bounds.height > BRUSH_SIZE_LIMITS.hardMax
-  ) {
-    log.warn(
-      `Selection too large. Maximum size is ${BRUSH_SIZE_LIMITS.hardMax}x${BRUSH_SIZE_LIMITS.hardMax}`
-    );
-    return null;
-  }
+  if (!isValidBrushSize(bounds)) return null;
 
-  if (
-    bounds.width < BRUSH_SIZE_LIMITS.min ||
-    bounds.height < BRUSH_SIZE_LIMITS.min
-  ) {
-    log.warn("Selection too small");
-    return null;
-  }
-
-  // Get pixel data
-  let pixelData: ImageData;
-
-  if (info.imageData) {
-    // Floating selection already has imageData
-    pixelData = info.imageData;
-  } else {
-    // Get from active layer's canvas
-    const activeLayerId = layerStore.activeLayerId.value;
-    const currentFrame = animationStore.currentFrameId.value;
-
-    if (!activeLayerId) {
-      log.warn("No active layer");
-      return null;
-    }
-
-    const canvas = animationStore.getCelCanvas(currentFrame, activeLayerId);
-
-    if (!canvas) {
-      log.warn("No canvas available to capture brush from");
-      return null;
-    }
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      log.warn("Could not get canvas context");
-      return null;
-    }
-
-    pixelData = ctx.getImageData(
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height
-    );
-  }
+  const pixelData = readSelectionPixels(info);
+  if (!pixelData) return null;
 
   // Apply mask if freeform selection
   if (mask) {
@@ -157,6 +107,67 @@ function captureBrushFromSelection(name?: string): Brush | null {
   };
 
   return brush;
+}
+
+function isValidBrushSize(bounds: { width: number; height: number }): boolean {
+  if (
+    bounds.width > BRUSH_SIZE_LIMITS.hardMax ||
+    bounds.height > BRUSH_SIZE_LIMITS.hardMax
+  ) {
+    log.warn(
+      `Selection too large. Maximum size is ${BRUSH_SIZE_LIMITS.hardMax}x${BRUSH_SIZE_LIMITS.hardMax}`
+    );
+    return false;
+  }
+
+  if (
+    bounds.width < BRUSH_SIZE_LIMITS.min ||
+    bounds.height < BRUSH_SIZE_LIMITS.min
+  ) {
+    log.warn("Selection too small");
+    return false;
+  }
+
+  return true;
+}
+
+function readSelectionPixels(info: NonNullable<ReturnType<typeof getSelectionInfo>>): ImageData | null {
+  if (info.imageData) {
+    return info.imageData;
+  }
+
+  const activeLayerId = layerStore.activeLayerId.value;
+  const currentFrame = animationStore.currentFrameId.value;
+
+  if (!activeLayerId) {
+    log.warn("No active layer");
+    return null;
+  }
+
+  const activeLayer = layerStore.layers.value.find((layer) => layer.id === activeLayerId);
+  if (isReferenceLayer(activeLayer)) {
+    log.warn("Reference layers cannot be captured as brushes");
+    return null;
+  }
+
+  const canvas = animationStore.getCelCanvas(currentFrame, activeLayerId);
+  if (!canvas) {
+    log.warn("No canvas available to capture brush from");
+    return null;
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    log.warn("Could not get canvas context");
+    return null;
+  }
+
+  return ctx.getImageData(
+    info.bounds.x,
+    info.bounds.y,
+    info.bounds.width,
+    info.bounds.height
+  );
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   type MaskSelectionState,
 } from '../../utils/mask-utils';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
+import { isPaintableLayer } from '../../utils/layer-capabilities';
 
 /**
  * Shared behavior for selection tools (marquee, lasso, polygonal lasso,
@@ -137,7 +138,7 @@ export abstract class BaseSelectionTool extends BaseTool {
     // Get active layer canvas for content-aware trimming
     const activeLayerId = layerStore.activeLayerId.value;
     const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    const canvas = layer?.canvas;
+    const canvas = isPaintableLayer(layer) ? layer.canvas : undefined;
 
     const mode = selectionStore.mode.value;
 
@@ -201,7 +202,7 @@ export abstract class BaseSelectionTool extends BaseTool {
 
     const activeLayerId = layerStore.activeLayerId.value;
     const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    if (!layer?.canvas) return false;
+    if (!isPaintableLayer(layer)) return false;
 
     const command = new CommitFloatCommand(
       layer.canvas,

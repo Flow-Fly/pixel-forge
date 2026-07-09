@@ -3,9 +3,15 @@ import { BaseSelectionTool } from './base-selection-tool';
 import { selectionStore } from '../../stores/selection';
 import { layerStore } from '../../stores/layers';
 import { magicWandSettings } from '../../stores/tool-settings';
-import { floodFillSelect, type FloodFillOptions } from '../../utils/mask-utils';
+import {
+  floodFillSelect,
+  type FloodFillOptions,
+} from '../../utils/mask-utils';
+import { isPaintableLayer } from '../../utils/layer-capabilities';
 
 // Re-export for backward compatibility
+
+type FloodSelectionResult = NonNullable<ReturnType<typeof floodFillSelect>>;
 
 export class MagicWandTool extends BaseSelectionTool {
   name = 'magic-wand';
@@ -48,13 +54,32 @@ export class MagicWandTool extends BaseSelectionTool {
   }
 
   private selectRegion(x: number, y: number, shrinkToContent: boolean = false) {
+    const sample = this.readSelectionSample(x, y);
+    if (!sample) return;
+
+    const result = floodFillSelect(sample.imageData, sample.x, sample.y, this.options());
+
+    if (!result) {
+      this.clearEmptyReplaceSelection();
+      return;
+    }
+
+    this.applySelectionResult(result, sample.canvas, shrinkToContent);
+  }
+
+  private readSelectionSample(x: number, y: number): {
+    imageData: ImageData;
+    canvas: HTMLCanvasElement;
+    x: number;
+    y: number;
+  } | null {
     const activeLayerId = layerStore.activeLayerId.value;
     const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
 
-    if (!activeLayer || !activeLayer.canvas) return;
+    if (!isPaintableLayer(activeLayer)) return null;
 
     const ctx = activeLayer.canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return null;
 
     const startX = Math.floor(x);
     const startY = Math.floor(y);
@@ -63,38 +88,41 @@ export class MagicWandTool extends BaseSelectionTool {
 
     // Bounds check
     if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
-      return;
+      return null;
     }
 
-    // Get image data from layer
-    const imageData = ctx.getImageData(0, 0, width, height);
+    return {
+      imageData: ctx.getImageData(0, 0, width, height),
+      canvas: activeLayer.canvas,
+      x: startX,
+      y: startY,
+    };
+  }
 
-    // Get current settings
-    const options: FloodFillOptions = {
+  private options(): FloodFillOptions {
+    return {
       tolerance: magicWandSettings.tolerance.value,
       contiguous: magicWandSettings.contiguous.value,
       diagonal: magicWandSettings.diagonal.value,
     };
+  }
 
-    // Perform flood fill selection
-    const result = floodFillSelect(imageData, startX, startY, options);
-
-    if (!result) {
-      // No pixels selected (clicked outside bounds or no matching pixels)
-      if (selectionStore.mode.value === 'replace') {
-        selectionStore.clear();
-      }
-      return;
+  private clearEmptyReplaceSelection() {
+    if (selectionStore.mode.value === 'replace') {
+      selectionStore.clear();
     }
+  }
 
+  private applySelectionResult(
+    result: FloodSelectionResult,
+    canvas: HTMLCanvasElement,
+    shrinkToContent: boolean
+  ) {
     const { mask, bounds } = result;
 
     // Handle selection modes (add/subtract/replace)
     const currentState = selectionStore.state.value;
     const mode = selectionStore.mode.value;
-
-    // Pass canvas for content-aware trimming
-    const canvas = activeLayer.canvas;
 
     if (mode === 'replace' || currentState.type === 'none') {
       // Simple replace

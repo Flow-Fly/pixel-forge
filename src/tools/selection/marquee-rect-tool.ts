@@ -2,6 +2,7 @@ import type { ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
 import { selectionStore } from '../../stores/selection';
 import { layerStore } from '../../stores/layers';
+import { isPaintableLayer } from '../../utils/layer-capabilities';
 
 export class MarqueeRectTool extends BaseSelectionTool {
   name = 'marquee-rect';
@@ -74,7 +75,10 @@ export class MarqueeRectTool extends BaseSelectionTool {
     // pass the active layer canvas for content-aware trimming
     const activeLayerId = layerStore.activeLayerId.value;
     const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    selectionStore.finalizeSelection(layer?.canvas, shrinkToContent);
+    selectionStore.finalizeSelection(
+      isPaintableLayer(layer) ? layer.canvas : undefined,
+      shrinkToContent
+    );
     selectionStore.resetMode();
     this.clearPreviousSelection();
   }
