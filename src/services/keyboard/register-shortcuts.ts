@@ -30,6 +30,10 @@ import { log } from '../../utils/log';
 import type { Layer } from '../../types/layer';
 import type { SelectionState } from '../../types/selection';
 import { createClipboardIndexedSelection } from '../clipboard-snapshot';
+import { remapClipboardPaletteIndices } from '../clipboard-remap';
+import { createClipboardImageDataFromIndices } from '../clipboard-image-data';
+import { applyClipboardPaletteAppendPlan } from '../clipboard-palette-append';
+import { normalizeHex } from '../../stores/palette/color-utils';
 
 type ShortcutAction = () => void;
 
@@ -45,6 +49,7 @@ interface ShortcutRegistration {
 }
 
 type ShortcutGroup = ShortcutRegistration[];
+type ClipboardData = NonNullable<ReturnType<typeof clipboardStore.getData>>;
 
 const SELECTION_TOOLS: ToolType[] = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'];
 
@@ -114,11 +119,14 @@ function setToolSizeBy(delta: number) {
   setToolSize(tool, Math.max(1, currentSize + delta));
 }
 
-function commitFloatingSelection(state: Extract<SelectionState, { type: 'floating' }>) {
-  const layer = activeLayerWithCanvas();
+function commitFloatingSelectionInContext(
+  context: ProjectContext,
+  state: Extract<SelectionState, { type: 'floating' }>
+) {
+  const layer = activeLayerWithCanvasInContext(context);
   if (!layer?.canvas) return;
 
-  historyStore.execute(
+  context.history.execute(
     new CommitFloatCommand(
       layer.canvas,
       layer.id,
@@ -129,6 +137,10 @@ function commitFloatingSelection(state: Extract<SelectionState, { type: 'floatin
       state.mask
     )
   );
+}
+
+function commitFloatingSelection(state: Extract<SelectionState, { type: 'floating' }>) {
+  commitFloatingSelectionInContext(getActiveProjectContext(), state);
 }
 
 function moveSelectionByArrow(dx: number, dy: number) {
@@ -321,25 +333,70 @@ function cutSelection() {
   );
 }
 
+function colorsMatchAtIndex(
+  sourceColors: string[],
+  targetColors: string[],
+  paletteIndex: number
+): boolean {
+  const sourceColor = sourceColors[paletteIndex - 1];
+  const targetColor = targetColors[paletteIndex - 1];
+  if (!sourceColor || !targetColor) return false;
+
+  return normalizeHex(sourceColor) === normalizeHex(targetColor);
+}
+
+function canUseOriginalClipboardImageData(data: ClipboardData, context: ProjectContext): boolean {
+  const indexed = data.indexedSelection;
+  if (!indexed) return true;
+
+  return indexed.usedIndices.every((paletteIndex) =>
+    colorsMatchAtIndex(indexed.sourceColors, context.palette.mainColors.value, paletteIndex)
+  );
+}
+
+function createPasteImageData(data: ClipboardData, context: ProjectContext): ImageData {
+  const indexed = data.indexedSelection;
+  if (!indexed || canUseOriginalClipboardImageData(data, context)) {
+    return data.imageData;
+  }
+
+  const remapPlan = remapClipboardPaletteIndices({
+    indexData: indexed.indexData,
+    sourceColors: indexed.sourceColors,
+    targetColors: context.palette.mainColors.value,
+  });
+  const appendResult = applyClipboardPaletteAppendPlan(context.palette, remapPlan.colorsToAppend);
+
+  return createClipboardImageDataFromIndices({
+    indexData: remapPlan.remappedIndexData,
+    targetColors: appendResult.targetColors,
+    width: indexed.width,
+    height: indexed.height,
+    mask: indexed.mask,
+  });
+}
+
 function pasteSelection() {
   const data = clipboardStore.getData();
   if (!data) return;
 
-  const layer = activeLayerWithCanvas();
+  const context = getActiveProjectContext();
+  const layer = activeLayerWithCanvasInContext(context);
   if (!layer?.canvas) return;
 
-  const currentState = selectionStore.state.value;
+  const currentState = context.selection.state.value;
   if (currentState.type === 'floating') {
-    commitFloatingSelection(currentState);
+    commitFloatingSelectionInContext(context, currentState);
   }
 
-  const pasteX = Math.floor((projectStore.width.value - data.width) / 2);
-  const pasteY = Math.floor((projectStore.height.value - data.height) / 2);
+  const imageData = createPasteImageData(data, context);
+  const pasteX = Math.floor((context.project.width.value - data.width) / 2);
+  const pasteY = Math.floor((context.project.height.value - data.height) / 2);
 
-  selectionStore.state.value = {
+  context.selection.state.value = {
     type: 'floating',
     shape: data.shape,
-    imageData: data.imageData,
+    imageData,
     originalBounds: { x: pasteX, y: pasteY, width: data.width, height: data.height },
     currentOffset: { x: 0, y: 0 },
     mask: data.mask,
