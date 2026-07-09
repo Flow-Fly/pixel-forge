@@ -36,6 +36,7 @@ import { createClipboardImageDataFromIndices } from '../clipboard-image-data';
 import { applyClipboardPaletteAppendPlan } from '../clipboard-palette-append';
 import { createClipboardIndexPasteRegionPlan } from '../clipboard-index-paste-region';
 import { normalizeHex } from '../../stores/palette/color-utils';
+import { isPaintableLayer } from '../../utils/layer-capabilities';
 
 type ShortcutAction = () => void;
 
@@ -95,7 +96,7 @@ function activeLayer(): Layer | undefined {
 
 function activeLayerWithCanvas(): Layer | undefined {
   const layer = activeLayer();
-  return layer?.canvas ? layer : undefined;
+  return isPaintableLayer(layer) ? layer : undefined;
 }
 
 function activeLayerInContext(context: ProjectContext): Layer | undefined {
@@ -105,7 +106,7 @@ function activeLayerInContext(context: ProjectContext): Layer | undefined {
 
 function activeLayerWithCanvasInContext(context: ProjectContext): Layer | undefined {
   const layer = activeLayerInContext(context);
-  return layer?.canvas ? layer : undefined;
+  return isPaintableLayer(layer) ? layer : undefined;
 }
 
 function freeformMask(state: SelectionState): Uint8Array | undefined {

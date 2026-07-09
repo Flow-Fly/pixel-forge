@@ -407,6 +407,65 @@ describe('registerShortcuts', () => {
     }
   });
 
+  it('does not copy pixels from an active reference layer', () => {
+    const context = createProjectContext();
+    setActiveProjectContext(context);
+
+    try {
+      const layerId = 'reference-layer';
+      const frameId = 'copy-frame';
+      const canvas = makeReadableCanvas(2, 2);
+
+      context.layers.layers.value = [{
+        id: layerId,
+        name: 'Reference Layer',
+        type: 'reference',
+        visible: true,
+        locked: false,
+        opacity: 128,
+        blendMode: 'normal',
+        parentId: null,
+        canvas,
+        referenceData: {
+          bytes: new Uint8Array([1, 2, 3]),
+          mimeType: 'image/png',
+          x: 0,
+          y: 0,
+          scale: 1,
+        },
+      }];
+      context.layers.activeLayerId.value = layerId;
+      context.animation.currentFrameId.value = frameId;
+      context.animation.cels.value = new Map([
+        [
+          context.animation.getCelKey(layerId, frameId),
+          {
+            id: 'copy-cel',
+            layerId,
+            frameId,
+            canvas,
+            indexBuffer: Uint8Array.from([1, 1, 1, 1]),
+          },
+        ],
+      ]);
+      context.selection.state.value = {
+        type: 'selected',
+        shape: 'rectangle',
+        bounds: { x: 0, y: 0, width: 2, height: 2 },
+      };
+
+      registerShortcuts();
+      shortcutAction(`${MOD_PRIMARY}+c`)?.();
+
+      expect(clipboardStore.getData()).toBeNull();
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+      clipboardStore.clear();
+      selectionStore.clear();
+    }
+  });
+
   it('pastes remapped indexed clipboard data into the active project context', () => {
     const sourceContext = createProjectContext();
     const targetContext = createProjectContext();
