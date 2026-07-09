@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // happy-dom has neither IndexedDB nor canvas encoding. Keep those boundaries out
 // of these focused drawing-tool tests.
@@ -39,15 +39,16 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 import { StrokeSession } from '../../src/tools/stroke-session';
 import { PencilTool } from '../../src/tools/pencil-tool';
 import { EraserTool } from '../../src/tools/eraser-tool';
-import { animationStore } from '../../src/stores/animation';
 import { brushStore } from '../../src/stores/brush';
 import { colorStore } from '../../src/stores/colors';
-import { guidesStore } from '../../src/stores/guides';
-import { layerStore } from '../../src/stores/layers';
 import { paletteStore } from '../../src/stores/palette';
-import { projectStore } from '../../src/stores/project';
 import { eraserSettings, toolSizes } from '../../src/stores/tool-settings';
 import { getIndexBufferPixel } from '../../src/utils/indexed-color';
+import {
+  createProjectContext,
+  defaultProjectContext,
+  type ProjectContext,
+} from '../../src/stores/project-context';
 
 type Rgba = [number, number, number, number];
 
@@ -59,6 +60,7 @@ const celId = 'cel-restore';
 const red: Rgba = [255, 0, 0, 255];
 const green: Rgba = [0, 255, 0, 255];
 const transparent: Rgba = [0, 0, 0, 0];
+const createdContexts: ProjectContext[] = [];
 
 class FakeCanvasContext {
   readonly canvas: HTMLCanvasElement;
@@ -210,17 +212,19 @@ function pixelIndex(x: number, y: number): number {
   return y * width + x;
 }
 
-function setupDrawingState() {
-  animationStore.cels.value = new Map();
-  paletteStore.clearAllNewFlags();
-  paletteStore.setPalette(['#ff0000', '#00ff00', '#ffffff']);
-  projectStore.setSize(width, height);
-  guidesStore.clearAllGuides();
+function setupDrawingState(projectContext = defaultProjectContext) {
+  const { animation, colors, guides, layers, palette, project } = projectContext;
+
+  animation.cels.value = new Map();
+  palette.clearAllNewFlags();
+  palette.setPalette(['#ff0000', '#00ff00', '#ffffff']);
+  project.setSize(width, height);
+  guides.clearAllGuides();
   toolSizes.pencil.value = 1;
   toolSizes.eraser.value = 1;
   eraserSettings.mode.value = 'transparent';
-  colorStore.primaryColor.value = '#00ff00';
-  colorStore.secondaryColor.value = '#ffffff';
+  colors.primaryColor.value = '#00ff00';
+  colors.secondaryColor.value = '#ffffff';
   brushStore.activeBrush.value = {
     ...brushStore.builtinBrushes[0],
     opacity: 1,
@@ -231,7 +235,7 @@ function setupDrawingState() {
   const context = new FakeCanvasContext(width, height);
   const indexBuffer = new Uint8Array(width * height);
 
-  layerStore.layers.value = [
+  layers.layers.value = [
     {
       id: layerId,
       name: 'Test Layer',
@@ -244,11 +248,11 @@ function setupDrawingState() {
       canvas: context.canvas,
     },
   ];
-  layerStore.activeLayerId.value = layerId;
+  layers.activeLayerId.value = layerId;
 
-  animationStore.frames.value = [{ id: frameId, order: 0, duration: 100 }];
-  animationStore.currentFrameId.value = frameId;
-  animationStore.cels.value = new Map([
+  animation.frames.value = [{ id: frameId, order: 0, duration: 100 }];
+  animation.currentFrameId.value = frameId;
+  animation.cels.value = new Map([
     [
       `${layerId}:${frameId}`,
       {
@@ -261,11 +265,17 @@ function setupDrawingState() {
     ],
   ]);
 
-  return { context, indexBuffer };
+  return { context, indexBuffer, projectContext };
 }
 
 beforeEach(() => {
   setupDrawingState();
+});
+
+afterEach(() => {
+  for (const context of createdContexts.splice(0)) {
+    context.dispose();
+  }
 });
 
 describe('StrokeSession', () => {
@@ -278,7 +288,7 @@ describe('StrokeSession', () => {
     indexBuffer[pixelIndex(1, 1)] = redIndex;
 
     const session = new StrokeSession();
-    session.begin(asContext(context));
+    session.begin(asContext(context), defaultProjectContext);
 
     context.setPixel(1, 1, green);
     indexBuffer[pixelIndex(1, 1)] = greenIndex;
@@ -293,7 +303,7 @@ describe('StrokeSession', () => {
     const greenIndex = paletteStore.getColorIndex('#00ff00');
 
     const session = new StrokeSession();
-    session.begin(asContext(context));
+    session.begin(asContext(context), defaultProjectContext);
 
     context.setPixel(2, 1, green);
     indexBuffer[pixelIndex(2, 1)] = greenIndex;
@@ -312,6 +322,63 @@ describe('StrokeSession', () => {
 });
 
 describe('drawing tools pixel-perfect restore', () => {
+  it('draws with the initiating project color and palette index', () => {
+    const projectA = createProjectContext();
+    createdContexts.push(projectA);
+    const { context: contextA, indexBuffer: indexBufferA } = setupDrawingState(projectA);
+    const { context: contextB, indexBuffer: indexBufferB } = setupDrawingState();
+    const defaultPaletteBefore = [...paletteStore.mainColors.value];
+    const defaultDirtyRect = vi.spyOn(defaultProjectContext.dirtyRect, 'markDirty');
+    const projectDirtyRect = vi.spyOn(projectA.dirtyRect, 'markDirty');
+
+    projectA.colors.primaryColor.value = '#123456';
+    colorStore.primaryColor.value = '#abcdef';
+
+    const tool = new PencilTool(asContext(contextA));
+    tool.setProjectContext(projectA);
+    tool.onDown(1, 1);
+    tool.onUp(1, 1);
+
+    const paletteIndexA = projectA.palette.getColorIndex('#123456');
+    expect(contextA.getPixel(1, 1)).toEqual([18, 52, 86, 255]);
+    expect(paletteIndexA).toBeGreaterThan(0);
+    expect(getIndexBufferPixel(indexBufferA, width, 1, 1)).toBe(paletteIndexA);
+    expect(projectA.palette.mainColors.value).toContain('#123456');
+    expect(paletteStore.mainColors.value).toEqual(defaultPaletteBefore);
+    expect(projectDirtyRect).toHaveBeenCalled();
+    expect(defaultDirtyRect).not.toHaveBeenCalled();
+
+    tool.setContext(asContext(contextB));
+    tool.setProjectContext(defaultProjectContext);
+    tool.onDown(2, 2);
+
+    const paletteIndexB = paletteStore.getColorIndex('#abcdef');
+    expect(contextB.getPixel(2, 2)).toEqual([171, 205, 239, 255]);
+    expect(paletteIndexB).toBeGreaterThan(0);
+    expect(getIndexBufferPixel(indexBufferB, width, 2, 2)).toBe(paletteIndexB);
+    expect(projectA.palette.mainColors.value).not.toContain('#abcdef');
+  });
+
+  it('erases to the initiating project background color', () => {
+    const projectA = createProjectContext();
+    createdContexts.push(projectA);
+    const { context, indexBuffer } = setupDrawingState(projectA);
+    const defaultPaletteBefore = [...paletteStore.mainColors.value];
+
+    projectA.colors.secondaryColor.value = '#654321';
+    colorStore.secondaryColor.value = '#abcdef';
+
+    const tool = new EraserTool(asContext(context));
+    tool.setProjectContext(projectA);
+    tool.onDown(1, 1, { shift: false, ctrl: false, alt: false, button: 2 });
+
+    const paletteIndex = projectA.palette.getColorIndex('#654321');
+    expect(context.getPixel(1, 1)).toEqual([101, 67, 33, 255]);
+    expect(paletteIndex).toBeGreaterThan(0);
+    expect(getIndexBufferPixel(indexBuffer, width, 1, 1)).toBe(paletteIndex);
+    expect(paletteStore.mainColors.value).toEqual(defaultPaletteBefore);
+  });
+
   it('pencil restores an L-corner stamp to its pre-stroke pixel and palette index', () => {
     const { context, indexBuffer } = setupDrawingState();
     const redIndex = paletteStore.getColorIndex('#ff0000');
