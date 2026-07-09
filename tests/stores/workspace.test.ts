@@ -172,6 +172,23 @@ describe("WorkspaceStore", () => {
     expect(getActiveProjectContext()).toBe(contextB);
   });
 
+  it("finds an open project item by project id regardless of the active tab", () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    contextA.project.id.value = "project-a";
+    contextB.project.id.value = "project-b";
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+    });
+    workspace.addContext(contextB, { id: "project-b" });
+
+    expect(workspace.activeItem.context).toBe(contextB);
+    expect(workspace.getProjectItem("project-a")?.context).toBe(contextA);
+    expect(workspace.getProjectItem("project-b")?.context).toBe(contextB);
+    expect(workspace.getProjectItem("missing-project")).toBeUndefined();
+  });
+
   it("cycles project tabs through the active project context", () => {
     const contextA = createTestContext("Project A");
     const contextB = createTestContext("Project B");
