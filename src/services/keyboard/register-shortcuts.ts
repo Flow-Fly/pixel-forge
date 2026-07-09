@@ -8,6 +8,7 @@ import { projectStore } from '../../stores/project';
 import {
   DeleteSelectionCommand,
   CommitFloatCommand,
+  CommitIndexedFloatCommand,
   CutToFloatCommand,
   FillSelectionCommand,
 } from '../../commands/selection-commands';
@@ -28,11 +29,12 @@ import { getToolSize, setToolSize } from '../../stores/tool-settings';
 import { clipboardStore } from '../../stores/clipboard';
 import { log } from '../../utils/log';
 import type { Layer } from '../../types/layer';
-import type { SelectionState } from '../../types/selection';
+import type { FloatingIndexedPaste, SelectionState } from '../../types/selection';
 import { createClipboardIndexedSelection } from '../clipboard-snapshot';
 import { remapClipboardPaletteIndices } from '../clipboard-remap';
 import { createClipboardImageDataFromIndices } from '../clipboard-image-data';
 import { applyClipboardPaletteAppendPlan } from '../clipboard-palette-append';
+import { createClipboardIndexPasteRegionPlan } from '../clipboard-index-paste-region';
 import { normalizeHex } from '../../stores/palette/color-utils';
 
 type ShortcutAction = () => void;
@@ -50,6 +52,11 @@ interface ShortcutRegistration {
 
 type ShortcutGroup = ShortcutRegistration[];
 type ClipboardData = NonNullable<ReturnType<typeof clipboardStore.getData>>;
+
+interface PasteSelectionData {
+  imageData: ImageData;
+  indexedPaste?: FloatingIndexedPaste;
+}
 
 const SELECTION_TOOLS: ToolType[] = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'];
 
@@ -126,6 +133,46 @@ function commitFloatingSelectionInContext(
   const layer = activeLayerWithCanvasInContext(context);
   if (!layer?.canvas) return;
 
+  if (state.indexedPaste) {
+    const frameId = context.animation.currentFrameId.value;
+    const targetIndexBuffer = context.animation.ensureCelIndexBuffer(layer.id, frameId);
+    const destinationBounds = {
+      x: state.originalBounds.x + state.currentOffset.x,
+      y: state.originalBounds.y + state.currentOffset.y,
+      width: state.originalBounds.width,
+      height: state.originalBounds.height,
+    };
+    const indexRegionPlan = createClipboardIndexPasteRegionPlan({
+      sourceIndexData: state.indexedPaste.remappedIndexData,
+      targetIndexBuffer,
+      targetWidth: layer.canvas.width,
+      destinationBounds,
+      shape: state.shape,
+      mask: state.mask,
+    });
+
+    context.history.execute(
+      new CommitIndexedFloatCommand(
+        layer.canvas,
+        state.imageData,
+        state.originalBounds,
+        state.currentOffset,
+        state.shape,
+        {
+          layerId: layer.id,
+          frameId,
+          canvasWidth: layer.canvas.width,
+          indexRegionPlan,
+          paletteBeforeCommit: state.indexedPaste.paletteBeforeCommit,
+          mask: state.mask,
+          indexedPaste: state.indexedPaste,
+        },
+        context
+      )
+    );
+    return;
+  }
+
   context.history.execute(
     new CommitFloatCommand(
       layer.canvas,
@@ -201,9 +248,10 @@ function toggleFillOrFillSelection() {
 }
 
 function commitSelectionShortcut() {
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
   if (state.type === 'floating') {
-    commitFloatingSelection(state);
+    commitFloatingSelectionInContext(context, state);
   }
 }
 
@@ -354,12 +402,22 @@ function canUseOriginalClipboardImageData(data: ClipboardData, context: ProjectC
   );
 }
 
-function createPasteImageData(data: ClipboardData, context: ProjectContext): ImageData {
+function getFloatingIndexedPaletteState(
+  context: ProjectContext
+): FloatingIndexedPaste['paletteBeforeCommit'] {
+  return {
+    colors: [...context.palette.mainColors.value],
+    newColorFlags: new Set(context.palette.newColorFlags.value),
+  };
+}
+
+function createPasteSelectionData(data: ClipboardData, context: ProjectContext): PasteSelectionData {
   const indexed = data.indexedSelection;
   if (!indexed || canUseOriginalClipboardImageData(data, context)) {
-    return data.imageData;
+    return { imageData: data.imageData };
   }
 
+  const paletteBeforeCommit = getFloatingIndexedPaletteState(context);
   const remapPlan = remapClipboardPaletteIndices({
     indexData: indexed.indexData,
     sourceColors: indexed.sourceColors,
@@ -367,13 +425,19 @@ function createPasteImageData(data: ClipboardData, context: ProjectContext): Ima
   });
   const appendResult = applyClipboardPaletteAppendPlan(context.palette, remapPlan.colorsToAppend);
 
-  return createClipboardImageDataFromIndices({
-    indexData: remapPlan.remappedIndexData,
-    targetColors: appendResult.targetColors,
-    width: indexed.width,
-    height: indexed.height,
-    mask: indexed.mask,
-  });
+  return {
+    imageData: createClipboardImageDataFromIndices({
+      indexData: remapPlan.remappedIndexData,
+      targetColors: appendResult.targetColors,
+      width: indexed.width,
+      height: indexed.height,
+      mask: indexed.mask,
+    }),
+    indexedPaste: {
+      remappedIndexData: new Uint8Array(remapPlan.remappedIndexData),
+      paletteBeforeCommit,
+    },
+  };
 }
 
 function pasteSelection() {
@@ -389,17 +453,18 @@ function pasteSelection() {
     commitFloatingSelectionInContext(context, currentState);
   }
 
-  const imageData = createPasteImageData(data, context);
+  const pasteData = createPasteSelectionData(data, context);
   const pasteX = Math.floor((context.project.width.value - data.width) / 2);
   const pasteY = Math.floor((context.project.height.value - data.height) / 2);
 
   context.selection.state.value = {
     type: 'floating',
     shape: data.shape,
-    imageData,
+    imageData: pasteData.imageData,
     originalBounds: { x: pasteX, y: pasteY, width: data.width, height: data.height },
     currentOffset: { x: 0, y: 0 },
     mask: data.mask,
+    indexedPaste: pasteData.indexedPaste,
   };
 }
 
