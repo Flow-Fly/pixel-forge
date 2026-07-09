@@ -1,7 +1,5 @@
 import type { Point, ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
-import { selectionStore } from '../../stores/selection';
-import { projectStore } from '../../stores/project';
 import { polygonToMask, simplifyPath } from '../../utils/mask-utils';
 
 /**
@@ -24,7 +22,7 @@ export class LassoTool extends BaseSelectionTool {
 
     // Start selecting state for visual feedback
     const startPoint = this.points[0];
-    selectionStore.state.value = {
+    this.projectContext.selection.state.value = {
       type: 'selecting',
       shape: 'freeform',
       startPoint,
@@ -34,6 +32,7 @@ export class LassoTool extends BaseSelectionTool {
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
+    const selection = this.projectContext.selection;
     const canvasX = Math.floor(x);
     const canvasY = Math.floor(y);
 
@@ -53,11 +52,11 @@ export class LassoTool extends BaseSelectionTool {
     } else if (this.mode === 'dragging') {
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      const state = selectionStore.state.value;
+      const state = selection.state.value;
       if (state.type === 'transforming') {
-        selectionStore.moveTransform(dx, dy);
+        selection.moveTransform(dx, dy);
       } else {
-        selectionStore.moveFloat(dx, dy);
+        selection.moveFloat(dx, dy);
       }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
@@ -76,11 +75,12 @@ export class LassoTool extends BaseSelectionTool {
   }
 
   private finalizeSelection(shrinkToContent: boolean = false) {
+    const selection = this.projectContext.selection;
     // Need at least 3 points for a polygon
     if (this.points.length < 3) {
-      selectionStore.clear();
-      selectionStore.resetMode();
-      selectionStore.previousSelectionForVisual.value = null;
+      selection.clear();
+      selection.resetMode();
+      selection.previousSelectionForVisual.value = null;
       this.previousSelection = null;
       return;
     }
@@ -89,24 +89,24 @@ export class LassoTool extends BaseSelectionTool {
     const simplified = simplifyPath(this.points, 0.5);
 
     if (simplified.length < 3) {
-      selectionStore.clear();
-      selectionStore.resetMode();
-      selectionStore.previousSelectionForVisual.value = null;
+      selection.clear();
+      selection.resetMode();
+      selection.previousSelectionForVisual.value = null;
       this.previousSelection = null;
       return;
     }
 
     // Get canvas dimensions
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
+    const canvasWidth = this.projectContext.project.width.value;
+    const canvasHeight = this.projectContext.project.height.value;
 
     // Convert polygon to mask
     const result = polygonToMask(simplified, canvasWidth, canvasHeight);
 
     if (!result) {
-      selectionStore.clear();
-      selectionStore.resetMode();
-      selectionStore.previousSelectionForVisual.value = null;
+      selection.clear();
+      selection.resetMode();
+      selection.previousSelectionForVisual.value = null;
       this.previousSelection = null;
       return;
     }
@@ -134,7 +134,7 @@ export class LassoTool extends BaseSelectionTool {
     const maxX = Math.max(...xs);
     const maxY = Math.max(...ys);
 
-    selectionStore.state.value = {
+    this.projectContext.selection.state.value = {
       type: 'selecting',
       shape: 'freeform',
       startPoint: this.points[0],
