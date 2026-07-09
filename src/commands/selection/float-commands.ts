@@ -1,7 +1,9 @@
 import { type Command } from '../../stores/history';
 import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
+import type { ClipboardIndexPasteRegionPlan } from '../../services/clipboard-index-paste-region';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
+import { writeIndexRegion } from '../../utils/buffer-region';
 import { trimTransparentPixels } from './image-data';
 import {
   clearCanvasSelection,
@@ -10,6 +12,85 @@ import {
 } from './pixels';
 
 type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
+type IndexedSelectionCommandContext = Pick<ProjectContext, 'animation' | 'palette' | 'selection'>;
+
+export interface IndexedFloatPaletteState {
+  colors: string[];
+  newColorFlags: Set<string>;
+}
+
+export interface CommitIndexedFloatCommandOptions {
+  layerId: string;
+  frameId: string;
+  canvasWidth: number;
+  indexRegionPlan: ClipboardIndexPasteRegionPlan;
+  paletteBeforeCommit: IndexedFloatPaletteState;
+  mask?: Uint8Array;
+}
+
+function clonePaletteState(state: IndexedFloatPaletteState): IndexedFloatPaletteState {
+  return {
+    colors: [...state.colors],
+    newColorFlags: new Set(state.newColorFlags),
+  };
+}
+
+function currentPaletteState(context: IndexedSelectionCommandContext): IndexedFloatPaletteState {
+  return {
+    colors: [...context.palette.mainColors.value],
+    newColorFlags: new Set(context.palette.newColorFlags.value),
+  };
+}
+
+function getDestinationBounds(
+  originalBounds: Rect,
+  offset: { x: number; y: number }
+): Rect {
+  return {
+    x: originalBounds.x + offset.x,
+    y: originalBounds.y + offset.y,
+    width: originalBounds.width,
+    height: originalBounds.height,
+  };
+}
+
+function getPasteShape(shape: SelectionShape): SelectionShape {
+  return shape === 'ellipse' ? 'ellipse' : 'rectangle';
+}
+
+function restoreFloatingSelection(
+  context: SelectionCommandContext,
+  imageData: ImageData,
+  bounds: Rect,
+  shape: SelectionShape,
+  mask?: Uint8Array
+): void {
+  context.selection.setFloating(
+    imageData,
+    {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+    },
+    shape,
+    mask
+  );
+}
+
+function restoreCommittedFloat(
+  canvas: HTMLCanvasElement,
+  overwrittenImageData: ImageData,
+  context: SelectionCommandContext,
+  floatingImageData: ImageData,
+  destinationBounds: Rect,
+  shape: SelectionShape,
+  mask?: Uint8Array
+): void {
+  const ctx = canvas.getContext('2d')!;
+  ctx.putImageData(overwrittenImageData, destinationBounds.x, destinationBounds.y);
+  restoreFloatingSelection(context, floatingImageData, destinationBounds, shape, mask);
+}
 
 /**
  * Command for cutting selected pixels into a floating selection.
@@ -146,13 +227,7 @@ export class CommitFloatCommand implements Command {
     this.shape = shape;
     this.mask = mask;
 
-    // Calculate destination bounds
-    this.destinationBounds = {
-      x: originalBounds.x + offset.x,
-      y: originalBounds.y + offset.y,
-      width: originalBounds.width,
-      height: originalBounds.height,
-    };
+    this.destinationBounds = getDestinationBounds(originalBounds, offset);
 
     // Capture what's currently at the destination (for undo)
     const ctx = canvas.getContext('2d')!;
@@ -166,7 +241,7 @@ export class CommitFloatCommand implements Command {
 
   execute() {
     const ctx = this.canvas.getContext('2d')!;
-    const pasteShape = this.shape === 'ellipse' ? 'ellipse' : 'rectangle';
+    const pasteShape = getPasteShape(this.shape);
 
     pasteImageDataWithAlpha(
       ctx,
@@ -181,23 +256,129 @@ export class CommitFloatCommand implements Command {
   }
 
   undo() {
-    const ctx = this.canvas.getContext('2d')!;
-
-    // Restore what was overwritten at destination
-    ctx.putImageData(this.overwrittenImageData, this.destinationBounds.x, this.destinationBounds.y);
-
-    // Restore floating state at the destination position
-    this.context.selection.setFloating(
+    restoreCommittedFloat(
+      this.canvas,
+      this.overwrittenImageData,
+      this.context,
       this.floatingImageData,
-      {
-        x: this.destinationBounds.x,
-        y: this.destinationBounds.y,
-        width: this.destinationBounds.width,
-        height: this.destinationBounds.height,
-      },
+      this.destinationBounds,
       this.shape,
       this.mask
     );
     // Reset offset to 0 since we're now at destination
+  }
+}
+
+/**
+ * Command for committing an indexed floating selection to the canvas.
+ * Execute/redo restores the target palette after remap append, writes the
+ * pasted index-buffer region, pastes pixels, and clears the floating selection.
+ * Undo restores the previous palette, index-buffer region, pixels, and float.
+ */
+export class CommitIndexedFloatCommand implements Command {
+  id: string;
+  name = 'Commit Selection';
+  timestamp: number;
+  memorySize: number;
+
+  private canvas: HTMLCanvasElement;
+  private floatingImageData: ImageData;
+  private destinationBounds: Rect;
+  private overwrittenImageData: ImageData;
+  private shape: SelectionShape;
+  private layerId: string;
+  private frameId: string;
+  private canvasWidth: number;
+  private indexRegionPlan: ClipboardIndexPasteRegionPlan;
+  private paletteBeforeCommit: IndexedFloatPaletteState;
+  private paletteAfterCommit: IndexedFloatPaletteState;
+  private mask?: Uint8Array;
+  private readonly context: IndexedSelectionCommandContext;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    floatingImageData: ImageData,
+    originalBounds: Rect,
+    offset: { x: number; y: number },
+    shape: SelectionShape,
+    options: CommitIndexedFloatCommandOptions,
+    context: IndexedSelectionCommandContext = getActiveProjectContext()
+  ) {
+    this.id = crypto.randomUUID();
+    this.timestamp = Date.now();
+    this.canvas = canvas;
+    this.context = context;
+    this.floatingImageData = floatingImageData;
+    this.destinationBounds = getDestinationBounds(originalBounds, offset);
+    this.shape = shape;
+    this.layerId = options.layerId;
+    this.frameId = options.frameId;
+    this.canvasWidth = options.canvasWidth;
+    this.indexRegionPlan = {
+      previousIndexData: new Uint8Array(options.indexRegionPlan.previousIndexData),
+      nextIndexData: new Uint8Array(options.indexRegionPlan.nextIndexData),
+    };
+    this.paletteBeforeCommit = clonePaletteState(options.paletteBeforeCommit);
+    this.paletteAfterCommit = currentPaletteState(context);
+    this.mask = options.mask;
+
+    const ctx = canvas.getContext('2d')!;
+    this.overwrittenImageData = ctx.getImageData(
+      this.destinationBounds.x,
+      this.destinationBounds.y,
+      this.destinationBounds.width,
+      this.destinationBounds.height
+    );
+
+    this.memorySize =
+      this.floatingImageData.data.byteLength +
+      this.overwrittenImageData.data.byteLength +
+      this.indexRegionPlan.previousIndexData.byteLength +
+      this.indexRegionPlan.nextIndexData.byteLength +
+      200;
+  }
+
+  execute(): void {
+    this.applyPaletteState(this.paletteAfterCommit);
+    this.writeIndexRegion(this.indexRegionPlan.nextIndexData);
+    this.context.animation.rebuildAllCelCanvases();
+
+    const ctx = this.canvas.getContext('2d')!;
+    pasteImageDataWithAlpha(
+      ctx,
+      this.floatingImageData,
+      this.destinationBounds.x,
+      this.destinationBounds.y,
+      getPasteShape(this.shape)
+    );
+
+    this.context.selection.clearAfterCommit();
+  }
+
+  undo(): void {
+    this.applyPaletteState(this.paletteBeforeCommit);
+    this.writeIndexRegion(this.indexRegionPlan.previousIndexData);
+    this.context.animation.rebuildAllCelCanvases();
+
+    restoreCommittedFloat(
+      this.canvas,
+      this.overwrittenImageData,
+      this.context,
+      this.floatingImageData,
+      this.destinationBounds,
+      this.shape,
+      this.mask
+    );
+  }
+
+  private applyPaletteState(state: IndexedFloatPaletteState): void {
+    this.context.palette.setColorsDirect(state.colors, state.newColorFlags);
+  }
+
+  private writeIndexRegion(data: Uint8Array): void {
+    const indexBuffer = this.context.animation.getCelIndexBuffer(this.layerId, this.frameId);
+    if (!indexBuffer) return;
+
+    writeIndexRegion(indexBuffer, this.canvasWidth, this.destinationBounds, data);
   }
 }
