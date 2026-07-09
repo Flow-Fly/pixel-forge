@@ -12,13 +12,13 @@ import {
   FillSelectionCommand,
 } from '../../commands/selection-commands';
 import { colorStore } from '../../stores/colors';
-import { paletteStore } from '../../stores/palette';
 import { animationStore } from '../../stores/animation';
 import { viewportStore } from '../../stores/viewport';
 import { panelStore } from '../../stores/panels';
 import { shapeSettings } from '../../stores/tool-settings';
 import { guidesStore } from '../../stores/guides';
 import { workspaceStore } from '../../stores/workspace';
+import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import { AddFrameCommand } from '../../commands/animation-commands';
 import { GroupLayersCommand, UngroupLayersCommand } from '../../commands/layer-commands';
 import { toolRegistry } from '../../tools/tool-registry';
@@ -83,6 +83,16 @@ function activeLayer(): Layer | undefined {
 
 function activeLayerWithCanvas(): Layer | undefined {
   const layer = activeLayer();
+  return layer?.canvas ? layer : undefined;
+}
+
+function activeLayerInContext(context: ProjectContext): Layer | undefined {
+  const activeLayerId = context.layers.activeLayerId.value;
+  return context.layers.layers.value.find((layer) => layer.id === activeLayerId);
+}
+
+function activeLayerWithCanvasInContext(context: ProjectContext): Layer | undefined {
+  const layer = activeLayerInContext(context);
   return layer?.canvas ? layer : undefined;
 }
 
@@ -251,10 +261,11 @@ function selectCelBounds() {
 }
 
 function copySelection() {
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
   if (state.type !== 'selected') return;
 
-  const layer = activeLayerWithCanvas();
+  const layer = activeLayerWithCanvasInContext(context);
   if (!layer?.canvas) return;
 
   const ctx = layer.canvas.getContext('2d');
@@ -273,9 +284,9 @@ function copySelection() {
     }
   }
 
-  const indexBuffer = animationStore.getCelIndexBuffer(
+  const indexBuffer = context.animation.getCelIndexBuffer(
     layer.id,
-    animationStore.currentFrameId.value
+    context.animation.currentFrameId.value
   );
   const indexedSelection = createClipboardIndexedSelection({
     bounds,
@@ -283,7 +294,7 @@ function copySelection() {
     mask,
     indexBuffer,
     canvasWidth: layer.canvas.width,
-    sourceColors: paletteStore.mainColors.value,
+    sourceColors: context.palette.mainColors.value,
   });
 
   clipboardStore.setData({
