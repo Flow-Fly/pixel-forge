@@ -1,5 +1,4 @@
 import { BaseTool, type ModifierKeys } from './base-tool';
-import { viewportStore } from '../stores/viewport';
 
 /**
  * Zoom tool for zooming the viewport.
@@ -11,15 +10,16 @@ export class ZoomTool extends BaseTool {
   cursor = 'zoom-in';
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
+    const viewport = this.projectContext.viewport;
     // Calculate screen position for zoom-at-point
-    const screenX = x * viewportStore.zoom.value + viewportStore.panX.value;
-    const screenY = y * viewportStore.zoom.value + viewportStore.panY.value;
+    const screenX = x * viewport.zoom.value + viewport.panX.value;
+    const screenY = y * viewport.zoom.value + viewport.panY.value;
 
     // Alt+click = zoom out
     if (modifiers?.alt) {
-      viewportStore.zoomOutAt(screenX, screenY);
+      viewport.zoomOutAt(screenX, screenY);
     } else {
-      viewportStore.zoomInAt(screenX, screenY);
+      viewport.zoomInAt(screenX, screenY);
     }
   }
 
