@@ -1,5 +1,4 @@
 import { BaseTool, type ModifierKeys } from './base-tool';
-import { viewportStore } from '../stores/viewport';
 
 /**
  * Hand tool for panning the viewport.
@@ -15,11 +14,12 @@ export class HandTool extends BaseTool {
 
   onDown(x: number, y: number, _modifiers?: ModifierKeys) {
     this.isPanning = true;
+    const viewport = this.projectContext.viewport;
 
     // Convert canvas coordinates to screen coordinates for delta calculation
     // Note: x, y are canvas coords, but we need screen coords for panning
-    this.lastScreenX = x * viewportStore.zoom.value + viewportStore.panX.value;
-    this.lastScreenY = y * viewportStore.zoom.value + viewportStore.panY.value;
+    this.lastScreenX = x * viewport.zoom.value + viewport.panX.value;
+    this.lastScreenY = y * viewport.zoom.value + viewport.panY.value;
 
     // Change cursor while dragging
     if (this.ctx) {
@@ -29,17 +29,18 @@ export class HandTool extends BaseTool {
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
     if (!this.isPanning) return;
+    const viewport = this.projectContext.viewport;
 
     // Convert current canvas position to screen coordinates
-    const screenX = x * viewportStore.zoom.value + viewportStore.panX.value;
-    const screenY = y * viewportStore.zoom.value + viewportStore.panY.value;
+    const screenX = x * viewport.zoom.value + viewport.panX.value;
+    const screenY = y * viewport.zoom.value + viewport.panY.value;
 
     // Calculate delta in screen space
     const deltaX = screenX - this.lastScreenX;
     const deltaY = screenY - this.lastScreenY;
 
     // Pan the viewport
-    viewportStore.panBy(deltaX, deltaY);
+    viewport.panBy(deltaX, deltaY);
 
     // Update last position
     this.lastScreenX = screenX;
