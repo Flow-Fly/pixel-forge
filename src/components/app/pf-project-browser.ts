@@ -4,7 +4,8 @@ import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
 import { projectLibrary } from '../../services/project-library';
 import type { ProjectMeta } from '../../services/persistence/project-repository';
-import { projectStore } from '../../stores/project';
+import { getActiveProjectContext } from '../../stores/project-context';
+import { workspaceStore } from '../../stores/workspace';
 
 @customElement('pf-project-browser')
 export class PFProjectBrowser extends BaseComponent {
@@ -524,7 +525,13 @@ export class PFProjectBrowser extends BaseComponent {
     this.errorMessage = '';
 
     try {
-      await projectLibrary.openProject(id);
+      const result = await workspaceStore.openProject(id, {
+        saveActiveContext: this.canClose,
+      });
+      if (!result.ok) {
+        this.errorMessage = result.message;
+        return;
+      }
       this.dispatchEvent(new CustomEvent('project-opened', { bubbles: true, composed: true }));
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Failed to open project.');
@@ -547,9 +554,10 @@ export class PFProjectBrowser extends BaseComponent {
 
     this.errorMessage = '';
     try {
-      if (project.id === projectStore.id.value) {
-        projectStore.name.value = name;
-        await autoSaveService.saveNow();
+      const activeContext = getActiveProjectContext();
+      if (project.id === activeContext.project.id.value) {
+        activeContext.project.name.value = name;
+        await autoSaveService.saveNow(activeContext);
       } else {
         await projectLibrary.renameProject(project.id, name);
       }
@@ -569,8 +577,9 @@ export class PFProjectBrowser extends BaseComponent {
     this.errorMessage = '';
 
     try {
-      if (id === projectStore.id.value) {
-        await autoSaveService.saveNow();
+      const activeContext = getActiveProjectContext();
+      if (id === activeContext.project.id.value) {
+        await autoSaveService.saveNow(activeContext);
       }
       await projectLibrary.duplicateProject(id);
       await this.loadProjects();
@@ -587,8 +596,9 @@ export class PFProjectBrowser extends BaseComponent {
     this.deleteTarget = null;
 
     try {
-      const deletedOpenProject = project.id === projectStore.id.value;
-      await projectLibrary.deleteProject(project.id);
+      const activeContext = getActiveProjectContext();
+      const deletedOpenProject = project.id === activeContext.project.id.value;
+      await projectLibrary.deleteProject(project.id, { context: activeContext });
       await this.loadProjects();
 
       if (deletedOpenProject) {
