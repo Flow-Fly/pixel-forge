@@ -2,10 +2,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { MOD_PRIMARY } from '../../../src/utils/platform';
 import { toolRegistry } from '../../../src/tools/tool-registry';
-import { animationStore } from '../../../src/stores/animation';
 import { clipboardStore } from '../../../src/stores/clipboard';
-import { layerStore } from '../../../src/stores/layers';
-import { paletteStore } from '../../../src/stores/palette';
+import {
+  createProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+} from '../../../src/stores/project-context';
 import { selectionStore } from '../../../src/stores/selection';
 
 const keyboardServiceMock = vi.hoisted(() => ({
@@ -141,19 +143,16 @@ describe('registerShortcuts', () => {
     expect(workspaceStoreMock.activatePrevious).toHaveBeenCalledTimes(1);
   });
 
-  it('copies indexed selection metadata with the existing image data payload', () => {
-    const previousLayers = layerStore.layers.value;
-    const previousActiveLayerId = layerStore.activeLayerId.value;
-    const previousCels = animationStore.cels.value;
-    const previousFrameId = animationStore.currentFrameId.value;
-    const previousPalette = [...paletteStore.mainColors.value];
+  it('copies indexed selection metadata from the active project context', () => {
+    const context = createProjectContext();
+    setActiveProjectContext(context);
 
     try {
       const layerId = 'copy-layer';
       const frameId = 'copy-frame';
       const canvas = makeReadableCanvas(2, 2);
 
-      layerStore.layers.value = [{
+      context.layers.layers.value = [{
         id: layerId,
         name: 'Copy Layer',
         type: 'image',
@@ -164,11 +163,11 @@ describe('registerShortcuts', () => {
         parentId: null,
         canvas,
       }];
-      layerStore.activeLayerId.value = layerId;
-      animationStore.currentFrameId.value = frameId;
-      animationStore.cels.value = new Map([
+      context.layers.activeLayerId.value = layerId;
+      context.animation.currentFrameId.value = frameId;
+      context.animation.cels.value = new Map([
         [
-          animationStore.getCelKey(layerId, frameId),
+          context.animation.getCelKey(layerId, frameId),
           {
             id: 'copy-cel',
             layerId,
@@ -178,8 +177,8 @@ describe('registerShortcuts', () => {
           },
         ],
       ]);
-      paletteStore.mainColors.value = ['#111111', '#222222', '#333333'];
-      selectionStore.state.value = {
+      context.palette.mainColors.value = ['#111111', '#222222', '#333333'];
+      context.selection.state.value = {
         type: 'selected',
         shape: 'freeform',
         bounds: { x: 0, y: 0, width: 2, height: 2 },
@@ -204,11 +203,8 @@ describe('registerShortcuts', () => {
       ]);
       expect(clipboardData!.indexedSelection!.usedIndices).toEqual([2]);
     } finally {
-      layerStore.layers.value = previousLayers;
-      layerStore.activeLayerId.value = previousActiveLayerId;
-      animationStore.cels.value = previousCels;
-      animationStore.currentFrameId.value = previousFrameId;
-      paletteStore.mainColors.value = previousPalette;
+      restoreDefaultProjectContext();
+      context.dispose();
       clipboardStore.clear();
       selectionStore.clear();
     }
