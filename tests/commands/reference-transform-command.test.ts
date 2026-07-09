@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  TransformReferenceLayerCommand,
-  type ReferenceLayerTransform,
-} from '../../src/commands/layer-commands';
+import { TransformReferenceLayerCommand } from '../../src/commands/layer-commands';
+import type { ReferenceLayerTransform } from '../../src/services/reference-transform-geometry';
 import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
 import type { ReferenceLayerData } from '../../src/types/reference';
 

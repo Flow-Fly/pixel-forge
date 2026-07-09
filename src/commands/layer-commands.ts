@@ -2,11 +2,10 @@ import { type Command } from './index';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
 import { type Layer } from '../types/layer';
 import { type Cel } from '../types/animation';
-import type { ReferenceLayerData } from '../types/reference';
+import type { ReferenceLayerTransform } from '../services/reference-transform-geometry';
 
 type LayerCommandContext = Pick<ProjectContext, 'animation' | 'layers' | 'project'>;
 type ReferenceTransformCommandContext = Pick<ProjectContext, 'dirtyRect' | 'layers'>;
-export type ReferenceLayerTransform = Pick<ReferenceLayerData, 'x' | 'y' | 'scale'>;
 
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();

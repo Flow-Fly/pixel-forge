@@ -58,6 +58,24 @@ function visibleHandles(element: PFReferenceTransformHandles) {
   return [...(element.shadowRoot?.querySelectorAll<HTMLElement>('.reference-handle') ?? [])];
 }
 
+function referenceTransform(context: ProjectContext, layerId: string) {
+  const data = context.layers.layers.value.find((layer) => layer.id === layerId)?.referenceData;
+  return data ? { x: data.x, y: data.y, scale: data.scale } : null;
+}
+
+function dispatchDocumentMouseMove(clientX: number, clientY: number) {
+  document.dispatchEvent(new MouseEvent('mousemove', { clientX, clientY }));
+}
+
+function dispatchDocumentMouseUp() {
+  document.dispatchEvent(new MouseEvent('mouseup'));
+}
+
+async function flushHistoryCommand() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe('pf-reference-transform-handles', () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -139,5 +157,70 @@ describe('pf-reference-transform-handles', () => {
     expect(visibleBox(element)).toBeNull();
     expect(visibleHandles(element)).toHaveLength(0);
     expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
+  it('moves the active reference layer and commits one undoable command on mouseup', async () => {
+    const context = createContext();
+    context.viewport.zoom.value = 2;
+    const layer = context.layers.addReferenceLayer(referenceData(), 'Guide');
+    context.dirtyRect.consumeFullRedraw();
+    setActiveProjectContext(context);
+
+    const element = await createReferenceTransformHandles();
+    await waitForBitmapRender(element);
+
+    visibleBox(element)?.dispatchEvent(
+      new MouseEvent('mousedown', {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        bubbles: true,
+      })
+    );
+    dispatchDocumentMouseMove(18, 4);
+    await waitForContextRender(element);
+
+    expect(referenceTransform(context, layer.id)).toEqual({ x: 8, y: 5, scale: 2 });
+    expect(context.dirtyRect.consumeFullRedraw()).toBe(true);
+    expect(context.history.undoStack.value).toHaveLength(0);
+
+    dispatchDocumentMouseUp();
+    await flushHistoryCommand();
+
+    expect(context.history.undoStack.value).toHaveLength(1);
+
+    await context.history.undo();
+    expect(referenceTransform(context, layer.id)).toEqual({ x: 4, y: 8, scale: 2 });
+
+    await context.history.redo();
+    expect(referenceTransform(context, layer.id)).toEqual({ x: 8, y: 5, scale: 2 });
+  });
+
+  it('cancels movement if the reference layer is no longer active while dragging', async () => {
+    const context = createContext();
+    context.viewport.zoom.value = 2;
+    const reference = context.layers.addReferenceLayer(referenceData(), 'Guide');
+    const paintLayer = context.layers.addLayer('Paint');
+    context.layers.setActiveLayer(reference.id);
+    setActiveProjectContext(context);
+
+    const element = await createReferenceTransformHandles();
+    await waitForBitmapRender(element);
+
+    visibleBox(element)?.dispatchEvent(
+      new MouseEvent('mousedown', {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        bubbles: true,
+      })
+    );
+    context.layers.setActiveLayer(paintLayer.id);
+    dispatchDocumentMouseMove(18, 4);
+    dispatchDocumentMouseUp();
+    await flushHistoryCommand();
+
+    expect(referenceTransform(context, reference.id)).toEqual({ x: 4, y: 8, scale: 2 });
+    expect(context.history.undoStack.value).toHaveLength(0);
   });
 });
