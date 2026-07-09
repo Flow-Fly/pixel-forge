@@ -1,10 +1,9 @@
 import { BaseTool, type ModifierKeys } from "./base-tool";
-import { layerStore } from "../stores/layers";
-import { animationStore } from "../stores/animation";
-import { historyStore } from "../stores/history";
 import { textSettings } from "../stores/tool-settings";
-import { colorStore } from "../stores/colors";
-import { projectStore } from "../stores/project";
+import {
+  getActiveProjectContext,
+  type ProjectContext,
+} from "../stores/project-context";
 import { signal } from "../core/signal";
 import type { TextEditingState } from "../types/text";
 import {
@@ -35,6 +34,7 @@ export class TextTool extends BaseTool {
   private dragLayerId: string | null = null;
   private dragStartPos = { x: 0, y: 0 };
   private originalTextPos = { x: 0, y: 0 };
+  private editingProjectContext: ProjectContext | null = null;
 
   // Double-click detection
   private lastClickTime = 0;
@@ -100,12 +100,13 @@ export class TextTool extends BaseTool {
   onDrag(x: number, y: number, _modifiers?: ModifierKeys): void {
     if (!this.isDragging || !this.dragLayerId) return;
 
-    const currentFrameId = animationStore.currentFrameId.value;
+    const animation = this.projectContext.animation;
+    const currentFrameId = animation.currentFrameId.value;
     const dx = x - this.dragStartPos.x;
     const dy = y - this.dragStartPos.y;
 
     // Update text position in real-time for visual feedback
-    animationStore.updateTextCelData(this.dragLayerId, currentFrameId, {
+    animation.updateTextCelData(this.dragLayerId, currentFrameId, {
       x: Math.floor(this.originalTextPos.x + dx),
       y: Math.floor(this.originalTextPos.y + dy),
     });
@@ -114,7 +115,8 @@ export class TextTool extends BaseTool {
   onUp(x: number, y: number, _modifiers?: ModifierKeys): void {
     if (!this.isDragging || !this.dragLayerId) return;
 
-    const currentFrameId = animationStore.currentFrameId.value;
+    const { animation, history } = this.projectContext;
+    const currentFrameId = animation.currentFrameId.value;
     const dx = x - this.dragStartPos.x;
     const dy = y - this.dragStartPos.y;
 
@@ -129,18 +131,19 @@ export class TextTool extends BaseTool {
       newPos.y !== this.originalTextPos.y
     ) {
       // First, revert to original position (command will re-apply)
-      animationStore.updateTextCelData(this.dragLayerId, currentFrameId, {
+      animation.updateTextCelData(this.dragLayerId, currentFrameId, {
         x: this.originalTextPos.x,
         y: this.originalTextPos.y,
       });
 
       // Execute move command for undo/redo support
-      historyStore.execute(
+      history.execute(
         new MoveTextCommand(
           this.dragLayerId,
           currentFrameId,
           this.originalTextPos,
-          newPos
+          newPos,
+          this.projectContext
         )
       );
     }
@@ -154,8 +157,9 @@ export class TextTool extends BaseTool {
    * Start dragging a text layer.
    */
   private startDragging(layerId: string, x: number, y: number): void {
-    const currentFrameId = animationStore.currentFrameId.value;
-    const textCelData = animationStore.getTextCelData(layerId, currentFrameId);
+    const { animation, layers } = this.projectContext;
+    const currentFrameId = animation.currentFrameId.value;
+    const textCelData = animation.getTextCelData(layerId, currentFrameId);
 
     if (!textCelData) return;
 
@@ -165,7 +169,7 @@ export class TextTool extends BaseTool {
     this.originalTextPos = { x: textCelData.x, y: textCelData.y };
 
     // Set active layer
-    layerStore.setActiveLayer(layerId);
+    layers.setActiveLayer(layerId);
   }
 
   onKeyDown(e: KeyboardEvent): void {
@@ -184,20 +188,21 @@ export class TextTool extends BaseTool {
    * Create a new text layer at the specified position.
    */
   private createTextLayer(x: number, y: number): void {
-    const currentFrameId = animationStore.currentFrameId.value;
+    const { animation, colors, layers, project } = this.projectContext;
+    const currentFrameId = animation.currentFrameId.value;
     const font = textSettings.font.value || defaultFontId;
-    const color = colorStore.primaryColor.value;
+    const color = colors.primaryColor.value;
 
     // Create the text layer with style data
-    const layer = layerStore.addTextLayer(
+    const layer = layers.addTextLayer(
       { font, color },
       undefined, // auto-generate name
-      projectStore.width.value,
-      projectStore.height.value
+      project.width.value,
+      project.height.value
     );
 
     // Set initial text cel data (empty content at click position)
-    animationStore.setTextCelData(layer.id, currentFrameId, {
+    animation.setTextCelData(layer.id, currentFrameId, {
       content: "",
       x: Math.floor(x),
       y: Math.floor(y),
@@ -211,12 +216,14 @@ export class TextTool extends BaseTool {
    * Start editing a text layer.
    */
   private startEditing(layerId: string, _x: number, _y: number): void {
-    const currentFrameId = animationStore.currentFrameId.value;
-    const celKey = animationStore.getCelKey(layerId, currentFrameId);
-    const textCelData = animationStore.getTextCelData(layerId, currentFrameId);
+    const { animation, layers } = this.projectContext;
+    const currentFrameId = animation.currentFrameId.value;
+    const celKey = animation.getCelKey(layerId, currentFrameId);
+    const textCelData = animation.getTextCelData(layerId, currentFrameId);
 
     // Set active layer
-    layerStore.setActiveLayer(layerId);
+    layers.setActiveLayer(layerId);
+    this.editingProjectContext = this.projectContext;
 
     // Update editing state
     TextTool.editingState.value = {
@@ -232,6 +239,7 @@ export class TextTool extends BaseTool {
       layerId,
       celKey,
       initialContent: textCelData?.content ?? "",
+      projectContext: this.projectContext,
     });
   }
 
@@ -242,17 +250,19 @@ export class TextTool extends BaseTool {
     const state = TextTool.editingState.value;
 
     if (!state.isEditing || !state.layerId) return;
+    const projectContext = this.editingProjectContext ?? this.projectContext;
+    const { animation, layers } = projectContext;
 
     // Check if text is empty - if so, delete the layer
-    const currentFrameId = animationStore.currentFrameId.value;
-    const textCelData = animationStore.getTextCelData(
+    const currentFrameId = animation.currentFrameId.value;
+    const textCelData = animation.getTextCelData(
       state.layerId,
       currentFrameId
     );
 
     if (!textCelData?.content || textCelData.content.trim() === "") {
       // Delete empty text layer
-      layerStore.removeLayer(state.layerId);
+      layers.removeLayer(state.layerId);
     }
 
     // Reset editing state
@@ -263,6 +273,7 @@ export class TextTool extends BaseTool {
       cursorPosition: 0,
       cursorVisible: true,
     };
+    this.editingProjectContext = null;
 
     // Emit event for input component to blur
     this.emitEvent("stop-editing");
@@ -271,19 +282,24 @@ export class TextTool extends BaseTool {
   /**
    * Update the text content for the current editing session.
    */
-  static updateTextContent(content: string, cursorPosition: number): void {
+  static updateTextContent(
+    content: string,
+    cursorPosition: number,
+    projectContext: ProjectContext
+  ): void {
     const state = TextTool.editingState.value;
 
     if (!state.isEditing || !state.layerId) return;
 
-    const currentFrameId = animationStore.currentFrameId.value;
-    const existingData = animationStore.getTextCelData(
+    const animation = projectContext.animation;
+    const currentFrameId = animation.currentFrameId.value;
+    const existingData = animation.getTextCelData(
       state.layerId,
       currentFrameId
     );
 
     if (existingData) {
-      animationStore.updateTextCelData(state.layerId, currentFrameId, {
+      animation.updateTextCelData(state.layerId, currentFrameId, {
         content,
       });
     }
@@ -314,15 +330,16 @@ export class TextTool extends BaseTool {
     x: number,
     y: number
   ): { layerId: string } | null {
-    const layers = layerStore.layers.value;
-    const currentFrameId = animationStore.currentFrameId.value;
+    const { animation, layers: layersStore } = this.projectContext;
+    const layers = layersStore.layers.value;
+    const currentFrameId = animation.currentFrameId.value;
 
     // Check text layers from top to bottom (reverse order)
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i];
       if (layer.type !== "text" || !layer.visible || !layer.textData) continue;
 
-      const textCelData = animationStore.getTextCelData(
+      const textCelData = animation.getTextCelData(
         layer.id,
         currentFrameId
       );
@@ -355,14 +372,17 @@ export class TextTool extends BaseTool {
    * Check if a double-click should start editing.
    * Called from the canvas component on dblclick.
    */
-  static handleDoubleClick(layerId: string): boolean {
-    const layer = layerStore.layers.value.find((l) => l.id === layerId);
+  static handleDoubleClick(
+    layerId: string,
+    projectContext: ProjectContext = getActiveProjectContext()
+  ): boolean {
+    const layer = projectContext.layers.layers.value.find((l) => l.id === layerId);
     if (layer?.type !== "text") return false;
 
     // Trigger editing via event
     window.dispatchEvent(
       new CustomEvent("text-tool:edit-layer", {
-        detail: { layerId },
+        detail: { layerId, projectContext },
       })
     );
 
