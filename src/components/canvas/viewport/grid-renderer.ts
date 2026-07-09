@@ -4,9 +4,9 @@
  * Draws pixel and tile grids at screen resolution.
  */
 
-import { gridStore } from '../../../stores/grid';
-import { viewportStore } from '../../../stores/viewport';
-import { projectStore } from '../../../stores/project';
+import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
+
+type GridRenderContext = Pick<ProjectContext, 'grid' | 'project' | 'viewport'>;
 
 /**
  * Initialize the grid canvas context.
@@ -46,7 +46,8 @@ export function drawGrids(
   gridCanvas: HTMLCanvasElement | null,
   gridCtx: CanvasRenderingContext2D | null,
   clientWidth: number,
-  clientHeight: number
+  clientHeight: number,
+  context: GridRenderContext = getActiveProjectContext()
 ): void {
   if (!gridCtx || !gridCanvas) return;
 
@@ -60,43 +61,25 @@ export function drawGrids(
   ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
   ctx.scale(dpr, dpr); // Re-apply DPR scaling
 
-  const zoom = viewportStore.zoom.value;
-  const panX = viewportStore.panX.value;
-  const panY = viewportStore.panY.value;
-  const canvasWidth = projectStore.width.value;
-  const canvasHeight = projectStore.height.value;
+  const { grid, project, viewport } = context;
+  const zoom = viewport.zoom.value;
+  const panX = viewport.panX.value;
+  const panY = viewport.panY.value;
+  const canvasWidth = project.width.value;
+  const canvasHeight = project.height.value;
 
   // Pixel grid: only show at or above threshold
-  if (
-    gridStore.pixelGridEnabled.value &&
-    zoom >= gridStore.autoShowThreshold.value
-  ) {
-    drawPixelGrid(
-      ctx,
-      viewWidth,
-      viewHeight,
-      zoom,
-      panX,
-      panY,
-      canvasWidth,
-      canvasHeight
-    );
+  if (grid.pixelGridEnabled.value && zoom >= grid.autoShowThreshold.value) {
+    drawPixelGrid(ctx, viewWidth, viewHeight, zoom, panX, panY, canvasWidth, canvasHeight, grid);
   }
 
   // Tile grid: always show if enabled
-  if (gridStore.tileGridEnabled.value) {
-    drawTileGrid(
-      ctx,
-      viewWidth,
-      viewHeight,
-      zoom,
-      panX,
-      panY,
-      canvasWidth,
-      canvasHeight
-    );
+  if (grid.tileGridEnabled.value) {
+    drawTileGrid(ctx, viewWidth, viewHeight, zoom, panX, panY, canvasWidth, canvasHeight, grid);
   }
 }
+
+type GridStore = GridRenderContext['grid'];
 
 /**
  * Draw pixel grid (1px spacing between each pixel).
@@ -109,7 +92,8 @@ function drawPixelGrid(
   panX: number,
   panY: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  gridStore: GridStore
 ): void {
   ctx.save();
   ctx.strokeStyle = gridStore.pixelGridColor.value;
@@ -157,7 +141,8 @@ function drawTileGrid(
   panX: number,
   panY: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  gridStore: GridStore
 ): void {
   const tileSize = gridStore.tileGridSize.value;
 

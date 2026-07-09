@@ -4,9 +4,10 @@
  * Handles mouse-based panning, quick eyedropper, and lightness shifting.
  */
 
-import { viewportStore } from "../../../stores/viewport";
-import { colorStore } from "../../../stores/colors";
-import { toolStore } from "../../../stores/tools";
+import { toolStore } from '../../../stores/tools';
+import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
+
+type PanContext = Pick<ProjectContext, 'colors' | 'viewport'>;
 
 export interface PanState {
   isDragging: boolean;
@@ -50,7 +51,8 @@ export function isClickOnUI(e: MouseEvent | WheelEvent): boolean {
 export function handleGlobalMouseDown(
   e: MouseEvent,
   state: PanState,
-  startDragging: (e: MouseEvent) => void
+  startDragging: (e: MouseEvent) => void,
+  context: PanContext = getActiveProjectContext()
 ): void {
   // Skip if already dragging
   if (state.isDragging) return;
@@ -61,7 +63,7 @@ export function handleGlobalMouseDown(
   const currentTool = toolStore.activeTool.value;
 
   // Hand tool: pan from anywhere (like spacebar)
-  if (currentTool === "hand" && e.button === 0) {
+  if (currentTool === 'hand' && e.button === 0) {
     startDragging(e);
     return;
   }
@@ -73,7 +75,7 @@ export function handleGlobalMouseDown(
   }
 
   // Spacebar + left-click pan from anywhere
-  if (viewportStore.isSpacebarDown.value && e.button === 0) {
+  if (context.viewport.isSpacebarDown.value && e.button === 0) {
     startDragging(e);
     return;
   }
@@ -86,28 +88,26 @@ export function handleMouseDown(
   e: MouseEvent,
   _state: PanState,
   callbacks: PanHandlerCallbacks,
-  startDragging: (e: MouseEvent) => void
+  startDragging: (e: MouseEvent) => void,
+  context: PanContext = getActiveProjectContext()
 ): void {
   // Check if current tool is a selection tool (needs Alt for subtract mode, Ctrl for shrink-to-content)
   const currentTool = toolStore.activeTool.value;
-  const isSelectionTool = [
-    "marquee-rect",
-    "lasso",
-    "polygonal-lasso",
-    "magic-wand",
-  ].includes(currentTool);
+  const isSelectionTool = ['marquee-rect', 'lasso', 'polygonal-lasso', 'magic-wand'].includes(
+    currentTool
+  );
 
   // Hand tool: pan on left-click (works at viewport level, doesn't need active layer)
-  if (currentTool === "hand" && e.button === 0) {
+  if (currentTool === 'hand' && e.button === 0) {
     startDragging(e);
     return;
   }
 
   // Zoom tool: zoom in/out on click (works at viewport level)
-  if (currentTool === "zoom" && (e.button === 0 || e.button === 2)) {
+  if (currentTool === 'zoom' && (e.button === 0 || e.button === 2)) {
     e.preventDefault();
     e.stopPropagation();
-    triggerZoom(e, callbacks, e.altKey || e.button === 2);
+    triggerZoom(e, callbacks, e.altKey || e.button === 2, context);
     return;
   }
 
@@ -116,7 +116,7 @@ export function handleMouseDown(
   if ((e.altKey || e.metaKey) && !isSelectionTool) {
     e.preventDefault();
     e.stopPropagation();
-    triggerQuickEyedropper(e, callbacks);
+    triggerQuickEyedropper(e, callbacks, context);
     return;
   }
 
@@ -126,20 +126,20 @@ export function handleMouseDown(
       // Left click: shift darker
       e.preventDefault();
       e.stopPropagation();
-      colorStore.shiftLightnessDarker();
+      context.colors.shiftLightnessDarker();
       return;
     }
     if (e.button === 2) {
       // Right click: shift lighter
       e.preventDefault();
       e.stopPropagation();
-      colorStore.shiftLightnessLighter();
+      context.colors.shiftLightnessLighter();
       return;
     }
   }
 
   // Spacebar pan mode
-  if (viewportStore.isSpacebarDown.value) {
+  if (context.viewport.isSpacebarDown.value) {
     startDragging(e);
     return;
   }
@@ -157,8 +157,10 @@ export function handleMouseDown(
 function triggerZoom(
   e: MouseEvent,
   callbacks: PanHandlerCallbacks,
-  zoomOut: boolean
+  zoomOut: boolean,
+  context: PanContext = getActiveProjectContext()
 ): void {
+  const { viewport } = context;
   let screenX: number;
   let screenY: number;
 
@@ -169,23 +171,23 @@ function triggerZoom(
     screenY = e.clientY - rect.top;
   } else {
     // Fallback: use stored cursor position or center
-    const storedX = viewportStore.cursorScreenX.value;
-    const storedY = viewportStore.cursorScreenY.value;
+    const storedX = viewport.cursorScreenX.value;
+    const storedY = viewport.cursorScreenY.value;
 
     if (storedX !== null && storedY !== null) {
       screenX = storedX;
       screenY = storedY;
     } else {
       // Last fallback: center of container
-      screenX = viewportStore.containerWidth.value / 2;
-      screenY = viewportStore.containerHeight.value / 2;
+      screenX = viewport.containerWidth.value / 2;
+      screenY = viewport.containerHeight.value / 2;
     }
   }
 
   if (zoomOut) {
-    viewportStore.zoomOutAt(screenX, screenY);
+    viewport.zoomOutAt(screenX, screenY);
   } else {
-    viewportStore.zoomInAt(screenX, screenY);
+    viewport.zoomInAt(screenX, screenY);
   }
 
   callbacks.requestUpdate();
@@ -196,9 +198,10 @@ function triggerZoom(
  */
 function triggerQuickEyedropper(
   e: MouseEvent,
-  callbacks: PanHandlerCallbacks
+  callbacks: PanHandlerCallbacks,
+  context: PanContext = getActiveProjectContext()
 ): void {
-  const drawingCanvas = callbacks.querySelector("pf-drawing-canvas") as any;
+  const drawingCanvas = callbacks.querySelector('pf-drawing-canvas') as any;
   if (!drawingCanvas?.canvas) return;
 
   const canvasEl = drawingCanvas.canvas as HTMLCanvasElement;
@@ -212,23 +215,23 @@ function triggerQuickEyedropper(
   // Bounds check
   if (x < 0 || x >= canvasEl.width || y < 0 || y >= canvasEl.height) return;
 
-  const ctx = canvasEl.getContext("2d");
+  const ctx = canvasEl.getContext('2d');
   if (!ctx) return;
 
   const pixel = ctx.getImageData(x, y, 1, 1).data;
   const hex =
-    "#" +
-    pixel[0].toString(16).padStart(2, "0") +
-    pixel[1].toString(16).padStart(2, "0") +
-    pixel[2].toString(16).padStart(2, "0");
+    '#' +
+    pixel[0].toString(16).padStart(2, '0') +
+    pixel[1].toString(16).padStart(2, '0') +
+    pixel[2].toString(16).padStart(2, '0');
 
   if (e.button === 2) {
     // Right click: pick to secondary/background color
-    colorStore.setSecondaryColor(hex);
+    context.colors.setSecondaryColor(hex);
   } else {
     // Left click: pick to primary/foreground color
-    colorStore.setPrimaryColor(hex);
-    colorStore.updateLightnessVariations(hex);
+    context.colors.setPrimaryColor(hex);
+    context.colors.updateLightnessVariations(hex);
   }
 }
 
@@ -239,10 +242,11 @@ export function startDragging(
   e: MouseEvent,
   state: PanState,
   callbacks: PanHandlerCallbacks,
-  addGlobalListeners: () => void
+  addGlobalListeners: () => void,
+  context: PanContext = getActiveProjectContext()
 ): void {
   state.isDragging = true;
-  viewportStore.isPanning.value = true;
+  context.viewport.isPanning.value = true;
   state.lastMouseX = e.clientX;
   state.lastMouseY = e.clientY;
   e.preventDefault();
@@ -259,14 +263,15 @@ export function startDragging(
 export function handleGlobalMouseMove(
   e: MouseEvent,
   state: PanState,
-  callbacks: PanHandlerCallbacks
+  callbacks: PanHandlerCallbacks,
+  context: PanContext = getActiveProjectContext()
 ): void {
   if (!state.isDragging) return;
 
   const dx = e.clientX - state.lastMouseX;
   const dy = e.clientY - state.lastMouseY;
 
-  viewportStore.panBy(dx, dy);
+  context.viewport.panBy(dx, dy);
 
   state.lastMouseX = e.clientX;
   state.lastMouseY = e.clientY;
@@ -279,15 +284,16 @@ export function handleGlobalMouseMove(
 export function handleGlobalMouseUp(
   state: PanState,
   callbacks: PanHandlerCallbacks,
-  removeGlobalListeners: () => void
+  removeGlobalListeners: () => void,
+  context: PanContext = getActiveProjectContext()
 ): void {
   if (!state.isDragging) return;
 
   state.isDragging = false;
-  viewportStore.isPanning.value = false;
+  context.viewport.isPanning.value = false;
 
   // Rubber band: snap back to valid bounds
-  viewportStore.clampPanToBounds();
+  context.viewport.clampPanToBounds();
 
   // Remove global listeners
   removeGlobalListeners();
@@ -301,24 +307,28 @@ export function handleGlobalMouseUp(
 export function handleMouseMove(
   e: MouseEvent,
   state: PanState,
-  getBoundingClientRect: () => DOMRect
+  getBoundingClientRect: () => DOMRect,
+  context: PanContext = getActiveProjectContext()
 ): void {
   // Track cursor position for keyboard zoom (only when not dragging globally)
   if (!state.isDragging) {
     const rect = getBoundingClientRect();
-    viewportStore.cursorScreenX.value = e.clientX - rect.left;
-    viewportStore.cursorScreenY.value = e.clientY - rect.top;
+    context.viewport.cursorScreenX.value = e.clientX - rect.left;
+    context.viewport.cursorScreenY.value = e.clientY - rect.top;
   }
 }
 
 /**
  * Handle mouse leave viewport.
  */
-export function handleMouseLeave(state: PanState): void {
+export function handleMouseLeave(
+  state: PanState,
+  context: PanContext = getActiveProjectContext()
+): void {
   // Clear cursor position when leaving viewport (but not during drag)
   if (!state.isDragging) {
-    viewportStore.cursorScreenX.value = null;
-    viewportStore.cursorScreenY.value = null;
+    context.viewport.cursorScreenX.value = null;
+    context.viewport.cursorScreenY.value = null;
   }
 }
 

@@ -1,14 +1,13 @@
-import { html, css, nothing } from "lit";
-import { customElement } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { viewportStore } from "../../stores/viewport";
-import { guidesStore } from "../../stores/guides";
+import { html, css, nothing } from 'lit';
+import { customElement } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 
 /**
  * Overlay component that renders guide lines.
  * Lines extend across the entire workspace area.
  */
-@customElement("pf-guides-overlay")
+@customElement('pf-guides-overlay')
 export class PFGuidesOverlay extends BaseComponent {
   static styles = css`
     :host {
@@ -42,7 +41,7 @@ export class PFGuidesOverlay extends BaseComponent {
 
     /* Subtle glow effect for visibility */
     .guide::before {
-      content: "";
+      content: '';
       position: absolute;
       background: var(--pf-color-ember-rest, #00ffff);
       opacity: 0.3;
@@ -98,68 +97,70 @@ export class PFGuidesOverlay extends BaseComponent {
       display: none;
     }
   `;
+  private context: ProjectContext = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
 
   render() {
+    const { guides, viewport } = this.context;
+
     // Access reactive signals
-    const horizontalGuide = guidesStore.horizontalGuide.value;
-    const verticalGuide = guidesStore.verticalGuide.value;
-    const visible = guidesStore.visible.value;
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    const horizontalGuide = guides.horizontalGuide.value;
+    const verticalGuide = guides.verticalGuide.value;
+    const visible = guides.visible.value;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
 
     // Drag previews
-    const dragPreviewH = guidesStore.dragPreviewHorizontal.value;
-    const dragPreviewV = guidesStore.dragPreviewVertical.value;
+    const dragPreviewH = guides.dragPreviewHorizontal.value;
+    const dragPreviewV = guides.dragPreviewVertical.value;
 
     // Calculate screen positions for placed guides
     // Note: viewport-content is at (0,0), guides align with canvas pixels at panX/panY
     const horizontalScreenY =
-      visible && horizontalGuide !== null
-        ? panY + horizontalGuide * zoom
-        : null;
+      visible && horizontalGuide !== null ? panY + horizontalGuide * zoom : null;
 
-    const verticalScreenX =
-      visible && verticalGuide !== null ? panX + verticalGuide * zoom : null;
+    const verticalScreenX = visible && verticalGuide !== null ? panX + verticalGuide * zoom : null;
 
     // Calculate screen positions for drag previews
-    const previewHorizontalY =
-      dragPreviewH !== null ? panY + dragPreviewH * zoom : null;
+    const previewHorizontalY = dragPreviewH !== null ? panY + dragPreviewH * zoom : null;
 
-    const previewVerticalX =
-      dragPreviewV !== null ? panX + dragPreviewV * zoom : null;
+    const previewVerticalX = dragPreviewV !== null ? panX + dragPreviewV * zoom : null;
 
     return html`
-      ${horizontalScreenY !== null
-        ? html`<div
-            class="guide horizontal"
-            style="top: ${horizontalScreenY}px"
-          ></div>`
-        : nothing}
-      ${verticalScreenX !== null
-        ? html`<div
-            class="guide vertical"
-            style="left: ${verticalScreenX}px"
-          ></div>`
-        : nothing}
-      ${previewHorizontalY !== null
-        ? html`<div
-            class="guide horizontal preview"
-            style="top: ${previewHorizontalY}px"
-          ></div>`
-        : nothing}
-      ${previewVerticalX !== null
-        ? html`<div
-            class="guide vertical preview"
-            style="left: ${previewVerticalX}px"
-          ></div>`
-        : nothing}
+      ${
+        horizontalScreenY !== null
+          ? html`<div class="guide horizontal" style="top: ${horizontalScreenY}px"></div>`
+          : nothing
+      }
+      ${
+        verticalScreenX !== null
+          ? html`<div class="guide vertical" style="left: ${verticalScreenX}px"></div>`
+          : nothing
+      }
+      ${
+        previewHorizontalY !== null
+          ? html`<div class="guide horizontal preview" style="top: ${previewHorizontalY}px"></div>`
+          : nothing
+      }
+      ${
+        previewVerticalX !== null
+          ? html`<div class="guide vertical preview" style="left: ${previewVerticalX}px"></div>`
+          : nothing
+      }
     `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    "pf-guides-overlay": PFGuidesOverlay;
+    'pf-guides-overlay': PFGuidesOverlay;
   }
 }

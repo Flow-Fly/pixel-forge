@@ -1,19 +1,17 @@
-import { html, css, nothing } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { viewportStore } from "../../stores/viewport";
-import { projectStore } from "../../stores/project";
-import { guidesStore } from "../../stores/guides";
-import { clearCanvasForDpr } from "../../utils/canvas-utils";
-import "../common/pf-tooltip";
+import { html, css, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { clearCanvasForDpr } from '../../utils/canvas-utils';
+import '../common/pf-tooltip';
 
-type RulerOrientation = "horizontal" | "vertical";
+type RulerOrientation = 'horizontal' | 'vertical';
 
 /**
  * Ruler component for displaying tick marks and creating guides.
  * Can be placed at the top (horizontal) or left (vertical) of the viewport.
  */
-@customElement("pf-ruler")
+@customElement('pf-ruler')
 export class PFRuler extends BaseComponent {
   static styles = css`
     :host {
@@ -25,7 +23,7 @@ export class PFRuler extends BaseComponent {
       user-select: none;
     }
 
-    :host([orientation="horizontal"]) {
+    :host([orientation='horizontal']) {
       top: 0;
       left: 0;
       right: 0;
@@ -34,11 +32,11 @@ export class PFRuler extends BaseComponent {
       transition: height 150ms ease-out;
     }
 
-    :host([orientation="horizontal"][expanded]) {
+    :host([orientation='horizontal'][expanded]) {
       height: 24px;
     }
 
-    :host([orientation="vertical"]) {
+    :host([orientation='vertical']) {
       top: 0;
       left: 0;
       bottom: 0;
@@ -47,7 +45,7 @@ export class PFRuler extends BaseComponent {
       transition: width 150ms ease-out;
     }
 
-    :host([orientation="vertical"][expanded]) {
+    :host([orientation='vertical'][expanded]) {
       width: 24px;
     }
 
@@ -73,13 +71,13 @@ export class PFRuler extends BaseComponent {
       pointer-events: none;
     }
 
-    :host([orientation="horizontal"]) .guide-marker {
+    :host([orientation='horizontal']) .guide-marker {
       width: 2px;
       height: 100%;
       top: 0;
     }
 
-    :host([orientation="vertical"]) .guide-marker {
+    :host([orientation='vertical']) .guide-marker {
       height: 2px;
       width: 100%;
       left: 0;
@@ -109,7 +107,7 @@ export class PFRuler extends BaseComponent {
 
     .guide-delete::before,
     .guide-delete::after {
-      content: "";
+      content: '';
       position: absolute;
       width: 8px;
       height: 1.5px;
@@ -124,31 +122,32 @@ export class PFRuler extends BaseComponent {
       transform: rotate(-45deg);
     }
 
-    :host([orientation="horizontal"]) .guide-delete {
+    :host([orientation='horizontal']) .guide-delete {
       top: 100%;
       left: 50%;
       transform: translate(-50%, 2px);
     }
 
-    :host([orientation="vertical"]) .guide-delete {
+    :host([orientation='vertical']) .guide-delete {
       left: 100%;
       top: 50%;
       transform: translate(2px, -50%);
     }
   `;
 
-  @property({ type: String, reflect: true }) orientation: RulerOrientation =
-    "horizontal";
+  @property({ type: String, reflect: true }) orientation: RulerOrientation = 'horizontal';
 
   @state() private expanded = false;
   @state() private isDragging = false;
   @state() private dragPosition: number | null = null;
   @state() private tooltipX = 0;
   @state() private tooltipY = 0;
-  @state() private tooltipText = "";
+  @state() private tooltipText = '';
 
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
+  private context: ProjectContext = defaultProjectContext;
+  private dragContext: ProjectContext | null = null;
   private hoverTimeout: number | null = null;
   private isMouseDownElsewhere = false; // Track if user is drawing/interacting elsewhere
 
@@ -158,33 +157,36 @@ export class PFRuler extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.drawRuler();
+      this.requestUpdate();
+    });
     // Listen for mouse proximity to expand ruler
-    window.addEventListener("mousemove", this.handleWindowMouseMove);
-    this.addEventListener("transitionend", this.handleTransitionEnd);
+    window.addEventListener('mousemove', this.handleWindowMouseMove);
+    this.addEventListener('transitionend', this.handleTransitionEnd);
     // Track if user is drawing/interacting elsewhere (don't expand while drawing)
-    window.addEventListener("mousedown", this.handleGlobalMouseDown, true);
-    window.addEventListener("mouseup", this.handleGlobalMouseUp, true);
+    window.addEventListener('mousedown', this.handleGlobalMouseDown, true);
+    window.addEventListener('mouseup', this.handleGlobalMouseUp, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("mousemove", this.handleWindowMouseMove);
-    this.removeEventListener("transitionend", this.handleTransitionEnd);
-    window.removeEventListener("mousemove", this.handleDragMove);
-    window.removeEventListener("mouseup", this.handleDragEnd);
-    window.removeEventListener("mousedown", this.handleGlobalMouseDown, true);
-    window.removeEventListener("mouseup", this.handleGlobalMouseUp, true);
+    window.removeEventListener('mousemove', this.handleWindowMouseMove);
+    this.removeEventListener('transitionend', this.handleTransitionEnd);
+    window.removeEventListener('mousemove', this.handleDragMove);
+    window.removeEventListener('mouseup', this.handleDragEnd);
+    window.removeEventListener('mousedown', this.handleGlobalMouseDown, true);
+    window.removeEventListener('mouseup', this.handleGlobalMouseUp, true);
     if (this.hoverTimeout) {
       clearTimeout(this.hoverTimeout);
     }
   }
 
   protected firstUpdated(): void {
-    this.canvas = this.shadowRoot?.querySelector(
-      ".ruler-canvas"
-    ) as HTMLCanvasElement;
+    this.canvas = this.shadowRoot?.querySelector('.ruler-canvas') as HTMLCanvasElement;
     if (this.canvas) {
-      this.ctx = this.canvas.getContext("2d");
+      this.ctx = this.canvas.getContext('2d');
       this.resizeCanvas();
       this.drawRuler();
     }
@@ -209,18 +211,20 @@ export class PFRuler extends BaseComponent {
   }
 
   render() {
+    const { guides, project, viewport } = this.context;
+
     // Access reactive signals
-    void viewportStore.zoom.value;
-    void viewportStore.panX.value;
-    void viewportStore.panY.value;
-    void projectStore.width.value;
-    void projectStore.height.value;
-    void guidesStore.horizontalGuide.value;
-    void guidesStore.verticalGuide.value;
-    void guidesStore.visible.value;
+    void viewport.zoom.value;
+    void viewport.panX.value;
+    void viewport.panY.value;
+    void project.width.value;
+    void project.height.value;
+    void guides.horizontalGuide.value;
+    void guides.verticalGuide.value;
+    void guides.visible.value;
 
     // Update expanded attribute for CSS
-    this.toggleAttribute("expanded", this.expanded);
+    this.toggleAttribute('expanded', this.expanded);
 
     // Schedule ruler redraw
     requestAnimationFrame(() => this.drawRuler());
@@ -230,16 +234,15 @@ export class PFRuler extends BaseComponent {
 
     return html`
       <div class="canvas-container">
-        <canvas
-          class="ruler-canvas"
-          @mousedown=${this.handleMouseDown}
-        ></canvas>
+        <canvas class="ruler-canvas" @mousedown=${this.handleMouseDown}></canvas>
       </div>
-      ${guideMarkerStyle
-        ? html`<div class="guide-marker" style=${guideMarkerStyle}>
-            <div class="guide-delete" @click=${this.handleDeleteGuide}></div>
-          </div>`
-        : nothing}
+      ${
+        guideMarkerStyle
+          ? html`<div class="guide-marker" style=${guideMarkerStyle}>
+              <div class="guide-delete" @click=${this.handleDeleteGuide}></div>
+            </div>`
+          : nothing
+      }
       <pf-tooltip
         .x=${this.tooltipX}
         .y=${this.tooltipY}
@@ -250,23 +253,24 @@ export class PFRuler extends BaseComponent {
   }
 
   private getGuideMarkerStyle(): string | null {
-    if (!guidesStore.visible.value) return null;
+    const { guides, viewport } = this.context;
+    if (!guides.visible.value) return null;
 
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
     const rulerOffset = this.EXPANDED_SIZE; // 24px
 
-    if (this.orientation === "horizontal") {
+    if (this.orientation === 'horizontal') {
       // Top ruler shows marker for vertical guide (X position)
-      const guideX = guidesStore.verticalGuide.value;
+      const guideX = guides.verticalGuide.value;
       if (guideX === null) return null;
       // Adjust for ruler offset (ruler CSS left: 24px, viewport-content at (0,0))
       const screenX = panX - rulerOffset + guideX * zoom;
       return `left: ${screenX}px`;
     } else {
       // Left ruler shows marker for horizontal guide (Y position)
-      const guideY = guidesStore.horizontalGuide.value;
+      const guideY = guides.horizontalGuide.value;
       if (guideY === null) return null;
       // Adjust for ruler offset (ruler CSS top: 24px, viewport-content at (0,0))
       const screenY = panY - rulerOffset + guideY * zoom;
@@ -280,7 +284,7 @@ export class PFRuler extends BaseComponent {
     const rect = this.getBoundingClientRect();
     let distance: number;
 
-    if (this.orientation === "horizontal") {
+    if (this.orientation === 'horizontal') {
       // Distance from bottom edge of ruler
       distance = e.clientY - rect.bottom;
     } else {
@@ -291,9 +295,7 @@ export class PFRuler extends BaseComponent {
     // Don't expand if user is drawing/interacting elsewhere (mouse down outside ruler)
     // But allow expansion if currently dragging a guide (isDragging is true, handled above)
     const shouldExpand =
-      !this.isMouseDownElsewhere &&
-      distance >= -rect.height &&
-      distance <= this.TRIGGER_ZONE;
+      !this.isMouseDownElsewhere && distance >= -rect.height && distance <= this.TRIGGER_ZONE;
 
     if (shouldExpand !== this.expanded) {
       this.expanded = shouldExpand;
@@ -303,7 +305,7 @@ export class PFRuler extends BaseComponent {
 
   private handleTransitionEnd = (e: TransitionEvent) => {
     if (e.target !== this) return;
-    if (e.propertyName !== "height" && e.propertyName !== "width") return;
+    if (e.propertyName !== 'height' && e.propertyName !== 'width') return;
 
     this.resizeCanvas();
     this.drawRuler();
@@ -326,10 +328,11 @@ export class PFRuler extends BaseComponent {
   private handleMouseDown = (e: MouseEvent) => {
     e.preventDefault();
     this.isDragging = true;
+    this.dragContext = this.context;
     this.updateDragPosition(e);
 
-    window.addEventListener("mousemove", this.handleDragMove);
-    window.addEventListener("mouseup", this.handleDragEnd);
+    window.addEventListener('mousemove', this.handleDragMove);
+    window.addEventListener('mouseup', this.handleDragEnd);
   };
 
   private handleDragMove = (e: MouseEvent) => {
@@ -343,18 +346,20 @@ export class PFRuler extends BaseComponent {
     // Always place guide on release (better UX - no "nothing happened" confusion)
     if (this.dragPosition !== null) {
       // Top ruler (horizontal) controls vertical guide, left ruler (vertical) controls horizontal guide
-      if (this.orientation === "horizontal") {
-        guidesStore.setVerticalGuide(this.dragPosition);
+      const context = this.dragContext ?? this.context;
+      if (this.orientation === 'horizontal') {
+        context.guides.setVerticalGuide(this.dragPosition);
       } else {
-        guidesStore.setHorizontalGuide(this.dragPosition);
+        context.guides.setHorizontalGuide(this.dragPosition);
       }
     }
 
     this.isDragging = false;
     this.dragPosition = null;
-    guidesStore.clearDragPreview();
-    window.removeEventListener("mousemove", this.handleDragMove);
-    window.removeEventListener("mouseup", this.handleDragEnd);
+    (this.dragContext ?? this.context).guides.clearDragPreview();
+    this.dragContext = null;
+    window.removeEventListener('mousemove', this.handleDragMove);
+    window.removeEventListener('mouseup', this.handleDragEnd);
     this.requestUpdate();
   };
 
@@ -362,20 +367,21 @@ export class PFRuler extends BaseComponent {
     e.preventDefault();
     e.stopPropagation();
     // Top ruler (horizontal) controls vertical guide, left ruler (vertical) controls horizontal guide
-    if (this.orientation === "horizontal") {
-      guidesStore.clearGuide("vertical");
+    if (this.orientation === 'horizontal') {
+      this.context.guides.clearGuide('vertical');
     } else {
-      guidesStore.clearGuide("horizontal");
+      this.context.guides.clearGuide('horizontal');
     }
     this.requestUpdate();
   };
 
   private updateDragPosition(e: MouseEvent): void {
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
+    const { guides, project, viewport } = this.dragContext ?? this.context;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
+    const canvasWidth = project.width.value;
+    const canvasHeight = project.height.value;
     const rulerOffset = this.EXPANDED_SIZE; // 24px
 
     this.tooltipX = e.clientX;
@@ -386,7 +392,7 @@ export class PFRuler extends BaseComponent {
 
     let pixelPos: number;
 
-    if (this.orientation === "horizontal") {
+    if (this.orientation === 'horizontal') {
       // Top ruler creates vertical guides (X position)
       // Position within ruler canvas
       const posInRuler = e.clientX - rulerRect.left;
@@ -412,10 +418,10 @@ export class PFRuler extends BaseComponent {
 
     // Update drag preview in store
     // Top ruler (horizontal) controls vertical guide, left ruler (vertical) controls horizontal guide
-    if (this.orientation === "horizontal") {
-      guidesStore.setDragPreview("vertical", pixelPos);
+    if (this.orientation === 'horizontal') {
+      guides.setDragPreview('vertical', pixelPos);
     } else {
-      guidesStore.setDragPreview("horizontal", pixelPos);
+      guides.setDragPreview('horizontal', pixelPos);
     }
 
     this.requestUpdate();
@@ -431,22 +437,23 @@ export class PFRuler extends BaseComponent {
 
     clearCanvasForDpr(ctx, this.canvas);
 
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-    const canvasWidth = projectStore.width.value;
-    const canvasHeight = projectStore.height.value;
+    const { project, viewport } = this.context;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
+    const canvasWidth = project.width.value;
+    const canvasHeight = project.height.value;
 
     // Colors
-    const tickColor = "rgba(255, 255, 255, 0.5)";
-    const majorTickColor = "rgba(255, 255, 255, 0.8)";
-    const textColor = "rgba(255, 255, 255, 0.9)";
+    const tickColor = 'rgba(255, 255, 255, 0.5)';
+    const majorTickColor = 'rgba(255, 255, 255, 0.8)';
+    const textColor = 'rgba(255, 255, 255, 0.9)';
 
-    ctx.font = "9px monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
 
-    if (this.orientation === "horizontal") {
+    if (this.orientation === 'horizontal') {
       this.drawHorizontalRuler(
         ctx,
         width,
@@ -491,21 +498,15 @@ export class PFRuler extends BaseComponent {
     // Calculate visible range accounting for the offset
     const adjustedPanX = panX - rulerOffset;
     const startPixel = Math.max(0, Math.floor(-adjustedPanX / zoom));
-    const endPixel = Math.min(
-      canvasWidth,
-      Math.ceil((width - adjustedPanX) / zoom)
-    );
+    const endPixel = Math.min(canvasWidth, Math.ceil((width - adjustedPanX) / zoom));
 
     // Determine tick density based on zoom
     const minTickSpacing = 4; // Minimum screen pixels between ticks
-    const tickStep =
-      zoom >= minTickSpacing ? 1 : Math.ceil(minTickSpacing / zoom);
+    const tickStep = zoom >= minTickSpacing ? 1 : Math.ceil(minTickSpacing / zoom);
 
     // Determine label skip for major ticks
     const minLabelSpacing = 30;
-    const labelSkip = Math.ceil(
-      minLabelSpacing / (this.MAJOR_TICK_INTERVAL * zoom)
-    );
+    const labelSkip = Math.ceil(minLabelSpacing / (this.MAJOR_TICK_INTERVAL * zoom));
 
     for (let pixel = startPixel; pixel <= endPixel; pixel += tickStep) {
       const screenX = adjustedPanX + pixel * zoom;
@@ -527,14 +528,10 @@ export class PFRuler extends BaseComponent {
       ctx.stroke();
 
       // Draw numbers for major ticks when expanded
-      if (
-        this.expanded &&
-        isMajor &&
-        pixel % (this.MAJOR_TICK_INTERVAL * labelSkip) === 0
-      ) {
+      if (this.expanded && isMajor && pixel % (this.MAJOR_TICK_INTERVAL * labelSkip) === 0) {
         ctx.fillStyle = textColor;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
         ctx.fillText(String(pixel), screenX + 3, height / 2);
       }
     }
@@ -558,24 +555,18 @@ export class PFRuler extends BaseComponent {
     // Calculate visible range accounting for the offset
     const adjustedPanY = panY - rulerOffset;
     const startPixel = Math.max(0, Math.floor(-adjustedPanY / zoom));
-    const endPixel = Math.min(
-      canvasHeight,
-      Math.ceil((height - adjustedPanY) / zoom)
-    );
+    const endPixel = Math.min(canvasHeight, Math.ceil((height - adjustedPanY) / zoom));
 
     // Determine tick density based on zoom
     const minTickSpacing = 4;
-    const tickStep =
-      zoom >= minTickSpacing ? 1 : Math.ceil(minTickSpacing / zoom);
+    const tickStep = zoom >= minTickSpacing ? 1 : Math.ceil(minTickSpacing / zoom);
 
     // Determine label skip for major ticks
     const minLabelSpacing = 30;
-    const labelSkip = Math.ceil(
-      minLabelSpacing / (this.MAJOR_TICK_INTERVAL * zoom)
-    );
+    const labelSkip = Math.ceil(minLabelSpacing / (this.MAJOR_TICK_INTERVAL * zoom));
 
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
 
     for (let pixel = startPixel; pixel <= endPixel; pixel += tickStep) {
       const screenY = adjustedPanY + pixel * zoom;
@@ -594,14 +585,10 @@ export class PFRuler extends BaseComponent {
       ctx.stroke();
 
       // Draw numbers for major ticks when expanded (below the tick)
-      if (
-        this.expanded &&
-        isMajor &&
-        pixel % (this.MAJOR_TICK_INTERVAL * labelSkip) === 0
-      ) {
+      if (this.expanded && isMajor && pixel % (this.MAJOR_TICK_INTERVAL * labelSkip) === 0) {
         ctx.fillStyle = textColor;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
         ctx.fillText(String(pixel), width / 2, screenY + 2);
       }
     }
@@ -610,6 +597,6 @@ export class PFRuler extends BaseComponent {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "pf-ruler": PFRuler;
+    'pf-ruler': PFRuler;
   }
 }

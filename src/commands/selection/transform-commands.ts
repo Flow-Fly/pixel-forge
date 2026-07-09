@@ -1,11 +1,10 @@
 import { type Command } from '../../stores/history';
-import { selectionStore } from '../../stores/selection';
+import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
-import {
-  flipSelectedPixels,
-  pasteImageDataWithAlpha,
-} from './pixels';
+import { flipSelectedPixels, pasteImageDataWithAlpha } from './pixels';
+
+type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
 
 /**
  * Command for applying a transform (scale and/or rotation) to a selection.
@@ -40,6 +39,7 @@ export class TransformSelectionCommand implements Command {
 
   // For proper undo/redo: what was at the destination before pasting
   private overwrittenAtDestination: ImageData;
+  private readonly context: SelectionCommandContext;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -51,11 +51,13 @@ export class TransformSelectionCommand implements Command {
     scale: { x: number; y: number },
     shape: SelectionShape,
     originalMask?: Uint8Array,
-    offset: { x: number; y: number } = { x: 0, y: 0 }
+    offset: { x: number; y: number } = { x: 0, y: 0 },
+    context: SelectionCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
     this.canvas = canvas;
+    this.context = context;
 
     // Generate descriptive name based on what changed
     const hasScale = scale.x !== 1 || scale.y !== 1;
@@ -109,21 +111,17 @@ export class TransformSelectionCommand implements Command {
     pasteImageDataWithAlpha(ctx, this.transformedImageData, this.actualDestX, this.actualDestY);
 
     // Clear selection state
-    selectionStore.clearAfterTransform();
+    this.context.selection.clearAfterTransform();
   }
 
   undo() {
     const ctx = this.canvas.getContext('2d')!;
 
     // Restore what was at the actual destination
-    ctx.putImageData(
-      this.overwrittenAtDestination,
-      this.actualDestX,
-      this.actualDestY
-    );
+    ctx.putImageData(this.overwrittenAtDestination, this.actualDestX, this.actualDestY);
 
     // Restore to transforming state with original data
-    selectionStore.startTransform(
+    this.context.selection.startTransform(
       this.originalImageData,
       this.originalBounds,
       this.originalShape,
@@ -132,10 +130,10 @@ export class TransformSelectionCommand implements Command {
 
     // Re-apply the transforms for preview
     if (this.scale.x !== 1 || this.scale.y !== 1) {
-      selectionStore.updateScale(this.scale.x, this.scale.y);
+      this.context.selection.updateScale(this.scale.x, this.scale.y);
     }
     if (this.rotation !== 0) {
-      selectionStore.updateRotation(this.rotation);
+      this.context.selection.updateRotation(this.rotation);
     }
   }
 }

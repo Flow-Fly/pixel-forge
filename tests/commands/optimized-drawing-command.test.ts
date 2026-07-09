@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // happy-dom has neither IndexedDB nor canvas encoding — mock the boundaries.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
@@ -32,13 +32,16 @@ class FakeImageData {
 }
 vi.stubGlobal('ImageData', FakeImageData);
 
-import {
-  extractIndexRegion,
-  writeIndexRegion,
-} from '../../src/utils/buffer-region';
+import { extractIndexRegion, writeIndexRegion } from '../../src/utils/buffer-region';
 import { OptimizedDrawingCommand } from '../../src/commands/optimized-drawing-command';
 import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
+import {
+  createProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../../src/stores/project-context';
 import type { Rect } from '../../src/types/geometry';
 
 const W = 8;
@@ -88,8 +91,7 @@ describe('index buffer region helpers', () => {
 describe('OptimizedDrawingCommand', () => {
   // A minimal recording 2D-context stand-in (happy-dom has no real one)
   function makeFakeCanvas() {
-    const putCalls: Array<{ x: number; y: number; data: Uint8ClampedArray }> =
-      [];
+    const putCalls: Array<{ x: number; y: number; data: Uint8ClampedArray }> = [];
     const fakeCtx = {
       putImageData: (img: { data: Uint8ClampedArray }, x: number, y: number) =>
         putCalls.push({ x, y, data: img.data }),
@@ -106,6 +108,7 @@ describe('OptimizedDrawingCommand', () => {
   const frameId = 'frame-1';
   const bounds: Rect = { x: 1, y: 1, width: 2, height: 2 };
   let putCalls: Array<{ x: number; y: number; data: Uint8ClampedArray }>;
+  const createdContexts: ProjectContext[] = [];
 
   beforeEach(() => {
     // Seed a layer with a fake canvas and a cel carrying an index buffer
@@ -126,24 +129,46 @@ describe('OptimizedDrawingCommand', () => {
     animationStore.cels.value = cels;
   });
 
+  afterEach(() => {
+    restoreDefaultProjectContext();
+    for (const context of createdContexts.splice(0)) {
+      context.dispose();
+    }
+  });
+
+  function createContextLayer(frameId: string) {
+    const context = createProjectContext();
+    createdContexts.push(context);
+
+    const { canvas, putCalls } = makeFakeCanvas();
+    const layer = context.layers.layers.value[0];
+    const layerId = layer.id;
+    context.layers.updateLayer(layerId, { canvas });
+    context.layers.activeLayerId.value = layerId;
+    context.animation.currentFrameId.value = frameId;
+
+    const cels = new Map(context.animation.cels.value);
+    cels.set(`${layerId}:${frameId}`, {
+      id: `${layerId}:${frameId}`,
+      layerId,
+      frameId,
+      canvas,
+      indexBuffer: new Uint8Array(W * H).fill(7),
+    });
+    context.animation.cels.value = cels;
+
+    return { context, layerId, putCalls };
+  }
+
   function makeCommand() {
     const before = new Uint8ClampedArray(bounds.width * bounds.height * 4);
-    const after = new Uint8ClampedArray(bounds.width * bounds.height * 4).fill(
-      255
-    );
-    return new OptimizedDrawingCommand(
-      layerId,
-      bounds,
-      before,
-      after,
-      'Test stroke',
-      {
-        frameId,
-        canvasWidth: W,
-        previousIndexData: new Uint8Array(bounds.width * bounds.height), // zeros
-        newIndexData: new Uint8Array(bounds.width * bounds.height).fill(7),
-      }
-    );
+    const after = new Uint8ClampedArray(bounds.width * bounds.height * 4).fill(255);
+    return new OptimizedDrawingCommand(layerId, bounds, before, after, 'Test stroke', {
+      frameId,
+      canvasWidth: W,
+      previousIndexData: new Uint8Array(bounds.width * bounds.height), // zeros
+      newIndexData: new Uint8Array(bounds.width * bounds.height).fill(7),
+    });
   }
 
   it('memory cost is proportional to stroke bounds, not canvas size', () => {
@@ -161,8 +186,7 @@ describe('OptimizedDrawingCommand', () => {
     // Inside bounds: restored to pre-stroke zeros; outside: untouched 7s
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const inside =
-          x >= bounds.x && x < bounds.x + 2 && y >= bounds.y && y < bounds.y + 2;
+        const inside = x >= bounds.x && x < bounds.x + 2 && y >= bounds.y && y < bounds.y + 2;
         expect(buffer[y * W + x]).toBe(inside ? 0 : 7);
       }
     }
@@ -180,5 +204,54 @@ describe('OptimizedDrawingCommand', () => {
       expect(buffer[i]).toBe(7);
     }
     expect(putCalls).toHaveLength(2);
+  });
+
+  it('executes and undoes against the context captured at creation time', () => {
+    const source = createContextLayer(frameId);
+    const other = createContextLayer(frameId);
+    other.context.layers.layers.value = [
+      {
+        ...other.context.layers.layers.value[0],
+        id: source.layerId,
+      },
+    ];
+    other.context.layers.activeLayerId.value = source.layerId;
+
+    const otherCels = new Map(other.context.animation.cels.value);
+    otherCels.set(`${source.layerId}:${frameId}`, {
+      id: `${source.layerId}:${frameId}:other`,
+      layerId: source.layerId,
+      frameId,
+      canvas: other.context.layers.layers.value[0].canvas!,
+      indexBuffer: new Uint8Array(W * H).fill(3),
+    });
+    other.context.animation.cels.value = otherCels;
+
+    const command = new OptimizedDrawingCommand(
+      source.layerId,
+      bounds,
+      new Uint8ClampedArray(bounds.width * bounds.height * 4),
+      new Uint8ClampedArray(bounds.width * bounds.height * 4).fill(255),
+      'Captured stroke',
+      {
+        frameId,
+        canvasWidth: W,
+        previousIndexData: new Uint8Array(bounds.width * bounds.height),
+        newIndexData: new Uint8Array(bounds.width * bounds.height).fill(9),
+      },
+      source.context
+    );
+
+    setActiveProjectContext(other.context);
+    command.execute();
+    command.undo();
+
+    const sourceBuffer = source.context.animation.getCelIndexBuffer(source.layerId, frameId)!;
+    const otherBuffer = other.context.animation.getCelIndexBuffer(source.layerId, frameId)!;
+
+    expect(source.putCalls).toHaveLength(2);
+    expect(other.putCalls).toHaveLength(0);
+    expect(sourceBuffer[bounds.y * W + bounds.x]).toBe(0);
+    expect(otherBuffer[bounds.y * W + bounds.x]).toBe(3);
   });
 });

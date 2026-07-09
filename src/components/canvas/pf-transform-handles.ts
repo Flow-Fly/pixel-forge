@@ -1,32 +1,27 @@
-import { html, css, nothing } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { selectionStore } from "../../stores/selection";
-import { viewportStore } from "../../stores/viewport";
-import {
-  angleFromCenter,
-  snapAngle,
-  normalizeAngle,
-} from "../../utils/rotation";
+import { html, css, nothing } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { angleFromCenter, snapAngle, normalizeAngle } from '../../utils/rotation';
 
 /**
  * Handle types
  */
-type HandleType = "resize-corner" | "resize-edge" | "rotation";
+type HandleType = 'resize-corner' | 'resize-edge' | 'rotation';
 
 /**
  * Handle positions
  */
 type HandlePosition =
-  | "top-left"
-  | "top"
-  | "top-right"
-  | "left"
-  | "right"
-  | "bottom-left"
-  | "bottom"
-  | "bottom-right"
-  | "rotation-button";
+  | 'top-left'
+  | 'top'
+  | 'top-right'
+  | 'left'
+  | 'right'
+  | 'bottom-left'
+  | 'bottom'
+  | 'bottom-right'
+  | 'rotation-button';
 
 interface HandleInfo {
   type: HandleType;
@@ -42,7 +37,7 @@ interface HandleInfo {
  * - Edge rectangles: resize single dimension
  * - Single rotation button at top-right corner
  */
-@customElement("pf-transform-handles")
+@customElement('pf-transform-handles')
 export class PFTransformHandles extends BaseComponent {
   static styles = css`
     :host {
@@ -123,7 +118,7 @@ export class PFTransformHandles extends BaseComponent {
 
     /* Rotation arrow icon */
     .handle.rotation::after {
-      content: "↻";
+      content: '↻';
       color: #333;
       font-size: 12px;
       font-weight: bold;
@@ -167,37 +162,40 @@ export class PFTransformHandles extends BaseComponent {
   private dragStartY = 0;
   private initialScale = { x: 1, y: 1 };
   private initialBounds: { width: number; height: number } | null = null;
+  private context: ProjectContext = defaultProjectContext;
+  private dragContext: ProjectContext | null = null;
 
   connectedCallback() {
     super.connectedCallback();
-    document.addEventListener("mousemove", this.handleDocumentMouseMove);
-    document.addEventListener("mouseup", this.handleDocumentMouseUp);
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+    document.addEventListener('mousemove', this.handleDocumentMouseMove);
+    document.addEventListener('mouseup', this.handleDocumentMouseUp);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener("mousemove", this.handleDocumentMouseMove);
-    document.removeEventListener("mouseup", this.handleDocumentMouseUp);
+    document.removeEventListener('mousemove', this.handleDocumentMouseMove);
+    document.removeEventListener('mouseup', this.handleDocumentMouseUp);
   }
 
   private getHandles(): HandleInfo[] {
-    const state = selectionStore.state.value;
-    if (
-      state.type !== "floating" &&
-      state.type !== "transforming" &&
-      state.type !== "selected"
-    ) {
+    const { selection, viewport } = this.context;
+    const state = selection.state.value;
+    if (state.type !== 'floating' && state.type !== 'transforming' && state.type !== 'selected') {
       return [];
     }
 
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
 
     // Get bounds based on state
     let screenLeft: number, screenTop: number, screenRight: number, screenBottom: number;
 
-    if (state.type === "transforming") {
+    if (state.type === 'transforming') {
       // For transforming, use original bounds + offset + scale
       // Scale is applied from the center, so calculate center first, then scaled dimensions
       const bounds = state.originalBounds;
@@ -218,7 +216,7 @@ export class PFTransformHandles extends BaseComponent {
       screenRight = (centerPixelX + halfWidth) * zoom + panX;
       screenBottom = (centerPixelY + halfHeight) * zoom + panY;
     } else {
-      const bounds = selectionStore.bounds;
+      const bounds = selection.bounds;
       if (!bounds) return [];
       screenLeft = bounds.x * zoom + panX;
       screenTop = bounds.y * zoom + panY;
@@ -233,40 +231,90 @@ export class PFTransformHandles extends BaseComponent {
 
     // Resize corner handles (on the bounds)
     handles.push(
-      { type: "resize-corner", position: "top-left", screenX: screenLeft, screenY: screenTop, cursor: "nwse-resize" },
-      { type: "resize-corner", position: "top-right", screenX: screenRight, screenY: screenTop, cursor: "nesw-resize" },
-      { type: "resize-corner", position: "bottom-left", screenX: screenLeft, screenY: screenBottom, cursor: "nesw-resize" },
-      { type: "resize-corner", position: "bottom-right", screenX: screenRight, screenY: screenBottom, cursor: "nwse-resize" }
+      {
+        type: 'resize-corner',
+        position: 'top-left',
+        screenX: screenLeft,
+        screenY: screenTop,
+        cursor: 'nwse-resize',
+      },
+      {
+        type: 'resize-corner',
+        position: 'top-right',
+        screenX: screenRight,
+        screenY: screenTop,
+        cursor: 'nesw-resize',
+      },
+      {
+        type: 'resize-corner',
+        position: 'bottom-left',
+        screenX: screenLeft,
+        screenY: screenBottom,
+        cursor: 'nesw-resize',
+      },
+      {
+        type: 'resize-corner',
+        position: 'bottom-right',
+        screenX: screenRight,
+        screenY: screenBottom,
+        cursor: 'nwse-resize',
+      }
     );
 
     // Resize edge handles (on the edges)
     handles.push(
-      { type: "resize-edge", position: "top", screenX: centerX, screenY: screenTop, cursor: "ns-resize" },
-      { type: "resize-edge", position: "bottom", screenX: centerX, screenY: screenBottom, cursor: "ns-resize" },
-      { type: "resize-edge", position: "left", screenX: screenLeft, screenY: centerY, cursor: "ew-resize" },
-      { type: "resize-edge", position: "right", screenX: screenRight, screenY: centerY, cursor: "ew-resize" }
+      {
+        type: 'resize-edge',
+        position: 'top',
+        screenX: centerX,
+        screenY: screenTop,
+        cursor: 'ns-resize',
+      },
+      {
+        type: 'resize-edge',
+        position: 'bottom',
+        screenX: centerX,
+        screenY: screenBottom,
+        cursor: 'ns-resize',
+      },
+      {
+        type: 'resize-edge',
+        position: 'left',
+        screenX: screenLeft,
+        screenY: centerY,
+        cursor: 'ew-resize',
+      },
+      {
+        type: 'resize-edge',
+        position: 'right',
+        screenX: screenRight,
+        screenY: centerY,
+        cursor: 'ew-resize',
+      }
     );
 
     // Single rotation handle at top-right corner (outside the selection)
     const rotOffset = this.ROTATION_OFFSET;
     handles.push({
-      type: "rotation",
-      position: "rotation-button",
+      type: 'rotation',
+      position: 'rotation-button',
       screenX: screenRight + rotOffset,
       screenY: screenTop - rotOffset,
-      cursor: "grab"
+      cursor: 'grab',
     });
 
     return handles;
   }
 
   private getSelectionCenter(): { x: number; y: number } | null {
-    const state = selectionStore.state.value;
-    const zoom = viewportStore.zoom.value;
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
+    const context = this.dragContext ?? this.context;
+    const { selection, viewport } = context;
+    const state = selection.state.value;
+    const zoom = viewport.zoom.value;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
 
-    if (state.type === "transforming") {
+    if (state.type === 'transforming') {
       const bounds = state.originalBounds;
       const offset = state.currentOffset;
       return {
@@ -275,7 +323,7 @@ export class PFTransformHandles extends BaseComponent {
       };
     }
 
-    const bounds = selectionStore.bounds;
+    const bounds = selection.bounds;
     if (!bounds) return null;
 
     return {
@@ -288,16 +336,19 @@ export class PFTransformHandles extends BaseComponent {
     e.preventDefault();
     e.stopPropagation();
 
-    const state = selectionStore.state.value;
+    const context = this.context;
+    const { selection } = context;
+    const state = selection.state.value;
+    this.dragContext = context;
 
     // Signal start of transform if needed
-    if (state.type === "selected" || state.type === "floating") {
-      const eventType = handle.type === "rotation" ? "rotation-start" : "resize-start";
+    if (state.type === 'selected' || state.type === 'floating') {
+      const eventType = handle.type === 'rotation' ? 'rotation-start' : 'resize-start';
       this.dispatchEvent(
         new CustomEvent(eventType, {
           bubbles: true,
           composed: true,
-          detail: { handle: handle.position },
+          detail: { handle: handle.position, context },
         })
       );
     }
@@ -305,7 +356,7 @@ export class PFTransformHandles extends BaseComponent {
     this.isDragging = true;
     this.activeHandle = handle;
 
-    if (handle.type === "rotation") {
+    if (handle.type === 'rotation') {
       // Rotation drag setup
       const center = this.getSelectionCenter();
       if (!center) return;
@@ -315,36 +366,36 @@ export class PFTransformHandles extends BaseComponent {
       const mouseY = e.clientY - rect.top;
 
       this.dragStartAngle = angleFromCenter(center.x, center.y, mouseX, mouseY);
-      this.initialRotation = selectionStore.rotation;
-      selectionStore.startRotationDrag();
+      this.initialRotation = selection.rotation;
+      selection.startRotationDrag();
     } else {
       // Resize drag setup
       this.dragStartX = e.clientX;
       this.dragStartY = e.clientY;
-      this.initialScale = { ...selectionStore.scale };
+      this.initialScale = { ...selection.scale };
 
       // Get original bounds for calculating new scale
-      const currentState = selectionStore.state.value;
-      if (currentState.type === "transforming") {
+      const currentState = selection.state.value;
+      if (currentState.type === 'transforming') {
         this.initialBounds = {
           width: currentState.originalBounds.width,
           height: currentState.originalBounds.height,
         };
       } else {
-        const bounds = selectionStore.bounds;
+        const bounds = selection.bounds;
         if (bounds) {
           this.initialBounds = { width: bounds.width, height: bounds.height };
         }
       }
 
-      selectionStore.startScaleDrag();
+      selection.startScaleDrag();
     }
   };
 
   private handleDocumentMouseMove = (e: MouseEvent) => {
     if (!this.isDragging || !this.activeHandle) return;
 
-    if (this.activeHandle.type === "rotation") {
+    if (this.activeHandle.type === 'rotation') {
       this.handleRotationDrag(e);
     } else {
       this.handleResizeDrag(e);
@@ -372,13 +423,15 @@ export class PFTransformHandles extends BaseComponent {
     }
 
     newRotation = normalizeAngle(newRotation);
-    selectionStore.updateRotation(newRotation);
+    const context = this.dragContext ?? this.context;
+    context.selection.updateRotation(newRotation);
   }
 
   private handleResizeDrag(e: MouseEvent) {
     if (!this.activeHandle || !this.initialBounds) return;
 
-    const zoom = viewportStore.zoom.value;
+    const context = this.dragContext ?? this.context;
+    const zoom = context.viewport.zoom.value;
     const deltaX = (e.clientX - this.dragStartX) / zoom;
     const deltaY = (e.clientY - this.dragStartY) / zoom;
 
@@ -395,31 +448,31 @@ export class PFTransformHandles extends BaseComponent {
 
     // Calculate new scale based on handle position
     switch (pos) {
-      case "right":
+      case 'right':
         newScaleX = (currentWidth + deltaX) / origWidth;
         break;
-      case "left":
+      case 'left':
         newScaleX = (currentWidth - deltaX) / origWidth;
         break;
-      case "bottom":
+      case 'bottom':
         newScaleY = (currentHeight + deltaY) / origHeight;
         break;
-      case "top":
+      case 'top':
         newScaleY = (currentHeight - deltaY) / origHeight;
         break;
-      case "bottom-right":
+      case 'bottom-right':
         newScaleX = (currentWidth + deltaX) / origWidth;
         newScaleY = (currentHeight + deltaY) / origHeight;
         break;
-      case "bottom-left":
+      case 'bottom-left':
         newScaleX = (currentWidth - deltaX) / origWidth;
         newScaleY = (currentHeight + deltaY) / origHeight;
         break;
-      case "top-right":
+      case 'top-right':
         newScaleX = (currentWidth + deltaX) / origWidth;
         newScaleY = (currentHeight - deltaY) / origHeight;
         break;
-      case "top-left":
+      case 'top-left':
         newScaleX = (currentWidth - deltaX) / origWidth;
         newScaleY = (currentHeight - deltaY) / origHeight;
         break;
@@ -430,26 +483,35 @@ export class PFTransformHandles extends BaseComponent {
     newScaleY = Math.max(0.1, newScaleY);
 
     // Shift key = maintain aspect ratio for corner handles
-    if (e.shiftKey && this.activeHandle.type === "resize-corner") {
+    if (e.shiftKey && this.activeHandle.type === 'resize-corner') {
       const uniformScale = Math.max(newScaleX, newScaleY);
       newScaleX = uniformScale;
       newScaleY = uniformScale;
     }
 
-    selectionStore.updateScale(newScaleX, newScaleY);
+    context.selection.updateScale(newScaleX, newScaleY);
   }
 
   private handleDocumentMouseUp = () => {
+    const context = this.dragContext ?? this.context;
     if (this.isDragging && this.activeHandle) {
-      if (this.activeHandle.type === "rotation") {
-        selectionStore.endRotationDrag();
+      if (this.activeHandle.type === 'rotation') {
+        context.selection.endRotationDrag();
         this.dispatchEvent(
-          new CustomEvent("rotation-end", { bubbles: true, composed: true })
+          new CustomEvent('rotation-end', {
+            bubbles: true,
+            composed: true,
+            detail: { context },
+          })
         );
       } else {
-        selectionStore.endScaleDrag();
+        context.selection.endScaleDrag();
         this.dispatchEvent(
-          new CustomEvent("resize-end", { bubbles: true, composed: true })
+          new CustomEvent('resize-end', {
+            bubbles: true,
+            composed: true,
+            detail: { context },
+          })
         );
       }
     }
@@ -457,14 +519,15 @@ export class PFTransformHandles extends BaseComponent {
     this.isDragging = false;
     this.activeHandle = null;
     this.initialBounds = null;
+    this.dragContext = null;
   };
 
   render() {
     // Access signals for reactivity
-    const state = selectionStore.state.value;
-    void viewportStore.zoom.value;
-    void viewportStore.panX.value;
-    void viewportStore.panY.value;
+    const state = this.context.selection.state.value;
+    void this.context.viewport.zoom.value;
+    void this.context.viewport.panX.value;
+    void this.context.viewport.panY.value;
 
     const handles = this.getHandles();
 
@@ -473,40 +536,44 @@ export class PFTransformHandles extends BaseComponent {
     }
 
     // Get rotation for tooltip display
-    const rotation = state.type === "transforming" ? state.rotation : 0;
-    const isRotating = this.isDragging && this.activeHandle?.type === "rotation";
-    const rotationHandle = handles.find(h => h.type === "rotation");
+    const rotation = state.type === 'transforming' ? state.rotation : 0;
+    const isRotating = this.isDragging && this.activeHandle?.type === 'rotation';
+    const rotationHandle = handles.find((h) => h.type === 'rotation');
 
     return html`
       ${handles.map(
         (handle) => html`
           <div
             class="handle ${handle.type} ${
-              handle.type === "resize-edge"
-                ? handle.position === "top" || handle.position === "bottom"
-                  ? "horizontal"
-                  : "vertical"
-                : ""
-            } ${this.isDragging && this.activeHandle === handle ? "dragging" : ""}"
+              handle.type === 'resize-edge'
+                ? handle.position === 'top' || handle.position === 'bottom'
+                  ? 'horizontal'
+                  : 'vertical'
+                : ''
+            } ${this.isDragging && this.activeHandle === handle ? 'dragging' : ''}"
             style="left: ${handle.screenX}px; top: ${handle.screenY}px; cursor: ${handle.cursor};"
             @mousedown=${(e: MouseEvent) => this.handleMouseDown(e, handle)}
           ></div>
         `
       )}
-      ${isRotating && rotationHandle ? html`
-        <div
-          class="rotation-tooltip"
-          style="left: ${rotationHandle.screenX + 14}px; top: ${rotationHandle.screenY - 8}px;"
-        >
-          ${Math.round(rotation)}°
-        </div>
-      ` : nothing}
+      ${
+        isRotating && rotationHandle
+          ? html`
+              <div
+                class="rotation-tooltip"
+                style="left: ${rotationHandle.screenX + 14}px; top: ${rotationHandle.screenY - 8}px;"
+              >
+                ${Math.round(rotation)}°
+              </div>
+            `
+          : nothing
+      }
     `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    "pf-transform-handles": PFTransformHandles;
+    'pf-transform-handles': PFTransformHandles;
   }
 }

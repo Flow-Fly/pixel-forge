@@ -1,8 +1,7 @@
 import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { AnimatedCanvasOverlay } from './animated-canvas-overlay';
-import { selectionStore } from '../../stores/selection';
-import { viewportStore } from '../../stores/viewport';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import { traceMaskOutline, connectSegments } from '../../utils/mask-utils';
 import type { Point } from '../../types/geometry';
 import { type SelectionState } from '../../types/selection';
@@ -48,7 +47,6 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     }
   `;
 
-
   // Tooltip state for dimension display
   @state() private widthTooltipX = 0;
   @state() private widthTooltipY = 0;
@@ -61,6 +59,16 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   // Cache for freeform outline paths
   private cachedOutlinePaths: Point[][] | null = null;
   private cachedStateId: string | null = null;
+  private context: ProjectContext = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.clearSelectionVisualState();
+      this.requestUpdate();
+    });
+  }
 
   protected draw() {
     const frame = this.getSelectionFrame();
@@ -73,14 +81,25 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     this.getSelectionFrameDrawers(frame)[frame.state.type]();
   }
 
-  private getSelectionFrameDrawers(frame: SelectionFrame): Record<SelectionState['type'], SelectionFrameDrawer> {
+  private getSelectionFrameDrawers(
+    frame: SelectionFrame
+  ): Record<SelectionState['type'], SelectionFrameDrawer> {
     return {
       none: () => this.clearSelectionVisualState(),
-      selecting: () => this.drawSelectingFrame(frame, frame.state as Extract<SelectionState, { type: 'selecting' }>),
-      selected: () => this.drawSelectedFrame(frame, frame.state as Extract<SelectionState, { type: 'selected' }>),
-      floating: () => this.drawFloatingFrame(frame, frame.state as Extract<SelectionState, { type: 'floating' }>),
+      selecting: () =>
+        this.drawSelectingFrame(
+          frame,
+          frame.state as Extract<SelectionState, { type: 'selecting' }>
+        ),
+      selected: () =>
+        this.drawSelectedFrame(frame, frame.state as Extract<SelectionState, { type: 'selected' }>),
+      floating: () =>
+        this.drawFloatingFrame(frame, frame.state as Extract<SelectionState, { type: 'floating' }>),
       transforming: () =>
-        this.drawTransformingFrame(frame, frame.state as Extract<SelectionState, { type: 'transforming' }>),
+        this.drawTransformingFrame(
+          frame,
+          frame.state as Extract<SelectionState, { type: 'transforming' }>
+        ),
     };
   }
 
@@ -90,10 +109,10 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
 
     return {
       ctx,
-      state: selectionStore.state.value,
-      zoom: viewportStore.zoom.value,
-      panX: viewportStore.panX.value,
-      panY: viewportStore.panY.value,
+      state: this.context.selection.state.value,
+      zoom: this.context.viewport.zoom.value,
+      panX: this.context.viewport.panX.value,
+      panY: this.context.viewport.panY.value,
     };
   }
 
@@ -103,9 +122,12 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     this.hideDimensionTooltips();
   }
 
-  private drawSelectingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'selecting' }>) {
+  private drawSelectingFrame(
+    frame: SelectionFrame,
+    state: Extract<SelectionState, { type: 'selecting' }>
+  ) {
     const { ctx, zoom, panX, panY } = frame;
-    const prevSelection = selectionStore.previousSelectionForVisual.value;
+    const prevSelection = this.context.selection.previousSelectionForVisual.value;
 
     if (prevSelection) {
       this.drawSelectionOutline(ctx, prevSelection, zoom, panX, panY);
@@ -121,7 +143,10 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     this.updateDimensionTooltips(state.currentBounds, zoom, panX, panY);
   }
 
-  private drawSelectedFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'selected' }>) {
+  private drawSelectedFrame(
+    frame: SelectionFrame,
+    state: Extract<SelectionState, { type: 'selected' }>
+  ) {
     const { ctx, zoom, panX, panY } = frame;
     this.drawSelectedState(ctx, state, zoom, panX, panY);
 
@@ -133,14 +158,20 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
     this.hideDimensionTooltips();
   }
 
-  private drawFloatingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'floating' }>) {
+  private drawFloatingFrame(
+    frame: SelectionFrame,
+    state: Extract<SelectionState, { type: 'floating' }>
+  ) {
     const { ctx, zoom, panX, panY } = frame;
     this.drawFloatingPixels(ctx, state, zoom, panX, panY);
     this.drawFloatingState(ctx, state, zoom, panX, panY);
     this.hideDimensionTooltips();
   }
 
-  private drawTransformingFrame(frame: SelectionFrame, state: Extract<SelectionState, { type: 'transforming' }>) {
+  private drawTransformingFrame(
+    frame: SelectionFrame,
+    state: Extract<SelectionState, { type: 'transforming' }>
+  ) {
     const { ctx, zoom, panX, panY } = frame;
     this.drawTransformingPixels(ctx, state, zoom, panX, panY);
     this.drawScaledRotatedMarchingAnts(ctx, state, zoom, panX, panY);
@@ -375,9 +406,7 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   ) {
     for (const path of outlinePaths) {
       if (path.length < 2) continue;
-      this.strokeMarchingAnts(ctx, (c) =>
-        this.strokePath(c, path, zoom, panX, panY)
-      );
+      this.strokeMarchingAnts(ctx, (c) => this.strokePath(c, path, zoom, panX, panY));
     }
   }
 
@@ -416,9 +445,7 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
   ) {
     if (path.length < 2) return;
 
-    this.strokeMarchingAnts(ctx, (c) =>
-      this.strokePath(c, path, zoom, panX, panY)
-    );
+    this.strokeMarchingAnts(ctx, (c) => this.strokePath(c, path, zoom, panX, panY));
   }
 
   private drawFloatingPixels(
@@ -460,11 +487,11 @@ export class PFSelectionOverlay extends AnimatedCanvasOverlay {
 
   render() {
     // Access signals for reactivity
-    void selectionStore.state.value;
-    void selectionStore.previousSelectionForVisual.value;
-    void viewportStore.zoom.value;
-    void viewportStore.panX.value;
-    void viewportStore.panY.value;
+    void this.context.selection.state.value;
+    void this.context.selection.previousSelectionForVisual.value;
+    void this.context.viewport.zoom.value;
+    void this.context.viewport.panX.value;
+    void this.context.viewport.panY.value;
 
     return html`
       <canvas></canvas>

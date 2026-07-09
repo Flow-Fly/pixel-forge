@@ -1,9 +1,7 @@
 import { html } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { viewportStore } from '../../stores/viewport';
-import { gridStore } from '../../stores/grid';
-import { projectStore } from '../../stores/project';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import './pf-selection-overlay';
 import './pf-marching-ants-overlay';
 import './pf-brush-cursor-overlay';
@@ -50,12 +48,21 @@ export class PFCanvasViewport extends BaseComponent {
   // State trackers
   private keyboardState: KeyboardState = createKeyboardState();
   private panState: PanState = createPanState();
+  private context: ProjectContext = defaultProjectContext;
+  private panContext: ProjectContext | null = null;
 
   // ResizeObserver to detect flex layout changes
   private resizeObserver: ResizeObserver | null = null;
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.updateContainerDimensions(context);
+      this.resizeGrid();
+      this.requestUpdate();
+    });
+
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onWindowBlur);
@@ -64,7 +71,7 @@ export class PFCanvasViewport extends BaseComponent {
     window.addEventListener('wheel', this.onGlobalWheel, { passive: false });
 
     // Update container dimensions for zoomToFit
-    this.updateContainerDimensions();
+    this.updateContainerDimensions(this.context);
 
     // Use ResizeObserver to detect size changes from flex layout
     this.resizeObserver = new ResizeObserver(() => {
@@ -74,7 +81,7 @@ export class PFCanvasViewport extends BaseComponent {
 
     // Center canvas on launch
     requestAnimationFrame(() => {
-      viewportStore.resetView();
+      this.context.viewport.resetView();
       this.initGrid();
       this.requestUpdate();
     });
@@ -105,8 +112,8 @@ export class PFCanvasViewport extends BaseComponent {
   }
 
   private handleResize = () => {
-    this.updateContainerDimensions();
-    viewportStore.clampPanToBounds();
+    this.updateContainerDimensions(this.context);
+    this.context.viewport.clampPanToBounds();
     this.resizeGrid();
     this.requestUpdate();
   };
@@ -115,30 +122,31 @@ export class PFCanvasViewport extends BaseComponent {
     resizeGridCanvas(this.gridCanvas, this.gridCtx, this.clientWidth, this.clientHeight);
   }
 
-  private updateContainerDimensions = () => {
-    viewportStore.containerWidth.value = this.clientWidth;
-    viewportStore.containerHeight.value = this.clientHeight;
+  private updateContainerDimensions = (context: ProjectContext) => {
+    context.viewport.containerWidth.value = this.clientWidth;
+    context.viewport.containerHeight.value = this.clientHeight;
   };
 
   render() {
-    const panX = viewportStore.panX.value;
-    const panY = viewportStore.panY.value;
-    const zoom = viewportStore.zoom.value;
-    const isSpaceDown = viewportStore.isSpacebarDown.value;
-    const isPanning = viewportStore.isPanning.value;
+    const { grid, project, viewport } = this.context;
+    const panX = viewport.panX.value;
+    const panY = viewport.panY.value;
+    const zoom = viewport.zoom.value;
+    const isSpaceDown = viewport.isSpacebarDown.value;
+    const isPanning = viewport.isPanning.value;
 
     // Access grid signals for reactive updates
-    void gridStore.pixelGridEnabled.value;
-    void gridStore.tileGridEnabled.value;
-    void gridStore.tileGridSize.value;
-    void gridStore.pixelGridColor.value;
-    void gridStore.pixelGridOpacity.value;
-    void gridStore.tileGridColor.value;
-    void gridStore.tileGridOpacity.value;
+    void grid.pixelGridEnabled.value;
+    void grid.tileGridEnabled.value;
+    void grid.tileGridSize.value;
+    void grid.pixelGridColor.value;
+    void grid.pixelGridOpacity.value;
+    void grid.tileGridColor.value;
+    void grid.tileGridOpacity.value;
 
     // Access project dimensions for grid redraw on project load
-    void projectStore.width.value;
-    void projectStore.height.value;
+    void project.width.value;
+    void project.height.value;
 
     // Update host attributes for cursor styling
     this.toggleAttribute('space-down', isSpaceDown && !isPanning);
@@ -194,7 +202,7 @@ export class PFCanvasViewport extends BaseComponent {
       this.initGrid();
       if (!this.gridCtx) return;
     }
-    drawGrids(this.gridCanvas, this.gridCtx, this.clientWidth, this.clientHeight);
+    drawGrids(this.gridCanvas, this.gridCtx, this.clientWidth, this.clientHeight, this.context);
   }
 
   // ============================================
@@ -205,8 +213,10 @@ export class PFCanvasViewport extends BaseComponent {
     requestUpdate: () => this.requestUpdate(),
     getClientWidth: () => this.clientWidth,
     getClientHeight: () => this.clientHeight,
-    commitTransform: () => commitTransform(),
-    setDragging: (value: boolean) => { this.panState.isDragging = value; },
+    commitTransform: () => commitTransform(this.context),
+    setDragging: (value: boolean) => {
+      this.panState.isDragging = value;
+    },
     getDragging: () => this.panState.isDragging,
   };
 
@@ -223,11 +233,11 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
-    handleKeyDown(e, this.keyboardState, this.keyboardCallbacks);
+    handleKeyDown(e, this.keyboardState, this.keyboardCallbacks, this.context);
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
-    handleKeyUp(e, this.keyboardState, this.keyboardCallbacks);
+    handleKeyUp(e, this.keyboardState, this.keyboardCallbacks, this.context);
   };
 
   private onWindowBlur = () => {
@@ -235,37 +245,56 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private onGlobalMouseDown = (e: MouseEvent) => {
-    handleGlobalMouseDown(e, this.panState, (ev) => this.startDrag(ev));
+    handleGlobalMouseDown(e, this.panState, (ev) => this.startDrag(ev, this.context), this.context);
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    panHandleMouseDown(e, this.panState, this.panCallbacks, (ev) => this.startDrag(ev));
+    panHandleMouseDown(
+      e,
+      this.panState,
+      this.panCallbacks,
+      (ev) => this.startDrag(ev, this.context),
+      this.context
+    );
   };
 
-  private startDrag = (e: MouseEvent) => {
-    panStartDragging(e, this.panState, this.panCallbacks, () => {
-      window.addEventListener('mousemove', this.onGlobalMouseMove);
-      window.addEventListener('mouseup', this.onGlobalMouseUp);
-    });
+  private startDrag = (e: MouseEvent, context: ProjectContext) => {
+    this.panContext = context;
+    panStartDragging(
+      e,
+      this.panState,
+      this.panCallbacks,
+      () => {
+        window.addEventListener('mousemove', this.onGlobalMouseMove);
+        window.addEventListener('mouseup', this.onGlobalMouseUp);
+      },
+      context
+    );
   };
 
   private onGlobalMouseMove = (e: MouseEvent) => {
-    handleGlobalMouseMove(e, this.panState, this.panCallbacks);
+    handleGlobalMouseMove(e, this.panState, this.panCallbacks, this.panContext ?? this.context);
   };
 
   private onGlobalMouseUp = () => {
-    handleGlobalMouseUp(this.panState, this.panCallbacks, () => {
-      window.removeEventListener('mousemove', this.onGlobalMouseMove);
-      window.removeEventListener('mouseup', this.onGlobalMouseUp);
-    });
+    handleGlobalMouseUp(
+      this.panState,
+      this.panCallbacks,
+      () => {
+        window.removeEventListener('mousemove', this.onGlobalMouseMove);
+        window.removeEventListener('mouseup', this.onGlobalMouseUp);
+        this.panContext = null;
+      },
+      this.panContext ?? this.context
+    );
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    panHandleMouseMove(e, this.panState, () => this.getBoundingClientRect());
+    panHandleMouseMove(e, this.panState, () => this.getBoundingClientRect(), this.context);
   };
 
   private onMouseLeave = () => {
-    handleMouseLeave(this.panState);
+    handleMouseLeave(this.panState, this.context);
   };
 
   private onContextMenu = (e: MouseEvent) => {
@@ -273,23 +302,25 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private onWheel = (e: WheelEvent) => {
-    wheelHandleWheel(e, this.keyboardState, this.wheelCallbacks);
+    wheelHandleWheel(e, this.keyboardState, this.wheelCallbacks, this.context);
   };
 
   private onGlobalWheel = (e: WheelEvent) => {
-    handleGlobalWheel(e, this.wheelCallbacks);
+    handleGlobalWheel(e, this.wheelCallbacks, this.context);
   };
 
-  private onRotationStart = () => {
-    handleRotationStart();
+  private onRotationStart = (e: Event) => {
+    const detail = (e as CustomEvent<{ context?: ProjectContext }>).detail;
+    handleRotationStart(detail?.context ?? this.context);
   };
 
   private onRotationEnd = () => {
     handleRotationEnd();
   };
 
-  private onResizeStart = () => {
-    handleResizeStart();
+  private onResizeStart = (e: Event) => {
+    const detail = (e as CustomEvent<{ context?: ProjectContext }>).detail;
+    handleResizeStart(detail?.context ?? this.context);
   };
 
   private onResizeEnd = () => {
@@ -297,7 +328,8 @@ export class PFCanvasViewport extends BaseComponent {
     // clicks outside or presses Enter
   };
 
-  private onCommitTransform = () => {
-    commitTransform();
+  private onCommitTransform = (e: Event) => {
+    const detail = (e as CustomEvent<{ context?: ProjectContext }>).detail;
+    commitTransform(detail?.context ?? this.context);
   };
 }

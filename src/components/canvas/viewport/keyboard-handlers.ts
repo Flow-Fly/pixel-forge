@@ -4,9 +4,9 @@
  * Handles spacebar pan mode, zoom keys, grid toggles, and transform shortcuts.
  */
 
-import { viewportStore } from '../../../stores/viewport';
-import { gridStore } from '../../../stores/grid';
-import { selectionStore } from '../../../stores/selection';
+import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
+
+type KeyboardContext = Pick<ProjectContext, 'grid' | 'selection' | 'viewport'>;
 
 export interface KeyboardState {
   isCtrlActuallyPressed: boolean;
@@ -40,25 +40,25 @@ export function createKeyboardState(): KeyboardState {
 export function handleKeyDown(
   e: KeyboardEvent,
   state: KeyboardState,
-  callbacks: KeyboardHandlerCallbacks
+  callbacks: KeyboardHandlerCallbacks,
+  context: KeyboardContext = getActiveProjectContext()
 ): void {
+  const { grid, selection, viewport } = context;
+
   // Track actual modifier key presses (to distinguish from macOS pinch injection)
   if (e.key === 'Control') state.isCtrlActuallyPressed = true;
   if (e.key === 'Meta') state.isMetaActuallyPressed = true;
   if (e.key === 'Alt') state.isAltActuallyPressed = true;
 
   // Skip if typing in an input
-  if (
-    e.target instanceof HTMLInputElement ||
-    e.target instanceof HTMLTextAreaElement
-  ) {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
     return;
   }
 
   // Spacebar for pan mode
   if (e.code === 'Space' && !e.repeat) {
     e.preventDefault();
-    viewportStore.isSpacebarDown.value = true;
+    viewport.isSpacebarDown.value = true;
     callbacks.requestUpdate();
     return;
   }
@@ -68,41 +68,41 @@ export function handleKeyDown(
 
   // +/- for zoom in/out (no modifier)
   if (e.key === '+' || e.key === '=') {
-    viewportStore.zoomIn();
+    viewport.zoomIn();
     callbacks.requestUpdate();
   } else if (e.key === '-') {
-    viewportStore.zoomOut();
+    viewport.zoomOut();
     callbacks.requestUpdate();
   } else if (e.key === 'Home') {
-    viewportStore.resetView();
+    viewport.resetView();
     callbacks.requestUpdate();
   }
 
   // Ctrl+G for pixel grid toggle
   if (e.key === 'g' && !e.shiftKey && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    gridStore.togglePixelGrid();
+    grid.togglePixelGrid();
     return;
   }
 
   // Ctrl+Shift+G for tile grid toggle
   if (e.key === 'G' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    gridStore.toggleTileGrid();
+    grid.toggleTileGrid();
     return;
   }
 
   // Note: Shift+G for guide visibility is handled by keyboardService
 
   // Handle transform state Enter/Escape
-  const selectionState = selectionStore.state.value;
+  const selectionState = selection.state.value;
   if (selectionState.type === 'transforming') {
     if (e.key === 'Enter') {
       e.preventDefault();
       callbacks.commitTransform();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      selectionStore.cancelTransform();
+      selection.cancelTransform();
     }
   }
 }
@@ -113,7 +113,8 @@ export function handleKeyDown(
 export function handleKeyUp(
   e: KeyboardEvent,
   state: KeyboardState,
-  callbacks: KeyboardHandlerCallbacks
+  callbacks: KeyboardHandlerCallbacks,
+  context: KeyboardContext = getActiveProjectContext()
 ): void {
   // Track actual modifier key releases
   if (e.key === 'Control') state.isCtrlActuallyPressed = false;
@@ -121,14 +122,15 @@ export function handleKeyUp(
   if (e.key === 'Alt') state.isAltActuallyPressed = false;
 
   if (e.code === 'Space') {
-    viewportStore.isSpacebarDown.value = false;
+    const { viewport } = context;
+    viewport.isSpacebarDown.value = false;
 
     // If we were panning with spacebar, clamp to bounds
-    if (viewportStore.isPanning.value || callbacks.getDragging()) {
-      viewportStore.clampPanToBounds();
+    if (viewport.isPanning.value || callbacks.getDragging()) {
+      viewport.clampPanToBounds();
     }
 
-    viewportStore.isPanning.value = false;
+    viewport.isPanning.value = false;
     callbacks.setDragging(false);
     callbacks.requestUpdate();
   }

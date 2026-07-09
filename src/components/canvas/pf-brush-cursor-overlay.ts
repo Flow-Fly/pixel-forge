@@ -2,10 +2,9 @@ import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { CanvasOverlay } from './canvas-overlay';
 import { brushStore } from '../../stores/brush';
-import { colorStore } from '../../stores/colors';
 import { toolStore } from '../../stores/tools';
 import { toolSizes } from '../../stores/tool-settings';
-import { viewportStore } from '../../stores/viewport';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import { PencilTool } from '../../tools/pencil-tool';
 import { EraserTool } from '../../tools/eraser-tool';
 import type { BrushImageData } from '../../types/brush';
@@ -39,12 +38,21 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
   `;
 
   @state() private cursorPos: { x: number; y: number } | null = null;
-  @state() private linePreview: { start: { x: number; y: number }; end: { x: number; y: number } } | null = null;
+  @state() private linePreview: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | null = null;
 
   private animationFrameId = 0;
+  private context: ProjectContext = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.scheduleDraw();
+      this.requestUpdate();
+    });
 
     // Listen for cursor position from drawing canvas
     window.addEventListener('canvas-cursor', this.handleCanvasCursor as EventListener);
@@ -92,7 +100,9 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
     this.clearCanvas();
   };
 
-  private handleLinePreview = (e: CustomEvent<{ start: { x: number; y: number }; end: { x: number; y: number } }>) => {
+  private handleLinePreview = (
+    e: CustomEvent<{ start: { x: number; y: number }; end: { x: number; y: number } }>
+  ) => {
     this.linePreview = e.detail;
     this.scheduleDraw();
   };
@@ -125,14 +135,13 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
     if (!this.cursorPos) return;
 
     // Get last stroke end from the active tool
-    const lastStrokeEnd = tool === 'pencil'
-      ? PencilTool.getLastStrokeEnd()
-      : EraserTool.getLastStrokeEnd();
+    const lastStrokeEnd =
+      tool === 'pencil' ? PencilTool.getLastStrokeEnd() : EraserTool.getLastStrokeEnd();
 
     if (lastStrokeEnd) {
       this.linePreview = {
         start: lastStrokeEnd,
-        end: { x: Math.floor(this.cursorPos.x), y: Math.floor(this.cursorPos.y) }
+        end: { x: Math.floor(this.cursorPos.x), y: Math.floor(this.cursorPos.y) },
       };
       this.scheduleDraw();
     }
@@ -182,7 +191,8 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
   }
 
   private isViewportPanning(): boolean {
-    return viewportStore.isSpacebarDown.value || viewportStore.isPanning.value;
+    const { viewport } = this.context;
+    return viewport.isSpacebarDown.value || viewport.isPanning.value;
   }
 
   private getDrawableTool(): 'pencil' | 'eraser' | null {
@@ -190,14 +200,18 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
     return tool === 'pencil' || tool === 'eraser' ? tool : null;
   }
 
-  private createBrushCursorFrame(ctx: CanvasRenderingContext2D, tool: 'pencil' | 'eraser'): BrushCursorFrame {
+  private createBrushCursorFrame(
+    ctx: CanvasRenderingContext2D,
+    tool: 'pencil' | 'eraser'
+  ): BrushCursorFrame {
+    const { colors, viewport } = this.context;
     return {
       ctx,
       tool,
-      zoom: viewportStore.zoom.value,
-      panX: viewportStore.panX.value,
-      panY: viewportStore.panY.value,
-      color: tool === 'eraser' ? colorStore.secondaryColor.value : colorStore.primaryColor.value,
+      zoom: viewport.zoom.value,
+      panX: viewport.panX.value,
+      panY: viewport.panY.value,
+      color: tool === 'eraser' ? colors.secondaryColor.value : colors.primaryColor.value,
     };
   }
 
@@ -391,16 +405,16 @@ export class PFBrushCursorOverlay extends CanvasOverlay {
   render() {
     // Access signals to trigger re-render when they change
     void brushStore.activeBrush.value;
-    void colorStore.primaryColor.value;
-    void colorStore.secondaryColor.value;
+    void this.context.colors.primaryColor.value;
+    void this.context.colors.secondaryColor.value;
     void toolStore.activeTool.value;
     void toolSizes.pencil.value;
     void toolSizes.eraser.value;
-    void viewportStore.zoom.value;
-    void viewportStore.panX.value;
-    void viewportStore.panY.value;
-    void viewportStore.isSpacebarDown.value;
-    void viewportStore.isPanning.value;
+    void this.context.viewport.zoom.value;
+    void this.context.viewport.panX.value;
+    void this.context.viewport.panY.value;
+    void this.context.viewport.isSpacebarDown.value;
+    void this.context.viewport.isPanning.value;
 
     return html`<canvas></canvas>`;
   }

@@ -1,51 +1,46 @@
-import { html, css, type PropertyValueMap } from "lit";
-import { customElement, property, query } from "lit/decorators.js";
-import { BaseComponent } from "../../core/base-component";
-import { layerStore } from "../../stores/layers";
-import { toolStore, type ToolType } from "../../stores/tools";
-import { selectionStore } from "../../stores/selection";
-import { CommitFloatCommand } from "../../commands/selection-commands";
-import { animationStore } from "../../stores/animation";
-import { historyStore } from "../../stores/history";
-import { dirtyRectStore } from "../../stores/dirty-rect";
-import { viewportStore } from "../../stores/viewport";
-import { renderScheduler } from "../../services/render-scheduler";
-import { onionSkinCache } from "../../services/onion-skin-cache";
-import { OptimizedDrawingCommand } from "../../commands/optimized-drawing-command";
-import type { ModifierKeys, Point } from "../../tools/base-tool";
-import { ToolController } from "../../tools/tool-controller";
-import { rectClamp, type Rect } from "../../types/geometry";
-import type { Layer } from "../../types/layer";
-import { extractIndexRegion } from "../../utils/buffer-region";
+import { html, css, type PropertyValueMap } from 'lit';
+import { customElement, property, query } from 'lit/decorators.js';
+import { BaseComponent } from '../../core/base-component';
+import { toolStore, type ToolType } from '../../stores/tools';
+import { CommitFloatCommand } from '../../commands/selection-commands';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { renderScheduler } from '../../services/render-scheduler';
+import { onionSkinCache } from '../../services/onion-skin-cache';
+import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
+import type { ModifierKeys, Point } from '../../tools/base-tool';
+import { ToolController } from '../../tools/tool-controller';
+import { rectClamp, type Rect } from '../../types/geometry';
+import type { Layer } from '../../types/layer';
+import { extractIndexRegion } from '../../utils/buffer-region';
 import {
   getFont,
   renderText,
   getCursorX,
   renderCursor,
   getDefaultFont,
-} from "../../utils/pixel-fonts";
-import { TextTool } from "../../tools/text-tool";
+} from '../../utils/pixel-fonts';
+import { TextTool } from '../../tools/text-tool';
 
 /** Tools that paint pixels on the active layer (vs. select/navigate). */
 const DRAWING_TOOLS = [
-  "pencil",
-  "eraser",
-  "fill",
-  "gradient",
-  "line",
-  "rectangle",
-  "ellipse",
+  'pencil',
+  'eraser',
+  'fill',
+  'gradient',
+  'line',
+  'rectangle',
+  'ellipse',
 ] as const;
 
 const DRAWING_TOOL_SET = new Set<ToolType>(DRAWING_TOOLS);
 const SELECTION_TOOL_SET = new Set<ToolType>([
-  "marquee-rect",
-  "lasso",
-  "polygonal-lasso",
-  "magic-wand",
+  'marquee-rect',
+  'lasso',
+  'polygonal-lasso',
+  'magic-wand',
 ]);
-const VIEWPORT_TOOL_SET = new Set<ToolType>(["hand", "zoom"]);
-const LAYER_WARNING_TOOL_SET = new Set<ToolType>([...DRAWING_TOOLS, "text"]);
+const VIEWPORT_TOOL_SET = new Set<ToolType>(['hand', 'zoom']);
+const LAYER_WARNING_TOOL_SET = new Set<ToolType>([...DRAWING_TOOLS, 'text']);
 
 type EditableLayer = Layer & { canvas: HTMLCanvasElement };
 
@@ -65,12 +60,12 @@ interface StrokeChange {
   newRegion: Uint8ClampedArray;
 }
 
-@customElement("pf-drawing-canvas")
+@customElement('pf-drawing-canvas')
 export class PFDrawingCanvas extends BaseComponent {
   @property({ type: Number }) width = 64;
   @property({ type: Number }) height = 64;
 
-  @query("canvas") canvas!: HTMLCanvasElement;
+  @query('canvas') canvas!: HTMLCanvasElement;
 
   static styles = css`
     :host {
@@ -80,7 +75,9 @@ export class PFDrawingCanvas extends BaseComponent {
       height: 100%;
       background-color: #151a21; /* Dark transparency base for canvas area */
       overflow: hidden;
-      box-shadow: 0 0 0 1px var(--pf-color-border), 0 20px 70px rgba(0, 0, 0, 0.42);
+      box-shadow:
+        0 0 0 1px var(--pf-color-border),
+        0 20px 70px rgba(0, 0, 0, 0.42);
     }
 
     canvas {
@@ -96,28 +93,41 @@ export class PFDrawingCanvas extends BaseComponent {
     }
 
     /* Inherit cursor from host during pan mode (set by viewport) */
-    :host([pan-cursor="grab"]) canvas {
+    :host([pan-cursor='grab']) canvas {
       cursor: grab !important;
     }
-    :host([pan-cursor="grabbing"]) canvas {
+    :host([pan-cursor='grabbing']) canvas {
       cursor: grabbing !important;
     }
-
   `;
 
   private ctx!: CanvasRenderingContext2D;
   private toolController!: ToolController;
   private previousImageData: ImageData | null = null;
+  private context: ProjectContext = defaultProjectContext;
+  private strokeContext: ProjectContext | null = null;
 
   // Index-buffer snapshot taken at stroke start, so the resulting command
   // can undo/redo palette indices along with the pixels
   private previousIndexSnapshot: Uint8Array | null = null;
-  private strokeFrameId: string = "";
+  private strokeFrameId: string = '';
 
   // Document-level event handlers for out-of-canvas tracking
   private boundDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
   private isStrokeActive = false;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      if (!this.isStrokeActive) {
+        this.strokeContext = null;
+      }
+      this.requestUpdate();
+      this.scheduleCanvasRender(context);
+    });
+  }
 
   protected firstUpdated(
     _changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>
@@ -125,7 +135,7 @@ export class PFDrawingCanvas extends BaseComponent {
     super.firstUpdated(_changedProperties);
 
     // Get context with performance hints
-    this.ctx = this.canvas.getContext("2d", {
+    this.ctx = this.canvas.getContext('2d', {
       alpha: true,
       desynchronized: true, // Hint for lower latency (may not be supported everywhere)
       willReadFrequently: false, // We mostly write, read only for history snapshots
@@ -142,9 +152,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.renderCanvas();
   }
 
-  protected updated(
-    _changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>
-  ): void {
+  protected updated(_changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>): void {
     super.updated(_changedProperties);
 
     // Check if tool changed
@@ -153,12 +161,12 @@ export class PFDrawingCanvas extends BaseComponent {
       this.loadTool(currentTool);
     }
 
-    if (_changedProperties.has("width") || _changedProperties.has("height")) {
+    if (_changedProperties.has('width') || _changedProperties.has('height')) {
       this.resizeCanvas();
     }
 
     // Request full redraw for signal-triggered updates (layer visibility, frame changes, etc.)
-    dirtyRectStore.requestFullRedraw();
+    this.context.dirtyRect.requestFullRedraw();
     this.renderCanvas();
   }
 
@@ -176,17 +184,17 @@ export class PFDrawingCanvas extends BaseComponent {
   private commitFloatingSelectionForDrawingTool(toolName: ToolType) {
     if (!DRAWING_TOOL_SET.has(toolName)) return;
 
-    const command = this.createCommitFloatCommand();
+    const command = this.createCommitFloatCommand(this.context);
     if (command) {
-      historyStore.execute(command);
+      this.context.history.execute(command);
     }
   }
 
-  private createCommitFloatCommand(): CommitFloatCommand | null {
-    const state = selectionStore.state.value;
-    if (state.type !== "floating") return null;
+  private createCommitFloatCommand(context: ProjectContext): CommitFloatCommand | null {
+    const state = context.selection.state.value;
+    if (state.type !== 'floating') return null;
 
-    const activeLayer = this.getActiveLayer().layer;
+    const activeLayer = this.getActiveLayer(context).layer;
     if (!activeLayer?.canvas) return null;
 
     return new CommitFloatCommand(
@@ -196,7 +204,8 @@ export class PFDrawingCanvas extends BaseComponent {
       state.originalBounds,
       state.currentOffset,
       state.shape,
-      state.mask
+      state.mask,
+      context
     );
   }
 
@@ -222,34 +231,24 @@ export class PFDrawingCanvas extends BaseComponent {
     }
   }
 
-  renderCanvas() {
+  renderCanvas(context: ProjectContext = this.context) {
     if (!this.ctx) return;
 
-    const fullRedraw = dirtyRectStore.consumeFullRedraw();
-    const dirtyRect = fullRedraw ? null : dirtyRectStore.consumePendingDirty();
+    const fullRedraw = context.dirtyRect.consumeFullRedraw();
+    const dirtyRect = fullRedraw ? null : context.dirtyRect.consumePendingDirty();
 
     if (dirtyRect && !fullRedraw) {
       // Partial redraw - clip to dirty region
       this.ctx.save();
       this.ctx.beginPath();
-      this.ctx.rect(
-        dirtyRect.x,
-        dirtyRect.y,
-        dirtyRect.width,
-        dirtyRect.height
-      );
+      this.ctx.rect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
       this.ctx.clip();
 
       // Clear just the dirty region
-      this.ctx.clearRect(
-        dirtyRect.x,
-        dirtyRect.y,
-        dirtyRect.width,
-        dirtyRect.height
-      );
+      this.ctx.clearRect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
 
       // Render layers (clipped)
-      this.renderLayers(dirtyRect);
+      this.renderLayers(dirtyRect, context);
 
       this.ctx.restore();
     } else {
@@ -257,10 +256,10 @@ export class PFDrawingCanvas extends BaseComponent {
       this.ctx.clearRect(0, 0, this.width, this.height);
 
       // Draw onion skins if enabled (only on full redraw)
-      this.drawOnionSkins();
+      this.drawOnionSkins(context);
 
       // Render all layers
-      this.renderLayers(null);
+      this.renderLayers(null, context);
     }
 
     // Selection overlay always needs to be drawn
@@ -270,17 +269,17 @@ export class PFDrawingCanvas extends BaseComponent {
   /**
    * Render visible layers, optionally clipped to a dirty rect.
    */
-  private renderLayers(dirtyRect: Rect | null) {
-    const layers = layerStore.layers.value;
-    const currentFrameId = animationStore.currentFrameId.value;
+  private renderLayers(dirtyRect: Rect | null, context: ProjectContext) {
+    const layers = context.layers.layers.value;
+    const currentFrameId = context.animation.currentFrameId.value;
 
-    const cels = animationStore.cels.value;
+    const cels = context.animation.cels.value;
 
     for (const layer of layers) {
       if (!layer.visible) continue;
 
       // Get cel for current frame to apply cel-level opacity
-      const celKey = animationStore.getCelKey(layer.id, currentFrameId);
+      const celKey = context.animation.getCelKey(layer.id, currentFrameId);
       const cel = cels.get(celKey);
 
       // Combine layer opacity (0-255) and cel opacity (0-100)
@@ -288,13 +287,13 @@ export class PFDrawingCanvas extends BaseComponent {
       const celOpacity = (cel?.opacity ?? 100) / 100;
       this.ctx.globalAlpha = layerOpacity * celOpacity;
       this.ctx.globalCompositeOperation =
-        layer.blendMode === "normal"
-          ? "source-over"
+        layer.blendMode === 'normal'
+          ? 'source-over'
           : (layer.blendMode as GlobalCompositeOperation);
 
-      if (layer.type === "text") {
+      if (layer.type === 'text') {
         // Render text layer using pixel font
-        this.renderTextLayer(layer.id, currentFrameId);
+        this.renderTextLayer(layer.id, currentFrameId, context);
       } else if (layer.canvas) {
         // Render raster layer
         if (dirtyRect) {
@@ -318,17 +317,17 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Reset composite operation
     this.ctx.globalAlpha = 1;
-    this.ctx.globalCompositeOperation = "source-over";
+    this.ctx.globalCompositeOperation = 'source-over';
   }
 
   /**
    * Render a text layer using pixel fonts.
    */
-  private renderTextLayer(layerId: string, frameId: string) {
-    const layer = layerStore.layers.value.find((l) => l.id === layerId);
-    if (!layer || layer.type !== "text" || !layer.textData) return;
+  private renderTextLayer(layerId: string, frameId: string, context: ProjectContext) {
+    const layer = context.layers.layers.value.find((l) => l.id === layerId);
+    if (!layer || layer.type !== 'text' || !layer.textData) return;
 
-    const textCelData = animationStore.getTextCelData(layerId, frameId);
+    const textCelData = context.animation.getTextCelData(layerId, frameId);
     if (!textCelData) return;
 
     const { content, x, y } = textCelData;
@@ -344,71 +343,58 @@ export class PFDrawingCanvas extends BaseComponent {
 
     // Render cursor if editing this layer
     const editingState = TextTool.editingState.value;
-    if (
-      editingState.isEditing &&
-      editingState.layerId === layerId &&
-      editingState.cursorVisible
-    ) {
-      const cursorX = getCursorX(
-        content || "",
-        editingState.cursorPosition,
-        font,
-        x
-      );
+    if (editingState.isEditing && editingState.layerId === layerId && editingState.cursorVisible) {
+      const cursorX = getCursorX(content || '', editingState.cursorPosition, font, x);
       renderCursor(this.ctx, cursorX, y, font.charHeight, color);
     }
   }
 
-  private drawOnionSkins() {
+  private drawOnionSkins(context: ProjectContext) {
     const { enabled, prevFrames, nextFrames, opacityStep, tint } =
-      animationStore.onionSkin.value;
+      context.animation.onionSkin.value;
     if (!enabled) return;
 
-    const frames = animationStore.frames.value;
-    const currentFrameId = animationStore.currentFrameId.value;
+    const frames = context.animation.frames.value;
+    const currentFrameId = context.animation.currentFrameId.value;
     const currentIndex = frames.findIndex((f) => f.id === currentFrameId);
     if (currentIndex === -1) return;
 
-    const activeLayerId = layerStore.activeLayerId.value;
+    const activeLayerId = context.layers.activeLayerId.value;
     if (!activeLayerId) return;
 
-    const cels = animationStore.cels.value;
+    const cels = context.animation.cels.value;
 
     // Helper to draw a frame with onion skin effect
     const drawFrame = (index: number, isPrev: boolean, distance: number) => {
       if (index < 0 || index >= frames.length) return;
 
       const frame = frames[index];
-      const key = animationStore.getCelKey(activeLayerId, frame.id);
+      const key = context.animation.getCelKey(activeLayerId, frame.id);
       const cel = cels.get(key);
 
       if (cel && cel.canvas) {
         const opacity = Math.max(0.1, 1 - distance * opacityStep);
-        const tintColor = isPrev ? "#ff0000" : "#0000ff";
+        const tintColor = isPrev ? '#ff0000' : '#0000ff';
 
         this.ctx.save();
         this.ctx.globalAlpha = opacity;
 
         if (tint) {
           // Try to get cached tinted bitmap (fast path)
-          const cachedBitmap = onionSkinCache.getSync(
-            cel.id,
-            tintColor,
-            opacity
-          );
+          const cachedBitmap = onionSkinCache.getSync(cel.id, tintColor, opacity);
 
           if (cachedBitmap) {
             // Cache hit - draw the cached bitmap
             this.ctx.drawImage(cachedBitmap, 0, 0);
           } else {
             // Cache miss - use sync fallback and populate cache for next time
-            const tempCanvas = document.createElement("canvas");
+            const tempCanvas = document.createElement('canvas');
             tempCanvas.width = this.width;
             tempCanvas.height = this.height;
-            const tempCtx = tempCanvas.getContext("2d")!;
+            const tempCtx = tempCanvas.getContext('2d')!;
 
             tempCtx.drawImage(cel.canvas, 0, 0);
-            tempCtx.globalCompositeOperation = "source-in";
+            tempCtx.globalCompositeOperation = 'source-in';
             tempCtx.fillStyle = tintColor;
             tempCtx.fillRect(0, 0, this.width, this.height);
 
@@ -477,7 +463,7 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private emitCanvasCursor(point: Point) {
-    const cursorEvent = new CustomEvent("canvas-cursor", {
+    const cursorEvent = new CustomEvent('canvas-cursor', {
       detail: { x: Math.floor(point.x), y: Math.floor(point.y) },
       bubbles: true,
       composed: true,
@@ -486,12 +472,12 @@ export class PFDrawingCanvas extends BaseComponent {
     window.dispatchEvent(cursorEvent);
   }
 
-  private shouldSkipToolMovement(): boolean {
-    return viewportStore.isSpacebarDown.value || viewportStore.isPanning.value;
+  private shouldSkipToolMovement(context: ProjectContext): boolean {
+    return context.viewport.isSpacebarDown.value || context.viewport.isPanning.value;
   }
 
-  private scheduleCanvasRender() {
-    renderScheduler.scheduleRender(() => this.renderCanvas());
+  private scheduleCanvasRender(context: ProjectContext = this.context) {
+    renderScheduler.scheduleRender(() => this.renderCanvas(context));
   }
 
   /**
@@ -499,11 +485,11 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private cleanupDocumentListeners() {
     if (this.boundDocumentMouseMove) {
-      document.removeEventListener("mousemove", this.boundDocumentMouseMove);
+      document.removeEventListener('mousemove', this.boundDocumentMouseMove);
       this.boundDocumentMouseMove = null;
     }
     if (this.boundDocumentMouseUp) {
-      document.removeEventListener("mouseup", this.boundDocumentMouseUp);
+      document.removeEventListener('mouseup', this.boundDocumentMouseUp);
       this.boundDocumentMouseUp = null;
     }
     this.isStrokeActive = false;
@@ -516,30 +502,32 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private handleMouseDown(e: MouseEvent) {
+    const context = this.context;
     const currentTool = toolStore.activeTool.value;
-    if (!this.shouldHandleCanvasMouseDown(e, currentTool)) return;
+    if (!this.shouldHandleCanvasMouseDown(e, currentTool, context)) return;
 
-    const target = this.getStrokeTarget();
+    const target = this.getStrokeTarget(context);
     if (!target) {
-      this.showLayerWarningForTool(currentTool);
+      this.showLayerWarningForTool(currentTool, context);
       return;
     }
 
-    this.startStroke(e, currentTool, target);
+    this.startStroke(e, currentTool, target, context);
   }
 
   private shouldHandleCanvasMouseDown(
     e: MouseEvent,
-    currentTool: ToolType
+    currentTool: ToolType,
+    context: ProjectContext
   ): boolean {
-    if (this.isPanGesture(e)) return false;
+    if (this.isPanGesture(e, context)) return false;
     if (VIEWPORT_TOOL_SET.has(currentTool)) return false;
     if (this.isQuickToolGesture(e, currentTool)) return false;
     return this.toolController.hasActiveTool;
   }
 
-  private isPanGesture(e: MouseEvent): boolean {
-    return e.button === 1 || viewportStore.isSpacebarDown.value;
+  private isPanGesture(e: MouseEvent, context: ProjectContext): boolean {
+    return e.button === 1 || context.viewport.isSpacebarDown.value;
   }
 
   private isQuickToolGesture(e: MouseEvent, currentTool: ToolType): boolean {
@@ -547,21 +535,21 @@ export class PFDrawingCanvas extends BaseComponent {
     return e.altKey || e.metaKey || e.ctrlKey;
   }
 
-  private getStrokeTarget(): StrokeTarget | null {
-    const { layerId, layer } = this.getActiveLayer();
+  private getStrokeTarget(context: ProjectContext): StrokeTarget | null {
+    const { layerId, layer } = this.getActiveLayer(context);
     if (!layerId || !this.isEditableLayer(layer)) return null;
 
-    const currentFrameId = animationStore.currentFrameId.value;
-    const editableLayer = this.getLayerForEdit(layerId, layer, currentFrameId);
-    const context = editableLayer.canvas.getContext("2d");
-    if (!context) return null;
+    const currentFrameId = context.animation.currentFrameId.value;
+    const editableLayer = this.getLayerForEdit(context, layerId, layer, currentFrameId);
+    const targetContext = editableLayer.canvas.getContext('2d');
+    if (!targetContext) return null;
 
-    return { layerId, layer: editableLayer, context };
+    return { layerId, layer: editableLayer, context: targetContext };
   }
 
-  private getActiveLayer(): ActiveLayerLookup {
-    const layerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((item) => item.id === layerId);
+  private getActiveLayer(context: ProjectContext): ActiveLayerLookup {
+    const layerId = context.layers.activeLayerId.value;
+    const layer = context.layers.layers.value.find((item) => item.id === layerId);
     return { layerId, layer };
   }
 
@@ -571,44 +559,41 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private getLayerForEdit(
+    context: ProjectContext,
     layerId: string,
     layer: EditableLayer,
     frameId: string
   ): EditableLayer {
-    const wasUnlinked = animationStore.ensureUnlinkedForEdit(layerId, frameId);
+    const wasUnlinked = context.animation.ensureUnlinkedForEdit(layerId, frameId);
     if (!wasUnlinked) return layer;
 
-    const freshLayer = layerStore.layers.value.find(
-      (item) => item.id === layerId
-    );
+    const freshLayer = context.layers.layers.value.find((item) => item.id === layerId);
     return this.isEditableLayer(freshLayer) ? freshLayer : layer;
   }
 
   private startStroke(
     e: MouseEvent,
     currentTool: ToolType,
-    target: StrokeTarget
+    target: StrokeTarget,
+    context: ProjectContext
   ) {
     const point = this.getCanvasCoordinates(e);
     const modifiers = this.getModifiers(e);
 
-    this.captureStrokeSnapshot(target, currentTool);
-    dirtyRectStore.resetStroke();
+    this.strokeContext = context;
+    this.captureStrokeSnapshot(target, currentTool, context);
+    context.dirtyRect.resetStroke();
     this.toolController.onDown(target.context, point, modifiers);
     this.attachDocumentListeners();
-    this.scheduleCanvasRender();
+    this.scheduleCanvasRender(context);
   }
 
-  private captureStrokeSnapshot(target: StrokeTarget, toolName: ToolType) {
-    this.previousImageData = target.context.getImageData(
-      0,
-      0,
-      this.width,
-      this.height
-    );
+  private captureStrokeSnapshot(target: StrokeTarget, toolName: ToolType, context: ProjectContext) {
+    this.previousImageData = target.context.getImageData(0, 0, this.width, this.height);
 
-    this.strokeFrameId = animationStore.currentFrameId.value;
+    this.strokeFrameId = context.animation.currentFrameId.value;
     this.previousIndexSnapshot = this.getPreviousIndexSnapshot(
+      context,
       target.layerId,
       this.strokeFrameId,
       toolName
@@ -616,13 +601,14 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private getPreviousIndexSnapshot(
+    context: ProjectContext,
     layerId: string,
     frameId: string,
     toolName: ToolType
   ): Uint8Array | null {
     const indexBuffer = DRAWING_TOOL_SET.has(toolName)
-      ? animationStore.ensureCelIndexBuffer(layerId, frameId)
-      : animationStore.getCelIndexBuffer(layerId, frameId);
+      ? context.animation.ensureCelIndexBuffer(layerId, frameId)
+      : context.animation.getCelIndexBuffer(layerId, frameId);
 
     return indexBuffer ? new Uint8Array(indexBuffer) : null;
   }
@@ -631,31 +617,28 @@ export class PFDrawingCanvas extends BaseComponent {
     this.isStrokeActive = true;
     this.boundDocumentMouseMove = this.handleDocumentMouseMove.bind(this);
     this.boundDocumentMouseUp = this.handleDocumentMouseUp.bind(this);
-    document.addEventListener("mousemove", this.boundDocumentMouseMove);
-    document.addEventListener("mouseup", this.boundDocumentMouseUp);
+    document.addEventListener('mousemove', this.boundDocumentMouseMove);
+    document.addEventListener('mouseup', this.boundDocumentMouseUp);
   }
 
-  private showLayerWarningForTool(toolName: ToolType) {
+  private showLayerWarningForTool(toolName: ToolType, context: ProjectContext) {
     if (!LAYER_WARNING_TOOL_SET.has(toolName)) return;
 
-    const { layerId, layer } = this.getActiveLayer();
+    const { layerId, layer } = this.getActiveLayer(context);
     const warning = this.getLayerWarning(layerId, layer);
     if (warning) {
       this.showWarning(warning);
     }
   }
 
-  private getLayerWarning(
-    layerId: string | null,
-    layer: Layer | undefined
-  ): string | null {
-    if (!layerId || !layer) return "No layer selected";
+  private getLayerWarning(layerId: string | null, layer: Layer | undefined): string | null {
+    if (!layerId || !layer) return 'No layer selected';
     return this.getBlockedLayerWarning(layer);
   }
 
   private getBlockedLayerWarning(layer: Layer): string | null {
-    if (layer.locked) return "Layer is locked";
-    if (!layer.visible) return "Layer is hidden";
+    if (layer.locked) return 'Layer is locked';
+    if (!layer.visible) return 'Layer is hidden';
     return null;
   }
 
@@ -665,7 +648,9 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private handleDocumentMouseMove(e: MouseEvent) {
     if (!this.canContinueStroke()) return;
-    if (this.shouldSkipToolMovement()) return;
+
+    const context = this.strokeContext ?? this.context;
+    if (this.shouldSkipToolMovement(context)) return;
 
     const point = this.getClampedMousePoint(e);
     const modifiers = this.getModifiers(e);
@@ -674,7 +659,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.emitCanvasCursor(point);
 
     this.toolController.onDrag(point, modifiers);
-    this.scheduleCanvasRender();
+    this.scheduleCanvasRender(context);
   }
 
   /**
@@ -683,6 +668,7 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private handleDocumentMouseUp(e: MouseEvent) {
     if (!this.isStrokeActive) return;
+    const context = this.strokeContext ?? this.context;
 
     // Clean up document listeners first
     this.cleanupDocumentListeners();
@@ -698,10 +684,10 @@ export class PFDrawingCanvas extends BaseComponent {
     this.toolController.onUp(point, modifiers);
 
     // Get stroke bounds before flushing
-    const strokeBounds = dirtyRectStore.flushStroke();
+    const strokeBounds = context.dirtyRect.flushStroke();
 
-    this.renderFinalStrokeState();
-    this.commitStrokeIfChanged(strokeBounds);
+    this.renderFinalStrokeState(context);
+    this.commitStrokeIfChanged(strokeBounds, context);
     this.clearStrokeSnapshots();
   }
 
@@ -709,29 +695,25 @@ export class PFDrawingCanvas extends BaseComponent {
     return this.isStrokeActive && this.toolController.hasActiveTool;
   }
 
-  private renderFinalStrokeState() {
+  private renderFinalStrokeState(context: ProjectContext) {
     renderScheduler.flush();
-    dirtyRectStore.requestFullRedraw();
-    this.renderCanvas();
+    context.dirtyRect.requestFullRedraw();
+    this.renderCanvas(context);
   }
 
-  private commitStrokeIfChanged(strokeBounds: Rect | null) {
+  private commitStrokeIfChanged(strokeBounds: Rect | null, context: ProjectContext) {
     const bounds = this.getUsableStrokeBounds(strokeBounds);
     if (!bounds) return;
 
-    const target = this.getActiveLayerContext();
+    const target = this.getActiveLayerContext(context);
     if (!target) return;
 
     const strokeChange = this.readStrokeChange(target.context, bounds);
     if (!strokeChange) return;
 
-    const command = this.createStrokeCommand(
-      target.layerId,
-      bounds,
-      strokeChange
-    );
-    historyStore.execute(command);
-    this.invalidateOnionSkinCel(target.layerId);
+    const command = this.createStrokeCommand(target.layerId, bounds, strokeChange, context);
+    context.history.execute(command);
+    this.invalidateOnionSkinCel(target.layerId, context);
   }
 
   private getUsableStrokeBounds(strokeBounds: Rect | null): Rect | null {
@@ -745,36 +727,27 @@ export class PFDrawingCanvas extends BaseComponent {
     return bounds.width <= 0 || bounds.height <= 0;
   }
 
-  private getActiveLayerContext(): Pick<
-    StrokeTarget,
-    "layerId" | "context"
-  > | null {
-    const { layerId, layer } = this.getActiveLayer();
+  private getActiveLayerContext(
+    context: ProjectContext
+  ): Pick<StrokeTarget, 'layerId' | 'context'> | null {
+    const { layerId, layer } = this.getActiveLayer(context);
     if (!layerId || !this.hasCanvas(layer)) return null;
 
-    const context = layer.canvas.getContext("2d");
-    if (!context) return null;
+    const canvasContext = layer.canvas.getContext('2d');
+    if (!canvasContext) return null;
 
-    return { layerId, context };
+    return { layerId, context: canvasContext };
   }
 
   private hasCanvas(layer: Layer | undefined): layer is EditableLayer {
     return Boolean(layer?.canvas);
   }
 
-  private readStrokeChange(
-    context: CanvasRenderingContext2D,
-    bounds: Rect
-  ): StrokeChange | null {
+  private readStrokeChange(context: CanvasRenderingContext2D, bounds: Rect): StrokeChange | null {
     if (!this.previousImageData) return null;
 
     const previousRegion = this.extractRegion(this.previousImageData, bounds);
-    const newImageData = context.getImageData(
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height
-    );
+    const newImageData = context.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
 
     if (this.uint8ArrayEquals(previousRegion, newImageData.data)) return null;
     return {
@@ -786,7 +759,8 @@ export class PFDrawingCanvas extends BaseComponent {
   private createStrokeCommand(
     layerId: string,
     bounds: Rect,
-    strokeChange: StrokeChange
+    strokeChange: StrokeChange,
+    context: ProjectContext
   ): OptimizedDrawingCommand {
     return new OptimizedDrawingCommand(
       layerId,
@@ -794,35 +768,26 @@ export class PFDrawingCanvas extends BaseComponent {
       strokeChange.previousRegion,
       strokeChange.newRegion,
       this.toolController.commandName,
-      this.createStrokeIndexBufferData(layerId, bounds)
+      this.createStrokeIndexBufferData(layerId, bounds, context),
+      context
     );
   }
 
-  private createStrokeIndexBufferData(layerId: string, bounds: Rect) {
-    const currentIndexBuffer = animationStore.getCelIndexBuffer(
-      layerId,
-      this.strokeFrameId
-    );
+  private createStrokeIndexBufferData(layerId: string, bounds: Rect, context: ProjectContext) {
+    const currentIndexBuffer = context.animation.getCelIndexBuffer(layerId, this.strokeFrameId);
     if (!this.previousIndexSnapshot || !currentIndexBuffer) return undefined;
 
     return {
       frameId: this.strokeFrameId,
       canvasWidth: this.width,
-      previousIndexData: extractIndexRegion(
-        this.previousIndexSnapshot,
-        this.width,
-        bounds
-      ),
+      previousIndexData: extractIndexRegion(this.previousIndexSnapshot, this.width, bounds),
       newIndexData: extractIndexRegion(currentIndexBuffer, this.width, bounds),
     };
   }
 
-  private invalidateOnionSkinCel(layerId: string) {
-    const celKey = animationStore.getCelKey(
-      layerId,
-      animationStore.currentFrameId.value
-    );
-    const cel = animationStore.cels.value.get(celKey);
+  private invalidateOnionSkinCel(layerId: string, context: ProjectContext) {
+    const celKey = context.animation.getCelKey(layerId, context.animation.currentFrameId.value);
+    const cel = context.animation.cels.value.get(celKey);
     if (cel) {
       onionSkinCache.invalidateCel(cel.id);
     }
@@ -831,6 +796,7 @@ export class PFDrawingCanvas extends BaseComponent {
   private clearStrokeSnapshots() {
     this.previousImageData = null;
     this.previousIndexSnapshot = null;
+    this.strokeContext = null;
   }
 
   private handleMouseMove(e: MouseEvent) {
@@ -844,7 +810,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.emitCanvasCursor(point);
 
     // Skip tool interaction during pan operations
-    if (this.shouldSkipToolMovement()) return;
+    if (this.shouldSkipToolMovement(this.context)) return;
 
     if (!this.toolController.hasActiveTool) return;
     const modifiers = this.getModifiers(e);
@@ -855,7 +821,7 @@ export class PFDrawingCanvas extends BaseComponent {
 
   private handleMouseLeave = (_e: MouseEvent) => {
     // Notify brush cursor overlay that cursor left canvas
-    window.dispatchEvent(new CustomEvent("canvas-cursor-leave"));
+    window.dispatchEvent(new CustomEvent('canvas-cursor-leave'));
 
     // Don't commit stroke here - document-level listeners handle out-of-canvas tracking
     // The stroke will be finalized when mouse is released anywhere
@@ -873,20 +839,14 @@ export class PFDrawingCanvas extends BaseComponent {
   /**
    * Extract a rectangular region from full ImageData.
    */
-  private extractRegion(
-    fullImageData: ImageData,
-    bounds: Rect
-  ): Uint8ClampedArray {
+  private extractRegion(fullImageData: ImageData, bounds: Rect): Uint8ClampedArray {
     const result = new Uint8ClampedArray(bounds.width * bounds.height * 4);
     const fullWidth = fullImageData.width;
 
     for (let y = 0; y < bounds.height; y++) {
       const srcOffset = ((bounds.y + y) * fullWidth + bounds.x) * 4;
       const dstOffset = y * bounds.width * 4;
-      result.set(
-        fullImageData.data.subarray(srcOffset, srcOffset + bounds.width * 4),
-        dstOffset
-      );
+      result.set(fullImageData.data.subarray(srcOffset, srcOffset + bounds.width * 4), dstOffset);
     }
 
     return result;
@@ -895,10 +855,7 @@ export class PFDrawingCanvas extends BaseComponent {
   /**
    * Compare two Uint8ClampedArray for equality.
    */
-  private uint8ArrayEquals(
-    a: Uint8ClampedArray,
-    b: Uint8ClampedArray
-  ): boolean {
+  private uint8ArrayEquals(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
       if (a[i] !== b[i]) return false;
@@ -911,7 +868,7 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private showWarning(message: string) {
     window.dispatchEvent(
-      new CustomEvent("show-warning-toast", {
+      new CustomEvent('show-warning-toast', {
         detail: { message },
       })
     );
@@ -920,10 +877,10 @@ export class PFDrawingCanvas extends BaseComponent {
   render() {
     // Access signals to register them with SignalWatcher for reactive updates
     // This ensures canvas re-renders when these values change
-    void historyStore.version.value;
-    void layerStore.layers.value;
-    void animationStore.currentFrameId.value;
-    void animationStore.cels.value; // For text cel updates
+    void this.context.history.version.value;
+    void this.context.layers.layers.value;
+    void this.context.animation.currentFrameId.value;
+    void this.context.animation.cels.value; // For text cel updates
     void TextTool.editingState.value; // For cursor blinking and text updates
 
     return html`

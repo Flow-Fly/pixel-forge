@@ -1,5 +1,5 @@
 import { type Command } from '../../stores/history';
-import { selectionStore } from '../../stores/selection';
+import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { trimTransparentPixels } from './image-data';
@@ -8,6 +8,8 @@ import {
   maskPixelsOutsideSelection,
   pasteImageDataWithAlpha,
 } from './pixels';
+
+type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
 
 /**
  * Command for cutting selected pixels into a floating selection.
@@ -33,17 +35,20 @@ export class CutToFloatCommand implements Command {
   private trimmedImageData: ImageData;
   private trimmedBounds: Rect;
   private trimmedMask?: Uint8Array;
+  private readonly context: SelectionCommandContext;
 
   constructor(
     canvas: HTMLCanvasElement,
     _layerId: string,
     bounds: Rect,
     shape: SelectionShape,
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    context: SelectionCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
     this.canvas = canvas;
+    this.context = context;
     this.originalBounds = { ...bounds };
     this.shape = shape;
     this.originalMask = mask;
@@ -86,7 +91,12 @@ export class CutToFloatCommand implements Command {
     clearCanvasSelection(ctx, this.originalBounds, this.shape, this.originalMask);
 
     // Set selection store to floating state with TRIMMED pixels
-    selectionStore.setFloating(this.trimmedImageData, this.trimmedBounds, this.shape, this.trimmedMask);
+    this.context.selection.setFloating(
+      this.trimmedImageData,
+      this.trimmedBounds,
+      this.shape,
+      this.trimmedMask
+    );
   }
 
   undo() {
@@ -96,7 +106,7 @@ export class CutToFloatCommand implements Command {
     ctx.putImageData(this.fullImageData, this.originalBounds.x, this.originalBounds.y);
 
     // Return to selected state with original bounds
-    selectionStore.setSelected(this.originalBounds, this.shape, this.originalMask);
+    this.context.selection.setSelected(this.originalBounds, this.shape, this.originalMask);
   }
 }
 
@@ -116,6 +126,7 @@ export class CommitFloatCommand implements Command {
   private overwrittenImageData: ImageData;
   private shape: SelectionShape;
   private mask?: Uint8Array;
+  private readonly context: SelectionCommandContext;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -124,11 +135,13 @@ export class CommitFloatCommand implements Command {
     originalBounds: Rect,
     offset: { x: number; y: number },
     shape: SelectionShape,
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    context: SelectionCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
     this.canvas = canvas;
+    this.context = context;
     this.floatingImageData = floatingImageData;
     this.shape = shape;
     this.mask = mask;
@@ -164,7 +177,7 @@ export class CommitFloatCommand implements Command {
     );
 
     // Clear selection state
-    selectionStore.clearAfterCommit();
+    this.context.selection.clearAfterCommit();
   }
 
   undo() {
@@ -174,7 +187,7 @@ export class CommitFloatCommand implements Command {
     ctx.putImageData(this.overwrittenImageData, this.destinationBounds.x, this.destinationBounds.y);
 
     // Restore floating state at the destination position
-    selectionStore.setFloating(
+    this.context.selection.setFloating(
       this.floatingImageData,
       {
         x: this.destinationBounds.x,

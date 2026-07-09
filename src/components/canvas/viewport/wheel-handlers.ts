@@ -4,11 +4,13 @@
  * Handles zoom and pan via mouse wheel and trackpad gestures.
  */
 
-import { viewportStore } from "../../../stores/viewport";
-import { toolStore } from "../../../stores/tools";
-import { getToolSize, setToolSize } from "../../../stores/tool-settings";
-import type { KeyboardState } from "./keyboard-handlers";
-import { isClickOnUI } from "./pan-handlers";
+import { toolStore } from '../../../stores/tools';
+import { getToolSize, setToolSize } from '../../../stores/tool-settings';
+import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
+import type { KeyboardState } from './keyboard-handlers';
+import { isClickOnUI } from './pan-handlers';
+
+type WheelContext = Pick<ProjectContext, 'viewport'>;
 
 export interface WheelHandlerCallbacks {
   requestUpdate: () => void;
@@ -33,7 +35,8 @@ function normalizeWheelDelta(delta: number, deltaMode: number): number {
 export function handleWheel(
   e: WheelEvent,
   keyboardState: KeyboardState,
-  callbacks: WheelHandlerCallbacks
+  callbacks: WheelHandlerCallbacks,
+  context: WheelContext = getActiveProjectContext()
 ): void {
   e.preventDefault();
 
@@ -63,13 +66,13 @@ export function handleWheel(
   if (shouldZoom) {
     const normalizedDelta = normalizeWheelDelta(e.deltaY, e.deltaMode);
     const zoomFactor = Math.exp(-normalizedDelta * (isPinchGesture ? 0.0035 : 0.0025));
-    viewportStore.zoomByFactorAt(zoomFactor, screenX, screenY);
+    context.viewport.zoomByFactorAt(zoomFactor, screenX, screenY);
     callbacks.requestUpdate();
     return;
   }
 
   // Trackpad two-finger scroll = pan.
-  viewportStore.panBy(-e.deltaX, -e.deltaY);
+  context.viewport.panBy(-e.deltaX, -e.deltaY);
   callbacks.requestUpdate();
 }
 
@@ -79,7 +82,8 @@ export function handleWheel(
  */
 export function handleGlobalWheel(
   e: WheelEvent,
-  callbacks: WheelHandlerCallbacks
+  callbacks: WheelHandlerCallbacks,
+  context: WheelContext = getActiveProjectContext()
 ): void {
   // Skip if event originated from within this component (already handled by local handler)
   if (callbacks.contains(e.target as Node)) return;
@@ -101,6 +105,6 @@ export function handleGlobalWheel(
 
   // Trackpad two-finger scroll = pan
   e.preventDefault();
-  viewportStore.panBy(-e.deltaX, -e.deltaY);
+  context.viewport.panBy(-e.deltaX, -e.deltaY);
   callbacks.requestUpdate();
 }
