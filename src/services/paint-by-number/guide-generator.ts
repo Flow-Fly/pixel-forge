@@ -4,16 +4,15 @@ import {
   rgbToHex,
   type RGB,
 } from '../../stores/palette/color-utils';
+import type { GuidedColorMapping } from '../../types/guided-drawing';
 
 const MAX_GUIDE_COLORS = 255;
 const DEFAULT_GUIDE_COLOR_COUNT = 12;
 
-export type GuideColorMapping = 'color' | 'luminance';
-
 export interface GuideGenerationOptions {
   maxColors?: number;
   palette?: string[];
-  mapping?: GuideColorMapping;
+  mapping?: GuidedColorMapping;
   simplifyIsolatedPixels?: boolean;
 }
 
@@ -329,7 +328,7 @@ function relativeLuminance(color: RGB): number {
 function mapImageToPalette(
   image: ImageData,
   palette: RGB[],
-  mapping: GuideColorMapping,
+  mapping: GuidedColorMapping,
 ): Uint8Array {
   const target = new Uint8Array(image.width * image.height);
   if (palette.length === 0) return target;
@@ -352,7 +351,7 @@ function mapImageToPalette(
 function findClosestPaletteIndex(
   color: RGB,
   palette: RGB[],
-  mapping: GuideColorMapping,
+  mapping: GuidedColorMapping,
 ): number {
   let closestIndex = 0;
   let closestDistance = Number.POSITIVE_INFINITY;

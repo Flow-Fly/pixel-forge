@@ -33,10 +33,10 @@ import { projectStore } from '../../src/stores/project';
 import { layerStore } from '../../src/stores/layers';
 
 describe('project file format version', () => {
-  it('is in sync with the newest schema fields (4.0.0 = reference layer data)', () => {
+  it('is in sync with the newest schema fields (4.1.0 = guided drawing)', () => {
     // If this fails, the ProjectFile schema changed without bumping
     // PROJECT_VERSION — bump it in the same PR (see src/types/project.ts).
-    expect(PROJECT_VERSION).toBe('4.0.0');
+    expect(PROJECT_VERSION).toBe('4.1.0');
   });
 
   it('stamps saved projects with PROJECT_VERSION and serializes current-format fields', async () => {

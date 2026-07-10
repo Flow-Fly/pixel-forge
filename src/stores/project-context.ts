@@ -4,6 +4,7 @@ import { createColorStore } from "./colors-store";
 import { createDirtyRectStore } from "./dirty-rect-store";
 import { createGridStore } from "./grid-store";
 import { createGuidesStore } from "./guides-store";
+import { createGuidedDrawingStore } from "./guided-drawing-store";
 import { createHistoryHighlightStore } from "./history-highlight-store";
 import { createHistoryStore } from "./history-store";
 import { createLayerStore } from "./layers-store";
@@ -18,6 +19,7 @@ export type ProjectColorStore = ReturnType<typeof createColorStore>;
 export type ProjectDirtyRectStore = ReturnType<typeof createDirtyRectStore>;
 export type ProjectGridStore = ReturnType<typeof createGridStore>;
 export type ProjectGuidesStore = ReturnType<typeof createGuidesStore>;
+export type ProjectGuidedDrawingStore = ReturnType<typeof createGuidedDrawingStore>;
 export type ProjectHistoryHighlightStore = ReturnType<
   typeof createHistoryHighlightStore
 >;
@@ -34,6 +36,7 @@ export interface ProjectContextStores {
   dirtyRect: ProjectDirtyRectStore;
   grid: ProjectGridStore;
   guides: ProjectGuidesStore;
+  guidedDrawing: ProjectGuidedDrawingStore;
   history: ProjectHistoryStore;
   historyHighlight: ProjectHistoryHighlightStore;
   layers: ProjectLayerStore;
@@ -57,6 +60,7 @@ function createProjectContextStores(
   const dirtyRect = createDirtyRectStore();
   const grid = createGridStore();
   const guides = createGuidesStore();
+  const guidedDrawing = createGuidedDrawingStore();
   const historyHighlight = createHistoryHighlightStore();
   const selection = createSelectionStore();
   const palette = createPaletteStore({ layers, refs });
@@ -66,6 +70,7 @@ function createProjectContextStores(
   const project = createProjectStore({
     animation,
     dirtyRect,
+    guidedDrawing,
     history,
     layers,
     palette,
@@ -80,6 +85,7 @@ function createProjectContextStores(
     dirtyRect,
     grid,
     guides,
+    guidedDrawing,
     history,
     historyHighlight,
     layers,
@@ -97,6 +103,7 @@ export class ProjectContext {
   readonly dirtyRect: ProjectDirtyRectStore;
   readonly grid: ProjectGridStore;
   readonly guides: ProjectGuidesStore;
+  readonly guidedDrawing: ProjectGuidedDrawingStore;
   readonly history: ProjectHistoryStore;
   readonly historyHighlight: ProjectHistoryHighlightStore;
   readonly layers: ProjectLayerStore;
@@ -114,6 +121,7 @@ export class ProjectContext {
     this.dirtyRect = stores.dirtyRect;
     this.grid = stores.grid;
     this.guides = stores.guides;
+    this.guidedDrawing = stores.guidedDrawing;
     this.history = stores.history;
     this.historyHighlight = stores.historyHighlight;
     this.layers = stores.layers;
