@@ -9,6 +9,7 @@ class GuidedDrawingStore {
   readonly session = signal<GuidedDrawingSession | null>(null);
   readonly numbersVisible = signal(true);
   readonly targetPreviewVisible = signal(false);
+  readonly finishPending = signal(false);
 
   get active(): boolean {
     return this.session.value !== null;
@@ -17,6 +18,7 @@ class GuidedDrawingStore {
   start(session: GuidedDrawingSession): void {
     validateSession(session);
     this.resetViewOptions();
+    this.finishPending.value = false;
     this.session.value = cloneSession(session);
   }
 
@@ -41,6 +43,8 @@ class GuidedDrawingStore {
   }
 
   toFile(): GuidedDrawingSessionFile | undefined {
+    if (this.finishPending.value) return undefined;
+
     const session = this.session.value;
     if (!session) return undefined;
 
@@ -53,7 +57,21 @@ class GuidedDrawingStore {
 
   clear(): void {
     this.session.value = null;
+    this.finishPending.value = false;
     this.resetViewOptions();
+  }
+
+  beginFinish(): void {
+    if (this.session.value) this.finishPending.value = true;
+  }
+
+  cancelFinish(): void {
+    this.finishPending.value = false;
+  }
+
+  completeFinish(): void {
+    if (!this.finishPending.value) return;
+    this.clear();
   }
 
   private resetViewOptions(): void {

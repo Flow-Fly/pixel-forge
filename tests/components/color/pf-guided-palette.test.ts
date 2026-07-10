@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const autoSaveServiceMock = vi.hoisted(() => ({
+  saveNow: vi.fn(),
+}));
+
+vi.mock('../../../src/services/auto-save', () => ({
+  autoSaveService: autoSaveServiceMock,
+}));
 import type { PFGuidedPalette } from '../../../src/components/color/palette-panel/pf-guided-palette';
 import '../../../src/components/color/palette-panel/pf-guided-palette';
 import '../../../src/components/color/pf-palette-panel';
@@ -10,6 +18,10 @@ describe('guided palette', () => {
 
   beforeAll(() => {
     HTMLElement.prototype.hidePopover = () => {};
+  });
+
+  beforeEach(() => {
+    autoSaveServiceMock.saveNow.mockResolvedValue(undefined);
   });
 
   afterAll(() => {
@@ -105,7 +117,71 @@ describe('guided palette', () => {
     guidedContext.dispose();
     normalContext.dispose();
   });
+
+  it('finishes guidance at partial coverage without touching art or history', async () => {
+    const context = createGuidedContext();
+    const historyEntry = {
+      id: 'stroke',
+      name: 'Pencil',
+      execute: vi.fn(),
+      undo: vi.fn(),
+    };
+    context.history.undoStack.value = [historyEntry];
+    const resetView = vi.spyOn(context.viewport, 'resetView');
+    setActiveProjectContext(context);
+    const element = document.createElement('pf-guided-palette') as PFGuidedPalette;
+    document.body.append(element);
+    await element.updateComplete;
+
+    const pixelsBefore = getPaintingPixels(context);
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.finish-guidance')?.click();
+    await element.updateComplete;
+    expect(element.shadowRoot?.textContent).toContain('Your drawing is 50% covered');
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.finish-confirm')?.click();
+    await settle(element);
+
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(context);
+    expect(context.guidedDrawing.active).toBe(false);
+    expect(context.history.undoStack.value).toEqual([historyEntry]);
+    expect(getPaintingPixels(context)).toEqual(pixelsBefore);
+    expect(resetView).toHaveBeenCalledTimes(1);
+
+    context.dispose();
+  });
+
+  it('keeps guidance active when the finish save fails', async () => {
+    const context = createGuidedContext();
+    setActiveProjectContext(context);
+    autoSaveServiceMock.saveNow.mockRejectedValueOnce(new Error('storage failed'));
+    const element = document.createElement('pf-guided-palette') as PFGuidedPalette;
+    document.body.append(element);
+    await element.updateComplete;
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.finish-guidance')?.click();
+    await element.updateComplete;
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.finish-confirm')?.click();
+    await settle(element);
+
+    expect(context.guidedDrawing.active).toBe(true);
+    expect(context.guidedDrawing.finishPending.value).toBe(false);
+    expect(element.shadowRoot?.textContent).toContain('Your guide is still active');
+
+    context.dispose();
+  });
 });
+
+async function settle(element: PFGuidedPalette) {
+  await Promise.resolve();
+  await element.updateComplete;
+  await Promise.resolve();
+  await element.updateComplete;
+}
+
+function getPaintingPixels(context: ReturnType<typeof createProjectContext>) {
+  const layer = context.layers.layers.value.find((item) => item.type === 'image');
+  return [...(layer?.canvas?.getContext('2d')?.getImageData(0, 0, 2, 1).data ?? [])];
+}
 
 function createGuidedContext() {
   const context = createProjectContext();

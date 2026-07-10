@@ -80,4 +80,21 @@ describe('GuidedDrawingStore', () => {
     expect(store.numbersVisible.value).toBe(true);
     expect(store.targetPreviewVisible.value).toBe(false);
   });
+
+  it('omits guidance only while an explicit finish is being saved', () => {
+    const store = createGuidedDrawingStore();
+    store.start(createSession());
+
+    store.beginFinish();
+    expect(store.active).toBe(true);
+    expect(store.toFile()).toBeUndefined();
+
+    store.cancelFinish();
+    expect(store.toFile()?.target).toEqual([1, 2]);
+
+    store.beginFinish();
+    store.completeFinish();
+    expect(store.active).toBe(false);
+    expect(store.finishPending.value).toBe(false);
+  });
 });
