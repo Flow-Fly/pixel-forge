@@ -47,6 +47,7 @@ describe('createGuidedProjectFile', () => {
     expect(file.guidedDrawing).toMatchObject({
       version: 1,
       target: [1, 2, 0, 1],
+      guideColorCount: 2,
       settings,
       sourceName: 'portrait.png',
       createdAt: 123,

@@ -17,6 +17,7 @@ export interface GuidedDrawingSessionFile {
   width: number;
   height: number;
   target: number[];
+  guideColorCount?: number;
   settings: GuidedDrawingSettings;
   sourceName?: string;
   createdAt: number;

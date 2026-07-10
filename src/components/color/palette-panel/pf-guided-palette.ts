@@ -1,0 +1,294 @@
+import { css, html } from 'lit';
+import { customElement } from 'lit/decorators.js';
+import { BaseComponent } from '../../../core/base-component';
+import {
+  analyzeGuidedDrawingProgress,
+  getGuidedDrawingSnapshot,
+  type GuidedDrawingProgress,
+} from '../../../services/paint-by-number/guided-progress';
+import { defaultProjectContext, type ProjectContext } from '../../../stores/project-context';
+
+const EMPTY_PROGRESS: GuidedDrawingProgress = {
+  total: 0,
+  covered: 0,
+  remaining: 0,
+  percentage: 0,
+  remainingByNumber: new Uint32Array(1),
+};
+
+@customElement('pf-guided-palette')
+export class PFGuidedPalette extends BaseComponent {
+  static styles = css`
+    :host {
+      display: grid;
+      gap: 12px;
+    }
+
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h2,
+    h3 {
+      color: var(--pf-color-text-secondary);
+      font-size: var(--pf-font-size-xs);
+      text-transform: uppercase;
+    }
+
+    .progress-copy,
+    .remaining,
+    .artist-copy {
+      color: var(--pf-color-text-muted);
+      font-size: var(--pf-font-size-xs);
+      line-height: 1.4;
+    }
+
+    progress {
+      width: 100%;
+      height: 6px;
+      overflow: hidden;
+      border: 0;
+      border-radius: 999px;
+      background: var(--pf-color-bg-input);
+    }
+
+    progress::-webkit-progress-bar {
+      background: var(--pf-color-bg-input);
+    }
+
+    progress::-webkit-progress-value {
+      background: var(--pf-color-accent);
+    }
+
+    progress::-moz-progress-bar {
+      background: var(--pf-color-accent);
+    }
+
+    .guide-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+    }
+
+    .guide-color {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      padding: 5px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-dark);
+      color: var(--pf-color-text-main);
+      cursor: pointer;
+      text-align: start;
+    }
+
+    .guide-color:hover {
+      border-color: var(--pf-color-border-strong);
+      background: var(--pf-color-bg-hover);
+    }
+
+    .guide-color[aria-pressed='true'] {
+      border-color: var(--pf-color-accent);
+      box-shadow: 0 0 0 1px var(--pf-color-primary-transparent);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: 2px;
+    }
+
+    .chip-wrap {
+      position: relative;
+      width: 30px;
+      height: 30px;
+    }
+
+    .chip {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 2px;
+      background: var(--guide-color);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.38) inset;
+    }
+
+    .number {
+      position: absolute;
+      inset-block-start: -3px;
+      inset-inline-start: -3px;
+      min-width: 16px;
+      padding: 1px 3px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 2px;
+      background: rgba(7, 9, 13, 0.9);
+      color: #f5f3ee;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 12px;
+      text-align: center;
+    }
+
+    .color-copy {
+      display: grid;
+      min-width: 0;
+    }
+
+    .hex {
+      overflow: hidden;
+      color: var(--pf-color-text-secondary);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .remaining {
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .artist-section {
+      display: grid;
+      gap: 7px;
+      padding-block-start: 2px;
+      border-block-start: 1px solid var(--pf-color-border);
+    }
+
+    .artist-grid {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      gap: 2px;
+    }
+
+    .artist-color {
+      aspect-ratio: 1;
+      min-width: 0;
+      padding: 0;
+      border: 1px solid var(--pf-color-border);
+      border-radius: 2px;
+      background: var(--artist-color);
+      cursor: pointer;
+    }
+
+    .artist-color[aria-pressed='true'] {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: 1px;
+    }
+  `;
+
+  private context: ProjectContext = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  render() {
+    const session = this.context.guidedDrawing.session.value;
+    const palette = this.context.palette.mainColors.value;
+    const primaryColor = this.context.colors.primaryColor.value.toLowerCase();
+    void this.context.history.version.value;
+    void this.context.layers.layers.value;
+
+    if (!session) return html``;
+
+    const progress = this.getProgress();
+    const guideColorCount = session.guideColorCount ?? findHighestGuideNumber(session.target);
+    const guideColors = palette.slice(0, guideColorCount);
+    const artistColors = palette.slice(guideColorCount);
+
+    return html`
+      <section aria-labelledby="guided-palette-title">
+        <h2 id="guided-palette-title">Guided palette</h2>
+        <p class="progress-copy">
+          ${progress.covered} of ${progress.total} cells covered ·
+          ${progress.remaining} remaining · ${progress.percentage}%
+        </p>
+        <progress
+          max=${Math.max(1, progress.total)}
+          value=${progress.covered}
+          aria-label="Guided drawing coverage"
+        ></progress>
+      </section>
+
+      <div class="guide-grid">
+        ${guideColors.map((color, index) => {
+          const guideNumber = index + 1;
+          const remaining = progress.remainingByNumber[guideNumber] ?? 0;
+          const selected = color.toLowerCase() === primaryColor;
+          return html`
+            <button
+              class="guide-color"
+              type="button"
+              aria-pressed=${String(selected)}
+              aria-label="Guide color ${guideNumber}, ${color}, ${remaining} cells remaining"
+              @click=${() => this.selectColor(color)}
+            >
+              <span class="chip-wrap" aria-hidden="true">
+                <span class="chip" style="--guide-color: ${color}"></span>
+                <span class="number">${guideNumber}</span>
+              </span>
+              <span class="color-copy" aria-hidden="true">
+                <span class="hex">${color}</span>
+                <span class="remaining">${remaining} left</span>
+              </span>
+            </button>
+          `;
+        })}
+      </div>
+
+      ${artistColors.length > 0
+        ? html`
+            <section class="artist-section" aria-labelledby="artist-colors-title">
+              <h3 id="artist-colors-title">Artist colors</h3>
+              <p class="artist-copy">Colors you introduced while drawing off-guide.</p>
+              <div class="artist-grid">
+                ${artistColors.map((color) => html`
+                  <button
+                    class="artist-color"
+                    type="button"
+                    style="--artist-color: ${color}"
+                    aria-label="Artist color ${color}"
+                    aria-pressed=${String(color.toLowerCase() === primaryColor)}
+                    @click=${() => this.selectColor(color)}
+                  ></button>
+                `)}
+              </div>
+            </section>
+          `
+        : ''}
+    `;
+  }
+
+  private getProgress(): GuidedDrawingProgress {
+    const snapshot = getGuidedDrawingSnapshot(this.context);
+    return snapshot
+      ? analyzeGuidedDrawingProgress(snapshot.session.target, snapshot.pixels)
+      : EMPTY_PROGRESS;
+  }
+
+  private selectColor(color: string) {
+    this.context.colors.setPrimaryColor(color);
+    this.context.colors.updateLightnessVariations(color);
+  }
+}
+
+function findHighestGuideNumber(target: Uint8Array): number {
+  let highest = 0;
+  for (const guideNumber of target) highest = Math.max(highest, guideNumber);
+  return highest;
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'pf-guided-palette': PFGuidedPalette;
+  }
+}
