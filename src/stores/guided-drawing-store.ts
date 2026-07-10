@@ -7,6 +7,8 @@ import {
 
 class GuidedDrawingStore {
   readonly session = signal<GuidedDrawingSession | null>(null);
+  readonly numbersVisible = signal(true);
+  readonly targetPreviewVisible = signal(false);
 
   get active(): boolean {
     return this.session.value !== null;
@@ -14,7 +16,16 @@ class GuidedDrawingStore {
 
   start(session: GuidedDrawingSession): void {
     validateSession(session);
+    this.resetViewOptions();
     this.session.value = cloneSession(session);
+  }
+
+  toggleNumbers(): void {
+    this.numbersVisible.value = !this.numbersVisible.value;
+  }
+
+  toggleTargetPreview(): void {
+    this.targetPreviewVisible.value = !this.targetPreviewVisible.value;
   }
 
   load(file: GuidedDrawingSessionFile | undefined): void {
@@ -42,6 +53,12 @@ class GuidedDrawingStore {
 
   clear(): void {
     this.session.value = null;
+    this.resetViewOptions();
+  }
+
+  private resetViewOptions(): void {
+    this.numbersVisible.value = true;
+    this.targetPreviewVisible.value = false;
   }
 }
 

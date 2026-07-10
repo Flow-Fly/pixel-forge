@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   collectVisibleGuidedNumberCells,
+  collectVisibleGuidedTargetCells,
   type PFGuidedNumberOverlay,
 } from '../../../src/components/canvas/pf-guided-number-overlay';
 import '../../../src/components/canvas/pf-canvas-viewport';
@@ -56,6 +57,22 @@ describe('guided number overlay', () => {
     })).toEqual([]);
   });
 
+  it('plans a target preview at any zoom without reading painted pixels', () => {
+    const cells = collectVisibleGuidedTargetCells(
+      Uint8Array.from([1, 0, 2]),
+      3,
+      {
+        zoom: 4,
+        panX: 0,
+        panY: 0,
+        viewportWidth: 12,
+        viewportHeight: 4,
+      },
+    );
+
+    expect(cells.map((cell) => cell.guideNumber)).toEqual([1, 2]);
+  });
+
   it('shows a DOM hint below the number threshold', async () => {
     const context = createProjectContext();
     context.guidedDrawing.start({
@@ -82,6 +99,11 @@ describe('guided number overlay', () => {
     expect(element.shadowRoot?.textContent).toContain('Zoom in to see guide numbers');
 
     context.viewport.setZoom(16);
+    await element.updateComplete;
+    expect(element.shadowRoot?.textContent).not.toContain('Zoom in to see guide numbers');
+
+    context.viewport.setZoom(8);
+    context.guidedDrawing.toggleNumbers();
     await element.updateComplete;
     expect(element.shadowRoot?.textContent).not.toContain('Zoom in to see guide numbers');
 

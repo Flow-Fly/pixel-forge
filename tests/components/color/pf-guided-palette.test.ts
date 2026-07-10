@@ -46,6 +46,19 @@ describe('guided palette', () => {
       'Canvas, palette, layers, and frames stay fixed',
     );
 
+    const viewButtons = [
+      ...element.shadowRoot!.querySelectorAll<HTMLButtonElement>('.view-controls button'),
+    ];
+    expect(viewButtons.map((button) => button.textContent?.trim()))
+      .toEqual(['Hide numbers', 'Preview target']);
+    viewButtons[0].click();
+    viewButtons[1].click();
+    await element.updateComplete;
+    expect(context.guidedDrawing.numbersVisible.value).toBe(false);
+    expect(context.guidedDrawing.targetPreviewVisible.value).toBe(true);
+    expect(viewButtons.map((button) => button.textContent?.trim()))
+      .toEqual(['Show numbers', 'Hide target']);
+
     buttons[1].click();
     await element.updateComplete;
     expect(context.colors.primaryColor.value).toBe('#eeeeee');

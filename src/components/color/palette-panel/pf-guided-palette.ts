@@ -46,6 +46,29 @@ export class PFGuidedPalette extends BaseComponent {
       line-height: 1.4;
     }
 
+    .view-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+    }
+
+    .view-controls button {
+      min-height: 30px;
+      padding: 5px 7px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-dark);
+      color: var(--pf-color-text-secondary);
+      cursor: pointer;
+      font-size: var(--pf-font-size-xs);
+    }
+
+    .view-controls button[aria-pressed='true'] {
+      border-color: var(--pf-color-accent);
+      background: var(--pf-color-primary-transparent);
+      color: var(--pf-color-text-main);
+    }
+
     .structure-note {
       padding: 7px 8px;
       border-inline-start: 2px solid var(--pf-color-accent);
@@ -226,6 +249,8 @@ export class PFGuidedPalette extends BaseComponent {
         ></progress>
       </section>
 
+      ${this.renderViewControls()}
+
       <div class="guide-grid">
         ${guideColors.map((color, index) => {
           const guideNumber = index + 1;
@@ -285,6 +310,31 @@ export class PFGuidedPalette extends BaseComponent {
     return snapshot
       ? analyzeGuidedDrawingProgress(snapshot.session.target, snapshot.pixels)
       : EMPTY_PROGRESS;
+  }
+
+  private renderViewControls() {
+    const guidance = this.context.guidedDrawing;
+    const numbersVisible = guidance.numbersVisible.value;
+    const targetPreviewVisible = guidance.targetPreviewVisible.value;
+
+    return html`
+      <div class="view-controls" aria-label="Guidance view">
+        <button
+          type="button"
+          aria-pressed=${String(numbersVisible)}
+          @click=${() => guidance.toggleNumbers()}
+        >
+          ${numbersVisible ? 'Hide numbers' : 'Show numbers'}
+        </button>
+        <button
+          type="button"
+          aria-pressed=${String(targetPreviewVisible)}
+          @click=${() => guidance.toggleTargetPreview()}
+        >
+          ${targetPreviewVisible ? 'Hide target' : 'Preview target'}
+        </button>
+      </div>
+    `;
   }
 
   private selectColor(color: string) {

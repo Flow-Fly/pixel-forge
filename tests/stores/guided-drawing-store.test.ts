@@ -59,4 +59,25 @@ describe('GuidedDrawingStore', () => {
     expect(() => store.start({ ...createSession(), target: new Uint8Array([1]) }))
       .toThrow('target does not match');
   });
+
+  it('keeps temporary view choices out of the durable session', () => {
+    const store = createGuidedDrawingStore();
+    store.start(createSession());
+
+    store.toggleNumbers();
+    store.toggleTargetPreview();
+    expect(store.numbersVisible.value).toBe(false);
+    expect(store.targetPreviewVisible.value).toBe(true);
+    expect(store.toFile()).not.toHaveProperty('numbersVisible');
+
+    store.load({ ...createSession(), target: [1, 2] });
+    expect(store.numbersVisible.value).toBe(true);
+    expect(store.targetPreviewVisible.value).toBe(false);
+
+    store.toggleNumbers();
+    store.toggleTargetPreview();
+    store.clear();
+    expect(store.numbersVisible.value).toBe(true);
+    expect(store.targetPreviewVisible.value).toBe(false);
+  });
 });
