@@ -16,7 +16,7 @@ import { PROJECT_VERSION, type ProjectFile } from "../../src/types/project";
 
 type WorkspaceProjectLibrary = Pick<
   ProjectLibraryService,
-  "openProject" | "createProject"
+  "openProject" | "createProject" | "createProjectFromFile"
 >;
 
 function makeProjectFile(name: string): ProjectFile {
@@ -94,6 +94,17 @@ function createProjectLibraryMock() {
       if (settings.context) {
         settings.context.project.id.value = projectId;
         settings.context.project.name.value = options.name ?? "Untitled";
+      }
+      return projectId;
+    }),
+    createProjectFromFile: vi.fn(async (project, settings = {}) => {
+      const projectId = `created-project-${nextProjectNumber}`;
+      nextProjectNumber += 1;
+      rememberContext(settings.context);
+      if (settings.context) {
+        settings.context.project.id.value = projectId;
+        settings.context.project.name.value = project.name ?? "Untitled";
+        settings.context.guidedDrawing.load(project.guidedDrawing);
       }
       return projectId;
     }),
@@ -500,6 +511,51 @@ describe("WorkspaceStore", () => {
       },
     );
     expect(autoSave.start).toHaveBeenCalledWith(result.item.context);
+  });
+
+  it("creates an exact project file in a separate context", async () => {
+    const initialContext = createTestContext("Current Project");
+    initialContext.project.id.value = "current-project";
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "current-project",
+      projectLibrary,
+      autoSave,
+    });
+    const project = makeProjectFile("Guided Project");
+    project.guidedDrawing = {
+      version: 1,
+      width: 8,
+      height: 8,
+      target: new Array(64).fill(1),
+      settings: {
+        longSide: 8,
+        paletteSource: "generated",
+        maxColors: 2,
+        mapping: "color",
+        simplifyIsolatedPixels: true,
+      },
+      createdAt: 123,
+    };
+
+    const result = await workspace.createProjectFromFile(project, {
+      activate: true,
+      saveActiveContext: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.item.context).not.toBe(initialContext);
+    expect(result.item.context.project.name.value).toBe("Guided Project");
+    expect(result.item.context.guidedDrawing.active).toBe(true);
+    expect(initialContext.project.name.value).toBe("Current Project");
+    expect(autoSave.saveNow).toHaveBeenCalledWith(initialContext);
+    expect(projectLibrary.createProjectFromFile).toHaveBeenCalledWith(project, {
+      context: result.item.context,
+      saveCurrent: false,
+    });
   });
 
   it("saves the active context before opening another project when requested", async () => {
