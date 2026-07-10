@@ -71,6 +71,7 @@ export function createGuidedProjectFile(input: GuidedProjectInput): ProjectFile 
       width: guide.width,
       height: guide.height,
       target: Array.from(guide.target),
+      guideColorCount: guide.palette.length,
       settings: cloneSettings(input.settings),
       sourceName: input.sourceName,
       createdAt: input.createdAt ?? Date.now(),

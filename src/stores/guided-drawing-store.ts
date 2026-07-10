@@ -62,6 +62,14 @@ function validateSession(session: GuidedDrawingSession): void {
   if (session.target.length !== session.width * session.height) {
     throw new RangeError('Guided drawing target does not match its dimensions');
   }
+  validateGuideColorCount(session.guideColorCount);
+}
+
+function validateGuideColorCount(guideColorCount: number | undefined): void {
+  if (guideColorCount === undefined) return;
+  if (Number.isInteger(guideColorCount) && guideColorCount > 0) return;
+
+  throw new RangeError('Guided drawing color count must be a positive integer');
 }
 
 function cloneSession(session: GuidedDrawingSession): GuidedDrawingSession {

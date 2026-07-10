@@ -10,6 +10,7 @@ import './pf-save-palette-dialog';
 import './pf-unsaved-changes-dialog';
 import './palette-panel/pf-palette-toolbar';
 import './palette-panel/pf-palette-grid';
+import './palette-panel/pf-guided-palette';
 import './palette-panel/pf-extraction-section';
 
 @customElement('pf-palette-panel')
@@ -247,6 +248,10 @@ export class PFPalettePanel extends BaseComponent {
   }
 
   render() {
+    if (this.context.guidedDrawing.active) {
+      return html`<pf-guided-palette></pf-guided-palette>`;
+    }
+
     const hasNewMarks = this.palette.newColorFlags.value.size > 0;
 
     return html`

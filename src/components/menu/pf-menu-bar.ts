@@ -1,12 +1,7 @@
 import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
-import { historyStore } from "../../stores/history";
-import { layerStore } from "../../stores/layers";
-import { projectStore } from "../../stores/project";
 import { getActiveProjectContext } from "../../stores/project-context";
-import { gridStore } from "../../stores/grid";
-import { viewportStore } from "../../stores/viewport";
 import {
   FlipLayerCommand,
   RotateLayerCommand,
@@ -244,9 +239,14 @@ export class PFMenuBar extends BaseComponent {
       width: 100%;
     }
 
-    .menu-item:hover {
+    .menu-item:hover:not(:disabled) {
       background-color: var(--pf-color-primary-transparent);
       color: var(--pf-color-text-main);
+    }
+
+    button.menu-item:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
     }
 
     .menu-item.danger {
@@ -478,6 +478,14 @@ export class PFMenuBar extends BaseComponent {
     return Math.max(MENU_MARGIN, Math.min(value, maxValue));
   }
 
+  private guidedActionTitle(
+    guidedProject: boolean,
+    regularTitle: string,
+    guidedTitle: string,
+  ): string {
+    return guidedProject ? guidedTitle : regularTitle;
+  }
+
   private getMenuButton(menuId: MenuId) {
     return this.shadowRoot?.querySelector<HTMLElement>(`#btn-${menuId}`) ?? null;
   }
@@ -487,16 +495,22 @@ export class PFMenuBar extends BaseComponent {
   }
 
   flipLayer(direction: "horizontal" | "vertical") {
-    const activeLayerId = layerStore.activeLayerId.value;
+    const context = getActiveProjectContext();
+    if (context.guidedDrawing.active) return;
+
+    const activeLayerId = context.layers.activeLayerId.value;
     if (activeLayerId) {
-      historyStore.execute(new FlipLayerCommand(activeLayerId, direction));
+      void context.history.execute(new FlipLayerCommand(activeLayerId, direction, context));
     }
   }
 
   rotateLayer(angle: number) {
-    const activeLayerId = layerStore.activeLayerId.value;
+    const context = getActiveProjectContext();
+    if (context.guidedDrawing.active) return;
+
+    const activeLayerId = context.layers.activeLayerId.value;
     if (activeLayerId) {
-      historyStore.execute(new RotateLayerCommand(activeLayerId, angle));
+      void context.history.execute(new RotateLayerCommand(activeLayerId, angle, context));
     }
   }
 
@@ -544,12 +558,12 @@ export class PFMenuBar extends BaseComponent {
           const pako = await import("pako");
           const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
           const project = JSON.parse(decompressed) as ProjectFileInput;
-          await projectStore.loadProject(project);
+          await getActiveProjectContext().project.loadProject(project);
         } else {
           // JSON format (uncompressed)
           const text = await file.text();
           const project = JSON.parse(text) as ProjectFileInput;
-          await projectStore.loadProject(project);
+          await getActiveProjectContext().project.loadProject(project);
         }
       } catch (error) {
         log.error("Failed to open file:", error);
@@ -560,9 +574,23 @@ export class PFMenuBar extends BaseComponent {
   }
 
   importReferenceImage() {
-    openReferenceImagePicker(getActiveProjectContext(), (error) => {
+    const context = getActiveProjectContext();
+    if (context.guidedDrawing.active) return;
+
+    openReferenceImagePicker(context, (error) => {
       log.error("Failed to import reference image:", error);
     });
+  }
+
+  showResizeDialog() {
+    if (getActiveProjectContext().guidedDrawing.active) return;
+
+    this.dispatchEvent(
+      new CustomEvent("resize-canvas", {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   showExportDialog() {
@@ -659,13 +687,15 @@ export class PFMenuBar extends BaseComponent {
   private async commitNameEdit(e: Event) {
     const input = e.target as HTMLInputElement;
     const newName = input.value.trim() || "Untitled";
-    projectStore.name.value = newName;
+    getActiveProjectContext().project.name.value = newName;
     this.isEditingName = false;
     await autoSaveService.saveNow();
   }
 
   render() {
-    const projectName = projectStore.name.value;
+    const context = getActiveProjectContext();
+    const projectName = context.project.name.value;
+    const guidedProject = context.guidedDrawing.active;
     const activeCrtPreset = this.getActiveCrtPreset();
 
     return html`
@@ -742,9 +772,19 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${this.openFile}>
             Import File...
           </div>
-          <div class="menu-item" @click=${this.importReferenceImage}>
+          <button
+            class="menu-item"
+            type="button"
+            ?disabled=${guidedProject}
+            title=${this.guidedActionTitle(
+              guidedProject,
+              "Import Reference Image",
+              "Guided projects keep one fixed painting layer",
+            )}
+            @click=${this.importReferenceImage}
+          >
             Import Reference Image...
-          </div>
+          </button>
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>
           </div>
@@ -767,10 +807,10 @@ export class PFMenuBar extends BaseComponent {
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "edit")}
         >
-          <div class="menu-item" @click=${() => historyStore.undo()}>
+          <div class="menu-item" @click=${() => context.history.undo()}>
             Undo <span class="shortcut">${formatShortcut(menuShortcuts.undo)}</span>
           </div>
-          <div class="menu-item" @click=${() => historyStore.redo()}>
+          <div class="menu-item" @click=${() => context.history.redo()}>
             Redo <span class="shortcut">${formatShortcut(menuShortcuts.redo)}</span>
           </div>
           <div class="menu-item">Cut <span class="shortcut">${formatShortcut(menuShortcuts.cut)}</span></div>
@@ -797,24 +837,24 @@ export class PFMenuBar extends BaseComponent {
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "view")}
         >
-          <div class="menu-item" @click=${() => viewportStore.zoomIn()}>
+          <div class="menu-item" @click=${() => context.viewport.zoomIn()}>
             Zoom In <span class="shortcut">${formatShortcut(menuShortcuts.zoomIn)}</span>
           </div>
-          <div class="menu-item" @click=${() => viewportStore.zoomOut()}>
+          <div class="menu-item" @click=${() => context.viewport.zoomOut()}>
             Zoom Out <span class="shortcut">${formatShortcut(menuShortcuts.zoomOut)}</span>
           </div>
-          <div class="menu-item" @click=${() => viewportStore.zoomToLevel(1)}>
+          <div class="menu-item" @click=${() => context.viewport.zoomToLevel(1)}>
             Zoom 100% <span class="shortcut">${formatShortcut(menuShortcuts.zoom100)}</span>
           </div>
-          <div class="menu-item" @click=${() => viewportStore.resetView()}>
+          <div class="menu-item" @click=${() => context.viewport.resetView()}>
             Fit to Viewport <span class="shortcut">0</span>
           </div>
-          <div class="menu-item" @click=${() => gridStore.togglePixelGrid()}>
-            ${gridStore.pixelGridEnabled.value ? "✓ " : "   "}Pixel Grid
+          <div class="menu-item" @click=${() => context.grid.togglePixelGrid()}>
+            ${context.grid.pixelGridEnabled.value ? "✓ " : "   "}Pixel Grid
             <span class="shortcut">${formatShortcut("mod+g")}</span>
           </div>
-          <div class="menu-item" @click=${() => gridStore.toggleTileGrid()}>
-            ${gridStore.tileGridEnabled.value ? "✓ " : "   "}Tile Grid
+          <div class="menu-item" @click=${() => context.grid.toggleTileGrid()}>
+            ${context.grid.tileGridEnabled.value ? "✓ " : "   "}Tile Grid
             <span class="shortcut">${formatShortcut("mod+shift+g")}</span>
           </div>
           <div class="menu-item" @click=${this.showGridSettingsDialog}>
@@ -852,30 +892,71 @@ export class PFMenuBar extends BaseComponent {
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "image")}
         >
-          <div
+          <button
             class="menu-item"
-            @click=${() =>
-              this.dispatchEvent(
-                new CustomEvent("resize-canvas", {
-                  bubbles: true,
-                  composed: true,
-                })
-              )}
+            type="button"
+            ?disabled=${guidedProject}
+            title=${this.guidedActionTitle(
+              guidedProject,
+              "Resize Canvas",
+              "Guided projects keep the canvas size fixed",
+            )}
+            @click=${this.showResizeDialog}
           >
             Resize Canvas...
-          </div>
-          <div class="menu-item" @click=${() => this.flipLayer("horizontal")}>
+          </button>
+          <button
+            class="menu-item"
+            type="button"
+            ?disabled=${guidedProject}
+            title=${this.guidedActionTitle(
+              guidedProject,
+              "Flip Horizontal",
+              "Guided projects keep guide coordinates fixed",
+            )}
+            @click=${() => this.flipLayer("horizontal")}
+          >
             Flip Horizontal
-          </div>
-          <div class="menu-item" @click=${() => this.flipLayer("vertical")}>
+          </button>
+          <button
+            class="menu-item"
+            type="button"
+            ?disabled=${guidedProject}
+            title=${this.guidedActionTitle(
+              guidedProject,
+              "Flip Vertical",
+              "Guided projects keep guide coordinates fixed",
+            )}
+            @click=${() => this.flipLayer("vertical")}
+          >
             Flip Vertical
-          </div>
-          <div class="menu-item" @click=${() => this.rotateLayer(90)}>
+          </button>
+          <button
+            class="menu-item"
+            type="button"
+            ?disabled=${guidedProject}
+            title=${this.guidedActionTitle(
+              guidedProject,
+              "Rotate 90 degrees clockwise",
+              "Guided projects keep guide coordinates fixed",
+            )}
+            @click=${() => this.rotateLayer(90)}
+          >
             Rotate 90° CW
-          </div>
-          <div class="menu-item" @click=${() => this.rotateLayer(-90)}>
+          </button>
+          <button
+            class="menu-item"
+            type="button"
+            ?disabled=${guidedProject}
+            title=${this.guidedActionTitle(
+              guidedProject,
+              "Rotate 90 degrees counter-clockwise",
+              "Guided projects keep guide coordinates fixed",
+            )}
+            @click=${() => this.rotateLayer(-90)}
+          >
             Rotate 90° CCW
-          </div>
+          </button>
           <div class="divider"></div>
           <div class="menu-section-label">Effect</div>
           ${CRT_PRESET_OPTIONS.map(

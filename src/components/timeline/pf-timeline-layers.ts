@@ -1,17 +1,14 @@
 import { html, css } from 'lit';
-import { customElement, property, state, query } from 'lit/decorators.js';
+import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import {
-  AddLayerCommand,
   DuplicateLayerCommand,
   RemoveLayerCommand,
   UpdateLayerCommand,
 } from '../../commands/layer-commands';
-import { openReferenceImagePicker } from '../../services/reference-image-picker';
 import type { Layer } from '../../types/layer';
 import type { ReferenceLayerData } from '../../types/reference';
-import { log } from '../../utils/log';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 import '../ui/pf-context-menu';
@@ -22,40 +19,6 @@ export class PFTimelineLayers extends BaseComponent {
   static styles = css`
     :host {
       display: block;
-    }
-
-    .toolbar {
-      display: flex;
-      gap: 2px;
-      padding: 4px;
-      border-bottom: 1px solid var(--pf-color-border);
-      background: rgba(255, 255, 255, 0.018);
-    }
-
-    .toolbar button {
-      background: var(--pf-color-bg-input);
-      border: 1px solid var(--pf-color-border);
-      border-radius: var(--pf-radius-sm);
-      color: var(--pf-color-text-muted);
-      font-size: 12px;
-      width: 24px;
-      height: 24px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-    }
-
-    .toolbar button:hover {
-      background: var(--pf-color-bg-hover);
-      color: var(--pf-color-text-main);
-      border-color: var(--pf-color-border-strong);
-    }
-
-    .toolbar button:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
     }
 
     .layer-list {
@@ -112,6 +75,11 @@ export class PFTimelineLayers extends BaseComponent {
     .icon-btn:hover {
       opacity: 1;
       color: var(--pf-color-text-main);
+    }
+
+    .icon-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.3;
     }
 
     .icon-btn.active {
@@ -251,8 +219,6 @@ export class PFTimelineLayers extends BaseComponent {
     }
   `;
 
-  @property({ type: Boolean, attribute: 'no-toolbar' }) noToolbar = false;
-
   @state() private editingLayerId: string | null = null;
   @state() private editingName: string = '';
   @state() private draggedLayerId: string | null = null;
@@ -330,32 +296,27 @@ export class PFTimelineLayers extends BaseComponent {
     }
   }
 
-  private addLayer() {
-    void this.context.history.execute(new AddLayerCommand(this.context));
+  private layerDragTitle(guidedProject: boolean): string {
+    return guidedProject
+      ? 'Guided projects keep the painting layer fixed'
+      : 'Drag to reorder';
   }
 
-  private importReferenceImage() {
-    openReferenceImagePicker(
-      this.context,
-      (error) => {
-        log.error('Failed to import reference image:', error);
-      },
-      () => this.requestUpdate()
-    );
+  private layerVisibilityTitle(layer: Layer, guidedProject: boolean): string {
+    if (guidedProject) return 'Guided projects keep the painting layer visible';
+    return `${layer.visible ? 'Hide' : 'Show'} layer`;
   }
 
-  private deleteLayer() {
-    const activeId = this.context.layers.activeLayerId.value;
-    if (activeId && this.context.layers.layers.value.length > 1) {
-      void this.context.history.execute(new RemoveLayerCommand(activeId, this.context));
-    }
+  private layerLockTitle(layer: Layer, guidedProject: boolean): string {
+    if (guidedProject) return 'Guided projects keep the painting layer drawable';
+    return `${layer.locked ? 'Unlock' : 'Lock'} layer`;
   }
 
-  private moveLayer(direction: 'up' | 'down') {
-    const activeId = this.context.layers.activeLayerId.value;
-    if (activeId) {
-      this.context.layers.reorderLayer(activeId, direction);
-    }
+  private layerContinuityTitle(layer: Layer, guidedProject: boolean): string {
+    if (guidedProject) return 'Guided projects keep one fixed frame';
+    return layer.continuous
+      ? 'Continuous (linked new cels)'
+      : 'Non-continuous (empty new cels)';
   }
 
   private selectLayer(id: string) {
@@ -364,16 +325,19 @@ export class PFTimelineLayers extends BaseComponent {
 
   private toggleVisibility(id: string, e: Event) {
     e.stopPropagation();
+    if (this.context.guidedDrawing.active) return;
     this.context.layers.toggleVisibility(id);
   }
 
   private toggleLock(id: string, e: Event) {
     e.stopPropagation();
+    if (this.context.guidedDrawing.active) return;
     this.context.layers.toggleLock(id);
   }
 
   private toggleContinuous(id: string, e: Event) {
     e.stopPropagation();
+    if (this.context.guidedDrawing.active) return;
     this.context.layers.toggleContinuous(id);
   }
 
@@ -490,6 +454,8 @@ export class PFTimelineLayers extends BaseComponent {
     e.stopPropagation();
 
     const context = this.context;
+    if (context.guidedDrawing.active) return;
+
     const layerStore = context.layers;
     const layer = layerStore.layers.value.find((l) => l.id === layerId);
     if (!layer) return;
@@ -559,6 +525,11 @@ export class PFTimelineLayers extends BaseComponent {
 
   // Drag and drop handlers
   private handleDragStart(id: string, e: DragEvent) {
+    if (this.context.guidedDrawing.active) {
+      e.preventDefault();
+      return;
+    }
+
     this.draggedLayerId = id;
     this.draggedLayerContext = this.context;
     if (e.dataTransfer) {
@@ -574,6 +545,7 @@ export class PFTimelineLayers extends BaseComponent {
   }
 
   private handleDragOver(id: string, e: DragEvent) {
+    if (this.context.guidedDrawing.active) return;
     e.preventDefault();
     if (this.draggedLayerId && this.draggedLayerId !== id) {
       this.dragOverLayerId = id;
@@ -585,6 +557,7 @@ export class PFTimelineLayers extends BaseComponent {
   }
 
   private handleDrop(targetId: string, e: DragEvent) {
+    if (this.context.guidedDrawing.active) return;
     e.preventDefault();
     if (!this.draggedLayerId || this.draggedLayerId === targetId) return;
 
@@ -697,156 +670,160 @@ export class PFTimelineLayers extends BaseComponent {
     window.removeEventListener('mouseup', this.handleOpacityScrubEnd);
   }
 
+  private renderLayerRow(
+    layer: Layer,
+    activeLayerId: string | null,
+    guidedProject: boolean,
+  ) {
+    const classes = [
+      'layer-row',
+      layer.id === activeLayerId ? 'active' : '',
+      this.draggedLayerId === layer.id ? 'dragging' : '',
+      this.dragOverLayerId === layer.id ? 'drag-over' : '',
+    ].filter(Boolean).join(' ');
+
+    return html`
+      <div
+        class=${classes}
+        data-layer-type=${layer.type}
+        @click=${() => this.selectLayer(layer.id)}
+        @contextmenu=${(event: MouseEvent) => this.handleLayerContextMenu(event, layer.id)}
+        @mouseenter=${(event: MouseEvent) =>
+          this.handleLayerMouseEnter(event, layer.id, layer.name)}
+        @mouseleave=${this.handleLayerMouseLeave}
+        .draggable=${!guidedProject}
+        @dragstart=${(event: DragEvent) => this.handleDragStart(layer.id, event)}
+        @dragend=${this.handleDragEnd}
+        @dragover=${(event: DragEvent) => this.handleDragOver(layer.id, event)}
+        @dragleave=${this.handleDragLeave}
+        @drop=${(event: DragEvent) => this.handleDrop(layer.id, event)}
+      >
+        ${this.renderLayerControls(layer, guidedProject)}
+        ${this.renderLayerName(layer)}
+        ${this.renderLayerOpacity(layer)}
+      </div>
+    `;
+  }
+
+  private renderLayerControls(layer: Layer, guidedProject: boolean) {
+    return html`
+      <span class="drag-handle" title=${this.layerDragTitle(guidedProject)}>⋮⋮</span>
+      <button
+        class="icon-btn ${!layer.visible ? 'hidden-layer' : ''}"
+        @click=${(event: Event) => this.toggleVisibility(layer.id, event)}
+        title=${this.layerVisibilityTitle(layer, guidedProject)}
+        ?disabled=${guidedProject}
+      >
+        👁
+      </button>
+      <button
+        class="icon-btn ${layer.locked ? 'locked-layer' : ''}"
+        @click=${(event: Event) => this.toggleLock(layer.id, event)}
+        title=${this.layerLockTitle(layer, guidedProject)}
+        ?disabled=${guidedProject}
+      >
+        ${layer.locked ? '🔒' : '🔓'}
+      </button>
+      <button
+        class="icon-btn ${layer.continuous ? 'continuous-layer' : 'not-continuous'}"
+        @click=${(event: Event) => this.toggleContinuous(layer.id, event)}
+        title=${this.layerContinuityTitle(layer, guidedProject)}
+        ?disabled=${guidedProject}
+      >
+        ∞
+      </button>
+    `;
+  }
+
+  private renderLayerName(layer: Layer) {
+    if (this.editingLayerId === layer.id) {
+      return html`
+        <input
+          class="layer-name-input"
+          type="text"
+          .value=${this.editingName}
+          @input=${this.handleRenameInput}
+          @blur=${this.finishRename}
+          @keydown=${this.handleRenameKeydown}
+          @click=${(event: Event) => event.stopPropagation()}
+        />
+      `;
+    }
+
+    return html`
+      <span
+        class="layer-name"
+        @dblclick=${(event: Event) => this.startRename(layer.id, layer.name, event)}
+      >
+        ${this.renderLayerTypeBadge(layer)}${layer.name}
+      </span>
+    `;
+  }
+
+  private renderLayerTypeBadge(layer: Layer) {
+    if (layer.type === 'text') {
+      return html`<span class="layer-type-badge">T</span>`;
+    }
+    if (layer.type !== 'reference') return '';
+
+    return html`
+      <span class="layer-type-badge reference-layer-badge" title="Reference layer">
+        <span class="reference-layer-icon" aria-hidden="true">▧</span>
+        <span class="reference-layer-label visually-hidden">reference</span>
+        <span class="reference-layer-abbreviation" aria-hidden="true">REF</span>
+      </span>
+    `;
+  }
+
+  private renderLayerOpacity(layer: Layer) {
+    return html`
+      <div class="opacity-control" @click=${(event: Event) => event.stopPropagation()}>
+        ${this.editingOpacityLayerId === layer.id
+          ? this.renderOpacityInput(layer)
+          : this.renderOpacityValue(layer)}
+      </div>
+    `;
+  }
+
+  private renderOpacityInput(layer: Layer) {
+    return html`
+      <input
+        type="number"
+        class="opacity-input"
+        min="0"
+        max="100"
+        .value=${String(Math.round((layer.opacity / 255) * 100))}
+        @keydown=${(event: KeyboardEvent) => this.handleOpacityInputKeyDown(layer.id, event)}
+        @blur=${(event: FocusEvent) => this.handleOpacityInputBlur(layer.id, event)}
+        @click=${(event: Event) => event.stopPropagation()}
+      />
+    `;
+  }
+
+  private renderOpacityValue(layer: Layer) {
+    return html`
+      <span
+        class="opacity-value ${this.scrubbingLayerId === layer.id ? 'scrubbing' : ''}"
+        @mousedown=${(event: MouseEvent) =>
+          this.handleOpacityScrubStart(layer.id, layer.opacity, event)}
+        @dblclick=${(event: MouseEvent) => this.handleOpacityDoubleClick(layer.id, event)}
+        title="Drag to adjust, double-click to edit"
+      >
+        ${Math.round((layer.opacity / 255) * 100)}%
+      </span>
+    `;
+  }
+
   render() {
     // Render layers in reverse order (top layer at top of list)
     const layerStore = this.context.layers;
     const layers = [...layerStore.layers.value].reverse();
     const activeLayerId = layerStore.activeLayerId.value;
-    const canDelete = layerStore.layers.value.length > 1;
-
-    // Check if we can move up/down
-    const activeIndex = layerStore.layers.value.findIndex((l) => l.id === activeLayerId);
-    const canMoveUp = activeIndex < layerStore.layers.value.length - 1;
-    const canMoveDown = activeIndex > 0;
+    const guidedProject = this.context.guidedDrawing.active;
 
     return html`
-      ${
-        !this.noToolbar
-          ? html`
-              <div class="toolbar">
-                <button @click=${this.addLayer} title="Add Layer">+</button>
-                <button
-                  @click=${this.importReferenceImage}
-                  title="Import Reference Image"
-                  aria-label="Import Reference Image"
-                >
-                  ▧
-                </button>
-                <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>
-                  -
-                </button>
-                <button
-                  @click=${() => this.moveLayer('up')}
-                  title="Move Up"
-                  ?disabled=${!canMoveUp}
-                >
-                  ↑
-                </button>
-                <button
-                  @click=${() => this.moveLayer('down')}
-                  title="Move Down"
-                  ?disabled=${!canMoveDown}
-                >
-                  ↓
-                </button>
-              </div>
-            `
-          : ''
-      }
       <div class="layer-list">
-        ${layers.map(
-          (layer) => html`
-            <div
-              class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${
-                this.draggedLayerId === layer.id ? 'dragging' : ''
-              } ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
-              data-layer-type=${layer.type}
-              @click=${() => this.selectLayer(layer.id)}
-              @contextmenu=${(e: MouseEvent) => this.handleLayerContextMenu(e, layer.id)}
-              @mouseenter=${(e: MouseEvent) => this.handleLayerMouseEnter(e, layer.id, layer.name)}
-              @mouseleave=${this.handleLayerMouseLeave}
-              draggable="true"
-              @dragstart=${(e: DragEvent) => this.handleDragStart(layer.id, e)}
-              @dragend=${this.handleDragEnd}
-              @dragover=${(e: DragEvent) => this.handleDragOver(layer.id, e)}
-              @dragleave=${this.handleDragLeave}
-              @drop=${(e: DragEvent) => this.handleDrop(layer.id, e)}
-            >
-              <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
-              <button
-                class="icon-btn ${!layer.visible ? 'hidden-layer' : ''}"
-                @click=${(e: Event) => this.toggleVisibility(layer.id, e)}
-                title="${layer.visible ? 'Hide' : 'Show'} layer"
-              >
-                ${layer.visible ? '👁' : '👁'}
-              </button>
-              <button
-                class="icon-btn ${layer.locked ? 'locked-layer' : ''}"
-                @click=${(e: Event) => this.toggleLock(layer.id, e)}
-                title="${layer.locked ? 'Unlock' : 'Lock'} layer"
-              >
-                ${layer.locked ? '🔒' : '🔓'}
-              </button>
-              <button
-                class="icon-btn ${layer.continuous ? 'continuous-layer' : 'not-continuous'}"
-                @click=${(e: Event) => this.toggleContinuous(layer.id, e)}
-                title="${layer.continuous ? 'Continuous (linked new cels)' : 'Non-continuous (empty new cels)'}"
-              >
-                ∞
-              </button>
-              ${
-                this.editingLayerId === layer.id
-                  ? html`
-                      <input
-                        class="layer-name-input"
-                        type="text"
-                        .value=${this.editingName}
-                        @input=${this.handleRenameInput}
-                        @blur=${this.finishRename}
-                        @keydown=${this.handleRenameKeydown}
-                        @click=${(e: Event) => e.stopPropagation()}
-                      />
-                    `
-                  : html`
-                      <span
-                        class="layer-name"
-                        @dblclick=${(e: Event) => this.startRename(layer.id, layer.name, e)}
-                      >
-                        ${layer.type === 'text' ? html`<span class="layer-type-badge">T</span>` : ''}
-                        ${
-                          layer.type === 'reference'
-                            ? html`
-                                <span class="layer-type-badge reference-layer-badge" title="Reference layer">
-                                  <span class="reference-layer-icon" aria-hidden="true">▧</span>
-                                  <span class="reference-layer-label visually-hidden">reference</span>
-                                  <span class="reference-layer-abbreviation" aria-hidden="true">REF</span>
-                                </span>
-                              `
-                            : ''
-                        }${layer.name}
-                      </span>
-                    `
-              }
-              <div class="opacity-control" @click=${(e: Event) => e.stopPropagation()}>
-                ${
-                  this.editingOpacityLayerId === layer.id
-                    ? html`
-                        <input
-                          type="number"
-                          class="opacity-input"
-                          min="0"
-                          max="100"
-                          .value=${String(Math.round((layer.opacity / 255) * 100))}
-                          @keydown=${(e: KeyboardEvent) => this.handleOpacityInputKeyDown(layer.id, e)}
-                          @blur=${(e: FocusEvent) => this.handleOpacityInputBlur(layer.id, e)}
-                          @click=${(e: Event) => e.stopPropagation()}
-                        />
-                      `
-                    : html`
-                        <span
-                          class="opacity-value ${this.scrubbingLayerId === layer.id ? 'scrubbing' : ''}"
-                          @mousedown=${(e: MouseEvent) => this.handleOpacityScrubStart(layer.id, layer.opacity, e)}
-                          @dblclick=${(e: MouseEvent) => this.handleOpacityDoubleClick(layer.id, e)}
-                          title="Drag to adjust, double-click to edit"
-                        >
-                          ${Math.round((layer.opacity / 255) * 100)}%
-                        </span>
-                      `
-                }
-              </div>
-            </div>
-          `
-        )}
+        ${layers.map((layer) => this.renderLayerRow(layer, activeLayerId, guidedProject))}
       </div>
       <pf-timeline-tooltip></pf-timeline-tooltip>
       <pf-context-menu></pf-context-menu>
