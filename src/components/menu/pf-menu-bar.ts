@@ -580,6 +580,15 @@ export class PFMenuBar extends BaseComponent {
     );
   }
 
+  showPaintByNumberDialog() {
+    this.dispatchEvent(
+      new CustomEvent("show-paint-by-number-dialog", {
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   showProjectBrowser() {
     this.dispatchEvent(
       new CustomEvent("show-project-browser", {
@@ -710,6 +719,13 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${this.showNewProjectDialog}>
             New Project... <span class="shortcut">${formatShortcut(menuShortcuts.newProject)}</span>
           </div>
+          <button
+            class="menu-item"
+            type="button"
+            @click=${this.showPaintByNumberDialog}
+          >
+            New Guided Drawing...
+          </button>
           <div class="menu-item" @click=${this.showProjectBrowser}>
             Open Project... <span class="shortcut">${formatShortcut(menuShortcuts.open)}</span>
           </div>

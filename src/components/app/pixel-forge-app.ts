@@ -15,6 +15,7 @@ import "./pf-project-browser";
 import "../dialogs/pf-resize-dialog";
 import "../dialogs/pf-export-dialog";
 import "../dialogs/pf-new-project-dialog";
+import "../dialogs/pf-paint-by-number-dialog";
 import "../dialogs/pf-grid-settings-dialog";
 import "../dialogs/pf-checker-settings-dialog";
 import "../dialogs/pf-accent-color-dialog";
@@ -235,6 +236,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() showResizeDialog = false;
   @state() showExportDialog = false;
   @state() showNewProjectDialog = false;
+  @state() showPaintByNumberDialog = false;
   @state() showProjectBrowser = false;
   @state() showDeleteCurrentDialog = false;
   @state() showKeyboardShortcutsDialog = false;
@@ -264,6 +266,10 @@ export class PixelForgeApp extends BaseComponent {
     window.addEventListener(
       "show-new-project-dialog",
       this.handleShowNewProjectDialog
+    );
+    window.addEventListener(
+      "show-paint-by-number-dialog",
+      this.handleShowPaintByNumberDialog
     );
     window.addEventListener(
       "show-keyboard-shortcuts-dialog",
@@ -333,6 +339,19 @@ export class PixelForgeApp extends BaseComponent {
     this.showNewProjectDialog = true;
   };
 
+  private handleShowPaintByNumberDialog = () => {
+    this.showProjectBrowser = false;
+    this.showPaintByNumberDialog = true;
+  };
+
+  private handlePaintByNumberDialogClose = () => {
+    this.showPaintByNumberDialog = false;
+
+    if (!this.hasLibraryProject) {
+      this.showProjectBrowser = true;
+    }
+  };
+
   private handleNewProjectDialogClose = () => {
     this.showNewProjectDialog = false;
 
@@ -394,6 +413,7 @@ export class PixelForgeApp extends BaseComponent {
   private handleProjectCreated = () => {
     this.hasLibraryProject = true;
     this.showNewProjectDialog = false;
+    this.showPaintByNumberDialog = false;
     this.showProjectBrowser = false;
   };
 
@@ -484,6 +504,10 @@ export class PixelForgeApp extends BaseComponent {
       this.handleShowNewProjectDialog
     );
     window.removeEventListener(
+      "show-paint-by-number-dialog",
+      this.handleShowPaintByNumberDialog
+    );
+    window.removeEventListener(
       "show-keyboard-shortcuts-dialog",
       this.handleShowKeyboardShortcutsDialog
     );
@@ -569,6 +593,7 @@ export class PixelForgeApp extends BaseComponent {
           @resize-canvas=${() => (this.showResizeDialog = true)}
           @show-export-dialog=${() => (this.showExportDialog = true)}
           @show-new-project-dialog=${this.handleShowNewProjectDialog}
+          @show-paint-by-number-dialog=${this.handleShowPaintByNumberDialog}
           @show-project-browser=${() => (this.showProjectBrowser = true)}
         ></pf-menu-bar>
       </header>
@@ -646,6 +671,12 @@ export class PixelForgeApp extends BaseComponent {
         @close=${this.handleNewProjectDialogClose}
         @project-created=${this.handleProjectCreated}
       ></pf-new-project-dialog>
+
+      <pf-paint-by-number-dialog
+        ?open=${this.showPaintByNumberDialog}
+        @close=${this.handlePaintByNumberDialogClose}
+        @project-created=${this.handleProjectCreated}
+      ></pf-paint-by-number-dialog>
 
       ${this.showProjectBrowser
         ? html`

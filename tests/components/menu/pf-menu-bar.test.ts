@@ -316,6 +316,25 @@ describe("pf-menu-bar popovers", () => {
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("opens guided drawing setup from the File menu", async () => {
+    const element = await createMenuBar();
+    const fileButton = button(element, "file");
+    const fileMenu = menu(element, "file");
+    let guidedDrawingRequested = false;
+
+    element.addEventListener("show-paint-by-number-dialog", () => {
+      guidedDrawingRequested = true;
+    });
+
+    fileButton?.click();
+    await element.updateComplete;
+    menuItem(fileMenu!, "New Guided Drawing")?.click();
+    await element.updateComplete;
+
+    expect(guidedDrawingRequested).toBe(true);
+    expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("imports a reference image from the File menu into the project active when the picker opened", async () => {
     const contextA = createContext("Context A");
     const contextB = createContext("Context B");
