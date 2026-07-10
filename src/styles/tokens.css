@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Departure Mono";
+  src: url("/fonts/departure-mono-1.500.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   /* Noir terminal palette */
   --pf-color-bg-dark: #07090d;
@@ -65,7 +73,7 @@
   --pf-radius-md: 4px;
 
   /* Typography */
-  --pf-font-mono: "SFMono-Regular", "Menlo", "Monaco", "Consolas", monospace;
+  --pf-font-mono: "Departure Mono", "SFMono-Regular", "Monaco", "Consolas", monospace;
   --pf-font-serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
   --pf-font-size-xs: 10px;
   --pf-font-size-sm: 12px;
