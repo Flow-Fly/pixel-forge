@@ -244,6 +244,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
   @state() private hasLibraryProject = false;
+  @state() private projectSelectionRequired = false;
   @state() private warningMessage: string | null = null;
 
   private resizeStartY = 0;
@@ -347,7 +348,7 @@ export class PixelForgeApp extends BaseComponent {
   private handlePaintByNumberDialogClose = () => {
     this.showPaintByNumberDialog = false;
 
-    if (!this.hasLibraryProject) {
+    if (this.projectSelectionRequired) {
       this.showProjectBrowser = true;
     }
   };
@@ -355,7 +356,7 @@ export class PixelForgeApp extends BaseComponent {
   private handleNewProjectDialogClose = () => {
     this.showNewProjectDialog = false;
 
-    if (!this.hasLibraryProject) {
+    if (this.projectSelectionRequired) {
       this.showProjectBrowser = true;
     }
   };
@@ -400,18 +401,20 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleProjectBrowserClose = () => {
-    if (this.hasLibraryProject) {
+    if (!this.projectSelectionRequired) {
       this.showProjectBrowser = false;
     }
   };
 
   private handleProjectOpened = () => {
     this.hasLibraryProject = true;
+    this.projectSelectionRequired = false;
     this.showProjectBrowser = false;
   };
 
   private handleProjectCreated = () => {
     this.hasLibraryProject = true;
+    this.projectSelectionRequired = false;
     this.showNewProjectDialog = false;
     this.showPaintByNumberDialog = false;
     this.showProjectBrowser = false;
@@ -419,6 +422,7 @@ export class PixelForgeApp extends BaseComponent {
 
   private handleCurrentProjectDeleted = () => {
     this.hasLibraryProject = false;
+    this.projectSelectionRequired = true;
     this.showProjectBrowser = true;
   };
 
@@ -462,6 +466,7 @@ export class PixelForgeApp extends BaseComponent {
         (await workspaceStore.restoreWorkspace(workspaceState))
       ) {
         this.hasLibraryProject = true;
+        this.projectSelectionRequired = false;
         this.showProjectBrowser = false;
         return;
       }
@@ -482,15 +487,18 @@ export class PixelForgeApp extends BaseComponent {
       ) {
         historyStore.clear();
         this.hasLibraryProject = true;
+        this.projectSelectionRequired = false;
         this.showProjectBrowser = false;
       } else {
         this.hasLibraryProject = false;
-        this.showProjectBrowser = true;
+        this.projectSelectionRequired = false;
+        this.showProjectBrowser = false;
       }
     } catch (error) {
       log.warn("Failed to load saved project, starting fresh:", error);
       this.hasLibraryProject = false;
-      this.showProjectBrowser = true;
+      this.projectSelectionRequired = false;
+      this.showProjectBrowser = false;
     }
   }
 
@@ -681,7 +689,7 @@ export class PixelForgeApp extends BaseComponent {
       ${this.showProjectBrowser
         ? html`
             <pf-project-browser
-              .canClose=${this.hasLibraryProject}
+              .canClose=${!this.projectSelectionRequired}
               @show-new-project-dialog=${this.handleShowNewProjectDialog}
               @show-paint-by-number-dialog=${this.handleShowPaintByNumberDialog}
               @project-browser-close=${this.handleProjectBrowserClose}
