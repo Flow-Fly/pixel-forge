@@ -2,6 +2,20 @@ import { html, css } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { settingsStore } from '../../stores/settings';
+import {
+  CRT_EFFECT_ID,
+  CRT_PARAM_CONTROLS,
+  CRT_PRESETS,
+  CRT_PRESET_OPTIONS,
+  getCrtParams,
+  getCrtPresetId,
+  ViewEffectPipeline,
+  type CrtParamKey,
+  type CrtPresetId,
+} from '../../services/view-effects';
+import type { Cel } from '../../types/animation';
+import type { Layer } from '../../types/layer';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -114,6 +128,16 @@ export class PFPreviewOverlay extends BaseComponent {
       background: transparent;
     }
 
+    .effect-canvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .effect-canvas[hidden] {
+      display: none;
+    }
+
     .preview-canvas-wrapper.bg-white {
       --preview-bg-color: white;
     }
@@ -151,6 +175,91 @@ export class PFPreviewOverlay extends BaseComponent {
       border-top: 1px solid var(--pf-color-border);
       background: rgba(255, 255, 255, 0.025);
       gap: 4px;
+    }
+
+    .effect-actions {
+      display: flex;
+      gap: 2px;
+    }
+
+    .effect-button,
+    .effect-settings-button {
+      background: var(--pf-color-bg-input);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      color: var(--pf-color-text-muted);
+      cursor: pointer;
+      font-size: 10px;
+      min-height: 20px;
+      padding: 2px 6px;
+    }
+
+    .effect-button:hover,
+    .effect-settings-button:hover {
+      background: var(--pf-color-bg-hover);
+      color: var(--pf-color-text-main);
+    }
+
+    .effect-button[aria-pressed='true'],
+    .effect-settings-button[aria-expanded='true'] {
+      border-color: var(--pf-color-accent);
+      color: var(--pf-color-accent);
+    }
+
+    .effect-button:focus-visible,
+    .effect-settings-button:focus-visible,
+    .effect-panel select:focus-visible,
+    .effect-panel input:focus-visible {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: 1px;
+    }
+
+    .effect-panel {
+      border-top: 1px solid var(--pf-color-border);
+      display: grid;
+      gap: 8px;
+      min-width: 220px;
+      padding: 8px;
+    }
+
+    .effect-preset-row,
+    .effect-slider-row {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 84px minmax(80px, 1fr) 34px;
+    }
+
+    .effect-preset-row {
+      grid-template-columns: 84px minmax(120px, 1fr);
+    }
+
+    .effect-panel label,
+    .effect-value {
+      color: var(--pf-color-text-muted);
+      font-size: 10px;
+    }
+
+    .effect-value {
+      color: var(--pf-color-text-main);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .effect-panel select {
+      background: var(--pf-color-bg-input);
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      color: var(--pf-color-text-main);
+      font: inherit;
+      font-size: 11px;
+      min-height: 24px;
+    }
+
+    .effect-panel input[type='range'] {
+      accent-color: var(--pf-color-accent);
+      min-width: 0;
+      width: 100%;
     }
 
     .bg-selector {
@@ -256,7 +365,8 @@ export class PFPreviewOverlay extends BaseComponent {
     }
   `;
 
-  @query('canvas') previewCanvas!: HTMLCanvasElement;
+  @query('.preview-canvas') previewCanvas!: HTMLCanvasElement;
+  @query('.effect-canvas') effectCanvas!: HTMLCanvasElement;
 
   @state() private collapsed = false;
   @state() private bgType: BackgroundType = 'checker';
@@ -267,6 +377,8 @@ export class PFPreviewOverlay extends BaseComponent {
   @state() private dragOffsetY = 0;
   @state() private previewSize = 128; // User-configurable preview size
   @state() private isResizing = false;
+  @state() private viewEffectsSupported = false;
+  @state() private effectsPanelOpen = false;
   private resizeStartX = 0;
   private resizeStartY = 0;
   private resizeStartSize = 0;
@@ -274,6 +386,7 @@ export class PFPreviewOverlay extends BaseComponent {
   private ctx: CanvasRenderingContext2D | null = null;
   private animationFrameId: number = 0;
   private context: ProjectContext = defaultProjectContext;
+  private viewEffectPipeline: ViewEffectPipeline | null = null;
 
   // Preview sizing constraints
   private readonly MAX_PREVIEW_SIZE = 300; // Max user-resizable size
@@ -296,11 +409,16 @@ export class PFPreviewOverlay extends BaseComponent {
     window.removeEventListener('mouseup', this.handleMouseUp);
     window.removeEventListener('mousemove', this.handleResizeMouseMove);
     window.removeEventListener('mouseup', this.handleResizeMouseUp);
+    this.viewEffectPipeline?.dispose();
   }
 
   firstUpdated() {
     if (this.previewCanvas) {
       this.ctx = this.previewCanvas.getContext('2d');
+    }
+    if (this.effectCanvas) {
+      this.viewEffectPipeline = new ViewEffectPipeline(this.effectCanvas);
+      this.viewEffectsSupported = this.viewEffectPipeline.isSupported;
     }
     // Set default position if not loaded
     if (this.posX === 0 && this.posY === 0) {
@@ -457,6 +575,39 @@ export class PFPreviewOverlay extends BaseComponent {
     this.context.animation.togglePlayback();
   }
 
+  private toggleCrtEffect() {
+    if (settingsStore.activeViewEffect.value === CRT_EFFECT_ID) {
+      settingsStore.setActiveViewEffect(null);
+      return;
+    }
+
+    const storedParams = settingsStore.getViewEffectParams(CRT_EFFECT_ID);
+    if (Object.keys(storedParams).length === 0) {
+      settingsStore.setViewEffectParams(CRT_EFFECT_ID, { ...CRT_PRESETS.subtle });
+    }
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
+  private setCrtPreset(presetId: CrtPresetId | 'custom') {
+    if (presetId === 'custom') return;
+    if (presetId === 'off') {
+      settingsStore.setActiveViewEffect(null);
+      return;
+    }
+
+    settingsStore.setViewEffectParams(CRT_EFFECT_ID, { ...CRT_PRESETS[presetId] });
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
+  private setCrtParam(key: CrtParamKey, value: number) {
+    const params = getCrtParams(settingsStore.getViewEffectParams(CRT_EFFECT_ID));
+    settingsStore.setViewEffectParams(CRT_EFFECT_ID, {
+      ...params,
+      [key]: value,
+    });
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
   private startAnimationLoop() {
     // This loop only handles rendering; playback state lives in the active context.
     const loop = () => {
@@ -479,38 +630,70 @@ export class PFPreviewOverlay extends BaseComponent {
     // Clear at actual canvas size
     this.ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Render each visible layer
     for (const layer of visibleLayers) {
-      if (!layer.visible) continue;
-
       const key = `${layer.id}:${currentFrameId}`;
-      const cel = cels.get(key);
-      const canvasToUse = cel?.canvas ?? layer.canvas;
-
-      if (canvasToUse) {
-        // Calculate effective opacity: layer opacity * cel opacity
-        const layerOpacity = layer.opacity / 255;
-        const celOpacity = (cel?.opacity ?? 100) / 100;
-        this.ctx.globalAlpha = layerOpacity * celOpacity;
-
-        this.ctx.globalCompositeOperation =
-          layer.blendMode === 'normal'
-            ? 'source-over'
-            : (layer.blendMode as GlobalCompositeOperation);
-
-        if (previewScale >= 1) {
-          // Scaling UP: draw at native resolution, CSS handles pixelated scaling
-          this.ctx.drawImage(canvasToUse, 0, 0);
-        } else {
-          // Scaling DOWN: draw scaled to reduce canvas size for performance
-          this.ctx.drawImage(canvasToUse, 0, 0, canvas.width, canvas.height);
-        }
-      }
+      this.drawPreviewLayer(layer, cels.get(key), canvas, previewScale);
     }
 
     // Reset composite settings
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
+
+    this.renderViewEffect(canvas, previewScale);
+  }
+
+  private drawPreviewLayer(
+    layer: Layer,
+    cel: Cel | undefined,
+    canvas: HTMLCanvasElement,
+    previewScale: number
+  ): void {
+    if (!layer.visible) return;
+
+    const canvasToUse = this.getLayerPreviewCanvas(layer, cel);
+    if (!canvasToUse || !this.ctx) return;
+
+    this.ctx.globalAlpha = (layer.opacity / 255) * this.getCelOpacity(cel);
+    this.ctx.globalCompositeOperation = this.getLayerCompositeOperation(layer);
+
+    if (previewScale >= 1) {
+      this.ctx.drawImage(canvasToUse, 0, 0);
+      return;
+    }
+    this.ctx.drawImage(canvasToUse, 0, 0, canvas.width, canvas.height);
+  }
+
+  private getLayerPreviewCanvas(layer: Layer, cel: Cel | undefined): HTMLCanvasElement | null {
+    if (cel) return cel.canvas;
+    return layer.canvas ?? null;
+  }
+
+  private getCelOpacity(cel: Cel | undefined): number {
+    return cel ? (cel.opacity ?? 100) / 100 : 1;
+  }
+
+  private getLayerCompositeOperation(layer: Layer): GlobalCompositeOperation {
+    return layer.blendMode === 'normal'
+      ? 'source-over'
+      : (layer.blendMode as GlobalCompositeOperation);
+  }
+
+  private renderViewEffect(source: HTMLCanvasElement, previewScale: number) {
+    const effectId = settingsStore.activeViewEffect.value;
+    const pipeline = this.viewEffectPipeline;
+    if (!effectId || !pipeline?.isSupported) return;
+
+    const projectWidth = this.context.project.width.value;
+    const projectHeight = this.context.project.height.value;
+    const displayWidth = Math.max(1, Math.round(projectWidth * previewScale));
+    const displayHeight = Math.max(1, Math.round(projectHeight * previewScale));
+    const pixelRatio = window.devicePixelRatio || 1;
+
+    pipeline.render(effectId, source, settingsStore.getViewEffectParams(effectId), {
+      width: displayWidth * pixelRatio,
+      height: displayHeight * pixelRatio,
+      spritePixelScale: previewScale * pixelRatio,
+    });
   }
 
   /**
@@ -569,6 +752,154 @@ export class PFPreviewOverlay extends BaseComponent {
     };
   }
 
+  private getContentStyle(): string {
+    if (this.collapsed) return '';
+    const extraHeight = this.effectsPanelOpen ? 300 : 100;
+    return `max-height: ${this.previewSize + extraHeight}px`;
+  }
+
+  private renderPreviewSurface(options: {
+    actualCanvasW: number;
+    actualCanvasH: number;
+    displayW: number;
+    displayH: number;
+    viewportStyle: ReturnType<PFPreviewOverlay['getViewportIndicatorStyle']>;
+  }) {
+    const { actualCanvasW, actualCanvasH, displayW, displayH, viewportStyle } = options;
+    const effectHidden = !settingsStore.activeViewEffect.value || !this.viewEffectsSupported;
+
+    return html`
+      <div class="preview-area" @click=${this.handlePreviewClick}>
+        <div class="preview-canvas-wrapper bg-${this.bgType}">
+          <canvas
+            class="preview-canvas"
+            width="${actualCanvasW}"
+            height="${actualCanvasH}"
+            style="width: ${displayW}px; height: ${displayH}px;"
+          ></canvas>
+          <canvas
+            class="effect-canvas"
+            aria-hidden="true"
+            ?hidden=${effectHidden}
+            style="width: ${displayW}px; height: ${displayH}px;"
+          ></canvas>
+          ${
+            viewportStyle
+              ? html`
+                  <div
+                    class="viewport-indicator"
+                    style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
+                  ></div>
+                `
+              : ''
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  private renderBackgroundControls() {
+    return html`
+      <div class="bg-selector">
+        <button
+          class="bg-btn white ${this.bgType === 'white' ? 'active' : ''}"
+          @click=${() => this.setBgType('white')}
+          title="White background"
+        ></button>
+        <button
+          class="bg-btn black ${this.bgType === 'black' ? 'active' : ''}"
+          @click=${() => this.setBgType('black')}
+          title="Black background"
+        ></button>
+        <button
+          class="bg-btn checker ${this.bgType === 'checker' ? 'active' : ''}"
+          @click=${() => this.setBgType('checker')}
+          title="Transparent (checker)"
+        ></button>
+      </div>
+    `;
+  }
+
+  private renderEffectActions(crtIsActive: boolean) {
+    if (!this.viewEffectsSupported) return '';
+
+    return html`
+      <div class="effect-actions">
+        <button
+          class="effect-button"
+          type="button"
+          aria-label="Toggle CRT effect"
+          aria-pressed=${crtIsActive}
+          @click=${this.toggleCrtEffect}
+        >
+          CRT
+        </button>
+        <button
+          class="effect-settings-button"
+          type="button"
+          aria-controls="crt-effect-panel"
+          aria-expanded=${this.effectsPanelOpen}
+          @click=${() => (this.effectsPanelOpen = !this.effectsPanelOpen)}
+        >
+          Tune
+        </button>
+      </div>
+    `;
+  }
+
+  private renderEffectPanel(
+    crtPreset: CrtPresetId | 'custom',
+    params: ReturnType<typeof getCrtParams>,
+    crtIsActive: boolean
+  ) {
+    if (!this.viewEffectsSupported || !this.effectsPanelOpen) return '';
+
+    return html`
+      <div class="effect-panel" id="crt-effect-panel">
+        <div class="effect-preset-row">
+          <label for="crt-preset">Preset</label>
+          <select
+            id="crt-preset"
+            .value=${crtPreset}
+            @change=${(event: Event) =>
+              this.setCrtPreset(
+                (event.target as HTMLSelectElement).value as CrtPresetId | 'custom'
+              )}
+          >
+            ${CRT_PRESET_OPTIONS.map(
+              ({ id, label }) => html`
+                <option value=${id} ?selected=${crtPreset === id}>${label}</option>
+              `
+            )}
+            ${crtPreset === 'custom' ? html`<option value="custom" selected>Custom</option>` : ''}
+          </select>
+        </div>
+        ${CRT_PARAM_CONTROLS.map(
+          ({ key, label }) => html`
+            <div class="effect-slider-row">
+              <label for="crt-${key}">${label}</label>
+              <input
+                id="crt-${key}"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                ?disabled=${!crtIsActive}
+                .value=${String(params[key])}
+                aria-valuetext="${Math.round(params[key] * 100)} percent"
+                @input=${(event: Event) =>
+                  this.setCrtParam(key, parseFloat((event.target as HTMLInputElement).value))}
+              />
+              <output class="effect-value" for="crt-${key}"
+                >${Math.round(params[key] * 100)}%</output
+              >
+            </div>
+          `
+        )}
+      </div>
+    `;
+  }
+
   render() {
     const { animation, project } = this.context;
     const isPlaying = animation.isPlaying.value;
@@ -584,6 +915,10 @@ export class PFPreviewOverlay extends BaseComponent {
     const actualCanvasH = previewScale >= 1 ? canvasH : displayH;
 
     const viewportStyle = this.getViewportIndicatorStyle();
+    const crtIsActive = settingsStore.activeViewEffect.value === CRT_EFFECT_ID;
+    const crtParams = getCrtParams(settingsStore.getViewEffectParams(CRT_EFFECT_ID));
+    const displayedCrtParams = crtIsActive ? crtParams : CRT_PRESETS.off;
+    const crtPreset = crtIsActive ? getCrtPresetId(crtParams) : 'off';
 
     return html`
       <div class="container" style="transform: translate(${this.posX}px, ${this.posY}px)">
@@ -594,50 +929,21 @@ export class PFPreviewOverlay extends BaseComponent {
           <span class="header-title">Preview</span>
         </div>
 
-        <div
-          class="content ${this.collapsed ? 'collapsed' : ''}"
-          style="${!this.collapsed ? `max-height: ${this.previewSize + 100}px` : ''}"
-        >
-          <div class="preview-area" @click=${this.handlePreviewClick}>
-            <div class="preview-canvas-wrapper bg-${this.bgType}">
-              <canvas
-                width="${actualCanvasW}"
-                height="${actualCanvasH}"
-                style="width: ${displayW}px; height: ${displayH}px;"
-              ></canvas>
-              ${
-                viewportStyle
-                  ? html`
-                      <div
-                        class="viewport-indicator"
-                        style="left: ${viewportStyle.left}; top: ${viewportStyle.top}; width: ${viewportStyle.width}; height: ${viewportStyle.height};"
-                      ></div>
-                    `
-                  : ''
-              }
-            </div>
-          </div>
+        <div class="content ${this.collapsed ? 'collapsed' : ''}" style=${this.getContentStyle()}>
+          ${this.renderPreviewSurface({
+            actualCanvasW,
+            actualCanvasH,
+            displayW,
+            displayH,
+            viewportStyle,
+          })}
 
           <div class="controls">
-            <div class="bg-selector">
-              <button
-                class="bg-btn white ${this.bgType === 'white' ? 'active' : ''}"
-                @click=${() => this.setBgType('white')}
-                title="White background"
-              ></button>
-              <button
-                class="bg-btn black ${this.bgType === 'black' ? 'active' : ''}"
-                @click=${() => this.setBgType('black')}
-                title="Black background"
-              ></button>
-              <button
-                class="bg-btn checker ${this.bgType === 'checker' ? 'active' : ''}"
-                @click=${() => this.setBgType('checker')}
-                title="Transparent (checker)"
-              ></button>
-            </div>
+            ${this.renderBackgroundControls()} ${this.renderEffectActions(crtIsActive)}
             <button class="play-btn" @click=${this.togglePlay}>${isPlaying ? '⏸' : '▶'}</button>
           </div>
+
+          ${this.renderEffectPanel(crtPreset, displayedCrtParams, crtIsActive)}
         </div>
         <div
           class="resize-handle"
