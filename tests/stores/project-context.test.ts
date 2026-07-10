@@ -5,6 +5,7 @@ import { colorStore } from "../../src/stores/colors";
 import { dirtyRectStore } from "../../src/stores/dirty-rect";
 import { gridStore } from "../../src/stores/grid";
 import { guidesStore } from "../../src/stores/guides";
+import { guidedDrawingStore } from "../../src/stores/guided-drawing";
 import { historyStore } from "../../src/stores/history";
 import { historyHighlightStore } from "../../src/stores/history-highlight";
 import { layerStore } from "../../src/stores/layers";
@@ -112,6 +113,20 @@ describe("ProjectContext", () => {
     contextA.project.setSize(32, 24);
     contextA.animation.fps.value = 24;
     contextA.palette.setPalette(["#111111", "#222222"]);
+    contextA.guidedDrawing.start({
+      version: 1,
+      width: 1,
+      height: 1,
+      target: new Uint8Array([1]),
+      settings: {
+        longSide: 1,
+        paletteSource: "generated",
+        maxColors: 1,
+        mapping: "color",
+        simplifyIsolatedPixels: true,
+      },
+      createdAt: 1,
+    });
     await contextA.history.execute({
       id: "command-a",
       name: "Command A",
@@ -125,6 +140,8 @@ describe("ProjectContext", () => {
     expect(contextB.animation.fps.value).toBe(12);
     expect(contextA.palette.mainColors.value).toEqual(["#111111", "#222222"]);
     expect(contextB.palette.mainColors.value).not.toEqual(["#111111", "#222222"]);
+    expect(contextA.guidedDrawing.active).toBe(true);
+    expect(contextB.guidedDrawing.active).toBe(false);
     expect(contextA.history.canUndo.value).toBe(true);
     expect(contextB.history.canUndo.value).toBe(false);
   });
@@ -177,6 +194,7 @@ describe("ProjectContext", () => {
     expect(defaultProjectContext.dirtyRect).toBe(dirtyRectStore);
     expect(defaultProjectContext.grid).toBe(gridStore);
     expect(defaultProjectContext.guides).toBe(guidesStore);
+    expect(defaultProjectContext.guidedDrawing).toBe(guidedDrawingStore);
     expect(defaultProjectContext.history).toBe(historyStore);
     expect(defaultProjectContext.historyHighlight).toBe(historyHighlightStore);
     expect(defaultProjectContext.layers).toBe(layerStore);

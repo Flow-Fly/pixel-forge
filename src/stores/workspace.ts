@@ -16,6 +16,7 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from "./project-context";
+import type { ProjectFile } from "../types/project";
 import { log } from "../utils/log";
 
 export const WORKSPACE_OPEN_ITEM_LIMIT = 8;
@@ -42,7 +43,7 @@ type WorkspaceLimitFailure = {
 
 type WorkspaceProjectLibrary = Pick<
   ProjectLibraryService,
-  "openProject" | "createProject"
+  "openProject" | "createProject" | "createProjectFromFile"
 >;
 type WorkspaceAutoSave = Pick<
   typeof autoSaveService,
@@ -195,6 +196,30 @@ export class WorkspaceStore {
     projectOptions: CreateProjectOptions,
     options: WorkspaceProjectOptions = {},
   ): Promise<WorkspaceProjectResult> {
+    return this.createProjectInNewContext(options, (context) =>
+      this.projectLibrary.createProject(projectOptions, {
+        context,
+        saveCurrent: false,
+      }),
+    );
+  }
+
+  async createProjectFromFile(
+    project: ProjectFile,
+    options: WorkspaceProjectOptions = {},
+  ): Promise<WorkspaceProjectResult> {
+    return this.createProjectInNewContext(options, (context) =>
+      this.projectLibrary.createProjectFromFile(project, {
+        context,
+        saveCurrent: false,
+      }),
+    );
+  }
+
+  private async createProjectInNewContext(
+    options: WorkspaceProjectOptions,
+    createProject: (context: ProjectContext) => Promise<string>,
+  ): Promise<WorkspaceProjectResult> {
     if (this.items.value.length >= this.itemLimit) {
       return this.createLimitFailure();
     }
@@ -204,10 +229,7 @@ export class WorkspaceStore {
     const context = createProjectContext();
     let projectId: string;
     try {
-      projectId = await this.projectLibrary.createProject(projectOptions, {
-        context,
-        saveCurrent: false,
-      });
+      projectId = await createProject(context);
     } catch (error) {
       context.dispose();
       throw error;
