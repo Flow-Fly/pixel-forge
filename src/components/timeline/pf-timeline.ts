@@ -64,7 +64,7 @@ export class PFTimeline extends BaseComponent {
       padding: 0;
     }
 
-    .layers-toolbar button:hover {
+    .layers-toolbar button:hover:not(:disabled) {
       background: var(--pf-color-bg-hover);
       color: var(--pf-color-text-main);
       border-color: var(--pf-color-border-strong);
@@ -249,10 +249,12 @@ export class PFTimeline extends BaseComponent {
   };
 
   private addLayer() {
+    if (this.context.guidedDrawing.active) return;
     void this.context.history.execute(new AddLayerCommand(this.context));
   }
 
   private deleteLayer() {
+    if (this.context.guidedDrawing.active) return;
     const activeId = this.context.layers.activeLayerId.value;
     if (activeId && this.context.layers.layers.value.length > 1) {
       void this.context.history.execute(new RemoveLayerCommand(activeId, this.context));
@@ -260,6 +262,7 @@ export class PFTimeline extends BaseComponent {
   }
 
   private moveLayer(direction: 'up' | 'down') {
+    if (this.context.guidedDrawing.active) return;
     const activeId = this.context.layers.activeLayerId.value;
     if (activeId) {
       this.context.layers.reorderLayer(activeId, direction);
@@ -286,6 +289,7 @@ export class PFTimeline extends BaseComponent {
     const activeIndex = layers.findIndex((l) => l.id === activeLayerId);
     const canMoveUp = activeIndex < layers.length - 1;
     const canMoveDown = activeIndex > 0;
+    const guidedProject = this.context.guidedDrawing.active;
 
     return html`
       <div class="controls-area">
@@ -294,15 +298,27 @@ export class PFTimeline extends BaseComponent {
       </div>
       <div class="header-row">
         <div class="layers-toolbar">
-          <button @click=${this.addLayer} title="Add Layer">+</button>
-          <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>-</button>
-          <button @click=${() => this.moveLayer('up')} title="Move Up" ?disabled=${!canMoveUp}>
+          <button
+            @click=${this.addLayer}
+            title=${guidedProject ? 'Guided projects keep one painting layer' : 'Add Layer'}
+            ?disabled=${guidedProject}
+          >+</button>
+          <button
+            @click=${this.deleteLayer}
+            title=${guidedProject ? 'Guided projects keep one painting layer' : 'Delete Layer'}
+            ?disabled=${guidedProject || !canDelete}
+          >-</button>
+          <button
+            @click=${() => this.moveLayer('up')}
+            title=${guidedProject ? 'Guided projects keep the painting layer fixed' : 'Move Up'}
+            ?disabled=${guidedProject || !canMoveUp}
+          >
             ↑
           </button>
           <button
             @click=${() => this.moveLayer('down')}
-            title="Move Down"
-            ?disabled=${!canMoveDown}
+            title=${guidedProject ? 'Guided projects keep the painting layer fixed' : 'Move Down'}
+            ?disabled=${guidedProject || !canMoveDown}
           >
             ↓
           </button>
@@ -318,7 +334,7 @@ export class PFTimeline extends BaseComponent {
         @wheel=${this.handleWheel}
       >
         <div class="layers-column">
-          <pf-timeline-layers no-toolbar></pf-timeline-layers>
+          <pf-timeline-layers></pf-timeline-layers>
         </div>
         <div class="grid-column">
           <pf-timeline-grid></pf-timeline-grid>

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import '../../../src/components/timeline/pf-playback-controls';
+import '../../../src/components/timeline/pf-timeline';
 import '../../../src/components/timeline/pf-timeline-layers';
 import '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import type { PFPlaybackControls } from '../../../src/components/timeline/pf-playback-controls';
+import type { PFTimeline } from '../../../src/components/timeline/pf-timeline';
 import type { PFTimelineLayers } from '../../../src/components/timeline/pf-timeline-layers';
 import type { PFTimelineFrameCells } from '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import {
@@ -20,6 +22,24 @@ function createContext(name: string) {
   context.project.name.value = name;
   createdContexts.push(context);
   return context;
+}
+
+function startGuidedSession(context: ProjectContext) {
+  context.guidedDrawing.start({
+    version: 1,
+    width: 1,
+    height: 1,
+    target: Uint8Array.from([1]),
+    guideColorCount: 1,
+    settings: {
+      longSide: 1,
+      paletteSource: 'generated',
+      maxColors: 1,
+      mapping: 'color',
+      simplifyIsolatedPixels: false,
+    },
+    createdAt: 1,
+  });
 }
 
 function renameFirstLayer(context: ProjectContext, name: string) {
@@ -43,6 +63,13 @@ async function createTimelineLayers() {
 
 async function createPlaybackControls() {
   const element = document.createElement('pf-playback-controls') as PFPlaybackControls;
+  document.body.append(element);
+  await element.updateComplete;
+  return element;
+}
+
+async function createTimeline() {
+  const element = document.createElement('pf-timeline') as PFTimeline;
   document.body.append(element);
   await element.updateComplete;
   return element;
@@ -124,9 +151,9 @@ describe('timeline active project context binding', () => {
     const contextB = createContext('Context B');
     setActiveProjectContext(contextA);
 
-    const layers = await createTimelineLayers();
-    clickByTitle(layers.shadowRoot, 'Add Layer');
-    await waitForContextRender(layers);
+    const timeline = await createTimeline();
+    clickByTitle(timeline.shadowRoot, 'Add Layer');
+    await waitForContextRender(timeline);
 
     expect(contextA.layers.layers.value).toHaveLength(2);
     expect(contextA.history.undoStack.value).toHaveLength(1);
@@ -147,6 +174,34 @@ describe('timeline active project context binding', () => {
     expect(contextA.history.undoStack.value).toHaveLength(1);
     expect(contextB.animation.frames.value).toHaveLength(1);
     expect(contextB.history.undoStack.value).toHaveLength(0);
+  });
+
+  it('keeps guided projects on one fixed layer and frame', async () => {
+    const context = createContext('Guide');
+    startGuidedSession(context);
+    setActiveProjectContext(context);
+
+    const layers = await createTimelineLayers();
+    const controls = await createPlaybackControls();
+    const timeline = await createTimeline();
+    const layerRow = layers.shadowRoot?.querySelector<HTMLElement>('.layer-row');
+    const frameButton = [...(controls.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((item) => item.textContent?.includes('+ Frame'));
+    const appLayerButtons = [
+      ...(timeline.shadowRoot?.querySelectorAll<HTMLButtonElement>('.layers-toolbar button') ?? []),
+    ];
+
+    expect(appLayerButtons.every((item) => item.disabled)).toBe(true);
+    expect(layerRow?.draggable).toBe(false);
+    expect(frameButton?.disabled).toBe(true);
+
+    (timeline as unknown as { addLayer(): void }).addLayer();
+    (controls as unknown as { addFrame(): void }).addFrame();
+    await waitForContextRender(layers);
+
+    expect(context.layers.layers.value).toHaveLength(1);
+    expect(context.animation.frames.value).toHaveLength(1);
+    expect(context.history.undoStack.value).toHaveLength(0);
   });
 
   it('commits a layer rename to the context where editing started', async () => {

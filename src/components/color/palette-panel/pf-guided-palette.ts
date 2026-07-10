@@ -39,10 +39,17 @@ export class PFGuidedPalette extends BaseComponent {
 
     .progress-copy,
     .remaining,
-    .artist-copy {
+    .artist-copy,
+    .structure-note {
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-xs);
       line-height: 1.4;
+    }
+
+    .structure-note {
+      padding: 7px 8px;
+      border-inline-start: 2px solid var(--pf-color-accent);
+      background: var(--pf-color-primary-transparent);
     }
 
     progress {
@@ -244,6 +251,11 @@ export class PFGuidedPalette extends BaseComponent {
           `;
         })}
       </div>
+
+      <p class="structure-note">
+        Canvas, palette, layers, and frames stay fixed so the numbered guide remains aligned.
+        Drawing colors and tools are still yours.
+      </p>
 
       ${artistColors.length > 0
         ? html`

@@ -42,6 +42,9 @@ describe('guided palette', () => {
     );
     expect(element.shadowRoot?.textContent).toContain('1 of 2 cells covered');
     expect(element.shadowRoot?.textContent).toContain('1 remaining · 50%');
+    expect(element.shadowRoot?.textContent).toContain(
+      'Canvas, palette, layers, and frames stay fixed',
+    );
 
     buttons[1].click();
     await element.updateComplete;
