@@ -68,6 +68,8 @@ vi.mock("../../../src/commands/layer-commands", () => ({
 
 import "../../../src/components/menu/pf-menu-bar";
 import type { PFMenuBar } from "../../../src/components/menu/pf-menu-bar";
+import { CRT_PRESETS } from "../../../src/services/view-effects";
+import { settingsStore } from "../../../src/stores/settings";
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -164,6 +166,7 @@ describe("pf-menu-bar popovers", () => {
   beforeEach(() => {
     setViewport(800, 600);
     localStorage.clear();
+    settingsStore.setActiveViewEffect(null);
     projectStoreMock.name.value = "Untitled";
     vi.clearAllMocks();
   });
@@ -263,6 +266,29 @@ describe("pf-menu-bar popovers", () => {
     expect(exportDialogRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
     expect(fileMenu?.hasAttribute("data-open")).toBe(false);
+  });
+
+  it("selects a live CRT profile from the Image menu", async () => {
+    const element = await createMenuBar();
+    const imageButton = button(element, "image");
+    const imageMenu = menu(element, "image");
+
+    imageButton?.click();
+    await element.updateComplete;
+    menuItem(imageMenu!, "Arcade Monitor")?.click();
+    await element.updateComplete;
+
+    expect(settingsStore.activeViewEffect.value).toBe("crt");
+    expect(settingsStore.getViewEffectParams("crt")).toEqual(CRT_PRESETS.arcade);
+
+    imageButton?.click();
+    await element.updateComplete;
+    const arcadeOption = menuItem(imageMenu!, "Arcade Monitor");
+    expect(arcadeOption?.getAttribute("aria-checked")).toBe("true");
+
+    menuItem(imageMenu!, "Off")?.click();
+    await element.updateComplete;
+    expect(settingsStore.activeViewEffect.value).toBeNull();
   });
 
   it("opens the project browser from the File menu", async () => {
