@@ -20,6 +20,15 @@ import { openReferenceImagePicker } from "../../services/reference-image-picker"
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 import { log } from "../../utils/log";
+import { settingsStore } from "../../stores/settings";
+import {
+  CRT_EFFECT_ID,
+  CRT_PRESETS,
+  CRT_PRESET_OPTIONS,
+  getCrtParams,
+  getCrtPresetId,
+  type CrtPresetId,
+} from "../../services/view-effects";
 
 const SHORTCUTS_STORAGE_KEY = "pf-shortcuts-visible";
 const MENU_MARGIN = 8;
@@ -226,6 +235,15 @@ export class PFMenuBar extends BaseComponent {
       text-transform: none;
     }
 
+    button.menu-item {
+      align-items: center;
+      background: none;
+      border: 0;
+      font: inherit;
+      text-align: left;
+      width: 100%;
+    }
+
     .menu-item:hover {
       background-color: var(--pf-color-primary-transparent);
       color: var(--pf-color-text-main);
@@ -244,6 +262,25 @@ export class PFMenuBar extends BaseComponent {
       height: 1px;
       margin: 6px 10px;
       background: var(--pf-color-border);
+    }
+
+    .menu-section-label {
+      color: var(--pf-color-text-muted);
+      font-size: var(--pf-font-size-xs);
+      padding: 4px 12px 3px;
+      text-transform: uppercase;
+    }
+
+    .effect-option {
+      justify-content: flex-start;
+      gap: 8px;
+    }
+
+    .effect-marker {
+      color: var(--pf-color-accent);
+      display: inline-block;
+      flex: 0 0 12px;
+      text-align: center;
     }
 
     .menu-btn[aria-expanded="true"] {
@@ -463,6 +500,21 @@ export class PFMenuBar extends BaseComponent {
     }
   }
 
+  private getActiveCrtPreset(): CrtPresetId | "custom" {
+    if (settingsStore.activeViewEffect.value !== CRT_EFFECT_ID) return "off";
+    return getCrtPresetId(getCrtParams(settingsStore.getViewEffectParams(CRT_EFFECT_ID)));
+  }
+
+  private setCrtPreset(presetId: CrtPresetId) {
+    if (presetId === "off") {
+      settingsStore.setActiveViewEffect(null);
+      return;
+    }
+
+    settingsStore.setViewEffectParams(CRT_EFFECT_ID, { ...CRT_PRESETS[presetId] });
+    settingsStore.setActiveViewEffect(CRT_EFFECT_ID);
+  }
+
   /**
    * Unified open handler that supports:
    * - .pf (compressed PixelForge project)
@@ -605,6 +657,7 @@ export class PFMenuBar extends BaseComponent {
 
   render() {
     const projectName = projectStore.name.value;
+    const activeCrtPreset = this.getActiveCrtPreset();
 
     return html`
       <div class="brand" aria-label="Pixel Forge">
@@ -807,6 +860,24 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${() => this.rotateLayer(-90)}>
             Rotate 90° CCW
           </div>
+          <div class="divider"></div>
+          <div class="menu-section-label">Effect</div>
+          ${CRT_PRESET_OPTIONS.map(
+            ({ id, label }) => html`
+              <button
+                class="menu-item effect-option"
+                type="button"
+                role="menuitemradio"
+                aria-checked=${String(activeCrtPreset === id)}
+                @click=${() => this.setCrtPreset(id)}
+              >
+                <span class="effect-marker" aria-hidden="true"
+                  >${activeCrtPreset === id ? "✓" : ""}</span
+                >
+                <span>${label}</span>
+              </button>
+            `
+          )}
         </div>
       </div>
 
