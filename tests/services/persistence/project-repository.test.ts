@@ -118,4 +118,17 @@ describe('IndexedDbProjectRepository', () => {
     await repo.setLastOpenedProjectId('id-roundtrip');
     expect(await repo.getLastOpenedProjectId()).toBe('id-roundtrip');
   });
+
+  it('persists workspace state and mirrors the active project as last-opened', async () => {
+    await repo.setWorkspaceState({
+      openProjectIds: ['project-a', 'project-b'],
+      activeProjectId: 'project-b',
+    });
+
+    expect(await repo.getWorkspaceState()).toEqual({
+      openProjectIds: ['project-a', 'project-b'],
+      activeProjectId: 'project-b',
+    });
+    expect(await repo.getLastOpenedProjectId()).toBe('project-b');
+  });
 });

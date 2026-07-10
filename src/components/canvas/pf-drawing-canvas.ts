@@ -6,6 +6,12 @@ import { CommitFloatCommand } from '../../commands/selection-commands';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import { renderScheduler } from '../../services/render-scheduler';
 import { onionSkinCache } from '../../services/onion-skin-cache';
+import { ReferenceBitmapCache } from '../../services/reference-bitmap-cache';
+import {
+  createReferenceLayerRenderPlan,
+  type ReferenceLayerRenderPlan,
+} from '../../services/reference-render-plan';
+import { ReferenceViewportRenderer } from '../../services/reference-viewport-renderer';
 import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
 import type { ModifierKeys, Point } from '../../tools/base-tool';
 import { ToolController } from '../../tools/tool-controller';
@@ -111,6 +117,11 @@ export class PFDrawingCanvas extends BaseComponent {
   // can undo/redo palette indices along with the pixels
   private previousIndexSnapshot: Uint8Array | null = null;
   private strokeFrameId: string = '';
+  private readonly referenceBitmapCache = new ReferenceBitmapCache();
+  private readonly referenceViewportRenderer = new ReferenceViewportRenderer({
+    cache: this.referenceBitmapCache,
+    requestRedraw: () => this.requestReferenceRedraw(),
+  });
 
   // Document-level event handlers for out-of-canvas tracking
   private boundDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
@@ -234,8 +245,13 @@ export class PFDrawingCanvas extends BaseComponent {
   renderCanvas(context: ProjectContext = this.context) {
     if (!this.ctx) return;
 
-    const fullRedraw = context.dirtyRect.consumeFullRedraw();
+    const referencePlan = createReferenceLayerRenderPlan(context.layers.layers.value);
+    const hasReferences = this.hasReferenceEntries(referencePlan);
+    const fullRedraw = context.dirtyRect.consumeFullRedraw() || hasReferences;
     const dirtyRect = fullRedraw ? null : context.dirtyRect.consumePendingDirty();
+    if (fullRedraw && hasReferences) {
+      context.dirtyRect.consumePendingDirty();
+    }
 
     if (dirtyRect && !fullRedraw) {
       // Partial redraw - clip to dirty region
@@ -258,12 +274,26 @@ export class PFDrawingCanvas extends BaseComponent {
       // Draw onion skins if enabled (only on full redraw)
       this.drawOnionSkins(context);
 
+      this.renderReferenceEntries(referencePlan.belowArtwork);
+
       // Render all layers
       this.renderLayers(null, context);
+
+      this.renderReferenceEntries(referencePlan.aboveArtwork);
     }
 
     // Selection overlay always needs to be drawn
     this.drawSelection();
+  }
+
+  private hasReferenceEntries(plan: ReferenceLayerRenderPlan): boolean {
+    return plan.belowArtwork.length > 0 || plan.aboveArtwork.length > 0;
+  }
+
+  private renderReferenceEntries(entries: ReferenceLayerRenderPlan['belowArtwork']) {
+    if (entries.length === 0) return;
+
+    this.referenceViewportRenderer.render(this.ctx, entries);
   }
 
   /**
@@ -480,6 +510,11 @@ export class PFDrawingCanvas extends BaseComponent {
     renderScheduler.scheduleRender(() => this.renderCanvas(context));
   }
 
+  private requestReferenceRedraw() {
+    this.context.dirtyRect.requestFullRedraw();
+    this.scheduleCanvasRender(this.context);
+  }
+
   /**
    * Clean up document-level listeners.
    */
@@ -499,6 +534,7 @@ export class PFDrawingCanvas extends BaseComponent {
     super.disconnectedCallback();
     // Clean up any active document listeners when component is destroyed
     this.cleanupDocumentListeners();
+    this.referenceBitmapCache.clear();
   }
 
   private handleMouseDown(e: MouseEvent) {
@@ -554,6 +590,7 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private isEditableLayer(layer: Layer | undefined): layer is EditableLayer {
+    if (layer?.type === 'reference') return false;
     if (!layer?.canvas) return false;
     return !layer.locked && layer.visible;
   }
@@ -583,7 +620,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.strokeContext = context;
     this.captureStrokeSnapshot(target, currentTool, context);
     context.dirtyRect.resetStroke();
-    this.toolController.onDown(target.context, point, modifiers);
+    this.toolController.onDown(target.context, context, point, modifiers);
     this.attachDocumentListeners();
     this.scheduleCanvasRender(context);
   }
@@ -639,6 +676,7 @@ export class PFDrawingCanvas extends BaseComponent {
   private getBlockedLayerWarning(layer: Layer): string | null {
     if (layer.locked) return 'Layer is locked';
     if (!layer.visible) return 'Layer is hidden';
+    if (layer.type === 'reference') return 'Reference layers cannot be painted';
     return null;
   }
 

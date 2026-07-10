@@ -1,7 +1,7 @@
 import { html, css } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { colorStore } from '../../stores/colors';
+import { defaultProjectContext } from '../../stores/project-context';
 
 /**
  * Compact color selector for the toolbar.
@@ -99,19 +99,32 @@ export class PFColorSelectorCompact extends BaseComponent {
 
   @query('#fg-picker') private fgPicker!: HTMLInputElement;
   @query('#bg-picker') private bgPicker!: HTMLInputElement;
+  private context = defaultProjectContext;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  private get colors() {
+    return this.context.colors;
+  }
 
   render() {
     return html`
       <div class="colors-container">
         <div
           class="color-box bg"
-          style="background-color: ${colorStore.secondaryColor.value}"
+          style="background-color: ${this.colors.secondaryColor.value}"
           @click=${() => this.openPicker('bg')}
           title="Background Color - Click to change"
         ></div>
         <div
           class="color-box fg"
-          style="background-color: ${colorStore.primaryColor.value}"
+          style="background-color: ${this.colors.primaryColor.value}"
           @click=${() => this.openPicker('fg')}
           title="Foreground Color - Click to change"
         ></div>
@@ -128,14 +141,14 @@ export class PFColorSelectorCompact extends BaseComponent {
         type="color"
         id="fg-picker"
         class="hidden-picker"
-        .value=${colorStore.primaryColor.value}
+        .value=${this.colors.primaryColor.value}
         @input=${this.handleFgChange}
       />
       <input
         type="color"
         id="bg-picker"
         class="hidden-picker"
-        .value=${colorStore.secondaryColor.value}
+        .value=${this.colors.secondaryColor.value}
         @input=${this.handleBgChange}
       />
     `;
@@ -151,22 +164,22 @@ export class PFColorSelectorCompact extends BaseComponent {
 
   private handleFgChange(e: Event) {
     const color = (e.target as HTMLInputElement).value;
-    colorStore.setPrimaryColor(color);
-    colorStore.updateLightnessVariations(color);
+    this.colors.setPrimaryColor(color);
+    this.colors.updateLightnessVariations(color);
   }
 
   private handleBgChange(e: Event) {
     const color = (e.target as HTMLInputElement).value;
-    colorStore.setSecondaryColor(color);
+    this.colors.setSecondaryColor(color);
   }
 
   private swapColors() {
-    colorStore.swapColors();
+    this.colors.swapColors();
   }
 
   private resetColors() {
-    colorStore.setPrimaryColor('#000000');
-    colorStore.setSecondaryColor('#ffffff');
+    this.colors.setPrimaryColor('#000000');
+    this.colors.setSecondaryColor('#ffffff');
   }
 }
 

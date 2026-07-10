@@ -2,6 +2,7 @@ import pako from 'pako';
 import { animationStore } from '../stores/animation';
 import { layerStore } from '../stores/layers';
 import { projectStore } from '../stores/project';
+import { getExportableArtworkLayers } from './export-composition';
 import type { Layer } from '../types/layer';
 
 /**
@@ -188,7 +189,7 @@ function hasVisiblePixels(pixels: Uint8ClampedArray): boolean {
  * Export current project as Aseprite file.
  */
 function writeAseFile(): ArrayBuffer {
-  const layers = layerStore.layers.value.filter(layer => layer.type !== 'reference');
+  const layers = getExportableArtworkLayers(layerStore.layers.value);
   const frames = animationStore.frames.value;
   const width = projectStore.width.value;
   const height = projectStore.height.value;

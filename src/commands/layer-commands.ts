@@ -2,8 +2,14 @@ import { type Command } from './index';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
 import { type Layer } from '../types/layer';
 import { type Cel } from '../types/animation';
+import type { ReferenceLayerTransform } from '../services/reference-transform-geometry';
 
 type LayerCommandContext = Pick<ProjectContext, 'animation' | 'layers' | 'project'>;
+type ReferenceTransformCommandContext = Pick<ProjectContext, 'dirtyRect' | 'layers'>;
+
+function layerCanOwnCels(layer: Layer): boolean {
+  return layer.type !== 'reference';
+}
 
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
@@ -46,7 +52,7 @@ export class DuplicateLayerCommand implements Command {
     const newLayer = this.context.layers.duplicateLayer(this.sourceLayerId);
     this.newLayerId = newLayer?.id ?? null;
 
-    if (this.newLayerId) {
+    if (this.newLayerId && newLayer && layerCanOwnCels(newLayer)) {
       // Duplicate all cels for this layer
       this.duplicateCels(this.sourceLayerId, this.newLayerId);
     }
@@ -189,6 +195,48 @@ export class UpdateLayerCommand implements Command {
 
   undo() {
     this.context.layers.updateLayer(this.layerId, this.oldUpdates);
+  }
+}
+
+export class TransformReferenceLayerCommand implements Command {
+  id = crypto.randomUUID();
+  name = 'Transform Reference Layer';
+  private readonly layerId: string;
+  private readonly oldTransform: ReferenceLayerTransform;
+  private readonly newTransform: ReferenceLayerTransform;
+  private readonly context: ReferenceTransformCommandContext;
+
+  constructor(
+    layerId: string,
+    oldTransform: ReferenceLayerTransform,
+    newTransform: ReferenceLayerTransform,
+    context: ReferenceTransformCommandContext = getActiveProjectContext()
+  ) {
+    this.layerId = layerId;
+    this.oldTransform = oldTransform;
+    this.newTransform = newTransform;
+    this.context = context;
+  }
+
+  execute() {
+    this.applyTransform(this.newTransform);
+  }
+
+  undo() {
+    this.applyTransform(this.oldTransform);
+  }
+
+  private applyTransform(transform: ReferenceLayerTransform) {
+    const layer = this.context.layers.layers.value.find((item) => item.id === this.layerId);
+    if (layer?.type !== 'reference' || !layer.referenceData) return;
+
+    this.context.layers.updateLayer(this.layerId, {
+      referenceData: {
+        ...layer.referenceData,
+        ...transform,
+      },
+    });
+    this.context.dirtyRect.requestFullRedraw();
   }
 }
 // ... existing commands ...

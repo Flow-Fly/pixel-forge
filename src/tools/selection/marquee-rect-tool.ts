@@ -1,7 +1,6 @@
 import type { ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
-import { selectionStore } from '../../stores/selection';
-import { layerStore } from '../../stores/layers';
+import { isPaintableLayer } from '../../utils/layer-capabilities';
 
 export class MarqueeRectTool extends BaseSelectionTool {
   name = 'marquee-rect';
@@ -13,19 +12,20 @@ export class MarqueeRectTool extends BaseSelectionTool {
   }
 
   onDrag(x: number, y: number, modifiers?: ModifierKeys) {
+    const selection = this.projectContext.selection;
     const canvasX = Math.floor(x);
     const canvasY = Math.floor(y);
 
     if (this.mode === 'selecting') {
-      selectionStore.updateSelection({ x: canvasX, y: canvasY }, { shift: modifiers?.shift });
+      selection.updateSelection({ x: canvasX, y: canvasY }, { shift: modifiers?.shift });
     } else if (this.mode === 'dragging') {
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      const state = selectionStore.state.value;
+      const state = selection.state.value;
       if (state.type === 'transforming') {
-        selectionStore.moveTransform(dx, dy);
+        selection.moveTransform(dx, dy);
       } else {
-        selectionStore.moveFloat(dx, dy);
+        selection.moveFloat(dx, dy);
       }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
@@ -44,23 +44,24 @@ export class MarqueeRectTool extends BaseSelectionTool {
   }
 
   private finalizeSelection(shrinkToContent: boolean) {
-    const s = selectionStore.state.value;
+    const { layers, selection } = this.projectContext;
+    const s = selection.state.value;
     if (s.type !== 'selecting') {
-      selectionStore.resetMode();
+      selection.resetMode();
       this.previousSelection = null;
       return;
     }
 
     // Don't create selection if too small
     if (s.currentBounds.width < 2 && s.currentBounds.height < 2) {
-      selectionStore.clear();
-      selectionStore.resetMode();
+      selection.clear();
+      selection.resetMode();
       this.previousSelection = null;
       return;
     }
 
     // For add/subtract, combine with previous selection
-    const mode = selectionStore.mode.value;
+    const mode = selection.mode.value;
     if (mode !== 'replace' && this.previousSelection) {
       // Create a mask for the new rectangle (all 255s within bounds)
       const newBounds = s.currentBounds;
@@ -72,17 +73,20 @@ export class MarqueeRectTool extends BaseSelectionTool {
 
     // Standard finalization (replace mode or no previous selection);
     // pass the active layer canvas for content-aware trimming
-    const activeLayerId = layerStore.activeLayerId.value;
-    const layer = layerStore.layers.value.find((l) => l.id === activeLayerId);
-    selectionStore.finalizeSelection(layer?.canvas, shrinkToContent);
-    selectionStore.resetMode();
+    const activeLayerId = layers.activeLayerId.value;
+    const layer = layers.layers.value.find((l) => l.id === activeLayerId);
+    selection.finalizeSelection(
+      isPaintableLayer(layer) ? layer.canvas : undefined,
+      shrinkToContent
+    );
+    selection.resetMode();
     this.clearPreviousSelection();
   }
   private startNewSelection(x: number, y: number) {
     this.capturePreviousSelection();
 
     this.mode = 'selecting';
-    selectionStore.startSelection('rectangle', { x, y });
+    this.projectContext.selection.startSelection('rectangle', { x, y });
   }
 
 }

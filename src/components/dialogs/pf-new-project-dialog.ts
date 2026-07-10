@@ -1,13 +1,13 @@
 import { html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { projectLibrary } from '../../services/project-library';
 import {
   DEFAULT_PROJECT_HEIGHT,
   DEFAULT_PROJECT_WIDTH,
   NEW_PROJECT_PRESETS,
   clampProjectDimension,
 } from '../../services/project-defaults';
+import { workspaceStore } from '../../stores/workspace';
 import '../ui/pf-dialog';
 
 @customElement('pf-new-project-dialog')
@@ -196,16 +196,20 @@ export class PFNewProjectDialog extends BaseComponent {
     const width = clampProjectDimension(this.width, DEFAULT_PROJECT_WIDTH);
     const height = clampProjectDimension(this.height, DEFAULT_PROJECT_HEIGHT);
 
-    const id = await projectLibrary.createProject(
+    const result = await workspaceStore.createProject(
       { width, height },
-      { saveCurrent: this.saveCurrentBeforeCreate }
+      { saveActiveContext: this.saveCurrentBeforeCreate }
     );
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+
     this.close();
 
     this.dispatchEvent(new CustomEvent('project-created', {
       bubbles: true,
       composed: true,
-      detail: { id, width, height }
+      detail: { id: result.projectId, width, height }
     }));
   }
 }

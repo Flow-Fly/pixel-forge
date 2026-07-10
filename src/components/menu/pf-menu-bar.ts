@@ -4,6 +4,7 @@ import { BaseComponent } from "../../core/base-component";
 import { historyStore } from "../../stores/history";
 import { layerStore } from "../../stores/layers";
 import { projectStore } from "../../stores/project";
+import { getActiveProjectContext } from "../../stores/project-context";
 import { gridStore } from "../../stores/grid";
 import { viewportStore } from "../../stores/viewport";
 import {
@@ -15,6 +16,7 @@ import {
 // import pako from "pako";
 import { type ProjectFileInput } from "../../types/project";
 import { autoSaveService } from "../../services/auto-save";
+import { openReferenceImagePicker } from "../../services/reference-image-picker";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 import { log } from "../../utils/log";
@@ -505,6 +507,12 @@ export class PFMenuBar extends BaseComponent {
     input.click();
   }
 
+  importReferenceImage() {
+    openReferenceImagePicker(getActiveProjectContext(), (error) => {
+      log.error("Failed to import reference image:", error);
+    });
+  }
+
   showExportDialog() {
     this.dispatchEvent(
       new CustomEvent("show-export-dialog", { bubbles: true, composed: true })
@@ -664,6 +672,9 @@ export class PFMenuBar extends BaseComponent {
           <div class="divider"></div>
           <div class="menu-item" @click=${this.openFile}>
             Import File...
+          </div>
+          <div class="menu-item" @click=${this.importReferenceImage}>
+            Import Reference Image...
           </div>
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>

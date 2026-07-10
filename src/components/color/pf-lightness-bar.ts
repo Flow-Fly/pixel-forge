@@ -1,7 +1,7 @@
 import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { colorStore } from '../../stores/colors';
+import { defaultProjectContext } from '../../stores/project-context';
 
 const STORAGE_KEY = 'pf-lightness-bar-collapsed';
 
@@ -83,10 +83,19 @@ export class PFLightnessBar extends BaseComponent {
   `;
 
   @state() private collapsed = false;
+  private context = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
     this.loadCollapseState();
+    this.subscribeToActiveProjectContext((context) => {
+      this.context = context;
+      this.requestUpdate();
+    });
+  }
+
+  private get colors() {
+    return this.context.colors;
   }
 
   private loadCollapseState() {
@@ -106,12 +115,12 @@ export class PFLightnessBar extends BaseComponent {
   }
 
   private selectSwatch(index: number) {
-    colorStore.setLightnessIndex(index);
+    this.colors.setLightnessIndex(index);
   }
 
   render() {
-    const variations = colorStore.lightnessVariations.value;
-    const activeIndex = colorStore.lightnessIndex.value;
+    const variations = this.colors.lightnessVariations.value;
+    const activeIndex = this.colors.lightnessIndex.value;
 
     return html`
       <div class="container ${this.collapsed ? 'collapsed' : ''}">

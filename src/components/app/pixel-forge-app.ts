@@ -24,7 +24,12 @@ import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-panel";
 import "../layers/pf-layers-panel";
-import { projectStore } from "../../stores/project";
+import "./pf-project-tabs";
+import {
+  activeProjectContext,
+  getActiveProjectContext,
+} from "../../stores/project-context";
+import { workspaceStore } from "../../stores/workspace";
 import { viewportStore } from "../../stores/viewport";
 import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
@@ -357,7 +362,9 @@ export class PixelForgeApp extends BaseComponent {
   private handleDuplicateCurrentProject = async () => {
     try {
       await autoSaveService.saveNow();
-      await projectLibrary.duplicateProject(projectStore.id.value);
+      await projectLibrary.duplicateProject(
+        getActiveProjectContext().project.id.value
+      );
       this.showWarning("Project duplicated");
     } catch (error) {
       log.error("Failed to duplicate project:", error);
@@ -399,7 +406,9 @@ export class PixelForgeApp extends BaseComponent {
     this.showDeleteCurrentDialog = false;
 
     try {
-      await projectLibrary.deleteProject(projectStore.id.value);
+      await projectLibrary.deleteProject(
+        getActiveProjectContext().project.id.value
+      );
       this.handleCurrentProjectDeleted();
     } catch (error) {
       log.error("Failed to delete project:", error);
@@ -427,6 +436,16 @@ export class PixelForgeApp extends BaseComponent {
 
   private async loadSavedProject() {
     try {
+      const workspaceState = await projectRepository.getWorkspaceState();
+      if (
+        workspaceState &&
+        (await workspaceStore.restoreWorkspace(workspaceState))
+      ) {
+        this.hasLibraryProject = true;
+        this.showProjectBrowser = false;
+        return;
+      }
+
       let projectId = await projectRepository.getLastOpenedProjectId();
       if (!projectId) {
         // No last-opened marker — fall back to the most recent project
@@ -434,15 +453,13 @@ export class PixelForgeApp extends BaseComponent {
         projectId = all[0]?.id ?? null;
       }
 
-      const savedProject = projectId
-        ? await projectRepository.load(projectId)
-        : null;
-      if (savedProject && projectId) {
-        projectStore.id.value = projectId;
-        // fromAutoSave = true: palette is already loaded from localStorage,
-        // don't overwrite with stale palette data from IndexedDB
-        await projectStore.loadProject(savedProject, true);
-        await projectRepository.setLastOpenedProjectId(projectId);
+      if (
+        projectId &&
+        (await workspaceStore.restoreWorkspace({
+          openProjectIds: [projectId],
+          activeProjectId: projectId,
+        }))
+      ) {
         historyStore.clear();
         this.hasLibraryProject = true;
         this.showProjectBrowser = false;
@@ -544,6 +561,7 @@ export class PixelForgeApp extends BaseComponent {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
     const isTimelineCollapsed =
       panelStore.panelStates.value.timeline?.collapsed ?? false;
+    const activeProject = activeProjectContext.value.project;
 
     return html`
       <header class="menu-bar">
@@ -564,10 +582,13 @@ export class PixelForgeApp extends BaseComponent {
       </aside>
 
       <main class="workspace">
+        <pf-project-tabs
+          @show-project-browser=${this.handleShowProjectBrowser}
+        ></pf-project-tabs>
         <pf-canvas-viewport @canvas-cursor=${this.handleCanvasCursor}>
           <pf-drawing-canvas
-            .width=${projectStore.width.value}
-            .height=${projectStore.height.value}
+            .width=${activeProject.width.value}
+            .height=${activeProject.height.value}
           ></pf-drawing-canvas>
         </pf-canvas-viewport>
         <pf-preview-overlay></pf-preview-overlay>
@@ -644,7 +665,7 @@ export class PixelForgeApp extends BaseComponent {
         @pf-close=${() => (this.showDeleteCurrentDialog = false)}
       >
         <span slot="title">Delete Current Project</span>
-        <p>Delete "${projectStore.name.value}" from this browser?</p>
+        <p>Delete "${activeProject.name.value}" from this browser?</p>
         <div slot="actions">
           <button
             type="button"

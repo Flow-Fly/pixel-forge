@@ -6,6 +6,7 @@ import './pf-selection-overlay';
 import './pf-marching-ants-overlay';
 import './pf-brush-cursor-overlay';
 import './pf-transform-handles';
+import './pf-reference-transform-handles';
 import './pf-text-input';
 import './pf-ruler';
 import './pf-guides-overlay';
@@ -183,6 +184,7 @@ export class PFCanvasViewport extends BaseComponent {
       <pf-selection-overlay></pf-selection-overlay>
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
       <pf-brush-cursor-overlay></pf-brush-cursor-overlay>
+      <pf-reference-transform-handles></pf-reference-transform-handles>
       <pf-transform-handles
         @rotation-start=${this.onRotationStart}
         @rotation-end=${this.onRotationEnd}

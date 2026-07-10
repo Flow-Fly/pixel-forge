@@ -9,6 +9,8 @@ vi.mock('../../../src/services/persistence/indexed-db', () => ({
     delete: vi.fn(async () => {}),
     getLastOpenedProjectId: vi.fn(async () => null),
     setLastOpenedProjectId: vi.fn(async () => {}),
+    getWorkspaceState: vi.fn(async () => null),
+    setWorkspaceState: vi.fn(async () => {}),
   },
 }));
 

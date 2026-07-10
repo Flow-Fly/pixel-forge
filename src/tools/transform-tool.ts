@@ -1,8 +1,4 @@
 import { BaseTool } from './base-tool';
-import { selectionStore } from '../stores/selection';
-import { historyStore } from '../stores/history';
-import { layerStore } from '../stores/layers';
-import { animationStore } from '../stores/animation';
 import { TransformSelectionCommand } from '../commands/selection-commands';
 import { MoveTextCommand } from '../commands/text-commands';
 import { log } from '../utils/log';
@@ -22,15 +18,16 @@ export class TransformTool extends BaseTool {
   private originalTextPos = { x: 0, y: 0 };
 
   onDown(x: number, y: number) {
+    const { animation, layers, selection } = this.projectContext;
     // Check if active layer is a text layer
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
+    const activeLayerId = layers.activeLayerId.value;
+    const activeLayer = layers.layers.value.find(l => l.id === activeLayerId);
 
     if (activeLayer?.type === 'text' && activeLayerId) {
       // Start dragging text layer
-      const currentFrameId = animationStore.currentFrameId.value;
+      const currentFrameId = animation.currentFrameId.value;
       if (!currentFrameId) return;
-      const textCelData = animationStore.getTextCelData(activeLayerId, currentFrameId);
+      const textCelData = animation.getTextCelData(activeLayerId, currentFrameId);
 
       if (textCelData) {
         this.isDraggingText = true;
@@ -43,12 +40,12 @@ export class TransformTool extends BaseTool {
     }
 
     // Handle selection-based transforms
-    const state = selectionStore.state.value;
+    const state = selection.state.value;
     if (state.type === 'none') return;
 
     // If we're in transforming state and click outside the selection, commit
     if (state.type === 'transforming') {
-      if (!selectionStore.isPointInSelection(Math.floor(x), Math.floor(y))) {
+      if (!selection.isPointInSelection(Math.floor(x), Math.floor(y))) {
         this.commitTransform();
         return;
       }
@@ -63,14 +60,15 @@ export class TransformTool extends BaseTool {
   }
 
   onDrag(x: number, y: number) {
+    const { animation, selection } = this.projectContext;
     // Handle text layer dragging
     if (this.isDraggingText && this.textLayerId) {
-      const currentFrameId = animationStore.currentFrameId.value;
+      const currentFrameId = animation.currentFrameId.value;
       const dx = x - this.startX;
       const dy = y - this.startY;
 
       // Update text position in real-time for visual feedback
-      animationStore.updateTextCelData(this.textLayerId, currentFrameId, {
+      animation.updateTextCelData(this.textLayerId, currentFrameId, {
         x: Math.floor(this.originalTextPos.x + dx),
         y: Math.floor(this.originalTextPos.y + dy),
       });
@@ -84,13 +82,13 @@ export class TransformTool extends BaseTool {
     const dy = y - this.startY;
 
     if (this.mode === 'move') {
-      const state = selectionStore.state.value;
+      const state = selection.state.value;
       if (state.type === 'floating') {
         // Move floating selection
-        selectionStore.moveFloat(dx, dy);
+        selection.moveFloat(dx, dy);
       } else if (state.type === 'transforming') {
         // Move selection during rotation
-        selectionStore.moveTransform(dx, dy);
+        selection.moveTransform(dx, dy);
       }
       // For 'selected' state, would need to cut to float first
     }
@@ -100,9 +98,10 @@ export class TransformTool extends BaseTool {
   }
 
   onUp(x: number, y: number) {
+    const { animation, history } = this.projectContext;
     // Handle text layer drag completion
     if (this.isDraggingText && this.textLayerId) {
-      const currentFrameId = animationStore.currentFrameId.value;
+      const currentFrameId = animation.currentFrameId.value;
       const dx = x - this.startX;
       const dy = y - this.startY;
 
@@ -114,18 +113,19 @@ export class TransformTool extends BaseTool {
       // Only create command if position actually changed
       if (newPos.x !== this.originalTextPos.x || newPos.y !== this.originalTextPos.y) {
         // First, revert to original position (command will re-apply)
-        animationStore.updateTextCelData(this.textLayerId, currentFrameId, {
+        animation.updateTextCelData(this.textLayerId, currentFrameId, {
           x: this.originalTextPos.x,
           y: this.originalTextPos.y,
         });
 
         // Execute move command for undo/redo support
-        historyStore.execute(
+        history.execute(
           new MoveTextCommand(
             this.textLayerId,
             currentFrameId,
             this.originalTextPos,
-            newPos
+            newPos,
+            this.projectContext
           )
         );
       }
@@ -140,7 +140,8 @@ export class TransformTool extends BaseTool {
   }
 
   onKeyDown(e: KeyboardEvent) {
-    const state = selectionStore.state.value;
+    const selection = this.projectContext.selection;
+    const state = selection.state.value;
 
     if (state.type === 'transforming') {
       if (e.key === 'Enter') {
@@ -148,13 +149,14 @@ export class TransformTool extends BaseTool {
         this.commitTransform();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        selectionStore.cancelTransform();
+        selection.cancelTransform();
       }
     }
   }
 
   private commitTransform() {
-    const transformState = selectionStore.getTransformState();
+    const { history, layers, selection } = this.projectContext;
+    const transformState = selection.getTransformState();
     if (!transformState) return;
 
     const { imageData, originalBounds, currentBounds, currentOffset, rotation, scale, shape, mask } = transformState;
@@ -165,23 +167,23 @@ export class TransformTool extends BaseTool {
     const hasMovement = currentOffset.x !== 0 || currentOffset.y !== 0;
 
     if (!hasRotation && !hasScale && !hasMovement) {
-      selectionStore.cancelTransform();
+      selection.cancelTransform();
       return;
     }
 
     // Use already-computed preview data (scaled + rotated)
-    const transformedImageData = selectionStore.getTransformPreview();
+    const transformedImageData = selection.getTransformPreview();
     if (!transformedImageData) {
-      selectionStore.cancelTransform();
+      selection.cancelTransform();
       return;
     }
 
     // Get the active layer's canvas
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find(l => l.id === activeLayerId);
+    const activeLayerId = layers.activeLayerId.value;
+    const activeLayer = layers.layers.value.find(l => l.id === activeLayerId);
     if (!activeLayer?.canvas) {
       log.error('Active layer canvas not found');
-      selectionStore.cancelTransform();
+      selection.cancelTransform();
       return;
     }
 
@@ -198,9 +200,10 @@ export class TransformTool extends BaseTool {
       scale,
       shape,
       mask,
-      currentOffset
+      currentOffset,
+      this.projectContext
     );
 
-    historyStore.execute(command);
+    history.execute(command);
   }
 }

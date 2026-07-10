@@ -1,13 +1,18 @@
-import { effect } from '../core/signal';
-import { animationStore } from '../stores/animation';
-import { historyStore } from '../stores/history';
-import { projectStore } from '../stores/project';
+import { effect, signal } from '../core/signal';
+import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { projectRepository } from './persistence/indexed-db';
 import { createProjectThumbnail } from './project-thumbnail';
 import { log } from '../utils/log';
 import { compositeFrame } from '../utils/canvas-utils';
 
 const AUTO_SAVE_DEBOUNCE_MS = 2000;
+
+interface AutoSaveContextState {
+  isDirty: boolean;
+  saveTimeout: ReturnType<typeof setTimeout> | null;
+  dispose: (() => void) | null;
+  suppressSaveCount: number;
+}
 
 /**
  * Persists the current project to IndexedDB whenever the edit history
@@ -18,86 +23,103 @@ const AUTO_SAVE_DEBOUNCE_MS = 2000;
  * `historyStore.version` instead, which bumps on every execute/undo/redo.
  */
 class AutoSaveService {
-  private isDirty = false;
-  private saveTimeout: ReturnType<typeof setTimeout> | null = null;
-  private dispose: (() => void) | null = null;
-  private suppressSaveCount = 0;
+  readonly dirtyContexts = signal<ReadonlySet<ProjectContext>>(new Set());
+
+  private contextState = new Map<ProjectContext, AutoSaveContextState>();
+  private dirtyContextSet = new Set<ProjectContext>();
+  private hasDocumentListeners = false;
 
   /** Start observing history changes. Idempotent. */
-  start() {
-    if (this.dispose) return;
+  start(context: ProjectContext = defaultProjectContext) {
+    const state = this.getState(context);
+    if (state.dispose) return;
 
     let firstRun = true;
-    this.dispose = effect(() => {
+    state.dispose = effect(() => {
       // Subscribe to history changes (execute/undo/redo/clear all bump this)
-      historyStore.version.get();
+      context.history.version.get();
       if (firstRun) {
         // Don't schedule a save just for booting up
         firstRun = false;
         return;
       }
-      this.markDirty();
+      this.markDirty(context);
     });
 
-    window.addEventListener('blur', this.flushIfDirty);
-    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.attachDocumentListeners();
   }
 
-  /** Stop observing and drop any pending save. */
-  stop() {
-    this.dispose?.();
-    this.dispose = null;
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-      this.saveTimeout = null;
+  /** Stop observing and drop pending saves. */
+  stop(context?: ProjectContext) {
+    if (context) {
+      this.stopContext(context);
+    } else {
+      for (const activeContext of [...this.contextState.keys()]) {
+        this.stopContext(activeContext);
+      }
     }
-    window.removeEventListener('blur', this.flushIfDirty);
-    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+
+    if (!this.hasStartedContexts()) {
+      this.detachDocumentListeners();
+    }
   }
 
   /** Mark the project dirty and (re)schedule a debounced save. */
-  markDirty() {
-    if (this.suppressSaveCount > 0) return;
+  markDirty(context: ProjectContext = defaultProjectContext) {
+    const state = this.getState(context);
+    if (state.suppressSaveCount > 0) return;
 
-    this.isDirty = true;
+    state.isDirty = true;
+    this.setDirtyContext(context, true);
 
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-    }
-    this.saveTimeout = setTimeout(() => {
-      this.saveTimeout = null;
-      void this.performSave();
+    this.clearSaveTimeout(state);
+    state.saveTimeout = setTimeout(() => {
+      state.saveTimeout = null;
+      void this.performSave(context);
     }, AUTO_SAVE_DEBOUNCE_MS);
   }
 
   /** Save immediately if there are unsaved changes (blur/tab-hidden). */
   flushIfDirty = () => {
-    if (!this.isDirty) return;
-    this.clearSaveTimeout();
-    void this.performSave();
+    for (const [context, state] of this.contextState) {
+      if (!state.isDirty) continue;
+      this.clearSaveTimeout(state);
+      void this.performSave(context);
+    }
   };
 
   /** Save the open project now, even if no edit debounce is pending. */
-  async saveNow() {
-    this.clearSaveTimeout();
-    await this.performSave({ force: true, rethrow: true });
+  async saveNow(context: ProjectContext = defaultProjectContext) {
+    const state = this.getState(context);
+    this.clearSaveTimeout(state);
+    await this.performSave(context, { force: true, rethrow: true });
+  }
+
+  isDirty(context: ProjectContext = defaultProjectContext): boolean {
+    return this.dirtyContexts.value.has(context);
   }
 
   /** Drop a pending debounce without writing. Used when the open project is deleted. */
-  clearPendingSave() {
-    this.clearSaveTimeout();
-    this.isDirty = false;
+  clearPendingSave(context: ProjectContext = defaultProjectContext) {
+    const state = this.getState(context);
+    this.clearSaveTimeout(state);
+    state.isDirty = false;
+    this.setDirtyContext(context, false);
   }
 
   /** Run project load/reset work without treating reset signals as user edits. */
-  async runWithoutSaving<T>(work: () => Promise<T>): Promise<T> {
-    this.suppressSaveCount++;
+  async runWithoutSaving<T>(
+    work: () => Promise<T>,
+    context: ProjectContext = defaultProjectContext
+  ): Promise<T> {
+    const state = this.getState(context);
+    state.suppressSaveCount++;
     try {
       const result = await work();
       await Promise.resolve();
       return result;
     } finally {
-      this.suppressSaveCount--;
+      state.suppressSaveCount--;
     }
   }
 
@@ -108,43 +130,109 @@ class AutoSaveService {
   };
 
   private async performSave(
+    context: ProjectContext,
     options: { force?: boolean; rethrow?: boolean } = {}
   ) {
-    if (!this.isDirty && !options.force) return;
+    const state = this.getState(context);
+    if (!state.isDirty && !options.force) return;
+
+    const wasDirty = state.isDirty;
+    state.isDirty = false;
+    this.setDirtyContext(context, false);
 
     try {
-      const projectData = await projectStore.saveProject();
-      const thumbnail = await createThumbnailSafely();
-      await projectRepository.save(projectStore.id.value, projectData, {
+      const projectData = await context.project.saveProject();
+      const thumbnail = await createThumbnailSafely(context);
+      await projectRepository.save(context.project.id.value, projectData, {
         thumbnail,
       });
-      this.isDirty = false;
-      projectStore.lastSaved.value = Date.now();
+      context.project.lastSaved.value = Date.now();
     } catch (error) {
+      state.isDirty = wasDirty || state.isDirty;
+      this.setDirtyContext(context, state.isDirty);
       log.error('Auto-save failed:', error);
       if (options.rethrow) throw error;
     }
   }
 
-  private clearSaveTimeout() {
-    if (!this.saveTimeout) return;
-    clearTimeout(this.saveTimeout);
-    this.saveTimeout = null;
+  private getState(context: ProjectContext): AutoSaveContextState {
+    const existingState = this.contextState.get(context);
+    if (existingState) return existingState;
+
+    const state: AutoSaveContextState = {
+      isDirty: false,
+      saveTimeout: null,
+      dispose: null,
+      suppressSaveCount: 0,
+    };
+    this.contextState.set(context, state);
+    return state;
+  }
+
+  private stopContext(context: ProjectContext) {
+    const state = this.contextState.get(context);
+    if (!state) return;
+
+    state.dispose?.();
+    state.dispose = null;
+    this.clearSaveTimeout(state);
+    this.contextState.delete(context);
+    this.setDirtyContext(context, false);
+  }
+
+  private hasStartedContexts(): boolean {
+    for (const state of this.contextState.values()) {
+      if (state.dispose) return true;
+    }
+    return false;
+  }
+
+  private attachDocumentListeners() {
+    if (this.hasDocumentListeners) return;
+
+    window.addEventListener('blur', this.flushIfDirty);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.hasDocumentListeners = true;
+  }
+
+  private detachDocumentListeners() {
+    if (!this.hasDocumentListeners) return;
+
+    window.removeEventListener('blur', this.flushIfDirty);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.hasDocumentListeners = false;
+  }
+
+  private clearSaveTimeout(state: AutoSaveContextState) {
+    if (!state.saveTimeout) return;
+    clearTimeout(state.saveTimeout);
+    state.saveTimeout = null;
+  }
+
+  private setDirtyContext(context: ProjectContext, isDirty: boolean) {
+    if (isDirty) {
+      if (this.dirtyContextSet.has(context)) return;
+      this.dirtyContextSet.add(context);
+    } else {
+      if (!this.dirtyContextSet.delete(context)) return;
+    }
+
+    this.dirtyContexts.value = new Set(this.dirtyContextSet);
   }
 }
 
 export const autoSaveService = new AutoSaveService();
 
-async function createThumbnailSafely(): Promise<Uint8Array | undefined> {
-  const frame = animationStore.frames.value[0];
+async function createThumbnailSafely(context: ProjectContext): Promise<Uint8Array | undefined> {
+  const frame = context.animation.frames.value[0];
   if (!frame) return undefined;
 
   try {
     return await createProjectThumbnail({
-      compositeFrame,
+      compositeFrame: (frameId, targetCtx) => compositeFrame(frameId, targetCtx, { context }),
       frameId: frame.id,
-      width: projectStore.width.value,
-      height: projectStore.height.value,
+      width: context.project.width.value,
+      height: context.project.height.value,
     });
   } catch (error) {
     log.error('Thumbnail generation failed:', error);

@@ -29,6 +29,8 @@ const autoSaveServiceMock = vi.hoisted(() => ({
   saveNow: vi.fn(),
 }));
 
+const importReferenceImageFileMock = vi.hoisted(() => vi.fn(async () => null));
+
 vi.mock("../../../src/stores/history", () => ({
   historyStore: historyStoreMock,
 }));
@@ -55,6 +57,10 @@ vi.mock("../../../src/services/auto-save", () => ({
   autoSaveService: autoSaveServiceMock,
 }));
 
+vi.mock("../../../src/services/reference-import-action", () => ({
+  importReferenceImageFile: importReferenceImageFileMock,
+}));
+
 vi.mock("../../../src/commands/layer-commands", () => ({
   FlipLayerCommand: class FlipLayerCommand {},
   RotateLayerCommand: class RotateLayerCommand {},
@@ -62,6 +68,14 @@ vi.mock("../../../src/commands/layer-commands", () => ({
 
 import "../../../src/components/menu/pf-menu-bar";
 import type { PFMenuBar } from "../../../src/components/menu/pf-menu-bar";
+import {
+  createProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from "../../../src/stores/project-context";
+
+const createdContexts: ProjectContext[] = [];
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
@@ -111,6 +125,41 @@ function menuItem(panel: HTMLElement, label: string) {
   );
 }
 
+function createContext(name: string) {
+  const context = createProjectContext();
+  context.project.name.value = name;
+  createdContexts.push(context);
+  return context;
+}
+
+function useReferenceImageInput(files: File[], dispatchChangeOnClick = true) {
+  const input = document.createElement("input");
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: files,
+  });
+
+  const click = vi.spyOn(input, "click").mockImplementation(() => {
+    if (dispatchChangeOnClick) {
+      input.dispatchEvent(new Event("change"));
+    }
+  });
+
+  const originalCreateElement = document.createElement.bind(document);
+  const createElement = vi.spyOn(document, "createElement");
+  createElement.mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+    if (tagName === "input") return input;
+    return originalCreateElement(tagName, options);
+  }) as typeof document.createElement);
+
+  return { click, input };
+}
+
+async function flushImport() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("pf-menu-bar popovers", () => {
   beforeEach(() => {
     setViewport(800, 600);
@@ -123,6 +172,10 @@ describe("pf-menu-bar popovers", () => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    restoreDefaultProjectContext();
+    for (const context of createdContexts.splice(0)) {
+      context.dispose();
+    }
   });
 
   it("opens File from a click", async () => {
@@ -228,12 +281,55 @@ describe("pf-menu-bar popovers", () => {
     expect(menuItem(fileMenu!, "New Project")).toBeTruthy();
     expect(menuItem(fileMenu!, "Open Project")).toBeTruthy();
     expect(menuItem(fileMenu!, "Import File")).toBeTruthy();
+    expect(menuItem(fileMenu!, "Import Reference Image")).toBeTruthy();
 
     menuItem(fileMenu!, "Open Project")?.click();
     await element.updateComplete;
 
     expect(browserRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("imports a reference image from the File menu into the project active when the picker opened", async () => {
+    const contextA = createContext("Context A");
+    const contextB = createContext("Context B");
+    const file = new File([Uint8Array.from([1, 2, 3])], "guide.webp", { type: "image/webp" });
+    const { input } = useReferenceImageInput([file], false);
+    setActiveProjectContext(contextA);
+    const element = await createMenuBar();
+    const fileButton = button(element, "file");
+    const fileMenu = menu(element, "file");
+
+    fileButton?.click();
+    await element.updateComplete;
+    menuItem(fileMenu!, "Import Reference Image")?.click();
+    await element.updateComplete;
+    setActiveProjectContext(contextB);
+    input.dispatchEvent(new Event("change"));
+    await flushImport();
+
+    expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+    expect(input.type).toBe("file");
+    expect(input.accept).toBe("image/png,image/jpeg,image/webp");
+    expect(importReferenceImageFileMock).toHaveBeenCalledTimes(1);
+    expect(importReferenceImageFileMock).toHaveBeenCalledWith(contextA, file);
+  });
+
+  it("does nothing when the File menu reference image picker is canceled", async () => {
+    const context = createContext("Context A");
+    const { click } = useReferenceImageInput([]);
+    setActiveProjectContext(context);
+    const element = await createMenuBar();
+    const fileButton = button(element, "file");
+    const fileMenu = menu(element, "file");
+
+    fileButton?.click();
+    await element.updateComplete;
+    menuItem(fileMenu!, "Import Reference Image")?.click();
+    await flushImport();
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(importReferenceImageFileMock).not.toHaveBeenCalled();
   });
 
   it("clamps right-edge menus inside the viewport", async () => {

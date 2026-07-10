@@ -49,6 +49,15 @@ async function getImageDimensions(file: File): Promise<{ width: number; height: 
   return dimensions;
 }
 
+function cloneReferenceData(referenceData: ReferenceLayerData | undefined): ReferenceLayerData | undefined {
+  if (!referenceData) return undefined;
+
+  return {
+    ...referenceData,
+    bytes: new Uint8Array(referenceData.bytes),
+  };
+}
+
 class LayerStore {
   layers = signal<Layer[]>([]);
   activeLayerId = signal<string | null>(null);
@@ -82,7 +91,13 @@ class LayerStore {
    */
   duplicateLayer(sourceLayerId: string): Layer | null {
     const sourceLayer = this.layers.value.find(l => l.id === sourceLayerId);
-    if (!sourceLayer || !sourceLayer.canvas) return null;
+    if (!sourceLayer) return null;
+
+    if (sourceLayer.type === 'reference') {
+      return this.duplicateReferenceLayer(sourceLayer);
+    }
+
+    if (!sourceLayer.canvas) return null;
 
     const canvas = createLayerCanvas(sourceLayer.canvas.width, sourceLayer.canvas.height);
     const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
@@ -107,6 +122,28 @@ class LayerStore {
 
     // Insert after the source layer
     const sourceIndex = this.layers.value.findIndex(l => l.id === sourceLayerId);
+    const newLayers = [...this.layers.value];
+    newLayers.splice(sourceIndex + 1, 0, newLayer);
+    this.layers.value = newLayers;
+    this.activeLayerId.value = newLayer.id;
+    return newLayer;
+  }
+
+  private duplicateReferenceLayer(sourceLayer: Layer): Layer {
+    const newLayer: Layer = {
+      id: uuidv4(),
+      name: `${sourceLayer.name} Copy`,
+      type: 'reference',
+      visible: sourceLayer.visible,
+      locked: false,
+      opacity: sourceLayer.opacity,
+      blendMode: sourceLayer.blendMode,
+      parentId: sourceLayer.parentId,
+      continuous: sourceLayer.continuous,
+      referenceData: cloneReferenceData(sourceLayer.referenceData),
+    };
+
+    const sourceIndex = this.layers.value.findIndex(l => l.id === sourceLayer.id);
     const newLayers = [...this.layers.value];
     newLayers.splice(sourceIndex + 1, 0, newLayer);
     this.layers.value = newLayers;

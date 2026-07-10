@@ -1,11 +1,15 @@
 import type { ModifierKeys } from '../base-tool';
 import { BaseSelectionTool } from './base-selection-tool';
-import { selectionStore } from '../../stores/selection';
-import { layerStore } from '../../stores/layers';
 import { magicWandSettings } from '../../stores/tool-settings';
-import { floodFillSelect, type FloodFillOptions } from '../../utils/mask-utils';
+import {
+  floodFillSelect,
+  type FloodFillOptions,
+} from '../../utils/mask-utils';
+import { isPaintableLayer } from '../../utils/layer-capabilities';
 
 // Re-export for backward compatibility
+
+type FloodSelectionResult = NonNullable<ReturnType<typeof floodFillSelect>>;
 
 export class MagicWandTool extends BaseSelectionTool {
   name = 'magic-wand';
@@ -23,16 +27,17 @@ export class MagicWandTool extends BaseSelectionTool {
   }
 
   onDrag(x: number, y: number, _modifiers?: ModifierKeys) {
+    const selection = this.projectContext.selection;
     if (this.mode === 'dragging') {
       const canvasX = Math.floor(x);
       const canvasY = Math.floor(y);
       const dx = canvasX - this.lastDragX;
       const dy = canvasY - this.lastDragY;
-      const state = selectionStore.state.value;
+      const state = selection.state.value;
       if (state.type === 'transforming') {
-        selectionStore.moveTransform(dx, dy);
+        selection.moveTransform(dx, dy);
       } else {
-        selectionStore.moveFloat(dx, dy);
+        selection.moveFloat(dx, dy);
       }
       this.lastDragX = canvasX;
       this.lastDragY = canvasY;
@@ -43,18 +48,37 @@ export class MagicWandTool extends BaseSelectionTool {
     if (this.mode === 'dragging') {
       this.mode = 'idle';
     } else {
-      selectionStore.resetMode();
+      this.projectContext.selection.resetMode();
     }
   }
 
   private selectRegion(x: number, y: number, shrinkToContent: boolean = false) {
-    const activeLayerId = layerStore.activeLayerId.value;
-    const activeLayer = layerStore.layers.value.find((l) => l.id === activeLayerId);
+    const sample = this.readSelectionSample(x, y);
+    if (!sample) return;
 
-    if (!activeLayer || !activeLayer.canvas) return;
+    const result = floodFillSelect(sample.imageData, sample.x, sample.y, this.options());
+
+    if (!result) {
+      this.clearEmptyReplaceSelection();
+      return;
+    }
+
+    this.applySelectionResult(result, sample.canvas, shrinkToContent);
+  }
+
+  private readSelectionSample(x: number, y: number): {
+    imageData: ImageData;
+    canvas: HTMLCanvasElement;
+    x: number;
+    y: number;
+  } | null {
+    const activeLayerId = this.projectContext.layers.activeLayerId.value;
+    const activeLayer = this.projectContext.layers.layers.value.find((l) => l.id === activeLayerId);
+
+    if (!isPaintableLayer(activeLayer)) return null;
 
     const ctx = activeLayer.canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return null;
 
     const startX = Math.floor(x);
     const startY = Math.floor(y);
@@ -63,49 +87,54 @@ export class MagicWandTool extends BaseSelectionTool {
 
     // Bounds check
     if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
-      return;
+      return null;
     }
 
-    // Get image data from layer
-    const imageData = ctx.getImageData(0, 0, width, height);
+    return {
+      imageData: ctx.getImageData(0, 0, width, height),
+      canvas: activeLayer.canvas,
+      x: startX,
+      y: startY,
+    };
+  }
 
-    // Get current settings
-    const options: FloodFillOptions = {
+  private options(): FloodFillOptions {
+    return {
       tolerance: magicWandSettings.tolerance.value,
       contiguous: magicWandSettings.contiguous.value,
       diagonal: magicWandSettings.diagonal.value,
     };
+  }
 
-    // Perform flood fill selection
-    const result = floodFillSelect(imageData, startX, startY, options);
-
-    if (!result) {
-      // No pixels selected (clicked outside bounds or no matching pixels)
-      if (selectionStore.mode.value === 'replace') {
-        selectionStore.clear();
-      }
-      return;
+  private clearEmptyReplaceSelection() {
+    const selection = this.projectContext.selection;
+    if (selection.mode.value === 'replace') {
+      selection.clear();
     }
+  }
 
+  private applySelectionResult(
+    result: FloodSelectionResult,
+    canvas: HTMLCanvasElement,
+    shrinkToContent: boolean
+  ) {
+    const selection = this.projectContext.selection;
     const { mask, bounds } = result;
 
     // Handle selection modes (add/subtract/replace)
-    const currentState = selectionStore.state.value;
-    const mode = selectionStore.mode.value;
-
-    // Pass canvas for content-aware trimming
-    const canvas = activeLayer.canvas;
+    const currentState = selection.state.value;
+    const mode = selection.mode.value;
 
     if (mode === 'replace' || currentState.type === 'none') {
       // Simple replace
-      selectionStore.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
+      selection.finalizeFreeformSelection(bounds, mask, canvas, shrinkToContent);
     } else if (currentState.type === 'selected') {
       // Add, subtract, or intersect with existing selection
       const combined = this.combineMasks(currentState, bounds, mask, mode);
       if (combined) {
-        selectionStore.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
+        selection.finalizeFreeformSelection(combined.bounds, combined.mask, canvas, shrinkToContent);
       } else {
-        selectionStore.clear();
+        selection.clear();
       }
     }
   }

@@ -36,6 +36,18 @@ const fileShortcuts: ShortcutCategory = {
 };
 
 // ============================================
+// WORKSPACE SHORTCUTS
+// ============================================
+const workspaceShortcuts: ShortcutCategory = {
+  name: "Workspace",
+  shortcuts: [
+    { key: "mod+tab", action: "Next project tab" },
+    { key: "ctrl+pagedown", action: "Next project tab" },
+    { key: "ctrl+pageup", action: "Previous project tab" },
+  ],
+};
+
+// ============================================
 // EDIT SHORTCUTS
 // ============================================
 const editShortcuts: ShortcutCategory = {
@@ -229,6 +241,7 @@ export const globalShortcutCategories: ShortcutCategory[] = [
   layerShortcuts,
   canvasShortcuts,
   fileShortcuts,
+  workspaceShortcuts,
 ];
 
 /**

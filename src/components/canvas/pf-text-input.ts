@@ -3,8 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { TextTool } from "../../tools/text-tool";
 import { toolStore } from "../../stores/tools";
-import { layerStore } from "../../stores/layers";
-import { animationStore } from "../../stores/animation";
+import {
+  getActiveProjectContext,
+  type ProjectContext,
+} from "../../stores/project-context";
 
 /**
  * Hidden input component for capturing text input.
@@ -55,6 +57,7 @@ export class PfTextInput extends BaseComponent {
   private inputRef: HTMLInputElement | null = null;
   private cursorBlinkInterval: number | null = null;
   private justStartedEditing = false;
+  private editingProjectContext: ProjectContext | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -85,6 +88,8 @@ export class PfTextInput extends BaseComponent {
 
   private handleStartEditing = async (e: Event) => {
     const detail = (e as CustomEvent).detail;
+    this.editingProjectContext =
+      detail.projectContext ?? this.editingProjectContext ?? getActiveProjectContext();
     this.isActive = true;
     this.justStartedEditing = true;
 
@@ -126,11 +131,15 @@ export class PfTextInput extends BaseComponent {
       this.inputRef.blur();
       this.inputRef.value = "";
     }
+    this.editingProjectContext = null;
   };
 
   private handleEditLayer = (e: Event) => {
     const detail = (e as CustomEvent).detail;
     const { layerId } = detail;
+    const projectContext = detail.projectContext ?? getActiveProjectContext();
+    const { animation, layers } = projectContext;
+    this.editingProjectContext = projectContext;
 
     // Switch to text tool if not already active
     if (toolStore.activeTool.value !== "text") {
@@ -138,14 +147,14 @@ export class PfTextInput extends BaseComponent {
     }
 
     // Get the text content for this layer
-    const currentFrameId = animationStore.currentFrameId.value;
-    const textCelData = animationStore.getTextCelData(layerId, currentFrameId);
+    const currentFrameId = animation.currentFrameId.value;
+    const textCelData = animation.getTextCelData(layerId, currentFrameId);
 
     // Set active layer
-    layerStore.setActiveLayer(layerId);
+    layers.setActiveLayer(layerId);
 
     // Update editing state
-    const celKey = animationStore.getCelKey(layerId, currentFrameId);
+    const celKey = animation.getCelKey(layerId, currentFrameId);
     TextTool.editingState.value = {
       isEditing: true,
       layerId,
@@ -161,6 +170,7 @@ export class PfTextInput extends BaseComponent {
           layerId,
           celKey,
           initialContent: textCelData?.content ?? "",
+          projectContext,
         },
       })
     );
@@ -169,17 +179,19 @@ export class PfTextInput extends BaseComponent {
   private handleCommit = () => {
     const state = TextTool.editingState.value;
     if (!state.isEditing || !state.layerId) return;
+    const projectContext = this.editingProjectContext ?? getActiveProjectContext();
+    const { animation, layers } = projectContext;
 
     // Check if text is empty - if so, delete the layer
-    const currentFrameId = animationStore.currentFrameId.value;
-    const textCelData = animationStore.getTextCelData(
+    const currentFrameId = animation.currentFrameId.value;
+    const textCelData = animation.getTextCelData(
       state.layerId,
       currentFrameId
     );
 
     if (!textCelData?.content || textCelData.content.trim() === "") {
       // Delete empty text layer
-      layerStore.removeLayer(state.layerId);
+      layers.removeLayer(state.layerId);
     }
 
     // Reset editing state
@@ -200,7 +212,9 @@ export class PfTextInput extends BaseComponent {
     const cursorPosition = input.selectionStart ?? content.length;
 
     // Update the text tool state
-    TextTool.updateTextContent(content, cursorPosition);
+    const projectContext = this.editingProjectContext;
+    if (!projectContext) return;
+    TextTool.updateTextContent(content, cursorPosition, projectContext);
   };
 
   private handleKeyDown = (e: KeyboardEvent) => {

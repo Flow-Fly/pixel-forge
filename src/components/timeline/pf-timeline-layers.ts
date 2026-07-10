@@ -8,6 +8,10 @@ import {
   RemoveLayerCommand,
   UpdateLayerCommand,
 } from '../../commands/layer-commands';
+import { openReferenceImagePicker } from '../../services/reference-image-picker';
+import type { Layer } from '../../types/layer';
+import type { ReferenceLayerData } from '../../types/reference';
+import { log } from '../../utils/log';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 import '../ui/pf-context-menu';
@@ -196,6 +200,35 @@ export class PFTimelineLayers extends BaseComponent {
       color: var(--pf-color-bg-dark);
     }
 
+    .reference-layer-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .reference-layer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--pf-color-bg-tertiary);
+      border: 1px solid var(--pf-color-accent-cyan, #91b8c5);
+      color: var(--pf-color-accent-cyan, #91b8c5);
+      letter-spacing: 0.04em;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+
     .layer-name-input {
       flex: 1;
       background: var(--pf-color-bg-surface);
@@ -301,6 +334,16 @@ export class PFTimelineLayers extends BaseComponent {
     void this.context.history.execute(new AddLayerCommand(this.context));
   }
 
+  private importReferenceImage() {
+    openReferenceImagePicker(
+      this.context,
+      (error) => {
+        log.error('Failed to import reference image:', error);
+      },
+      () => this.requestUpdate()
+    );
+  }
+
   private deleteLayer() {
     const activeId = this.context.layers.activeLayerId.value;
     if (activeId && this.context.layers.layers.value.length > 1) {
@@ -383,6 +426,65 @@ export class PFTimelineLayers extends BaseComponent {
     }
   }
 
+  private createReferenceDisplayItems(
+    layer: Layer,
+    context: ProjectContext
+  ): ContextMenuItem[] {
+    if (layer.type !== 'reference' || !layer.referenceData) return [];
+
+    const isDesaturated = layer.referenceData.desaturate === true;
+    const position = layer.referenceData.position ?? 'below';
+
+    return [
+      {
+        type: 'item',
+        icon: '◐',
+        label: isDesaturated ? 'Show reference in color' : 'Desaturate reference',
+        action: () => {
+          this.updateReferenceDisplay(layer.id, context, {
+            desaturate: !isDesaturated,
+          });
+        },
+      },
+      {
+        type: 'item',
+        icon: position === 'above' ? '↓' : '↑',
+        label:
+          position === 'above'
+            ? 'Move reference below artwork'
+            : 'Move reference above artwork',
+        action: () => {
+          this.updateReferenceDisplay(layer.id, context, {
+            position: position === 'above' ? 'below' : 'above',
+          });
+        },
+      },
+      { type: 'divider' },
+    ];
+  }
+
+  private updateReferenceDisplay(
+    layerId: string,
+    context: ProjectContext,
+    updates: Partial<Pick<ReferenceLayerData, 'desaturate' | 'position'>>
+  ): void {
+    const layer = context.layers.layers.value.find((item) => item.id === layerId);
+    if (layer?.type !== 'reference' || !layer.referenceData) return;
+
+    void context.history.execute(
+      new UpdateLayerCommand(
+        layerId,
+        {
+          referenceData: {
+            ...layer.referenceData,
+            ...updates,
+          },
+        },
+        context
+      )
+    );
+  }
+
   private handleLayerContextMenu(e: MouseEvent, layerId: string) {
     e.preventDefault();
     e.stopPropagation();
@@ -426,6 +528,7 @@ export class PFTimelineLayers extends BaseComponent {
         },
       },
       { type: 'divider' },
+      ...this.createReferenceDisplayItems(layer, context),
       {
         type: 'item',
         label: layer.continuous ? '◯ Make Non-Continuous' : '∞ Make Continuous',
@@ -612,6 +715,13 @@ export class PFTimelineLayers extends BaseComponent {
           ? html`
               <div class="toolbar">
                 <button @click=${this.addLayer} title="Add Layer">+</button>
+                <button
+                  @click=${this.importReferenceImage}
+                  title="Import Reference Image"
+                  aria-label="Import Reference Image"
+                >
+                  ▧
+                </button>
                 <button @click=${this.deleteLayer} title="Delete Layer" ?disabled=${!canDelete}>
                   -
                 </button>
@@ -640,6 +750,7 @@ export class PFTimelineLayers extends BaseComponent {
               class="layer-row ${layer.id === activeLayerId ? 'active' : ''} ${
                 this.draggedLayerId === layer.id ? 'dragging' : ''
               } ${this.dragOverLayerId === layer.id ? 'drag-over' : ''}"
+              data-layer-type=${layer.type}
               @click=${() => this.selectLayer(layer.id)}
               @contextmenu=${(e: MouseEvent) => this.handleLayerContextMenu(e, layer.id)}
               @mouseenter=${(e: MouseEvent) => this.handleLayerMouseEnter(e, layer.id, layer.name)}
@@ -691,7 +802,18 @@ export class PFTimelineLayers extends BaseComponent {
                         class="layer-name"
                         @dblclick=${(e: Event) => this.startRename(layer.id, layer.name, e)}
                       >
-                        ${layer.type === 'text' ? html`<span class="layer-type-badge">T</span>` : ''}${layer.name}
+                        ${layer.type === 'text' ? html`<span class="layer-type-badge">T</span>` : ''}
+                        ${
+                          layer.type === 'reference'
+                            ? html`
+                                <span class="layer-type-badge reference-layer-badge" title="Reference layer">
+                                  <span class="reference-layer-icon" aria-hidden="true">▧</span>
+                                  <span class="reference-layer-label visually-hidden">reference</span>
+                                  <span class="reference-layer-abbreviation" aria-hidden="true">REF</span>
+                                </span>
+                              `
+                            : ''
+                        }${layer.name}
                       </span>
                     `
               }

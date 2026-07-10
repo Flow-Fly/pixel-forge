@@ -6,7 +6,11 @@
  */
 
 import { signal } from '../../core/signal';
-import type { SelectionState, SelectionShape } from '../../types/selection';
+import type {
+  FloatingIndexedPaste,
+  SelectionState,
+  SelectionShape,
+} from '../../types/selection';
 import type { Rect } from '../../types/geometry';
 import type { SelectionMode } from './types';
 import { trimBoundsToContent, trimFreeformToContent } from './bounds-utils';
@@ -271,7 +275,8 @@ class SelectionStore {
     imageData: ImageData,
     originalBounds: Rect,
     shape: SelectionShape,
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    indexedPaste?: FloatingIndexedPaste
   ) {
     this.state.value = {
       type: 'floating',
@@ -280,6 +285,7 @@ class SelectionStore {
       currentOffset: { x: 0, y: 0 },
       shape,
       mask,
+      indexedPaste,
     };
   }
 

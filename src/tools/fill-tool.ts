@@ -1,9 +1,6 @@
 import { BaseTool } from './base-tool';
-import { colorStore } from '../stores/colors';
-import { paletteStore } from '../stores/palette';
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
 import { floodFill } from '../services/drawing/algorithms';
+import { isPaintableLayer } from '../utils/layer-capabilities';
 
 export class FillTool extends BaseTool {
   name = 'fill';
@@ -19,20 +16,20 @@ export class FillTool extends BaseTool {
 
     if (startX < 0 || startX >= width || startY < 0 || startY >= height) return;
 
+    const { animation, colors, layers, palette } = this.projectContext;
+    const layerId = layers.activeLayerId.value;
+    const layer = layers.layers.value.find((candidate) => candidate.id === layerId);
+    if (!isPaintableLayer(layer)) return;
+
     const imageData = this.ctx.getImageData(0, 0, width, height);
 
     // Get index buffer for indexed color mode
-    const layerId = layerStore.activeLayerId.value;
-    const frameId = animationStore.currentFrameId.value;
-    const hex = colorStore.primaryColor.value;
-    let indexBuffer: Uint8Array | undefined;
-    let fillPaletteIndex = 0;
+    const frameId = animation.currentFrameId.value;
+    const hex = colors.primaryColor.value;
 
-    if (layerId) {
-      indexBuffer = animationStore.ensureCelIndexBuffer(layerId, frameId);
-      // Get palette index for drawing - adds to the palette if needed
-      fillPaletteIndex = paletteStore.getOrAddColorForDrawing(hex);
-    }
+    const indexBuffer = animation.ensureCelIndexBuffer(layer.id, frameId);
+    // Get palette index for drawing - adds to the palette if needed
+    const fillPaletteIndex = palette.getOrAddColorForDrawing(hex);
 
     const bounds = floodFill(
       imageData.data,

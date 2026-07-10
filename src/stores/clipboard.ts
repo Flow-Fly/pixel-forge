@@ -5,13 +5,25 @@
  */
 
 import { signal } from '../core/signal';
+import type { SelectionShape } from '../types/selection';
 
-interface ClipboardData {
-  imageData: ImageData;
-  shape: 'rectangle' | 'ellipse' | 'freeform';
+export interface ClipboardIndexedSelection {
+  indexData: Uint8Array;
+  sourceColors: string[];
+  usedIndices: number[];
+  shape: SelectionShape;
   mask?: Uint8Array;
   width: number;
   height: number;
+}
+
+interface ClipboardData {
+  imageData: ImageData;
+  shape: SelectionShape;
+  mask?: Uint8Array;
+  width: number;
+  height: number;
+  indexedSelection?: ClipboardIndexedSelection;
 }
 
 class ClipboardStore {

@@ -6,54 +6,39 @@
  */
 
 import { hexToRgb, rgbToHsl, rgbToHex, hslDistance, type HSL } from './color-utils';
+import { isReferenceLayer } from '../../utils/layer-capabilities';
 
 /** Simple readable signal interface */
 interface Readable<T> {
   value: T;
 }
 
+type DrawingLayer = { id: string; visible: boolean; type?: string };
+type DrawingCel = {
+  canvas: HTMLCanvasElement | null;
+  layerId: string;
+  frameId: string;
+};
+
+type DrawingAnimationStore = {
+  currentFrameId: Readable<string>;
+  cels: Readable<Map<string, DrawingCel>>;
+  getCelKey: (layerId: string, frameId: string) => string;
+};
+
+type DrawingLayerStore = {
+  layers: Readable<DrawingLayer[]>;
+};
+
 /**
  * Extract distinct colors from visible layers of the current frame.
  * Returns clustered representative colors sorted by pixel count.
  */
 export async function extractColorsFromDrawing(
-  animationStore: {
-    currentFrameId: Readable<string>;
-    cels: Readable<Map<string, { canvas: HTMLCanvasElement | null; layerId: string; frameId: string }>>;
-    getCelKey: (layerId: string, frameId: string) => string;
-  },
-  layerStore: {
-    layers: Readable<Array<{ id: string; visible: boolean }>>;
-  }
+  animationStore: DrawingAnimationStore,
+  layerStore: DrawingLayerStore
 ): Promise<string[]> {
-  const currentFrameId = animationStore.currentFrameId.value;
-  const layers = layerStore.layers.value;
-  const cels = animationStore.cels.value;
-
-  // Collect all pixel colors from visible layers
-  const colorCounts = new Map<string, number>();
-
-  for (const layer of layers) {
-    if (!layer.visible) continue;
-
-    const key = animationStore.getCelKey(layer.id, currentFrameId);
-    const cel = cels.get(key);
-    if (!cel?.canvas) continue;
-
-    const ctx = cel.canvas.getContext('2d');
-    if (!ctx) continue;
-
-    const imageData = ctx.getImageData(0, 0, cel.canvas.width, cel.canvas.height);
-    const data = imageData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const a = data[i + 3];
-      if (a < 128) continue; // Skip transparent pixels
-
-      const hex = rgbToHex(data[i], data[i + 1], data[i + 2]);
-      colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
-    }
-  }
+  const colorCounts = collectVisibleLayerColors(animationStore, layerStore);
 
   if (colorCounts.size === 0) {
     return [];
@@ -65,6 +50,47 @@ export async function extractColorsFromDrawing(
   // Sort by total pixel count and return all distinct colors (no limit)
   clusters.sort((a, b) => b.count - a.count);
   return clusters.map(c => c.representative);
+}
+
+function collectVisibleLayerColors(
+  animationStore: DrawingAnimationStore,
+  layerStore: DrawingLayerStore
+): Map<string, number> {
+  const currentFrameId = animationStore.currentFrameId.value;
+  const layers = layerStore.layers.value;
+  const cels = animationStore.cels.value;
+
+  // Collect all pixel colors from visible layers
+  const colorCounts = new Map<string, number>();
+
+  for (const layer of layers) {
+    if (!layer.visible) continue;
+    if (isReferenceLayer(layer)) continue;
+
+    const key = animationStore.getCelKey(layer.id, currentFrameId);
+    const cel = cels.get(key);
+    if (!cel?.canvas) continue;
+
+    addCanvasColors(cel.canvas, colorCounts);
+  }
+
+  return colorCounts;
+}
+
+function addCanvasColors(canvas: HTMLCanvasElement, colorCounts: Map<string, number>) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3];
+    if (a < 128) continue; // Skip transparent pixels
+
+    const hex = rgbToHex(data[i], data[i + 1], data[i + 2]);
+    colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
+  }
 }
 
 interface ColorCluster {
@@ -128,4 +154,3 @@ function clusterColors(
     return { representative, count: totalCount };
   });
 }
-

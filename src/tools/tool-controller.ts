@@ -1,4 +1,5 @@
 import type { ModifierKeys, BaseTool, Point } from "./base-tool";
+import type { ProjectContext } from "../stores/project-context";
 import type { ToolType } from "../stores/tools";
 import { log } from "../utils/log";
 
@@ -99,12 +100,14 @@ export class ToolController {
 
   onDown(
     ctx: CanvasRenderingContext2D,
+    projectContext: ProjectContext,
     point: Point,
     modifiers?: ModifierKeys
   ): void {
     if (!this.activeTool) return;
 
     this.activeTool.setContext(ctx);
+    this.activeTool.setProjectContext(projectContext);
     this.activeTool.onDown(point.x, point.y, modifiers);
   }
 
