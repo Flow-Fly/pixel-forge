@@ -63,3 +63,58 @@ describe('PwaStore install prompt', () => {
     expect(store.installAvailable.value).toBe(false);
   });
 });
+
+describe('PwaStore update flow', () => {
+  let store: PwaStore;
+
+  beforeEach(() => {
+    store = new PwaStore();
+  });
+
+  afterEach(() => {
+    store.stop();
+  });
+
+  it('waits for the user and saves before applying an update', async () => {
+    const calls: string[] = [];
+    const save = vi.fn(async () => {
+      calls.push('save');
+    });
+    const update = vi.fn(async () => {
+      calls.push('update');
+    });
+    store.setUpdateHandler(update);
+    store.showUpdate();
+
+    expect(store.updateAvailable.value).toBe(true);
+    expect(await store.restartWithUpdate(save)).toBe(true);
+
+    expect(calls).toEqual(['save', 'update']);
+    expect(update).toHaveBeenCalledWith(true);
+    expect(store.updateAvailable.value).toBe(false);
+  });
+
+  it('dismisses the notice without applying the update', () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    store.setUpdateHandler(update);
+    store.showUpdate();
+
+    store.dismissUpdate();
+
+    expect(store.updateAvailable.value).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('keeps the session open when saving fails', async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    store.setUpdateHandler(update);
+    store.showUpdate();
+
+    const result = await store.restartWithUpdate(() => Promise.reject(new Error('storage full')));
+
+    expect(result).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(store.updateAvailable.value).toBe(true);
+    expect(store.updateError.value).toContain('could not save');
+  });
+});

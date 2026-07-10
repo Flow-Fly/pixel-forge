@@ -26,6 +26,7 @@ import "../ui/pf-undo-history";
 import "../ui/pf-panel";
 import "../layers/pf-layers-panel";
 import "./pf-project-tabs";
+import "./pf-pwa-update-toast";
 import {
   activeProjectContext,
   getActiveProjectContext,
@@ -741,6 +742,7 @@ export class PixelForgeApp extends BaseComponent {
       ${this.warningMessage
         ? html`<div class="warning-toast">${this.warningMessage}</div>`
         : ""}
+      <pf-pwa-update-toast></pf-pwa-update-toast>
     `;
   }
 }

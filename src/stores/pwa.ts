@@ -9,12 +9,17 @@ export interface BeforeInstallPromptEvent extends Event {
 }
 
 type StandaloneNavigator = Navigator & { standalone?: boolean };
+type UpdateServiceWorker = (reloadPage?: boolean) => Promise<void>;
 
 export class PwaStore {
   readonly installAvailable = signal(false);
+  readonly updateAvailable = signal(false);
+  readonly applyingUpdate = signal(false);
+  readonly updateError = signal<string | null>(null);
 
   private installPrompt: BeforeInstallPromptEvent | null = null;
   private listeningForInstall = false;
+  private updateServiceWorker: UpdateServiceWorker | null = null;
 
   start() {
     if (this.listeningForInstall) return;
@@ -32,6 +37,10 @@ export class PwaStore {
 
     this.listeningForInstall = false;
     this.clearInstallPrompt();
+    this.updateServiceWorker = null;
+    this.updateAvailable.value = false;
+    this.applyingUpdate.value = false;
+    this.updateError.value = null;
   }
 
   async promptInstall() {
@@ -42,6 +51,50 @@ export class PwaStore {
     this.clearInstallPrompt();
     await prompt.prompt();
     await prompt.userChoice;
+  }
+
+  setUpdateHandler(updateServiceWorker: UpdateServiceWorker) {
+    this.updateServiceWorker = updateServiceWorker;
+  }
+
+  showUpdate() {
+    this.updateError.value = null;
+    this.updateAvailable.value = true;
+  }
+
+  dismissUpdate() {
+    this.updateAvailable.value = false;
+    this.updateError.value = null;
+  }
+
+  async restartWithUpdate(saveCurrentProject: () => Promise<void>) {
+    if (!this.updateAvailable.value || !this.updateServiceWorker || this.applyingUpdate.value) {
+      return false;
+    }
+
+    this.applyingUpdate.value = true;
+    this.updateError.value = null;
+
+    try {
+      await saveCurrentProject();
+    } catch {
+      this.updateError.value =
+        'Pixel Forge could not save before restarting. Your current session stayed open.';
+      this.applyingUpdate.value = false;
+      return false;
+    }
+
+    try {
+      this.updateAvailable.value = false;
+      await this.updateServiceWorker(true);
+      return true;
+    } catch {
+      this.updateAvailable.value = true;
+      this.updateError.value = 'The update could not be started. Your current session stayed open.';
+      return false;
+    } finally {
+      this.applyingUpdate.value = false;
+    }
   }
 
   private handleBeforeInstallPrompt = (event: Event) => {
