@@ -16,6 +16,7 @@ import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 import { log } from "../../utils/log";
 import { settingsStore } from "../../stores/settings";
+import { pwaStore } from "../../stores/pwa";
 import {
   CRT_EFFECT_ID,
   CRT_PRESETS,
@@ -626,6 +627,10 @@ export class PFMenuBar extends BaseComponent {
     );
   }
 
+  installPixelForge() {
+    void pwaStore.promptInstall();
+  }
+
   duplicateCurrentProject() {
     this.dispatchEvent(
       new CustomEvent("duplicate-current-project", {
@@ -788,6 +793,18 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>
           </div>
+          ${pwaStore.installAvailable.value
+            ? html`
+                <div class="divider"></div>
+                <button
+                  class="menu-item"
+                  type="button"
+                  @click=${this.installPixelForge}
+                >
+                  Install Pixel Forge
+                </button>
+              `
+            : ""}
         </div>
 
         <button

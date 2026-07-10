@@ -71,6 +71,10 @@ import type { PFMenuBar } from "../../../src/components/menu/pf-menu-bar";
 import { CRT_PRESETS } from "../../../src/services/view-effects";
 import { settingsStore } from "../../../src/stores/settings";
 import {
+  pwaStore,
+  type BeforeInstallPromptEvent,
+} from "../../../src/stores/pwa";
+import {
   createProjectContext,
   restoreDefaultProjectContext,
   setActiveProjectContext,
@@ -187,12 +191,15 @@ describe("pf-menu-bar popovers", () => {
     settingsStore.setActiveViewEffect(null);
     projectStoreMock.name.value = "Untitled";
     vi.clearAllMocks();
+    pwaStore.stop();
+    pwaStore.start();
   });
 
   afterEach(() => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    pwaStore.stop();
     restoreDefaultProjectContext();
     for (const context of createdContexts.splice(0)) {
       context.dispose();
@@ -332,6 +339,30 @@ describe("pf-menu-bar popovers", () => {
 
     expect(browserRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("only shows the install action while the browser offers installation", async () => {
+    const element = await createMenuBar();
+    const fileMenu = menu(element, "file")!;
+
+    expect(menuItem(fileMenu, "Install Pixel Forge")).toBeUndefined();
+
+    const installEvent = new Event("beforeinstallprompt", {
+      cancelable: true,
+    }) as BeforeInstallPromptEvent;
+    const prompt = vi.fn().mockResolvedValue(undefined);
+    Object.assign(installEvent, {
+      prompt,
+      userChoice: Promise.resolve({ outcome: "accepted", platform: "web" }),
+    });
+    window.dispatchEvent(installEvent);
+    await element.updateComplete;
+
+    menuItem(fileMenu, "Install Pixel Forge")?.click();
+    await element.updateComplete;
+
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(menuItem(fileMenu, "Install Pixel Forge")).toBeUndefined();
   });
 
   it("opens guided drawing setup from the File menu", async () => {
