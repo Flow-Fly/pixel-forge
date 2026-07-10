@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  analyzeGuideComplexity,
   generateNumberedGuide,
   perceptualColorDistance,
+  simplifyIsolatedGuidePixels,
 } from '../../../src/services/paint-by-number/guide-generator';
 
 class FakeImageData {
@@ -30,11 +32,20 @@ describe('generateNumberedGuide', () => {
       [255, 0, 0, 255],
     ]);
 
-    const guide = generateNumberedGuide(image, 2);
+    const guide = generateNumberedGuide(image, {
+      maxColors: 2,
+      simplifyIsolatedPixels: false,
+    });
 
     expect(guide.palette).toEqual(['#0000ff', '#ff0000']);
     expect([...guide.target]).toEqual([2, 1, 2]);
     expect([guide.width, guide.height]).toEqual([3, 1]);
+    expect(guide.complexity).toEqual({
+      paintableCells: 3,
+      paletteSize: 2,
+      isolatedCells: 3,
+      simplifiedCells: 0,
+    });
   });
 
   it('maps transparent cells to zero', () => {
@@ -94,7 +105,32 @@ describe('generateNumberedGuide', () => {
       target: new Uint8Array([0]),
       width: 1,
       height: 1,
+      complexity: {
+        paintableCells: 0,
+        paletteSize: 0,
+        isolatedCells: 0,
+        simplifiedCells: 0,
+      },
     });
+  });
+
+  it('preserves a supplied palette and supports luminance matching', () => {
+    const image = imageData(1, 1, [[0, 255, 255, 255]]);
+    const palette = ['#0000ff', '#ff0000'];
+
+    const colorGuide = generateNumberedGuide(image, {
+      palette,
+      mapping: 'color',
+    });
+    const luminanceGuide = generateNumberedGuide(image, {
+      palette,
+      mapping: 'luminance',
+    });
+
+    expect(colorGuide.palette).toEqual(palette);
+    expect(luminanceGuide.palette).toEqual(palette);
+    expect([...colorGuide.target]).toEqual([1]);
+    expect([...luminanceGuide.target]).toEqual([2]);
   });
 });
 
@@ -107,5 +143,28 @@ describe('perceptualColorDistance', () => {
     expect(perceptualColorDistance(red, blue)).toBe(
       perceptualColorDistance(blue, red),
     );
+  });
+});
+
+describe('guide playability', () => {
+  it('simplifies a truly isolated cell to the neighboring majority', () => {
+    expect([
+      ...simplifyIsolatedGuidePixels(new Uint8Array([1, 2, 1]), 3, 1),
+    ]).toEqual([1, 1, 1]);
+  });
+
+  it('keeps connected regions and reports complexity', () => {
+    const target = new Uint8Array([
+      1, 2,
+      1, 2,
+    ]);
+
+    expect([...simplifyIsolatedGuidePixels(target, 2, 2)]).toEqual([...target]);
+    expect(analyzeGuideComplexity(target, 2, 2, 2)).toEqual({
+      paintableCells: 4,
+      paletteSize: 2,
+      isolatedCells: 0,
+      simplifiedCells: 0,
+    });
   });
 });
