@@ -1,12 +1,14 @@
 import { css, html } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../../core/base-component';
+import { autoSaveService } from '../../../services/auto-save';
 import {
   analyzeGuidedDrawingProgress,
   getGuidedDrawingSnapshot,
   type GuidedDrawingProgress,
 } from '../../../services/paint-by-number/guided-progress';
 import { defaultProjectContext, type ProjectContext } from '../../../stores/project-context';
+import '../../ui/pf-dialog';
 
 const EMPTY_PROGRESS: GuidedDrawingProgress = {
   total: 0,
@@ -44,6 +46,84 @@ export class PFGuidedPalette extends BaseComponent {
       color: var(--pf-color-text-muted);
       font-size: var(--pf-font-size-xs);
       line-height: 1.4;
+    }
+
+    .view-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+    }
+
+    .view-controls button {
+      min-height: 30px;
+      padding: 5px 7px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-dark);
+      color: var(--pf-color-text-secondary);
+      cursor: pointer;
+      font-size: var(--pf-font-size-xs);
+    }
+
+    .view-controls button[aria-pressed='true'] {
+      border-color: var(--pf-color-accent);
+      background: var(--pf-color-primary-transparent);
+      color: var(--pf-color-text-main);
+    }
+
+    .finish-section {
+      display: grid;
+      gap: 6px;
+      padding-block-start: 2px;
+      border-block-start: 1px solid var(--pf-color-border);
+    }
+
+    .finish-guidance {
+      min-height: 32px;
+      padding: 6px 8px;
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-sm);
+      background: transparent;
+      color: var(--pf-color-text-main);
+      cursor: pointer;
+      font-size: var(--pf-font-size-xs);
+    }
+
+    .finish-guidance:hover {
+      border-color: var(--pf-color-accent);
+      background: var(--pf-color-bg-hover);
+    }
+
+    .finish-copy,
+    .finish-error {
+      margin: 0;
+      color: var(--pf-color-text-muted);
+      font-size: var(--pf-font-size-xs);
+      line-height: 1.45;
+    }
+
+    .finish-error {
+      color: var(--pf-color-danger, #f0aaa2);
+    }
+
+    .dialog-action {
+      padding: 7px 10px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      background: transparent;
+      color: var(--pf-color-text-main);
+      cursor: pointer;
+    }
+
+    .dialog-action.primary {
+      border-color: var(--pf-color-accent);
+      background: var(--pf-color-primary-transparent);
+      color: var(--pf-color-accent-hover);
+    }
+
+    .dialog-action:disabled {
+      cursor: wait;
+      opacity: 0.55;
     }
 
     .structure-note {
@@ -189,6 +269,9 @@ export class PFGuidedPalette extends BaseComponent {
   `;
 
   private context: ProjectContext = defaultProjectContext;
+  @state() private finishConfirmationOpen = false;
+  @state() private isFinishing = false;
+  @state() private finishError = '';
 
   connectedCallback() {
     super.connectedCallback();
@@ -225,6 +308,9 @@ export class PFGuidedPalette extends BaseComponent {
           aria-label="Guided drawing coverage"
         ></progress>
       </section>
+
+      ${this.renderViewControls()}
+      ${this.renderFinishGuidance(progress)}
 
       <div class="guide-grid">
         ${guideColors.map((color, index) => {
@@ -286,6 +372,109 @@ export class PFGuidedPalette extends BaseComponent {
       ? analyzeGuidedDrawingProgress(snapshot.session.target, snapshot.pixels)
       : EMPTY_PROGRESS;
   }
+
+  private renderViewControls() {
+    const guidance = this.context.guidedDrawing;
+    const numbersVisible = guidance.numbersVisible.value;
+    const targetPreviewVisible = guidance.targetPreviewVisible.value;
+
+    return html`
+      <div class="view-controls" aria-label="Guidance view">
+        <button
+          type="button"
+          aria-pressed=${String(numbersVisible)}
+          @click=${() => guidance.toggleNumbers()}
+        >
+          ${numbersVisible ? 'Hide numbers' : 'Show numbers'}
+        </button>
+        <button
+          type="button"
+          aria-pressed=${String(targetPreviewVisible)}
+          @click=${() => guidance.toggleTargetPreview()}
+        >
+          ${targetPreviewVisible ? 'Hide target' : 'Preview target'}
+        </button>
+      </div>
+    `;
+  }
+
+  private renderFinishGuidance(progress: GuidedDrawingProgress) {
+    return html`
+      <section class="finish-section" aria-label="Finish guidance">
+        <button
+          class="finish-guidance"
+          type="button"
+          @click=${this.openFinishConfirmation}
+        >
+          Finish guidance
+        </button>
+        <p class="finish-copy">You decide when the scaffold has done its job.</p>
+      </section>
+
+      <pf-dialog
+        ?open=${this.finishConfirmationOpen}
+        width="min(420px, calc(100vw - 32px))"
+        @pf-close=${this.closeFinishConfirmation}
+      >
+        <span slot="title">Finish guidance?</span>
+        <p class="finish-copy">
+          Your drawing is ${progress.percentage}% covered. This removes the numbers and fixed
+          guide structure. Your painted pixels and undo history stay exactly as they are.
+        </p>
+        ${this.finishError
+          ? html`<p class="finish-error" role="alert">${this.finishError}</p>`
+          : ''}
+        <div slot="actions">
+          <button
+            class="dialog-action"
+            type="button"
+            ?disabled=${this.isFinishing}
+            @click=${this.closeFinishConfirmation}
+          >
+            Keep guidance
+          </button>
+          <button
+            class="dialog-action primary finish-confirm"
+            type="button"
+            ?disabled=${this.isFinishing}
+            @click=${this.finishGuidance}
+          >
+            ${this.isFinishing ? 'Finishing…' : 'Finish guidance'}
+          </button>
+        </div>
+      </pf-dialog>
+    `;
+  }
+
+  private openFinishConfirmation = () => {
+    this.finishError = '';
+    this.finishConfirmationOpen = true;
+  };
+
+  private closeFinishConfirmation = () => {
+    if (this.isFinishing) return;
+    this.finishConfirmationOpen = false;
+    this.finishError = '';
+  };
+
+  private finishGuidance = async () => {
+    if (this.isFinishing || !this.context.guidedDrawing.active) return;
+
+    this.isFinishing = true;
+    this.finishError = '';
+    this.context.guidedDrawing.beginFinish();
+    try {
+      await autoSaveService.saveNow(this.context);
+      this.context.guidedDrawing.completeFinish();
+      this.context.viewport.resetView();
+      this.finishConfirmationOpen = false;
+    } catch {
+      this.context.guidedDrawing.cancelFinish();
+      this.finishError = 'Guidance could not be finished safely. Your guide is still active.';
+    } finally {
+      this.isFinishing = false;
+    }
+  };
 
   private selectColor(color: string) {
     this.context.colors.setPrimaryColor(color);

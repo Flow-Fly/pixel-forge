@@ -683,6 +683,7 @@ export class PixelForgeApp extends BaseComponent {
             <pf-project-browser
               .canClose=${this.hasLibraryProject}
               @show-new-project-dialog=${this.handleShowNewProjectDialog}
+              @show-paint-by-number-dialog=${this.handleShowPaintByNumberDialog}
               @project-browser-close=${this.handleProjectBrowserClose}
               @project-opened=${this.handleProjectOpened}
               @current-project-deleted=${this.handleCurrentProjectDeleted}

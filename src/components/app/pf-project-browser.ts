@@ -90,7 +90,8 @@ export class PFProjectBrowser extends BaseComponent {
 
     .header-actions,
     .card-actions,
-    .rename-actions {
+    .rename-actions,
+    .empty-actions {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -180,6 +181,11 @@ export class PFProjectBrowser extends BaseComponent {
       text-align: center;
       border: 1px dashed var(--pf-color-border-strong);
       min-height: 226px;
+    }
+
+    .new-card.guided {
+      border-color: color-mix(in srgb, var(--pf-color-accent) 62%, var(--pf-color-border));
+      background: var(--pf-color-primary-transparent);
     }
 
     .thumbnail {
@@ -344,10 +350,13 @@ export class PFProjectBrowser extends BaseComponent {
         </div>
         <section class="shell" aria-label="Project library">
           <div class="toolbar">
-            <p class="subtitle">Open a saved sprite or start a fresh canvas.</p>
+            <p class="subtitle">Open a saved sprite, start fresh, or use an image as guidance.</p>
             <form method="dialog" class="header-actions">
               <button class="primary" type="submit" value="new-project">
                 New Project
+              </button>
+              <button type="submit" value="guided-drawing">
+                Guided Drawing
               </button>
               ${this.canClose
                 ? html`
@@ -379,11 +388,18 @@ export class PFProjectBrowser extends BaseComponent {
       return html`
         <div class="empty">
           <p>No projects saved yet.</p>
-          <form method="dialog" class="empty-action">
-            <button class="primary" type="submit" value="new-project">
-              Create First Project
-            </button>
-          </form>
+          <div class="empty-actions">
+            <form method="dialog" class="empty-action">
+              <button class="primary" type="submit" value="new-project">
+                Create First Project
+              </button>
+            </form>
+            <form method="dialog" class="empty-action">
+              <button type="submit" value="guided-drawing">
+                Create Guided Drawing
+              </button>
+            </form>
+          </div>
         </div>
       `;
     }
@@ -394,6 +410,12 @@ export class PFProjectBrowser extends BaseComponent {
           <button class="new-card" type="submit" value="new-project">
             <strong>New Project</strong>
             <span class="meta">Choose a size and start drawing.</span>
+          </button>
+        </form>
+        <form method="dialog" class="new-card-form">
+          <button class="new-card guided" type="submit" value="guided-drawing">
+            <strong>Guided Drawing</strong>
+            <span class="meta">Start from an image in a separate numbered project.</span>
           </button>
         </form>
         ${this.projects.map((project) => this.renderProject(project))}
@@ -689,6 +711,13 @@ export class PFProjectBrowser extends BaseComponent {
     if (returnValue === 'new-project') {
       this.dispatchEvent(
         new CustomEvent('show-new-project-dialog', { bubbles: true, composed: true })
+      );
+      return;
+    }
+
+    if (returnValue === 'guided-drawing') {
+      this.dispatchEvent(
+        new CustomEvent('show-paint-by-number-dialog', { bubbles: true, composed: true })
       );
       return;
     }

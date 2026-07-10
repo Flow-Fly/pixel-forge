@@ -21,6 +21,33 @@ export interface GuidedNumberViewport {
   viewportHeight: number;
 }
 
+export function collectVisibleGuidedTargetCells(
+  target: Uint8Array,
+  width: number,
+  viewport: GuidedNumberViewport,
+): GuidedNumberCell[] {
+  const cells: GuidedNumberCell[] = [];
+  for (let index = 0; index < target.length; index += 1) {
+    const guideNumber = target[index];
+    if (guideNumber === 0) continue;
+
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const screenX = x * viewport.zoom + viewport.panX;
+    const screenY = y * viewport.zoom + viewport.panY;
+    if (!isCellVisible(screenX, screenY, viewport)) continue;
+
+    cells.push({
+      guideNumber,
+      screenX,
+      screenY,
+      size: viewport.zoom,
+    });
+  }
+
+  return cells;
+}
+
 export function collectVisibleGuidedNumberCells(
   target: Uint8Array,
   pixels: Uint8ClampedArray,
@@ -121,6 +148,8 @@ export class PFGuidedNumberOverlay extends CanvasOverlay {
 
   render() {
     const session = this.context.guidedDrawing.session.value;
+    const numbersVisible = this.context.guidedDrawing.numbersVisible.value;
+    void this.context.guidedDrawing.targetPreviewVisible.value;
     const zoom = this.context.viewport.zoom.value;
     void this.context.viewport.panX.value;
     void this.context.viewport.panY.value;
@@ -129,7 +158,7 @@ export class PFGuidedNumberOverlay extends CanvasOverlay {
 
     return html`
       <canvas aria-label="Guided drawing numbers"></canvas>
-      ${session && zoom < NUMBER_ZOOM_THRESHOLD
+      ${session && numbersVisible && zoom < NUMBER_ZOOM_THRESHOLD
         ? html`
             <p class="zoom-hint" role="status" aria-live="polite">
               Zoom in to see guide numbers
@@ -155,23 +184,62 @@ export class PFGuidedNumberOverlay extends CanvasOverlay {
     if (!snapshot) return;
 
     const { viewport } = this.context;
-    const cells = collectVisibleGuidedNumberCells(
+    const frame = {
+      zoom: viewport.zoom.value,
+      panX: viewport.panX.value,
+      panY: viewport.panY.value,
+      viewportWidth: this.clientWidth,
+      viewportHeight: this.clientHeight,
+    };
+
+    if (this.context.guidedDrawing.targetPreviewVisible.value) {
+      const targetCells = collectVisibleGuidedTargetCells(
+        snapshot.session.target,
+        snapshot.session.width,
+        frame,
+      );
+      this.drawTargetPreview(
+        drawingContext,
+        targetCells,
+        this.context.palette.mainColors.value,
+      );
+    }
+
+    if (!this.context.guidedDrawing.numbersVisible.value) return;
+
+    const numberCells = collectVisibleGuidedNumberCells(
       snapshot.session.target,
       snapshot.pixels,
       snapshot.session.width,
-      {
-        zoom: viewport.zoom.value,
-        panX: viewport.panX.value,
-        panY: viewport.panY.value,
-        viewportWidth: this.clientWidth,
-        viewportHeight: this.clientHeight,
-      },
+      frame,
     );
 
-    this.drawCells(drawingContext, cells);
+    this.drawNumbers(drawingContext, numberCells);
   }
 
-  private drawCells(context: CanvasRenderingContext2D, cells: GuidedNumberCell[]) {
+  private drawTargetPreview(
+    context: CanvasRenderingContext2D,
+    cells: GuidedNumberCell[],
+    palette: string[],
+  ) {
+    context.save();
+    context.globalAlpha = 0.72;
+    for (const cell of cells) {
+      const color = palette[cell.guideNumber - 1];
+      if (!color) continue;
+
+      context.fillStyle = color;
+      context.fillRect(
+        Math.floor(cell.screenX),
+        Math.floor(cell.screenY),
+        Math.ceil(cell.size),
+        Math.ceil(cell.size),
+      );
+    }
+    context.restore();
+  }
+
+  private drawNumbers(context: CanvasRenderingContext2D, cells: GuidedNumberCell[]) {
     const fontFamily = getComputedStyle(this).fontFamily || '"Departure Mono", monospace';
     context.textAlign = 'center';
     context.textBaseline = 'middle';

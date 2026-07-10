@@ -59,4 +59,42 @@ describe('GuidedDrawingStore', () => {
     expect(() => store.start({ ...createSession(), target: new Uint8Array([1]) }))
       .toThrow('target does not match');
   });
+
+  it('keeps temporary view choices out of the durable session', () => {
+    const store = createGuidedDrawingStore();
+    store.start(createSession());
+
+    store.toggleNumbers();
+    store.toggleTargetPreview();
+    expect(store.numbersVisible.value).toBe(false);
+    expect(store.targetPreviewVisible.value).toBe(true);
+    expect(store.toFile()).not.toHaveProperty('numbersVisible');
+
+    store.load({ ...createSession(), target: [1, 2] });
+    expect(store.numbersVisible.value).toBe(true);
+    expect(store.targetPreviewVisible.value).toBe(false);
+
+    store.toggleNumbers();
+    store.toggleTargetPreview();
+    store.clear();
+    expect(store.numbersVisible.value).toBe(true);
+    expect(store.targetPreviewVisible.value).toBe(false);
+  });
+
+  it('omits guidance only while an explicit finish is being saved', () => {
+    const store = createGuidedDrawingStore();
+    store.start(createSession());
+
+    store.beginFinish();
+    expect(store.active).toBe(true);
+    expect(store.toFile()).toBeUndefined();
+
+    store.cancelFinish();
+    expect(store.toFile()?.target).toEqual([1, 2]);
+
+    store.beginFinish();
+    store.completeFinish();
+    expect(store.active).toBe(false);
+    expect(store.finishPending.value).toBe(false);
+  });
 });

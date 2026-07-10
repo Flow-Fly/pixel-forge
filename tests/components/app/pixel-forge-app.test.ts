@@ -184,4 +184,34 @@ describe('pixel-forge-app project dialogs', () => {
     expect(element.shadowRoot?.querySelector('pf-project-browser')).toBeNull();
     expect(element.shadowRoot?.querySelector('pf-new-project-dialog')?.open).toBe(true);
   });
+
+  it('opens guided setup when the project browser requests it', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      hasLibraryProject: boolean;
+      showPaintByNumberDialog: boolean;
+      showProjectBrowser: boolean;
+      updateComplete: Promise<unknown>;
+    };
+
+    document.body.append(element);
+    await element.updateComplete;
+
+    element.hasLibraryProject = true;
+    element.showProjectBrowser = true;
+    element.showPaintByNumberDialog = false;
+    await element.updateComplete;
+
+    const browser = element.shadowRoot?.querySelector('pf-project-browser');
+    browser?.dispatchEvent(
+      new CustomEvent('show-paint-by-number-dialog', { bubbles: true, composed: true })
+    );
+    await element.updateComplete;
+
+    expect(element.showProjectBrowser).toBe(false);
+    expect(element.showPaintByNumberDialog).toBe(true);
+    expect(element.shadowRoot?.querySelector('pf-project-browser')).toBeNull();
+    expect(element.shadowRoot?.querySelector('pf-paint-by-number-dialog')?.open).toBe(true);
+  });
 });
