@@ -134,6 +134,24 @@ function createContext(name: string) {
   return context;
 }
 
+function startGuidedSession(context: ProjectContext) {
+  context.guidedDrawing.start({
+    version: 1,
+    width: 1,
+    height: 1,
+    target: Uint8Array.from([1]),
+    guideColorCount: 1,
+    settings: {
+      longSide: 1,
+      paletteSource: "generated",
+      maxColors: 1,
+      mapping: "color",
+      simplifyIsolatedPixels: false,
+    },
+    createdAt: 1,
+  });
+}
+
 function useReferenceImageInput(files: File[], dispatchChangeOnClick = true) {
   const input = document.createElement("input");
   Object.defineProperty(input, "files", {
@@ -314,6 +332,42 @@ describe("pf-menu-bar popovers", () => {
 
     expect(browserRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens guided drawing setup from the File menu", async () => {
+    const element = await createMenuBar();
+    const fileButton = button(element, "file");
+    const fileMenu = menu(element, "file");
+    let guidedDrawingRequested = false;
+
+    element.addEventListener("show-paint-by-number-dialog", () => {
+      guidedDrawingRequested = true;
+    });
+
+    fileButton?.click();
+    await element.updateComplete;
+    menuItem(fileMenu!, "New Guided Drawing")?.click();
+    await element.updateComplete;
+
+    expect(guidedDrawingRequested).toBe(true);
+    expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("keeps guided structure actions disabled while creative actions stay available", async () => {
+    const context = createContext("Portrait guide");
+    startGuidedSession(context);
+    setActiveProjectContext(context);
+    const element = await createMenuBar();
+    const fileMenu = menu(element, "file")!;
+    const imageMenu = menu(element, "image")!;
+
+    expect(element.shadowRoot?.querySelector(".project-name-display")?.textContent)
+      .toContain("Portrait guide");
+    expect((menuItem(fileMenu, "Import Reference Image") as HTMLButtonElement).disabled).toBe(true);
+    expect((menuItem(imageMenu, "Resize Canvas") as HTMLButtonElement).disabled).toBe(true);
+    expect((menuItem(imageMenu, "Flip Horizontal") as HTMLButtonElement).disabled).toBe(true);
+    expect((menuItem(imageMenu, "Rotate 90° CW") as HTMLButtonElement).disabled).toBe(true);
+    expect((menuItem(imageMenu, "Arcade Monitor") as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("imports a reference image from the File menu into the project active when the picker opened", async () => {

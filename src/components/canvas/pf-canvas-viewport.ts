@@ -5,6 +5,7 @@ import { defaultProjectContext, type ProjectContext } from '../../stores/project
 import './pf-selection-overlay';
 import './pf-marching-ants-overlay';
 import './pf-brush-cursor-overlay';
+import './pf-guided-number-overlay';
 import './pf-transform-handles';
 import './pf-reference-transform-handles';
 import './pf-text-input';
@@ -181,6 +182,7 @@ export class PFCanvasViewport extends BaseComponent {
         <slot></slot>
       </div>
       <canvas id="grid-overlay"></canvas>
+      <pf-guided-number-overlay></pf-guided-number-overlay>
       <pf-selection-overlay></pf-selection-overlay>
       <pf-marching-ants-overlay></pf-marching-ants-overlay>
       <pf-brush-cursor-overlay></pf-brush-cursor-overlay>

@@ -70,6 +70,21 @@ export class ProjectLibraryService {
     return id;
   }
 
+  async createProjectFromFile(
+    project: ProjectFile,
+    settings: CreateProjectSettings = {}
+  ): Promise<string> {
+    const context = settings.context ?? defaultProjectContext;
+    if (settings.saveCurrent ?? true) {
+      await autoSaveService.saveNow(context);
+    }
+
+    const id = uuidv4();
+    await this.repository.save(id, structuredClone(project));
+    await this.loadStoredProject(id, context);
+    return id;
+  }
+
   async duplicateProject(id: string): Promise<string> {
     const project = await this.getProjectOrThrow(id);
     const sourceMeta = await this.findProjectMeta(id);

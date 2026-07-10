@@ -27,10 +27,15 @@ export class PFPlaybackControls extends BaseComponent {
       letter-spacing: 0;
     }
 
-    button:hover {
+    button:hover:not(:disabled) {
       background-color: var(--pf-color-bg-hover);
       border-color: var(--pf-color-border-strong);
       color: var(--pf-color-text-main);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
     }
 
     button.active {
@@ -82,10 +87,12 @@ export class PFPlaybackControls extends BaseComponent {
   }
 
   addFrame() {
+    if (this.context.guidedDrawing.active) return;
     void this.context.history.execute(new AddFrameCommand(true, undefined, this.context));
   }
 
   deleteFrame() {
+    if (this.context.guidedDrawing.active) return;
     const currentFrameId = this.context.animation.currentFrameId.value;
     if (currentFrameId) {
       void this.context.history.execute(new DeleteFrameCommand(currentFrameId, this.context));
@@ -136,6 +143,7 @@ export class PFPlaybackControls extends BaseComponent {
     const frameCount = animation.frames.value.length;
     const effectiveFPS = this.getEffectiveFPS();
     const totalDuration = this.getTotalDuration();
+    const guidedProject = this.context.guidedDrawing.active;
 
     return html`
       <button @click=${() => animation.goToFrame(animation.frames.value[0]?.id)}>|&lt;</button>
@@ -150,8 +158,18 @@ export class PFPlaybackControls extends BaseComponent {
         style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
       ></div>
 
-      <button @click=${this.addFrame} title="Add Duplicate Frame">+ Frame</button>
-      <button @click=${this.deleteFrame} title="Delete Current Frame" ?disabled=${frameCount <= 1}>
+      <button
+        @click=${this.addFrame}
+        title=${guidedProject ? 'Guided projects keep one frame' : 'Add Duplicate Frame'}
+        ?disabled=${guidedProject}
+      >
+        + Frame
+      </button>
+      <button
+        @click=${this.deleteFrame}
+        title=${guidedProject ? 'Guided projects keep one frame' : 'Delete Current Frame'}
+        ?disabled=${guidedProject || frameCount <= 1}
+      >
         - Frame
       </button>
 

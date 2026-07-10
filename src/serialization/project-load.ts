@@ -31,6 +31,7 @@ export type ProjectLoadStores = {
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
     linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
+    rebuildAllCelCanvases: () => void;
     rebuildAllIndexBuffers: () => void;
     setFrameDuration: (frameId: string, duration: number) => void;
     setTextCelData: (
@@ -133,6 +134,7 @@ export async function hydrateProjectFrames(
   }
 
   restoreLinkedCelGroups(stores, linkedCelGroups);
+  stores.animation.rebuildAllCelCanvases();
   deletePlaceholderFrame(stores, placeholderFrameId);
 }
 
@@ -304,6 +306,7 @@ function giveSharedTransparentCelOwnCanvas(
     !cel ||
     cel.linkedCelId !== EMPTY_CEL_LINK_ID ||
     !hasProjectImageData(celFile.data)
+    && !(celFile.indexData && celFile.indexData.length > 0)
   ) {
     return;
   }
@@ -351,7 +354,7 @@ function restoreCelIndexBuffer(
 ): void {
   const { animation } = stores;
   const cel = animation.cels.value.get(celKey);
-  if (!cel || !hasProjectImageData(celFile.data)) return;
+  if (!cel) return;
 
   const cels = new Map(animation.cels.value);
 
@@ -360,7 +363,7 @@ function restoreCelIndexBuffer(
       ...cel,
       indexBuffer: new Uint8Array(celFile.indexData),
     });
-  } else if (canvas && !file.palette) {
+  } else if (canvas && hasProjectImageData(celFile.data) && !file.palette) {
     cels.set(celKey, {
       ...cel,
       indexBuffer: buildIndexBufferFromCanvas(canvas, stores.palette, true),

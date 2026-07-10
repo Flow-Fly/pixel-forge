@@ -2,6 +2,7 @@ import type { FrameTag } from './animation';
 import type { LayerType, BlendMode } from './layer';
 import type { ReferenceLayerData } from './reference';
 import type { TextLayerData, TextCelData } from './text';
+import type { GuidedDrawingSessionFile } from './guided-drawing';
 
 /**
  * Current project file format version.
@@ -12,8 +13,9 @@ import type { TextLayerData, TextCelData } from './text';
  *
  * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added `layers[].continuous`,
  * 4.0.0 removed `ephemeralPalette` and added reference layer data.
+ * 4.1.0 added optional durable guided drawing sessions.
  */
-export const PROJECT_VERSION = '4.0.0';
+export const PROJECT_VERSION = '4.1.0';
 
 export type ProjectImageData = Uint8Array;
 export type LegacyProjectImageData =
@@ -62,6 +64,7 @@ export interface ProjectFile {
     currentFrameIndex: number;
   };
   tags?: FrameTag[]; // Frame tags (v2.0+, optional for backward compat)
+  guidedDrawing?: GuidedDrawingSessionFile; // v4.1+: optional numbered drawing guide
 }
 
 export type ProjectLayerFileInput = Omit<ProjectLayerFile, 'data'> & {

@@ -214,6 +214,33 @@ describe('ProjectLibraryService', () => {
     expect(projects.has('current')).toBe(false);
   });
 
+  it('creates and opens an exact project file without mutating its input', async () => {
+    const project = makeProject('Guided project', 5, 3);
+    project.guidedDrawing = {
+      version: 1,
+      width: 5,
+      height: 3,
+      target: new Array(15).fill(1),
+      settings: {
+        longSide: 5,
+        paletteSource: 'generated',
+        maxColors: 2,
+        mapping: 'color',
+        simplifyIsolatedPixels: true,
+      },
+      createdAt: 123,
+    };
+    const input = structuredClone(project);
+
+    const id = await service.createProjectFromFile(project, { saveCurrent: false });
+
+    expect(project).toEqual(input);
+    expect(projectStore.id.value).toBe(id);
+    expect(projectStore.name.value).toBe('Guided project');
+    expect(projectStore.width.value).toBe(5);
+    expect(projects.get(id)?.guidedDrawing).toEqual(project.guidedDrawing);
+  });
+
   it('saves edits to the open project before loading another project', async () => {
     projects.set('a', makeProject('Project A'));
     projects.set('b', makeProject('Project B'));

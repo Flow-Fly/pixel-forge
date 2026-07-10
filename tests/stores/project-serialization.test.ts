@@ -34,6 +34,7 @@ import { projectStore } from '../../src/stores/project';
 import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
 import { paletteStore } from '../../src/stores/palette';
+import { guidedDrawingStore } from '../../src/stores/guided-drawing';
 import { PROJECT_VERSION } from '../../src/types/project';
 import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
@@ -262,6 +263,44 @@ describe('project save -> load -> save round-trip (structural)', () => {
     vi.useRealTimers();
 
     expect(paletteStore.mainColors.value).toEqual(PALETTE);
+  });
+
+  it('round-trips optional guided drawing state', async () => {
+    const saved = await buildSampleProject();
+    guidedDrawingStore.start({
+      version: 1,
+      width: 2,
+      height: 2,
+      target: new Uint8Array([1, 2, 0, 1]),
+      settings: {
+        longSide: 2,
+        paletteSource: 'restricted',
+        restrictedPalette: ['#000000', '#ffffff'],
+        mapping: 'luminance',
+        simplifyIsolatedPixels: true,
+      },
+      sourceName: 'source.png',
+      createdAt: 123,
+    });
+
+    const withGuide = await projectStore.saveProject();
+    expect(withGuide.guidedDrawing?.target).toEqual([1, 2, 0, 1]);
+
+    guidedDrawingStore.clear();
+    vi.useFakeTimers();
+    await projectStore.loadProject(structuredClone(withGuide), false);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    expect(guidedDrawingStore.session.value?.target).toEqual(
+      new Uint8Array([1, 2, 0, 1]),
+    );
+    expect((await projectStore.saveProject()).guidedDrawing).toEqual(
+      withGuide.guidedDrawing,
+    );
+
+    await projectStore.loadProject(saved, false);
+    expect(guidedDrawingStore.active).toBe(false);
   });
 
   it('round-trips reference layer metadata without animation cels', async () => {

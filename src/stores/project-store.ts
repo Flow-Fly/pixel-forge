@@ -33,6 +33,7 @@ import type { Layer } from "../types/layer";
 import type { createAnimationStore } from "./animation/store";
 import type { createDirtyRectStore } from "./dirty-rect-store";
 import type { createHistoryStore } from "./history-store";
+import type { createGuidedDrawingStore } from "./guided-drawing-store";
 import type { createLayerStore } from "./layers-store";
 import type { createPaletteStore } from "./palette/store";
 import type { createSelectionStore } from "./selection/store";
@@ -40,6 +41,7 @@ import type { createSelectionStore } from "./selection/store";
 type ProjectAnimationStore = ReturnType<typeof createAnimationStore>;
 type ProjectDirtyRectStore = ReturnType<typeof createDirtyRectStore>;
 type ProjectHistoryStore = ReturnType<typeof createHistoryStore>;
+type ProjectGuidedDrawingStore = ReturnType<typeof createGuidedDrawingStore>;
 type ProjectLayerStore = ReturnType<typeof createLayerStore>;
 type ProjectPaletteStore = ReturnType<typeof createPaletteStore>;
 type ProjectSelectionStore = ReturnType<typeof createSelectionStore>;
@@ -48,6 +50,7 @@ export interface ProjectStoreDependencies {
   animation: ProjectAnimationStore;
   dirtyRect: ProjectDirtyRectStore;
   history: ProjectHistoryStore;
+  guidedDrawing: ProjectGuidedDrawingStore;
   layers: ProjectLayerStore;
   palette: ProjectPaletteStore;
   refs: StoreRefs;
@@ -102,6 +105,7 @@ class ProjectStore {
   private readonly animation: ProjectAnimationStore;
   private readonly dirtyRect: ProjectDirtyRectStore;
   private readonly history: ProjectHistoryStore;
+  private readonly guidedDrawing: ProjectGuidedDrawingStore;
   private readonly layers: ProjectLayerStore;
   private readonly loadStores: ProjectLoadStores;
   private readonly palette: ProjectPaletteStore;
@@ -112,6 +116,7 @@ class ProjectStore {
     this.animation = dependencies.animation;
     this.dirtyRect = dependencies.dirtyRect;
     this.history = dependencies.history;
+    this.guidedDrawing = dependencies.guidedDrawing;
     this.layers = dependencies.layers;
     this.palette = dependencies.palette;
     this.refs = dependencies.refs;
@@ -177,6 +182,8 @@ class ProjectStore {
       (f) => f.id === this.animation.currentFrameId.value
     );
 
+    const guidedDrawing = this.guidedDrawing.toFile();
+
     return {
       version: PROJECT_VERSION,
       name: this.name.value,
@@ -190,6 +197,7 @@ class ProjectStore {
         currentFrameIndex: currentFrameIndex === -1 ? 0 : currentFrameIndex,
       },
       tags: this.animation.tags.value,
+      ...(guidedDrawing && { guidedDrawing }),
     };
   }
 
@@ -207,6 +215,7 @@ class ProjectStore {
 
     this.setSize(file.width, file.height);
     this.name.value = file.name || DEFAULT_PROJECT_NAME;
+    this.guidedDrawing.load(file.guidedDrawing);
 
     restoreProjectPaletteForLoad(this.loadStores, file);
     await hydrateProjectLayers(this.loadStores, file);
@@ -236,6 +245,7 @@ class ProjectStore {
     this.setSize(width, height);
     this.name.value = DEFAULT_PROJECT_NAME;
     this.lastSaved.value = null;
+    this.guidedDrawing.clear();
 
     // 2. Clear all layers
     while (this.layers.layers.value.length > 0) {

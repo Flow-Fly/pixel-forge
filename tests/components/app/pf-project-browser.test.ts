@@ -214,6 +214,7 @@ describe('pf-project-browser', () => {
     expect(element.shadowRoot?.textContent).toContain('Open Project');
     expect(element.shadowRoot?.textContent).toContain('Second Project');
     expect(buttonWithText(element.shadowRoot!, 'New Project')).toBeTruthy();
+    expect(buttonWithText(element.shadowRoot!, 'Guided Drawing')).toBeTruthy();
   });
 
   it('emits show-new-project-dialog from the native dialog return value', async () => {
@@ -225,6 +226,19 @@ describe('pf-project-browser', () => {
     });
 
     closeWithReturnValue(projectDialog(element.shadowRoot!), 'new-project');
+    await settle(element);
+
+    expect(requested).toBe(true);
+  });
+
+  it('emits the shared guided-drawing setup request from the library', async () => {
+    const element = await createBrowser();
+    let requested = false;
+    element.addEventListener('show-paint-by-number-dialog', () => {
+      requested = true;
+    });
+
+    closeWithReturnValue(projectDialog(element.shadowRoot!), 'guided-drawing');
     await settle(element);
 
     expect(requested).toBe(true);
