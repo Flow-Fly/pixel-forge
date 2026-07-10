@@ -21,6 +21,27 @@ export interface GuidedNumberViewport {
   viewportHeight: number;
 }
 
+export interface GuidedNumberLabelStyle {
+  fillStyle: string;
+  fontSize: number;
+  fontWeight: number;
+  lineWidth: number;
+  strokeStyle: string;
+}
+
+export function getGuidedNumberLabelStyle(
+  cellSize: number,
+  labelLength: number,
+): GuidedNumberLabelStyle {
+  return {
+    fillStyle: 'rgba(245, 243, 238, 0.62)',
+    fontSize: Math.min(12, Math.max(7, cellSize * (labelLength > 1 ? 0.46 : 0.52))),
+    fontWeight: 500,
+    lineWidth: Math.min(1.5, Math.max(1, cellSize * 0.06)),
+    strokeStyle: 'rgba(7, 9, 13, 0.46)',
+  };
+}
+
 export function collectVisibleGuidedTargetCells(
   target: Uint8Array,
   width: number,
@@ -246,23 +267,17 @@ export class PFGuidedNumberOverlay extends CanvasOverlay {
 
     for (const cell of cells) {
       const label = String(cell.guideNumber);
-      const fontSize = Math.min(14, cell.size * (label.length > 1 ? 0.5 : 0.58));
-      const inset = Math.max(1, Math.round(cell.size * 0.1));
-      const badgeWidth = cell.size - inset * 2;
-      const badgeHeight = cell.size - inset * 2;
+      const style = getGuidedNumberLabelStyle(cell.size, label.length);
       const centerX = cell.screenX + cell.size / 2;
       const centerY = cell.screenY + cell.size / 2;
 
-      context.fillStyle = 'rgba(7, 9, 13, 0.78)';
-      context.fillRect(
-        Math.round(cell.screenX + inset),
-        Math.round(cell.screenY + inset),
-        Math.max(1, Math.round(badgeWidth)),
-        Math.max(1, Math.round(badgeHeight)),
-      );
-      context.font = `700 ${fontSize}px ${fontFamily}`;
-      context.fillStyle = '#f5f3ee';
-      context.fillText(label, centerX, centerY + 0.5, badgeWidth);
+      context.font = `${style.fontWeight} ${style.fontSize}px ${fontFamily}`;
+      context.lineJoin = 'round';
+      context.lineWidth = style.lineWidth;
+      context.strokeStyle = style.strokeStyle;
+      context.strokeText(label, centerX, centerY + 0.5, cell.size);
+      context.fillStyle = style.fillStyle;
+      context.fillText(label, centerX, centerY + 0.5, cell.size);
     }
   }
 }
