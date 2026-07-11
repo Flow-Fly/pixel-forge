@@ -750,9 +750,9 @@ export class PFMenuBar extends BaseComponent {
             Delete Current...
           </div>
           <div class="divider"></div>
-          <div class="menu-item" @click=${this.openFile}>
+          <button class="menu-item" type="button" @click=${this.openFile}>
             Import File...
-          </div>
+          </button>
           <button
             class="menu-item"
             type="button"

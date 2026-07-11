@@ -279,6 +279,18 @@ export class PixelForgeApp extends BaseComponent {
       color: var(--pf-color-text-main);
       outline: none;
     }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
   `;
 
   @state() showResizeDialog = false;
@@ -419,8 +431,7 @@ export class PixelForgeApp extends BaseComponent {
   }
 
   private handleProjectFileDragOver = (event: DragEvent) => {
-    const files = supportedProjectFiles(getDataTransferFiles(event.dataTransfer));
-    if (files.length === 0) return;
+    if (!hasDraggedFiles(event.dataTransfer)) return;
 
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
@@ -710,6 +721,22 @@ export class PixelForgeApp extends BaseComponent {
     localStorage.setItem("pf-timeline-height", String(this.timelineHeight));
   };
 
+  private renderFileImportStatus() {
+    return html`
+      <span class="visually-hidden" role="status" aria-live="polite"
+        >${this.fileImportMessage ?? ""}</span
+      >
+      ${this.fileImportMessage
+        ? html`
+            <div class="file-import-status">
+              <span aria-hidden="true">${this.fileImportMessage}</span>
+              <button type="button" @click=${this.dismissFileImportMessage}>Dismiss</button>
+            </div>
+          `
+        : ""}
+    `;
+  }
+
   render() {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
     const isTimelineCollapsed =
@@ -862,14 +889,7 @@ export class PixelForgeApp extends BaseComponent {
       ${this.warningMessage
         ? html`<div class="warning-toast">${this.warningMessage}</div>`
         : ""}
-      ${this.fileImportMessage
-        ? html`
-            <div class="file-import-status">
-              <span role="status" aria-live="polite">${this.fileImportMessage}</span>
-              <button type="button" @click=${this.dismissFileImportMessage}>Dismiss</button>
-            </div>
-          `
-        : ""}
+      ${this.renderFileImportStatus()}
       <pf-pwa-update-toast></pf-pwa-update-toast>
     `;
   }
@@ -885,4 +905,11 @@ function getDataTransferFiles(dataTransfer: DataTransfer | null): File[] {
     .filter((item) => item.kind === "file")
     .map((item) => item.getAsFile())
     .filter((file): file is File => file !== null);
+}
+
+function hasDraggedFiles(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  if (dataTransfer.files.length > 0) return true;
+  if (Array.from(dataTransfer.items).some((item) => item.kind === "file")) return true;
+  return Array.from(dataTransfer.types).includes("Files");
 }

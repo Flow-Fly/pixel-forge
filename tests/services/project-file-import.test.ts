@@ -38,6 +38,7 @@ function project(name = 'Imported project'): ProjectFile {
 function dependencies(opened = true) {
   const projectLibrary = {
     importProjectFile: vi.fn(async () => 'imported-id'),
+    deleteProject: vi.fn(async () => undefined),
   };
   const workspace = {
     openProject: vi.fn(async () =>
@@ -87,7 +88,6 @@ describe('ProjectFileImportService', () => {
     expect(result).toMatchObject({
       projectId: 'imported-id',
       opened: false,
-      message: expect.stringContaining('Imported project'),
     });
     expect(deps.projectLibrary.importProjectFile).toHaveBeenCalledOnce();
   });
@@ -115,6 +115,7 @@ describe('ProjectFileImportService', () => {
         if (input.name === 'First') await firstImportPaused;
         return input.name ?? 'imported';
       }),
+      deleteProject: vi.fn(async () => undefined),
     };
     const workspace = {
       openProject: vi.fn(async (projectId: string) => ({
@@ -146,5 +147,16 @@ describe('ProjectFileImportService', () => {
       'First',
       'Second',
     ]);
+  });
+
+  it('rolls back a library record when opening the imported project fails', async () => {
+    const deps = dependencies();
+    deps.workspace.openProject.mockRejectedValueOnce(new Error('Could not hydrate project'));
+    const service = new ProjectFileImportService(deps);
+    const file = new File([JSON.stringify(project())], 'broken-images.json');
+
+    await expect(service.importFile(file)).rejects.toThrow('Could not hydrate project');
+
+    expect(deps.projectLibrary.deleteProject).toHaveBeenCalledWith('imported-id');
   });
 });

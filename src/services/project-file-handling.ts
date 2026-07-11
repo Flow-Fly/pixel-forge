@@ -1,10 +1,21 @@
-import { projectFileImportService, type ProjectFileImportOutcome } from './project-file-import';
+import {
+  projectFileImportService,
+  type ProjectFileImportOutcome,
+  type ProjectFileImportService,
+} from './project-file-import';
 
 export const PROJECT_FILE_IMPORT_REPORT_EVENT = 'project-file-import-report';
 
 export interface ProjectFileImportReport {
   outcomes: ProjectFileImportOutcome[];
   unreadableFiles: string[];
+}
+
+type ProjectFileBatchImporter = Pick<ProjectFileImportService, 'importFiles'>;
+
+interface ImportProjectFilesOptions {
+  importer?: ProjectFileBatchImporter;
+  unreadableFiles?: string[];
 }
 
 const SUPPORTED_PROJECT_FILE_EXTENSIONS = new Set(['pf', 'json', 'ase', 'aseprite']);
@@ -17,14 +28,21 @@ export function supportedProjectFiles(files: Iterable<File>): File[] {
   return Array.from(files).filter(isSupportedProjectFile);
 }
 
-export async function importProjectFiles(files: Iterable<File>): Promise<ProjectFileImportReport> {
-  const outcomes = await projectFileImportService.importFiles(files);
-  const report = { outcomes, unreadableFiles: [] };
+export async function importProjectFiles(
+  files: Iterable<File>,
+  options: ImportProjectFilesOptions = {}
+): Promise<ProjectFileImportReport> {
+  const importer = options.importer ?? projectFileImportService;
+  const outcomes = await importer.importFiles(files);
+  const report = {
+    outcomes,
+    unreadableFiles: options.unreadableFiles ?? [],
+  };
   dispatchProjectFileImportReport(report);
   return report;
 }
 
-export function dispatchProjectFileImportReport(report: ProjectFileImportReport): void {
+function dispatchProjectFileImportReport(report: ProjectFileImportReport): void {
   if (report.outcomes.length === 0 && report.unreadableFiles.length === 0) return;
 
   window.dispatchEvent(

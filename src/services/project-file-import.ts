@@ -3,13 +3,12 @@ import { projectLibrary, type ProjectLibraryService } from './project-library';
 import { workspaceStore, type WorkspaceStore } from '../stores/workspace';
 import { createProjectContext } from '../stores/project-context';
 
-type ImportProjectLibrary = Pick<ProjectLibraryService, 'importProjectFile'>;
+type ImportProjectLibrary = Pick<ProjectLibraryService, 'deleteProject' | 'importProjectFile'>;
 type ImportWorkspace = Pick<WorkspaceStore, 'openProject'>;
 
 export interface ProjectFileImportResult {
   projectId: string;
   opened: boolean;
-  message?: string;
 }
 
 export type ProjectFileImportOutcome =
@@ -42,20 +41,23 @@ export class ProjectFileImportService {
   async importFile(file: File): Promise<ProjectFileImportResult> {
     const project = await this.decodeProjectFile(file);
     const projectId = await this.projectLibrary.importProjectFile(project);
-    const openResult = await this.workspace.openProject(projectId, {
-      activate: true,
-      saveActiveContext: true,
-    });
+    let openResult: Awaited<ReturnType<ImportWorkspace['openProject']>>;
+
+    try {
+      openResult = await this.workspace.openProject(projectId, {
+        activate: true,
+        saveActiveContext: true,
+      });
+    } catch (error) {
+      await this.projectLibrary.deleteProject(projectId);
+      throw error;
+    }
 
     if (openResult.ok) {
       return { projectId, opened: true };
     }
 
-    return {
-      projectId,
-      opened: false,
-      message: `Imported ${project.name || file.name} into Project Library. ${openResult.message}`,
-    };
+    return { projectId, opened: false };
   }
 
   importFiles(files: Iterable<File>): Promise<ProjectFileImportOutcome[]> {

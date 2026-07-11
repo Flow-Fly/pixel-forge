@@ -204,6 +204,21 @@ describe('pixel-forge-app project dialogs', () => {
     expect(projectFileHandlingMock.importProjectFiles).not.toHaveBeenCalled();
   });
 
+  it('accepts protected file drags before the browser exposes their files', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const element = document.createElement('pixel-forge-app') as HTMLElement;
+    document.body.append(element);
+    await vi.waitFor(() => {
+      expect(pwaFileHandlingMock.registerLaunchConsumer).toHaveBeenCalledOnce();
+    });
+    const drag = protectedFileDragEvent();
+
+    window.dispatchEvent(drag);
+
+    expect(drag.defaultPrevented).toBe(true);
+    expect(projectFileHandlingMock.importProjectFiles).not.toHaveBeenCalled();
+  });
+
   it('announces project import results with dismissible, polite feedback', async () => {
     await import('../../../src/components/app/pixel-forge-app');
     const element = document.createElement('pixel-forge-app') as HTMLElement & {
@@ -417,6 +432,19 @@ function fileTransferEvent(type: 'dragover' | 'drop', files: File[]): DragEvent 
     value: {
       files,
       items: [],
+      dropEffect: 'none',
+    },
+  });
+  return event;
+}
+
+function protectedFileDragEvent(): DragEvent {
+  const event = new Event('dragover', { cancelable: true }) as DragEvent;
+  Object.defineProperty(event, 'dataTransfer', {
+    value: {
+      files: [],
+      items: [{ kind: 'file', getAsFile: () => null }],
+      types: ['Files'],
       dropEffect: 'none',
     },
   });

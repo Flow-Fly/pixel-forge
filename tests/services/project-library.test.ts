@@ -268,6 +268,20 @@ describe('ProjectLibraryService', () => {
     expect(repository.setLastOpenedProjectId).not.toHaveBeenCalled();
   });
 
+  it('rejects malformed project data before creating a library record', async () => {
+    const invalidProject = {
+      ...makeProject('Malformed project'),
+      animation: undefined,
+    } as unknown as ProjectFileInput;
+
+    await expect(service.importProjectFile(invalidProject)).rejects.toThrow(
+      'animation state is missing'
+    );
+
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(projects.size).toBe(0);
+  });
+
   it('saves edits to the open project before loading another project', async () => {
     projects.set('a', makeProject('Project A'));
     projects.set('b', makeProject('Project B'));

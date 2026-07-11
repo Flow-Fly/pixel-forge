@@ -11,7 +11,14 @@ import {
 } from '../../src/stores/project-context';
 
 const canvasContext = new Proxy(
-  { imageSmoothingEnabled: false },
+  {
+    imageSmoothingEnabled: false,
+    getImageData: vi.fn((_x: number, _y: number, width: number, height: number) => ({
+      data: new Uint8ClampedArray(width * height * 4),
+      width,
+      height,
+    })),
+  },
   {
     get(target, key) {
       if (key in target) return target[key as keyof typeof target];
@@ -61,6 +68,7 @@ describe('Aseprite import', () => {
       bytes.byteOffset + bytes.byteLength
     ) as ArrayBuffer;
     const parsed = parseAseFile(buffer);
+    const rebuildIndexBuffers = vi.spyOn(targetContext.animation, 'rebuildAllIndexBuffers');
 
     try {
       sourceContext.project.name.value = 'Drawing in progress';
@@ -77,6 +85,30 @@ describe('Aseprite import', () => {
       expect(sourceContext.project.name.value).toBe('Drawing in progress');
       expect(sourceContext.project.width.value).toBe(17);
       expect(sourceContext.project.height.value).toBe(19);
+      expect(rebuildIndexBuffers).toHaveBeenCalledOnce();
+
+      const linkedCel = parsed.frames
+        .flatMap((frame, targetFrameIndex) => frame.cels.map((cel) => ({ cel, targetFrameIndex })))
+        .find(({ cel }) => cel.celType === 1 && cel.linkedFrame !== undefined);
+      expect(linkedCel).toBeDefined();
+      if (!linkedCel || linkedCel.cel.linkedFrame === undefined) return;
+
+      const imageLayerIndices = parsed.layers
+        .map((layer, index) => (layer.type === 0 ? index : -1))
+        .filter((index) => index >= 0);
+      const importedLayerIndex = imageLayerIndices.indexOf(linkedCel.cel.layerIndex);
+      const importedLayer = targetContext.layers.layers.value[importedLayerIndex];
+      const sourceFrame = targetContext.animation.frames.value[linkedCel.cel.linkedFrame];
+      const targetFrame = targetContext.animation.frames.value[linkedCel.targetFrameIndex];
+      const sourceCel = targetContext.animation.cels.value.get(
+        targetContext.animation.getCelKey(importedLayer.id, sourceFrame.id)
+      );
+      const targetCel = targetContext.animation.cels.value.get(
+        targetContext.animation.getCelKey(importedLayer.id, targetFrame.id)
+      );
+
+      expect(targetCel?.canvas).toBe(sourceCel?.canvas);
+      expect(targetCel?.indexBuffer).toBe(sourceCel?.indexBuffer);
     } finally {
       sourceContext.dispose();
       targetContext.dispose();
@@ -88,6 +120,7 @@ describe('Aseprite import', () => {
     const file = new File([new Uint8Array(bytes)], 'tiny-fighter.aseprite');
     const projectLibrary = {
       importProjectFile: vi.fn(async () => 'aseprite-project'),
+      deleteProject: vi.fn(async () => undefined),
     };
     const workspace = {
       openProject: vi.fn(async () => ({

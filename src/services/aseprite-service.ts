@@ -126,6 +126,10 @@ export async function importAseFile(
     linkGroups.get(groupKey)!.push(targetCelKey);
   }
 
+  // Imported cels were painted directly, so synchronize their indexed-color
+  // buffers before links share the source cel's canvas and buffer.
+  animation.rebuildAllIndexBuffers();
+
   // Apply hard links
   for (const celKeys of linkGroups.values()) {
     if (celKeys.length >= 2) {

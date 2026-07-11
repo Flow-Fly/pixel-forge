@@ -1,9 +1,6 @@
 import { projectFileImportService, type ProjectFileImportService } from './project-file-import';
 import { log } from '../utils/log';
-import {
-  dispatchProjectFileImportReport,
-  type ProjectFileImportReport,
-} from './project-file-handling';
+import { importProjectFiles, type ProjectFileImportReport } from './project-file-handling';
 
 type ProjectFileBatchImporter = Pick<ProjectFileImportService, 'importFiles'>;
 
@@ -52,12 +49,10 @@ export class PwaFileHandlingService {
       }
     }
 
-    const report = {
-      outcomes: await this.importer.importFiles(files),
+    return await importProjectFiles(files, {
+      importer: this.importer,
       unreadableFiles,
-    };
-    dispatchProjectFileImportReport(report);
-    return report;
+    });
   }
 }
 
