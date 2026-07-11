@@ -615,4 +615,52 @@ describe("WorkspaceStore", () => {
     expect(projectLibrary.createProject).not.toHaveBeenCalled();
     expect(workspace.items.value).toHaveLength(WORKSPACE_OPEN_ITEM_LIMIT);
   });
+
+  it("disposes a loaded context when the last tab is claimed during opening", async () => {
+    const initialContext = createTestContext("Initial Project");
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    let disposeLoadedContext: ReturnType<typeof vi.spyOn> | undefined;
+
+    vi.mocked(projectLibrary.openProject).mockImplementation(
+      async (projectId, settings = {}) => {
+        const loadedContext = settings.context;
+        expect(loadedContext).toBeDefined();
+        if (!loadedContext) throw new Error("Expected an isolated project context");
+
+        rememberContext(loadedContext);
+        disposeLoadedContext = vi.spyOn(loadedContext, "dispose");
+        loadedContext.project.id.value = projectId;
+        expectAdded(
+          workspace.addContext(createTestContext("Competing Project"), {
+            id: "competing-project",
+            activate: false,
+          }),
+        );
+        return makeProjectFile(`Project ${projectId}`);
+      },
+    );
+
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "initial-project",
+      itemLimit: 2,
+      projectLibrary,
+      autoSave,
+    });
+
+    const result = await workspace.openProject("overflow-project");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "tab-limit-reached",
+      message: "The workspace can keep up to 2 projects open at once.",
+    });
+    expect(disposeLoadedContext).toHaveBeenCalledOnce();
+    expect(autoSave.start).not.toHaveBeenCalled();
+    expect(workspace.items.value.map((item) => item.id)).toEqual([
+      "initial-project",
+      "competing-project",
+    ]);
+  });
 });

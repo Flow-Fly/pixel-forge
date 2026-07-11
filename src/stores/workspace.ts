@@ -428,7 +428,10 @@ export class WorkspaceStore {
       id: projectId,
       activate: options.activate,
     });
-    if (!result.ok) return result;
+    if (!result.ok) {
+      context.dispose();
+      return result;
+    }
 
     this.autoSave.start(context);
     return { ok: true, item: result.item, projectId };

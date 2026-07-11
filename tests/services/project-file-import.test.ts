@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import pako from 'pako';
 import { ProjectFileImportService } from '../../src/services/project-file-import';
+import { WorkspaceStore } from '../../src/stores/workspace';
+import {
+  createProjectContext,
+  restoreDefaultProjectContext,
+} from '../../src/stores/project-context';
 import { PROJECT_VERSION, type ProjectFile } from '../../src/types/project';
 
 function project(name = 'Imported project'): ProjectFile {
@@ -90,6 +95,63 @@ describe('ProjectFileImportService', () => {
       opened: false,
     });
     expect(deps.projectLibrary.importProjectFile).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the active drawing untouched when a real workspace is full', async () => {
+    const activeContext = createProjectContext();
+    activeContext.project.id.value = 'active-project';
+    activeContext.project.name.value = 'Current drawing';
+    const activeLayers = activeContext.layers.layers.value;
+    const activeFrames = activeContext.animation.frames.value;
+    const activeCels = activeContext.animation.cels.value;
+    const openProject = vi.fn(async () => {
+      throw new Error('The cap should prevent project hydration');
+    });
+    const workspace = new WorkspaceStore({
+      initialContext: activeContext,
+      initialItemId: 'active-project',
+      itemLimit: 1,
+      projectLibrary: {
+        openProject,
+        createProject: vi.fn(async () => 'unused-project'),
+        createProjectFromFile: vi.fn(async () => 'unused-project'),
+      },
+      autoSave: {
+        saveNow: vi.fn(async () => undefined),
+        start: vi.fn(),
+        stop: vi.fn(),
+      },
+    });
+    const importedProjects = new Map<string, ProjectFile>();
+    const service = new ProjectFileImportService({
+      projectLibrary: {
+        importProjectFile: vi.fn(async (input) => {
+          importedProjects.set('imported-project', structuredClone(input) as ProjectFile);
+          return 'imported-project';
+        }),
+        deleteProject: vi.fn(async () => undefined),
+      },
+      workspace,
+    });
+
+    try {
+      const result = await service.importFile(
+        new File([JSON.stringify(project('Imported drawing'))], 'drawing.json')
+      );
+
+      expect(result).toEqual({ projectId: 'imported-project', opened: false });
+      expect(importedProjects.get('imported-project')?.name).toBe('Imported drawing');
+      expect(openProject).not.toHaveBeenCalled();
+      expect(workspace.activeItem.context).toBe(activeContext);
+      expect(activeContext.project.id.value).toBe('active-project');
+      expect(activeContext.project.name.value).toBe('Current drawing');
+      expect(activeContext.layers.layers.value).toBe(activeLayers);
+      expect(activeContext.animation.frames.value).toBe(activeFrames);
+      expect(activeContext.animation.cels.value).toBe(activeCels);
+    } finally {
+      restoreDefaultProjectContext();
+      activeContext.dispose();
+    }
   });
 
   it('does not persist invalid or unsupported input', async () => {
