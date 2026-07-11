@@ -1,7 +1,5 @@
 import { signal } from '../core/signal';
-import { selectionStore } from './selection';
-import { layerStore } from './layers';
-import { animationStore } from './animation';
+import { getActiveProjectContext, type ProjectContext } from './project-context';
 
 export type ToolType =
   | 'pencil'
@@ -61,12 +59,12 @@ class ToolStore {
     return this.overrideCanvas.value !== null;
   }
 
-  setActiveTool(tool: ToolType) {
+  setActiveTool(tool: ToolType, context: ProjectContext = getActiveProjectContext()) {
     this.activeTool.value = tool;
 
     // Auto-select layer content when switching to transform tool
     if (tool === 'transform') {
-      this.autoSelectForTransform();
+      this.autoSelectForTransform(context);
     }
   }
 
@@ -74,18 +72,20 @@ class ToolStore {
    * Auto-select layer content when switching to transform tool.
    * Only activates if there's no current selection.
    */
-  private autoSelectForTransform() {
-    // Skip if there's already an active selection
-    if (selectionStore.isActive) return;
+  private autoSelectForTransform(context: ProjectContext) {
+    const { animation, layers, selection } = context;
 
-    const activeLayerId = layerStore.activeLayerId.value;
+    // Skip if there's already an active selection
+    if (selection.isActive) return;
+
+    const activeLayerId = layers.activeLayerId.value;
     if (!activeLayerId) return;
 
-    const currentFrameId = animationStore.currentFrameId.value;
-    const canvas = animationStore.getCelCanvas(currentFrameId, activeLayerId);
+    const currentFrameId = animation.currentFrameId.value;
+    const canvas = animation.getCelCanvas(currentFrameId, activeLayerId);
     if (!canvas) return;
 
-    selectionStore.selectLayerContent(canvas);
+    selection.selectLayerContent(canvas);
   }
 
   /**

@@ -3,8 +3,10 @@ import 'fake-indexeddb/auto';
 import { MOD_PRIMARY } from '../../../src/utils/platform';
 import { toolRegistry } from '../../../src/tools/tool-registry';
 import { clipboardStore } from '../../../src/stores/clipboard';
+import { toolStore } from '../../../src/stores/tools';
 import {
   createProjectContext,
+  defaultProjectContext,
   restoreDefaultProjectContext,
   setActiveProjectContext,
 } from '../../../src/stores/project-context';
@@ -338,6 +340,114 @@ describe('registerShortcuts', () => {
 
     expect(workspaceStoreMock.activateNext).toHaveBeenCalledTimes(2);
     expect(workspaceStoreMock.activatePrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes project-scoped view, color, guide, history, and selection shortcuts to the active context', async () => {
+    const context = createProjectContext();
+    setActiveProjectContext(context);
+    context.project.width.value = 17;
+    context.project.height.value = 9;
+
+    const activeReset = vi.spyOn(context.viewport, 'resetView');
+    const defaultReset = vi.spyOn(defaultProjectContext.viewport, 'resetView');
+    const activeSwap = vi.spyOn(context.colors, 'swapColors');
+    const defaultSwap = vi.spyOn(defaultProjectContext.colors, 'swapColors');
+    const activeGuides = vi.spyOn(context.guides, 'toggleVisibility');
+    const defaultGuides = vi.spyOn(defaultProjectContext.guides, 'toggleVisibility');
+    const activeUndo = vi.spyOn(context.history, 'undo');
+    const defaultUndo = vi.spyOn(defaultProjectContext.history, 'undo');
+
+    try {
+      registerShortcuts();
+
+      shortcutAction('0')?.();
+      shortcutAction('x')?.();
+      shortcutActionByDescription('shift+g', 'Toggle guides')?.();
+      shortcutAction(`${MOD_PRIMARY}+z`)?.();
+      shortcutAction(`${MOD_PRIMARY}+a`)?.();
+      await Promise.resolve();
+
+      expect(activeReset).toHaveBeenCalledOnce();
+      expect(activeSwap).toHaveBeenCalledOnce();
+      expect(activeGuides).toHaveBeenCalledOnce();
+      expect(activeUndo).toHaveBeenCalledOnce();
+      expect(context.selection.state.value).toMatchObject({
+        type: 'selected',
+        bounds: { x: 0, y: 0, width: 17, height: 9 },
+      });
+
+      expect(defaultReset).not.toHaveBeenCalled();
+      expect(defaultSwap).not.toHaveBeenCalled();
+      expect(defaultGuides).not.toHaveBeenCalled();
+      expect(defaultUndo).not.toHaveBeenCalled();
+      expect(defaultProjectContext.selection.state.value.type).toBe('none');
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  it('records selection edits in the active context history', () => {
+    const context = createProjectContext();
+    const canvas = makeEditableCanvas(4, 4);
+    installActiveIndexedCanvasLayer(context, 4, 4, new Uint8Array(16), canvas.canvas);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    setActiveProjectContext(context);
+    toolStore.setActiveTool('pencil');
+
+    const activeExecute = vi.spyOn(context.history, 'execute').mockResolvedValue();
+    const defaultExecute = vi.spyOn(defaultProjectContext.history, 'execute').mockResolvedValue();
+
+    try {
+      registerShortcuts();
+      shortcutAction('f')?.();
+
+      expect(activeExecute).toHaveBeenCalledOnce();
+      expect(defaultExecute).not.toHaveBeenCalled();
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  it('keeps selection, frame, and layer shortcut actions inside the active context', () => {
+    const context = createProjectContext();
+    const canvas = makeEditableCanvas(4, 4);
+    installActiveIndexedCanvasLayer(context, 4, 4, new Uint8Array(16), canvas.canvas);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    setActiveProjectContext(context);
+    toolStore.setActiveTool('pencil');
+
+    const activeExecute = vi.spyOn(context.history, 'execute').mockResolvedValue();
+    const defaultExecute = vi.spyOn(defaultProjectContext.history, 'execute').mockResolvedValue();
+
+    try {
+      registerShortcuts();
+
+      shortcutAction('f')?.();
+      shortcutAction('Delete')?.();
+      shortcutAction('alt+n')?.();
+      shortcutAction(`${MOD_PRIMARY}+g`)?.();
+
+      expect(activeExecute.mock.calls.map(([command]) => command.name)).toEqual([
+        'Fill Selection',
+        'Delete Selection',
+        'Add Frame',
+        'Group Layers',
+      ]);
+      expect(defaultExecute).not.toHaveBeenCalled();
+
+      context.selection.clear();
+      const activeNextFrame = vi.spyOn(context.animation, 'nextFrame');
+      const defaultNextFrame = vi.spyOn(defaultProjectContext.animation, 'nextFrame');
+      shortcutAction('ArrowRight')?.();
+
+      expect(activeNextFrame).toHaveBeenCalledOnce();
+      expect(defaultNextFrame).not.toHaveBeenCalled();
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
   });
 
   it('copies indexed selection metadata from the active project context', () => {
