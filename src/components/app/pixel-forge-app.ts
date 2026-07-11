@@ -37,6 +37,7 @@ import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
 import { autoSaveService } from "../../services/auto-save";
 import { projectLibrary } from "../../services/project-library";
+import { pwaFileHandling } from "../../services/pwa-file-handling";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 import { log } from "../../utils/log";
@@ -306,7 +307,9 @@ export class PixelForgeApp extends BaseComponent {
     );
 
     // Load saved project from IndexedDB after listeners are ready.
-    this.loadSavedProject();
+    void this.loadSavedProject().finally(() => {
+      pwaFileHandling.registerLaunchConsumer();
+    });
   }
 
   private handleShowWarningToast = (e: CustomEvent<{ message: string }>) => {

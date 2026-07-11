@@ -24,6 +24,10 @@ const workspaceStoreMock = vi.hoisted(() => ({
   restoreWorkspace: vi.fn(),
 }));
 
+const pwaFileHandlingMock = vi.hoisted(() => ({
+  registerLaunchConsumer: vi.fn(),
+}));
+
 const canvasContext = new Proxy(
   { imageSmoothingEnabled: false },
   {
@@ -52,6 +56,10 @@ vi.mock('../../../src/stores/workspace', () => ({
   WORKSPACE_OPEN_ITEM_LIMIT: 8,
   workspaceItemLimitMessage: () => 'The workspace can keep up to 8 projects open at once.',
   workspaceStore: workspaceStoreMock,
+}));
+
+vi.mock('../../../src/services/pwa-file-handling', () => ({
+  pwaFileHandling: pwaFileHandlingMock,
 }));
 
 describe('pixel-forge-app project dialogs', () => {
@@ -128,6 +136,28 @@ describe('pixel-forge-app project dialogs', () => {
     expect(element.showProjectBrowser).toBe(false);
     expect(element.shadowRoot?.querySelector('pf-project-browser')).toBeNull();
     expect(element.shadowRoot?.querySelector('pf-drawing-canvas')).toBeTruthy();
+  });
+
+  it('waits for workspace restoration before accepting operating-system files', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    let finishWorkspaceRead: ((value: null) => void) | undefined;
+    projectRepositoryMock.getWorkspaceState.mockImplementationOnce(
+      () =>
+        new Promise<null>((resolve) => {
+          finishWorkspaceRead = resolve;
+        })
+    );
+    const element = document.createElement('pixel-forge-app') as HTMLElement;
+
+    document.body.append(element);
+    await Promise.resolve();
+
+    expect(pwaFileHandlingMock.registerLaunchConsumer).not.toHaveBeenCalled();
+
+    finishWorkspaceRead?.(null);
+    await vi.waitFor(() => {
+      expect(pwaFileHandlingMock.registerLaunchConsumer).toHaveBeenCalledOnce();
+    });
   });
 
   it('opens the project browser from the project tab strip', async () => {

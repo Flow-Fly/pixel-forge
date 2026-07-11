@@ -104,4 +104,47 @@ describe('ProjectFileImportService', () => {
     expect(deps.projectLibrary.importProjectFile).not.toHaveBeenCalled();
     expect(deps.workspace.openProject).not.toHaveBeenCalled();
   });
+
+  it('serializes batches and keeps importing after one file fails', async () => {
+    let releaseFirstImport: (() => void) | undefined;
+    const firstImportPaused = new Promise<void>((resolve) => {
+      releaseFirstImport = resolve;
+    });
+    const projectLibrary = {
+      importProjectFile: vi.fn(async (input: ProjectFile) => {
+        if (input.name === 'First') await firstImportPaused;
+        return input.name ?? 'imported';
+      }),
+    };
+    const workspace = {
+      openProject: vi.fn(async (projectId: string) => ({
+        ok: true as const,
+        projectId,
+        item: {} as never,
+      })),
+    };
+    const service = new ProjectFileImportService({ projectLibrary, workspace });
+    const firstBatch = service.importFiles([
+      new File([JSON.stringify(project('First'))], 'first.json'),
+      new File(['broken'], 'broken.pf'),
+    ]);
+    const secondBatch = service.importFiles([
+      new File([JSON.stringify(project('Second'))], 'second.json'),
+    ]);
+
+    await vi.waitFor(() => {
+      expect(projectLibrary.importProjectFile).toHaveBeenCalledOnce();
+    });
+    expect(projectLibrary.importProjectFile.mock.calls[0][0].name).toBe('First');
+
+    releaseFirstImport?.();
+    const [firstOutcomes, secondOutcomes] = await Promise.all([firstBatch, secondBatch]);
+
+    expect(firstOutcomes.map((outcome) => outcome.ok)).toEqual([true, false]);
+    expect(secondOutcomes.map((outcome) => outcome.ok)).toEqual([true]);
+    expect(projectLibrary.importProjectFile.mock.calls.map(([input]) => input.name)).toEqual([
+      'First',
+      'Second',
+    ]);
+  });
 });

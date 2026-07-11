@@ -12,6 +12,18 @@ export interface ProjectFileImportResult {
   message?: string;
 }
 
+export type ProjectFileImportOutcome =
+  | {
+      file: File;
+      ok: true;
+      result: ProjectFileImportResult;
+    }
+  | {
+      file: File;
+      ok: false;
+      error: unknown;
+    };
+
 export interface ProjectFileImportDependencies {
   projectLibrary: ImportProjectLibrary;
   workspace: ImportWorkspace;
@@ -20,6 +32,7 @@ export interface ProjectFileImportDependencies {
 export class ProjectFileImportService {
   private readonly projectLibrary: ImportProjectLibrary;
   private readonly workspace: ImportWorkspace;
+  private importQueue: Promise<void> = Promise.resolve();
 
   constructor(dependencies: ProjectFileImportDependencies) {
     this.projectLibrary = dependencies.projectLibrary;
@@ -45,6 +58,16 @@ export class ProjectFileImportService {
     };
   }
 
+  importFiles(files: Iterable<File>): Promise<ProjectFileImportOutcome[]> {
+    const batch = Array.from(files);
+    const importBatch = this.importQueue.then(() => this.importBatch(batch));
+    this.importQueue = importBatch.then(
+      () => undefined,
+      () => undefined
+    );
+    return importBatch;
+  }
+
   private async decodeProjectFile(file: File): Promise<ProjectFileInput> {
     const extension = getFileExtension(file.name);
 
@@ -53,6 +76,20 @@ export class ProjectFileImportService {
     }
 
     return await decodePixelForgeProjectFile(file, extension);
+  }
+
+  private async importBatch(files: File[]): Promise<ProjectFileImportOutcome[]> {
+    const outcomes: ProjectFileImportOutcome[] = [];
+
+    for (const file of files) {
+      try {
+        outcomes.push({ file, ok: true, result: await this.importFile(file) });
+      } catch (error) {
+        outcomes.push({ file, ok: false, error });
+      }
+    }
+
+    return outcomes;
   }
 }
 
