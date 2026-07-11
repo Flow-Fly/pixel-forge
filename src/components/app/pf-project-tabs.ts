@@ -131,25 +131,77 @@ export class PFProjectTabs extends BaseComponent {
     }
 
     .error {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       padding: 5px 10px 7px;
       color: #f0aaa2;
       font-size: 12px;
     }
+
+    .error button {
+      padding: 2px 6px;
+      border: 1px solid currentColor;
+      border-radius: var(--pf-radius-sm);
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
   `;
 
   @state() private errorMessage = '';
+  private feedbackTimer: number | null = null;
+
+  disconnectedCallback() {
+    this.dismissFeedback();
+    super.disconnectedCallback();
+  }
+
+  private showFeedback(message: string) {
+    this.dismissFeedback();
+    this.errorMessage = message;
+    this.feedbackTimer = window.setTimeout(() => {
+      this.errorMessage = '';
+      this.feedbackTimer = null;
+    }, 6000);
+  }
+
+  private dismissFeedback = () => {
+    if (this.feedbackTimer !== null) {
+      clearTimeout(this.feedbackTimer);
+      this.feedbackTimer = null;
+    }
+    this.errorMessage = '';
+  };
 
   private activateItem(itemId: string) {
     const result = workspaceStore.activate(itemId);
-    this.errorMessage = result.ok ? '' : result.message;
+    if (result.ok) {
+      this.dismissFeedback();
+    } else {
+      this.showFeedback(result.message);
+    }
   }
 
   private async closeItem(itemId: string) {
     try {
       const result = await workspaceStore.closeProject(itemId);
-      this.errorMessage = result.ok ? '' : result.message;
+      if (result.ok) {
+        this.dismissFeedback();
+      } else {
+        this.showFeedback(result.message);
+      }
     } catch {
-      this.errorMessage = 'Could not close project.';
+      this.showFeedback('Could not close project.');
     }
   }
 
@@ -168,11 +220,11 @@ export class PFProjectTabs extends BaseComponent {
 
   private openProjectBrowser() {
     if (workspaceStore.items.value.length >= WORKSPACE_OPEN_ITEM_LIMIT) {
-      this.errorMessage = workspaceItemLimitMessage();
+      this.showFeedback(workspaceItemLimitMessage());
       return;
     }
 
-    this.errorMessage = '';
+    this.dismissFeedback();
     this.dispatchEvent(new CustomEvent('show-project-browser', { bubbles: true, composed: true }));
   }
 
@@ -236,7 +288,17 @@ export class PFProjectTabs extends BaseComponent {
           +
         </button>
       </nav>
-      ${this.errorMessage ? html`<div class="error">${this.errorMessage}</div>` : ''}
+      <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"
+        >${this.errorMessage}</span
+      >
+      ${this.errorMessage
+        ? html`
+            <div class="error">
+              <span aria-hidden="true">${this.errorMessage}</span>
+              <button type="button" @click=${this.dismissFeedback}>Dismiss</button>
+            </div>
+          `
+        : ''}
     `;
   }
 }

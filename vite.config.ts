@@ -33,6 +33,19 @@ export default defineConfig({
         display: 'standalone',
         background_color: '#0d1015',
         theme_color: '#0d1015',
+        file_handlers: [
+          {
+            action: './',
+            accept: {
+              'application/x-pixelforge': ['.pf'],
+              'application/x-aseprite': ['.ase', '.aseprite'],
+            },
+            launch_type: 'single-client',
+          },
+        ],
+        launch_handler: {
+          client_mode: 'focus-existing',
+        },
         icons: [
           {
             src: 'icons/pwa-192.png',

@@ -12,7 +12,10 @@ import {
 } from './project-defaults';
 import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { DB32_COLORS, PALETTE_BY_ID } from '../stores/palette/types';
-import { PROJECT_VERSION, type ProjectFile } from '../types/project';
+import { PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../types/project';
+import { normalizeProjectFileImageData } from '../serialization/project-data';
+import { migrateProjectFileForLoad } from '../serialization/project-load';
+import { GUIDED_DRAWING_VERSION } from '../types/guided-drawing';
 
 export type CreateProjectOptions = {
   name?: string;
@@ -82,6 +85,21 @@ export class ProjectLibraryService {
     const id = uuidv4();
     await this.repository.save(id, structuredClone(project));
     await this.loadStoredProject(id, context);
+    return id;
+  }
+
+  /** Persist an imported project under a fresh identity without opening it. */
+  async importProjectFile(project: ProjectFileInput): Promise<string> {
+    const id = uuidv4();
+    const canonicalProject = migrateProjectFileForLoad(
+      normalizeProjectFileImageData(structuredClone(project))
+    );
+    assertImportableProject(canonicalProject);
+
+    await this.repository.save(id, {
+      ...canonicalProject,
+      version: PROJECT_VERSION,
+    });
     return id;
   }
 
@@ -198,4 +216,80 @@ function createBlankProjectFile(options: CreateProjectOptions): ProjectFile {
 function getDefaultPalette(): string[] {
   const palette = PALETTE_BY_ID.get(DEFAULT_PROJECT_PALETTE_ID);
   return [...(palette?.colors ?? DB32_COLORS)];
+}
+
+function assertImportableProject(project: ProjectFile): void {
+  assertImport(isPositiveInteger(project.width), 'width must be a positive integer');
+  assertImport(isPositiveInteger(project.height), 'height must be a positive integer');
+  assertImport(Array.isArray(project.layers) && project.layers.length > 0, 'a layer is required');
+  assertImport(Array.isArray(project.frames) && project.frames.length > 0, 'a frame is required');
+  assertImport(Boolean(project.animation), 'animation state is missing');
+  assertImport(isPositiveNumber(project.animation.fps), 'animation fps must be positive');
+  assertImport(
+    isFrameIndex(project.animation.currentFrameIndex, project.frames.length),
+    'animation frame is out of range'
+  );
+
+  const layerIds = getImportLayerIds(project.layers);
+  assertImportFrames(project.frames, layerIds);
+  assertImportGuide(project.guidedDrawing);
+}
+
+function getImportLayerIds(layers: ProjectFile['layers']): Set<string> {
+  const ids = layers.map((layer) => layer.id);
+  assertImport(
+    ids.every((id) => typeof id === 'string' && id.length > 0),
+    'layer ids must be strings'
+  );
+  assertImport(new Set(ids).size === ids.length, 'layer ids must be unique');
+  return new Set(ids);
+}
+
+function assertImportFrames(frames: ProjectFile['frames'], layerIds: Set<string>): void {
+  const validFrames = frames.every(
+    (frame) => typeof frame.id === 'string' && frame.id.length > 0 && Array.isArray(frame.cels)
+  );
+  assertImport(validFrames, 'frame data is incomplete');
+
+  const frameIds = frames.map((frame) => frame.id);
+  assertImport(new Set(frameIds).size === frameIds.length, 'frame ids must be unique');
+  assertImport(
+    frames.flatMap((frame) => frame.cels).every((cel) => layerIds.has(cel.layerId)),
+    'a cel references an unknown layer'
+  );
+}
+
+function assertImportGuide(guide: ProjectFile['guidedDrawing']): void {
+  if (!guide) return;
+
+  assertImport(guide.version === GUIDED_DRAWING_VERSION, 'guided drawing version is unsupported');
+  assertImport(isPositiveInteger(guide.width), 'guided drawing width is invalid');
+  assertImport(isPositiveInteger(guide.height), 'guided drawing height is invalid');
+  assertImport(Array.isArray(guide.target), 'guided drawing target is missing');
+  assertImport(
+    guide.target.length === guide.width * guide.height,
+    'guided drawing target size is invalid'
+  );
+  assertImport(Boolean(guide.settings), 'guided drawing settings are missing');
+  assertImport(isOptionalPositiveInteger(guide.guideColorCount), 'guided color count is invalid');
+}
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
+}
+
+function isOptionalPositiveInteger(value: number | undefined): boolean {
+  return value === undefined || isPositiveInteger(value);
+}
+
+function isPositiveNumber(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+function isFrameIndex(value: number, frameCount: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value < frameCount;
+}
+
+function assertImport(condition: unknown, detail: string): asserts condition {
+  if (!condition) throw new Error(`Invalid project file: ${detail}`);
 }

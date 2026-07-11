@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectFile } from '../../src/types/project';
+import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 
 const repositoryMock = vi.hoisted(() => ({
   list: vi.fn(),
@@ -239,6 +239,47 @@ describe('ProjectLibraryService', () => {
     expect(projectStore.name.value).toBe('Guided project');
     expect(projectStore.width.value).toBe(5);
     expect(projects.get(id)?.guidedDrawing).toEqual(project.guidedDrawing);
+  });
+
+  it('normalizes and stores an imported project without opening it', async () => {
+    const legacyProject = makeProject('Imported project');
+    const input = {
+      ...legacyProject,
+      version: '3.2.0',
+      palette: ['#000000'],
+      ephemeralPalette: ['#ffffff'],
+      layers: legacyProject.layers.map((layer) => ({
+        ...layer,
+        data: { 0: 1, 1: 2 },
+      })),
+    } as ProjectFileInput;
+
+    const id = await service.importProjectFile(input);
+
+    expect(projectStore.id.value).toBe('current');
+    expect(projectStore.name.value).toBe('Current');
+    expect(projects.get(id)).toMatchObject({
+      version: PROJECT_VERSION,
+      name: 'Imported project',
+      palette: ['#000000', '#ffffff'],
+    });
+    expect(projects.get(id)?.layers[0].data).toEqual(Uint8Array.from([1, 2]));
+    expect(projects.get(id)).not.toHaveProperty('ephemeralPalette');
+    expect(repository.setLastOpenedProjectId).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed project data before creating a library record', async () => {
+    const invalidProject = {
+      ...makeProject('Malformed project'),
+      animation: undefined,
+    } as unknown as ProjectFileInput;
+
+    await expect(service.importProjectFile(invalidProject)).rejects.toThrow(
+      'animation state is missing'
+    );
+
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(projects.size).toBe(0);
   });
 
   it('saves edits to the open project before loading another project', async () => {
