@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { importAseFile } from '../../src/services/aseprite-service';
 import { parseAseFile } from '../../src/services/aseprite-parser';
@@ -9,6 +7,12 @@ import {
   restoreDefaultProjectContext,
   setActiveProjectContext,
 } from '../../src/stores/project-context';
+import { asepriteLinkedFixture } from '../fixtures/aseprite-linked';
+
+function asepriteLinkedBuffer(): ArrayBuffer {
+  const bytes = asepriteLinkedFixture();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
 
 const canvasContext = new Proxy(
   {
@@ -62,11 +66,7 @@ describe('Aseprite import', () => {
   it('imports a real file into only the supplied project context', async () => {
     const sourceContext = createProjectContext();
     const targetContext = createProjectContext();
-    const bytes = await readFile(resolve(process.cwd(), 'tests/Sprite-0001.ase'));
-    const buffer = bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength
-    ) as ArrayBuffer;
+    const buffer = asepriteLinkedBuffer();
     const parsed = parseAseFile(buffer);
     const rebuildIndexBuffers = vi.spyOn(targetContext.animation, 'rebuildAllIndexBuffers');
 
@@ -116,8 +116,7 @@ describe('Aseprite import', () => {
   });
 
   it('converts a real Aseprite file into a named durable project', async () => {
-    const bytes = await readFile(resolve(process.cwd(), 'tests/Sprite-0001.ase'));
-    const file = new File([new Uint8Array(bytes)], 'tiny-fighter.aseprite');
+    const file = new File([asepriteLinkedBuffer()], 'tiny-fighter.aseprite');
     const projectLibrary = {
       importProjectFile: vi.fn(async () => 'aseprite-project'),
       deleteProject: vi.fn(async () => undefined),
