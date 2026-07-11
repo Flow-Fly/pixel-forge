@@ -11,6 +11,14 @@ vi.mock('../../../src/services/auto-save', () => ({
 import '../../../src/components/app/pf-pwa-update-toast';
 import type { PFPwaUpdateToast } from '../../../src/components/app/pf-pwa-update-toast';
 import { pwaStore } from '../../../src/stores/pwa';
+import {
+  createProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../../../src/stores/project-context';
+
+const createdContexts: ProjectContext[] = [];
 
 async function createToast() {
   const element = document.createElement('pf-pwa-update-toast') as PFPwaUpdateToast;
@@ -36,6 +44,10 @@ describe('pf-pwa-update-toast', () => {
   afterEach(() => {
     document.body.replaceChildren();
     pwaStore.stop();
+    restoreDefaultProjectContext();
+    for (const context of createdContexts.splice(0)) {
+      context.dispose();
+    }
   });
 
   it('stays hidden until an update is waiting', async () => {
@@ -79,6 +91,24 @@ describe('pf-pwa-update-toast', () => {
     expect(autoSaveServiceMock.saveNow.mock.invocationCallOrder[0]).toBeLessThan(
       update.mock.invocationCallOrder[0]
     );
+  });
+
+  it('saves the project active when restart is requested', async () => {
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    createdContexts.push(contextA, contextB);
+    setActiveProjectContext(contextB);
+    const update = vi.fn().mockResolvedValue(undefined);
+    pwaStore.setUpdateHandler(update);
+    pwaStore.showUpdate();
+    const element = await createToast();
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.restart')?.click();
+    setActiveProjectContext(contextA);
+    await flushUpdate(element);
+
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextB);
+    expect(update).toHaveBeenCalledWith(true);
   });
 
   it('explains a save failure and does not restart', async () => {

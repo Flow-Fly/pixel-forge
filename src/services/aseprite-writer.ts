@@ -1,7 +1,8 @@
 import pako from 'pako';
-import { animationStore } from '../stores/animation';
-import { layerStore } from '../stores/layers';
-import { projectStore } from '../stores/project';
+import {
+  getActiveProjectContext,
+  type ProjectContext,
+} from '../stores/project-context';
 import { getExportableArtworkLayers } from './export-composition';
 import type { Layer } from '../types/layer';
 
@@ -159,13 +160,14 @@ function createCelChunk(
 }
 
 function createCelChunkForLayer(
+  context: ProjectContext,
   layer: Layer,
   layerIndex: number,
   frameId: string,
   width: number,
   height: number
 ): Uint8Array | null {
-  const celCanvas = animationStore.getCelCanvas(frameId, layer.id);
+  const celCanvas = context.animation.getCelCanvas(frameId, layer.id);
   if (!celCanvas) return null;
 
   const ctx = celCanvas.getContext('2d');
@@ -188,11 +190,11 @@ function hasVisiblePixels(pixels: Uint8ClampedArray): boolean {
 /**
  * Export current project as Aseprite file.
  */
-function writeAseFile(): ArrayBuffer {
-  const layers = getExportableArtworkLayers(layerStore.layers.value);
-  const frames = animationStore.frames.value;
-  const width = projectStore.width.value;
-  const height = projectStore.height.value;
+function writeAseFile(context: ProjectContext): ArrayBuffer {
+  const layers = getExportableArtworkLayers(context.layers.layers.value);
+  const frames = context.animation.frames.value;
+  const width = context.project.width.value;
+  const height = context.project.height.value;
 
   // Collect all chunks first to calculate exact size
   const frameData: Array<{
@@ -222,7 +224,14 @@ function writeAseFile(): ArrayBuffer {
 
     // Cel chunks
     layers.forEach((layer, layerIdx) => {
-      const chunk = createCelChunkForLayer(layer, layerIdx, frame.id, width, height);
+      const chunk = createCelChunkForLayer(
+        context,
+        layer,
+        layerIdx,
+        frame.id,
+        width,
+        height
+      );
       if (chunk) chunks.push(chunk);
     });
 
@@ -294,10 +303,22 @@ function writeAseFile(): ArrayBuffer {
 }
 
 /**
+ * Serialize one project context as an Aseprite file.
+ */
+export function createAseFile(
+  context: ProjectContext = getActiveProjectContext()
+): ArrayBuffer {
+  return writeAseFile(context);
+}
+
+/**
  * Export and download as .ase file.
  */
-export function exportAseFile(filename: string) {
-  const buffer = writeAseFile();
+export function exportAseFile(
+  filename: string,
+  context: ProjectContext = getActiveProjectContext()
+) {
+  const buffer = createAseFile(context);
   const blob = new Blob([buffer], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
 

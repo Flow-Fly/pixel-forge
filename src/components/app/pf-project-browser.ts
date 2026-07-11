@@ -599,9 +599,9 @@ export class PFProjectBrowser extends BaseComponent {
     this.errorMessage = '';
 
     try {
-      const activeContext = getActiveProjectContext();
-      if (id === activeContext.project.id.value) {
-        await autoSaveService.saveNow(activeContext);
+      const openItem = workspaceStore.getProjectItem(id);
+      if (openItem) {
+        await autoSaveService.saveNow(openItem.context);
       }
       await projectLibrary.duplicateProject(id);
       await this.loadProjects();
@@ -620,7 +620,9 @@ export class PFProjectBrowser extends BaseComponent {
     try {
       const activeContext = getActiveProjectContext();
       const deletedOpenProject = project.id === activeContext.project.id.value;
-      await projectLibrary.deleteProject(project.id, { context: activeContext });
+      const projectContext =
+        workspaceStore.getProjectItem(project.id)?.context ?? activeContext;
+      await projectLibrary.deleteProject(project.id, { context: projectContext });
       await this.loadProjects();
 
       if (deletedOpenProject) {

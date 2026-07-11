@@ -6,6 +6,8 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from '../../../src/stores/project-context';
+import { autoSaveService } from '../../../src/services/auto-save';
+import { projectLibrary } from '../../../src/services/project-library';
 
 const projectRepositoryMock = vi.hoisted(() => ({
   getLastOpenedProjectId: vi.fn(),
@@ -102,10 +104,89 @@ describe('pixel-forge-app project dialogs', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     restoreDefaultProjectContext();
     for (const context of createdContexts.splice(0)) {
       context.dispose();
     }
+  });
+
+  it('duplicates the project active when the action starts', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    contextA.project.id.value = 'project-a';
+    contextB.project.id.value = 'project-b';
+    createdContexts.push(contextA, contextB);
+    setActiveProjectContext(contextB);
+    const saveNow = vi.spyOn(autoSaveService, 'saveNow').mockResolvedValue();
+    const duplicateProject = vi
+      .spyOn(projectLibrary, 'duplicateProject')
+      .mockResolvedValue('project-b-copy');
+    const element = document.createElement('pixel-forge-app') as HTMLElement;
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('duplicate-current-project'));
+    await vi.waitFor(() => {
+      expect(duplicateProject).toHaveBeenCalled();
+    });
+
+    expect(saveNow).toHaveBeenCalledWith(contextB);
+    expect(duplicateProject).toHaveBeenCalledWith('project-b');
+  });
+
+  it('deletes the project active when confirmation opened', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    contextA.project.id.value = 'project-a';
+    contextB.project.id.value = 'project-b';
+    createdContexts.push(contextA, contextB);
+    setActiveProjectContext(contextB);
+    const deleteProject = vi
+      .spyOn(projectLibrary, 'deleteProject')
+      .mockResolvedValue();
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('delete-current-project'));
+    await element.updateComplete;
+    setActiveProjectContext(contextA);
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('pf-dialog button.primary')
+      ?.click();
+    await vi.waitFor(() => {
+      expect(deleteProject).toHaveBeenCalled();
+    });
+
+    expect(deleteProject).toHaveBeenCalledWith('project-b', {
+      context: contextB,
+    });
+  });
+
+  it('opens export with the project active when the action starts', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    createdContexts.push(contextA, contextB);
+    setActiveProjectContext(contextB);
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('show-export-dialog'));
+    setActiveProjectContext(contextA);
+    await element.updateComplete;
+
+    const dialog = element.shadowRoot?.querySelector<HTMLElement & {
+      context: ProjectContext | null;
+      open: boolean;
+    }>('pf-export-dialog');
+    expect(dialog?.open).toBe(true);
+    expect(dialog?.context).toBe(contextB);
   });
 
   it('restores saved workspace state during startup', async () => {

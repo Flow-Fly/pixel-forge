@@ -30,6 +30,7 @@ import "./pf-pwa-update-toast";
 import {
   activeProjectContext,
   getActiveProjectContext,
+  type ProjectContext,
 } from "../../stores/project-context";
 import { workspaceStore } from "../../stores/workspace";
 import { viewportStore } from "../../stores/viewport";
@@ -313,6 +314,8 @@ export class PixelForgeApp extends BaseComponent {
   private warningTimer: number | null = null;
   private fileImportTimer: number | null = null;
   private fileDropHandlingStarted = false;
+  private deleteCurrentProjectContext: ProjectContext | null = null;
+  private exportProjectContext: ProjectContext | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -504,11 +507,10 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleDuplicateCurrentProject = async () => {
+    const context = getActiveProjectContext();
     try {
-      await autoSaveService.saveNow();
-      await projectLibrary.duplicateProject(
-        getActiveProjectContext().project.id.value
-      );
+      await autoSaveService.saveNow(context);
+      await projectLibrary.duplicateProject(context.project.id.value);
       this.showWarning("Project duplicated");
     } catch (error) {
       log.error("Failed to duplicate project:", error);
@@ -517,11 +519,23 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleDeleteCurrentProject = () => {
+    this.deleteCurrentProjectContext = getActiveProjectContext();
     this.showDeleteCurrentDialog = true;
   };
 
+  private dismissDeleteCurrentProject = () => {
+    this.deleteCurrentProjectContext = null;
+    this.showDeleteCurrentDialog = false;
+  };
+
   private handleShowExportDialog = () => {
+    this.exportProjectContext = getActiveProjectContext();
     this.showExportDialog = true;
+  };
+
+  private handleExportDialogClose = () => {
+    this.exportProjectContext = null;
+    this.showExportDialog = false;
   };
 
   private handleProjectBrowserClose = () => {
@@ -551,12 +565,12 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private confirmDeleteCurrentProject = async () => {
-    this.showDeleteCurrentDialog = false;
+    const context =
+      this.deleteCurrentProjectContext ?? getActiveProjectContext();
+    this.dismissDeleteCurrentProject();
 
     try {
-      await projectLibrary.deleteProject(
-        getActiveProjectContext().project.id.value
-      );
+      await projectLibrary.deleteProject(context.project.id.value, { context });
       this.handleCurrentProjectDeleted();
     } catch (error) {
       log.error("Failed to delete project:", error);
@@ -742,12 +756,14 @@ export class PixelForgeApp extends BaseComponent {
     const isTimelineCollapsed =
       panelStore.panelStates.value.timeline?.collapsed ?? false;
     const activeProject = activeProjectContext.value.project;
+    const deleteProject =
+      this.deleteCurrentProjectContext?.project ?? activeProject;
 
     return html`
       <header class="menu-bar">
         <pf-menu-bar
           @resize-canvas=${() => (this.showResizeDialog = true)}
-          @show-export-dialog=${() => (this.showExportDialog = true)}
+          @show-export-dialog=${this.handleShowExportDialog}
           @show-new-project-dialog=${this.handleShowNewProjectDialog}
           @show-paint-by-number-dialog=${this.handleShowPaintByNumberDialog}
           @show-project-browser=${() => (this.showProjectBrowser = true)}
@@ -818,7 +834,8 @@ export class PixelForgeApp extends BaseComponent {
 
       <pf-export-dialog
         ?open=${this.showExportDialog}
-        @close=${() => (this.showExportDialog = false)}
+        .context=${this.exportProjectContext}
+        @close=${this.handleExportDialogClose}
       ></pf-export-dialog>
 
       <pf-new-project-dialog
@@ -850,15 +867,15 @@ export class PixelForgeApp extends BaseComponent {
       <pf-dialog
         ?open=${this.showDeleteCurrentDialog}
         width="360px"
-        @pf-close=${() => (this.showDeleteCurrentDialog = false)}
+        @pf-close=${this.dismissDeleteCurrentProject}
       >
         <span slot="title">Delete Current Project</span>
-        <p>Delete "${activeProject.name.value}" from this browser?</p>
+        <p>Delete "${deleteProject.name.value}" from this browser?</p>
         <div slot="actions">
           <button
             type="button"
             class="secondary"
-            @click=${() => (this.showDeleteCurrentDialog = false)}
+            @click=${this.dismissDeleteCurrentProject}
           >
             Cancel
           </button>
