@@ -5,8 +5,8 @@
  */
 
 import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
-import { CutToFloatCommand, TransformSelectionCommand } from '../../../commands/selection-commands';
-import { log } from '../../../utils/log';
+import { CutToFloatCommand } from '../../../commands/selection-commands';
+import { commitSelectionTransform } from '../../../services/selection-transform-commit';
 
 type TransformContext = Pick<ProjectContext, 'animation' | 'history' | 'layers' | 'selection'>;
 
@@ -93,54 +93,5 @@ export function handleRotationEnd(): void {
  * Called when user presses Enter or clicks Apply.
  */
 export function commitTransform(context: TransformContext = getActiveProjectContext()): void {
-  const { history, layers, selection } = context;
-  const transformState = selection.getTransformState();
-  if (!transformState) return;
-
-  const { imageData, originalBounds, currentBounds, currentOffset, rotation, scale, shape, mask } =
-    transformState;
-
-  // If no transform and no movement, just cancel (no change needed)
-  const hasRotation = rotation !== 0;
-  const hasScale = scale.x !== 1 || scale.y !== 1;
-  const hasMovement = currentOffset.x !== 0 || currentOffset.y !== 0;
-
-  if (!hasRotation && !hasScale && !hasMovement) {
-    selection.cancelTransform();
-    return;
-  }
-
-  // Get the active layer's canvas
-  const activeLayerId = layers.activeLayerId.value;
-  const activeLayer = layers.layers.value.find((l) => l.id === activeLayerId);
-  if (!activeLayer?.canvas) {
-    log.error('Active layer canvas not found');
-    selection.cancelTransform();
-    return;
-  }
-
-  // Use already-computed preview data (scaled + rotated)
-  const transformedImageData = selection.getTransformPreview();
-  if (!transformedImageData) {
-    selection.cancelTransform();
-    return;
-  }
-
-  // Create and execute the transform command on the active layer
-  const command = new TransformSelectionCommand(
-    activeLayerId ?? '',
-    context.animation.currentFrameId.value,
-    imageData,
-    originalBounds,
-    transformedImageData,
-    currentBounds,
-    rotation,
-    scale,
-    shape,
-    mask,
-    currentOffset,
-    context
-  );
-
-  history.execute(command);
+  commitSelectionTransform(context);
 }

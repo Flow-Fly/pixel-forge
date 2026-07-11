@@ -751,13 +751,17 @@ export class PixelForgeApp extends BaseComponent {
     `;
   }
 
+  private getDeleteProjectName(activeProject: ProjectContext["project"]) {
+    const project = this.deleteCurrentProjectContext?.project ?? activeProject;
+    return project.name.value;
+  }
+
   render() {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
     const isTimelineCollapsed =
       panelStore.panelStates.value.timeline?.collapsed ?? false;
     const activeProject = activeProjectContext.value.project;
-    const deleteProject =
-      this.deleteCurrentProjectContext?.project ?? activeProject;
+    const deleteProjectName = this.getDeleteProjectName(activeProject);
 
     return html`
       <header class="menu-bar">
@@ -870,7 +874,7 @@ export class PixelForgeApp extends BaseComponent {
         @pf-close=${this.dismissDeleteCurrentProject}
       >
         <span slot="title">Delete Current Project</span>
-        <p>Delete "${deleteProject.name.value}" from this browser?</p>
+        <p>Delete "${deleteProjectName}" from this browser?</p>
         <div slot="actions">
           <button
             type="button"

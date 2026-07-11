@@ -1,20 +1,9 @@
 import { type Command } from '../../stores/history';
-import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
+import { getActiveProjectContext } from '../../stores/project-context';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { flipSelectedPixels, pasteImageDataWithAlpha } from './pixels';
-
-type SelectionCommandContext = Pick<ProjectContext, 'animation' | 'selection'>;
-
-function getEditableCanvas(
-  context: SelectionCommandContext,
-  layerId: string,
-  frameId: string
-): HTMLCanvasElement {
-  const canvas = context.animation.getEditableCelCanvas(layerId, frameId);
-  if (!canvas) throw new Error('Editable cel canvas not found');
-  return canvas;
-}
+import { EditableCelCommand, type EditableCelCommandContext } from './editable-cel-command';
 
 /**
  * Command for applying a transform (scale and/or rotation) to a selection.
@@ -25,12 +14,8 @@ function getEditableCanvas(
  * selection store. The transform calculation happens before the command
  * is created (to support async web worker processing).
  */
-export class TransformSelectionCommand implements Command {
-  id: string;
+export class TransformSelectionCommand extends EditableCelCommand implements Command {
   name: string;
-  timestamp: number;
-
-  private canvas: HTMLCanvasElement;
 
   // Original state (for undo)
   private originalImageData: ImageData;
@@ -49,7 +34,6 @@ export class TransformSelectionCommand implements Command {
 
   // For proper undo/redo: what was at the destination before pasting
   private overwrittenAtDestination: ImageData;
-  private readonly context: SelectionCommandContext;
 
   constructor(
     layerId: string,
@@ -63,12 +47,9 @@ export class TransformSelectionCommand implements Command {
     shape: SelectionShape,
     originalMask?: Uint8Array,
     offset: { x: number; y: number } = { x: 0, y: 0 },
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.context = context;
-    this.canvas = getEditableCanvas(context, layerId, frameId);
+    super(layerId, frameId, context);
 
     // Generate descriptive name based on what changed
     const hasScale = scale.x !== 1 || scale.y !== 1;
@@ -153,12 +134,8 @@ export class TransformSelectionCommand implements Command {
  * Command for flipping selected pixels horizontally or vertically.
  * Works on "selected" state only - flips pixels in-place on the canvas.
  */
-export class FlipSelectionCommand implements Command {
-  id: string;
+export class FlipSelectionCommand extends EditableCelCommand implements Command {
   name: string;
-  timestamp: number;
-
-  private canvas: HTMLCanvasElement;
   private bounds: Rect;
   private shape: SelectionShape;
   private mask?: Uint8Array;
@@ -174,12 +151,10 @@ export class FlipSelectionCommand implements Command {
     shape: SelectionShape,
     direction: 'horizontal' | 'vertical',
     mask?: Uint8Array,
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
+    super(layerId, frameId, context);
     this.name = `Flip Selection ${direction === 'horizontal' ? 'Horizontal' : 'Vertical'}`;
-    this.canvas = getEditableCanvas(context, layerId, frameId);
     this.bounds = { ...bounds };
     this.shape = shape;
     this.direction = direction;

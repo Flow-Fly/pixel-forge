@@ -88,46 +88,29 @@ export class OptimizedDrawingCommand implements Command {
   }
 
   execute(): void {
-    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
-    const ctx = canvas?.getContext('2d');
-    if (!ctx) return;
-
-    // Create ImageData from stored array
-    const imageData = new ImageData(
-      new Uint8ClampedArray(this.newData), // Clone to create valid ImageData
-      this.bounds.width,
-      this.bounds.height
-    );
-    ctx.putImageData(imageData, this.bounds.x, this.bounds.y);
-
-    // Restore index buffer data if present
-    if (this.newIndexData) {
-      this.restoreIndexBufferRegion(this.newIndexData);
-    }
-
-    // Mark dirty for re-render
-    this.context.dirtyRect.markDirty(this.bounds);
+    this.applyData(this.newData, this.newIndexData);
   }
 
   undo(): void {
+    this.applyData(this.previousData, this.previousIndexData);
+  }
+
+  private applyData(pixelData: Uint8ClampedArray, indexData: Uint8Array | null): void {
     const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
     const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
-    // Create ImageData from stored array
     const imageData = new ImageData(
-      new Uint8ClampedArray(this.previousData), // Clone to create valid ImageData
+      new Uint8ClampedArray(pixelData),
       this.bounds.width,
       this.bounds.height
     );
     ctx.putImageData(imageData, this.bounds.x, this.bounds.y);
 
-    // Restore index buffer data if present
-    if (this.previousIndexData) {
-      this.restoreIndexBufferRegion(this.previousIndexData);
+    if (indexData) {
+      this.restoreIndexBufferRegion(indexData);
     }
 
-    // Mark dirty for re-render
     this.context.dirtyRect.markDirty(this.bounds);
   }
 

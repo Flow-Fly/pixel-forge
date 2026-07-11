@@ -266,24 +266,31 @@ function cancelSelection() {
   }
 }
 
+function deleteSelectedPixels(
+  context: ProjectContext,
+  state: Extract<SelectionState, { type: 'selected' }>
+): void {
+  const layer = activeLayerWithCanvasInContext(context);
+  if (!layer?.canvas) return;
+
+  context.history.execute(
+    new DeleteSelectionCommand(
+      layer.id,
+      context.animation.currentFrameId.value,
+      state.bounds,
+      state.shape,
+      freeformMask(state),
+      context
+    )
+  );
+}
+
 function deleteSelection() {
   const context = getActiveProjectContext();
   const state = context.selection.state.value;
 
   if (state.type === 'selected') {
-    const layer = activeLayerWithCanvasInContext(context);
-    if (!layer?.canvas) return;
-
-    context.history.execute(
-      new DeleteSelectionCommand(
-        layer.id,
-        context.animation.currentFrameId.value,
-        state.bounds,
-        state.shape,
-        freeformMask(state),
-        context
-      )
-    );
+    deleteSelectedPixels(context, state);
     return;
   }
 
@@ -385,20 +392,7 @@ function cutSelection() {
   if (state.type !== 'selected') return;
 
   copySelection(context);
-
-  const layer = activeLayerWithCanvasInContext(context);
-  if (!layer?.canvas) return;
-
-  context.history.execute(
-    new DeleteSelectionCommand(
-      layer.id,
-      context.animation.currentFrameId.value,
-      state.bounds,
-      state.shape,
-      freeformMask(state),
-      context
-    )
-  );
+  deleteSelectedPixels(context, state);
 }
 
 function colorsMatchAtIndex(

@@ -1,7 +1,6 @@
 import { BaseTool } from './base-tool';
-import { TransformSelectionCommand } from '../commands/selection-commands';
 import { MoveTextCommand } from '../commands/text-commands';
-import { log } from '../utils/log';
+import { commitSelectionTransform } from '../services/selection-transform-commit';
 
 export class TransformTool extends BaseTool {
   name = 'transform';
@@ -155,54 +154,6 @@ export class TransformTool extends BaseTool {
   }
 
   private commitTransform() {
-    const { history, layers, selection } = this.projectContext;
-    const transformState = selection.getTransformState();
-    if (!transformState) return;
-
-    const { imageData, originalBounds, currentBounds, currentOffset, rotation, scale, shape, mask } = transformState;
-
-    // If no transform and no movement, just cancel (no change)
-    const hasRotation = rotation !== 0;
-    const hasScale = scale.x !== 1 || scale.y !== 1;
-    const hasMovement = currentOffset.x !== 0 || currentOffset.y !== 0;
-
-    if (!hasRotation && !hasScale && !hasMovement) {
-      selection.cancelTransform();
-      return;
-    }
-
-    // Use already-computed preview data (scaled + rotated)
-    const transformedImageData = selection.getTransformPreview();
-    if (!transformedImageData) {
-      selection.cancelTransform();
-      return;
-    }
-
-    // Get the active layer's canvas
-    const activeLayerId = layers.activeLayerId.value;
-    const activeLayer = layers.layers.value.find(l => l.id === activeLayerId);
-    if (!activeLayer?.canvas) {
-      log.error('Active layer canvas not found');
-      selection.cancelTransform();
-      return;
-    }
-
-    // Create and execute the transform command (with offset for movement during transform)
-    const command = new TransformSelectionCommand(
-      activeLayer.id,
-      this.projectContext.animation.currentFrameId.value,
-      imageData,
-      originalBounds,
-      transformedImageData,
-      currentBounds,
-      rotation,
-      scale,
-      shape,
-      mask,
-      currentOffset,
-      this.projectContext
-    );
-
-    history.execute(command);
+    commitSelectionTransform(this.projectContext);
   }
 }

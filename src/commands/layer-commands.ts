@@ -11,6 +11,44 @@ function layerCanOwnCels(layer: Layer): boolean {
   return layer.type !== 'reference';
 }
 
+type LayerCanvasTransform = (
+  context: CanvasRenderingContext2D,
+  source: HTMLCanvasElement,
+  width: number,
+  height: number
+) => void;
+
+function transformLayerCel(
+  context: LayerCommandContext,
+  layerId: string,
+  frameId: string,
+  transform: LayerCanvasTransform
+): void {
+  const canvas = context.animation.getEditableCelCanvas(layerId, frameId);
+  if (!canvas) return;
+
+  const targetContext = canvas.getContext('2d');
+  if (!targetContext) return;
+
+  const transformedCanvas = document.createElement('canvas');
+  transformedCanvas.width = canvas.width;
+  transformedCanvas.height = canvas.height;
+  const transformedContext = transformedCanvas.getContext('2d');
+  if (!transformedContext) return;
+
+  transformedContext.save();
+  transform(transformedContext, canvas, canvas.width, canvas.height);
+  transformedContext.restore();
+
+  targetContext.clearRect(0, 0, canvas.width, canvas.height);
+  targetContext.drawImage(transformedCanvas, 0, 0);
+
+  const visibleLayer = context.layers.layers.value.find((layer) => layer.id === layerId);
+  if (visibleLayer?.canvas === canvas) {
+    context.layers.updateLayer(layerId, {});
+  }
+}
+
 export class AddLayerCommand implements Command {
   id = crypto.randomUUID();
   name = 'Add Layer';
@@ -270,39 +308,15 @@ export class FlipLayerCommand implements Command {
   }
 
   private flip() {
-    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Create temp canvas to draw flipped
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d')!;
-
-    tempCtx.save();
-    if (this.direction === 'horizontal') {
-      tempCtx.scale(-1, 1);
-      tempCtx.drawImage(canvas, -width, 0);
-    } else {
-      tempCtx.scale(1, -1);
-      tempCtx.drawImage(canvas, 0, -height);
-    }
-    tempCtx.restore();
-
-    // Update layer canvas
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(tempCanvas, 0, 0);
-
-    // Trigger update
-    const visibleLayer = this.context.layers.layers.value.find((layer) => layer.id === this.layerId);
-    if (visibleLayer?.canvas === canvas) {
-      this.context.layers.updateLayer(this.layerId, {});
-    }
+    transformLayerCel(this.context, this.layerId, this.frameId, (context, canvas, width, height) => {
+      if (this.direction === 'horizontal') {
+        context.scale(-1, 1);
+        context.drawImage(canvas, -width, 0);
+      } else {
+        context.scale(1, -1);
+        context.drawImage(canvas, 0, -height);
+      }
+    });
   }
 }
 
@@ -335,36 +349,12 @@ export class RotateLayerCommand implements Command {
   }
 
   private rotate(angle: number) {
-    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Create temp canvas
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d')!;
-
-    tempCtx.save();
-    tempCtx.translate(width / 2, height / 2);
-    tempCtx.rotate((angle * Math.PI) / 180);
-    tempCtx.translate(-width / 2, -height / 2);
-    tempCtx.drawImage(canvas, 0, 0);
-    tempCtx.restore();
-
-    // Update layer canvas
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(tempCanvas, 0, 0);
-
-    // Trigger update
-    const visibleLayer = this.context.layers.layers.value.find((layer) => layer.id === this.layerId);
-    if (visibleLayer?.canvas === canvas) {
-      this.context.layers.updateLayer(this.layerId, {});
-    }
+    transformLayerCel(this.context, this.layerId, this.frameId, (context, canvas, width, height) => {
+      context.translate(width / 2, height / 2);
+      context.rotate((angle * Math.PI) / 180);
+      context.translate(-width / 2, -height / 2);
+      context.drawImage(canvas, 0, 0);
+    });
   }
 }
 
