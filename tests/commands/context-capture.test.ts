@@ -78,6 +78,7 @@ function makeFakeCanvas() {
 function useLayerCanvas(context: ProjectContext, layerId: string) {
   const { canvas, putCalls } = makeFakeCanvas();
   const layer = context.layers.layers.value[0];
+  const frameId = context.animation.currentFrameId.value;
 
   context.layers.layers.value = [
     {
@@ -87,6 +88,17 @@ function useLayerCanvas(context: ProjectContext, layerId: string) {
     },
   ];
   context.layers.activeLayerId.value = layerId;
+  context.animation.cels.value = new Map([
+    [
+      context.animation.getCelKey(layerId, frameId),
+      {
+        id: crypto.randomUUID(),
+        layerId,
+        frameId,
+        canvas,
+      },
+    ],
+  ]);
 
   return putCalls;
 }
@@ -136,6 +148,7 @@ describe('command context capture', () => {
     const source = createTestContext();
     const other = createTestContext();
     const layerId = 'shared-image-layer';
+    const frameId = source.animation.currentFrameId.value;
     const bounds: Rect = { x: 1, y: 1, width: 2, height: 2 };
     const beforeData = new Uint8ClampedArray(bounds.width * bounds.height * 4).fill(7);
     const afterData = new Uint8ClampedArray(bounds.width * bounds.height * 4).fill(9);
@@ -143,7 +156,14 @@ describe('command context capture', () => {
     const otherPutCalls = useLayerCanvas(other, layerId);
 
     setActiveProjectContext(source);
-    const command = new PatchCommand(layerId, bounds, beforeData, afterData, 'Delayed stroke');
+    const command = new PatchCommand(
+      layerId,
+      frameId,
+      bounds,
+      beforeData,
+      afterData,
+      'Delayed stroke'
+    );
 
     setActiveProjectContext(other);
     command.execute();

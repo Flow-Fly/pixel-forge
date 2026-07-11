@@ -510,11 +510,13 @@ export class PFContextBar extends BaseComponent {
     if (!selected) return;
 
     const command = new FlipSelectionCommand(
-      selected.canvas,
+      selected.layer.id,
+      context.animation.currentFrameId.value,
       selected.bounds,
       selected.shape,
       direction,
-      selected.mask
+      selected.mask,
+      context
     );
     context.history.execute(command);
   }

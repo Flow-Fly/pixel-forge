@@ -1,7 +1,10 @@
 import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
-import { getActiveProjectContext } from "../../stores/project-context";
+import {
+  getActiveProjectContext,
+  type ProjectContext,
+} from "../../stores/project-context";
 import {
   FlipLayerCommand,
   RotateLayerCommand,
@@ -36,6 +39,7 @@ export class PFMenuBar extends BaseComponent {
   @state() private shortcutsVisible = false;
   @state() private isEditingName = false;
   @state() private activeMenu: MenuId | null = null;
+  private editingProjectContext: ProjectContext | null = null;
 
   static styles = css`
     :host {
@@ -646,6 +650,7 @@ export class PFMenuBar extends BaseComponent {
   }
 
   private startEditingName() {
+    this.editingProjectContext = getActiveProjectContext();
     this.isEditingName = true;
     // Focus the input after render
     this.updateComplete.then(() => {
@@ -661,16 +666,19 @@ export class PFMenuBar extends BaseComponent {
     if (e.key === "Enter") {
       this.commitNameEdit(e);
     } else if (e.key === "Escape") {
+      this.editingProjectContext = null;
       this.isEditingName = false;
     }
   }
 
   private async commitNameEdit(e: Event) {
+    const context = this.editingProjectContext ?? getActiveProjectContext();
     const input = e.target as HTMLInputElement;
     const newName = input.value.trim() || "Untitled";
-    getActiveProjectContext().project.name.value = newName;
+    this.editingProjectContext = null;
+    context.project.name.value = newName;
     this.isEditingName = false;
-    await autoSaveService.saveNow();
+    await autoSaveService.saveNow(context);
   }
 
   render() {

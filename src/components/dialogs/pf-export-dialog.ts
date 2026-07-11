@@ -1,9 +1,11 @@
 import { html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
-import { projectStore } from "../../stores/project";
-import { layerStore } from "../../stores/layers";
-import { animationStore } from "../../stores/animation";
+import {
+  defaultProjectContext,
+  getActiveProjectContext,
+  type ProjectContext,
+} from "../../stores/project-context";
 import { settingsStore } from "../../stores/settings";
 import { FileService } from "../../services/file-service";
 import { composeExportFrame } from "../../services/export-composition";
@@ -190,6 +192,7 @@ export class PFExportDialog extends BaseComponent {
   `;
 
   @property({ type: Boolean }) open = false;
+  @property({ attribute: false }) context: ProjectContext | null = null;
 
   @state() private format: ExportFormat = "pixelforge";
   @state() private scale: number = 1;
@@ -204,17 +207,20 @@ export class PFExportDialog extends BaseComponent {
   @state() private spritesheetColumns: number = 4;
   @state() private applyViewEffect: boolean = false;
   @state() private exportError: string = "";
+  private exportContext: ProjectContext = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
-    this.frameEnd = animationStore.frames.value.length;
+    this.exportContext = this.context ?? getActiveProjectContext();
+    this.frameEnd = this.exportContext.animation.frames.value.length;
   }
 
   willUpdate(changedProperties: Map<string, unknown>) {
     // Set filename to project name when dialog opens
     if (changedProperties.has("open") && this.open) {
-      this.filename = projectStore.name.value || "export";
-      this.frameEnd = animationStore.frames.value.length;
+      this.exportContext = this.context ?? getActiveProjectContext();
+      this.filename = this.exportContext.project.name.value || "export";
+      this.frameEnd = this.exportContext.animation.frames.value.length;
       this.applyViewEffect = false;
       this.exportError = "";
     }
@@ -247,8 +253,8 @@ export class PFExportDialog extends BaseComponent {
   }
 
   private get outputSize() {
-    const baseWidth = projectStore.width.value;
-    const baseHeight = projectStore.height.value;
+    const baseWidth = this.exportContext.project.width.value;
+    const baseHeight = this.exportContext.project.height.value;
     const frameCount = this.getFrameCount();
 
     if (this.format === "spritesheet") {
@@ -266,7 +272,7 @@ export class PFExportDialog extends BaseComponent {
   }
 
   private getFrameCount(): number {
-    const totalFrames = animationStore.frames.value.length;
+    const totalFrames = this.exportContext.animation.frames.value.length;
     if (this.frameSelection === "current") return 1;
     if (this.frameSelection === "all") return totalFrames;
     return Math.max(1, this.frameEnd - this.frameStart + 1);
@@ -310,20 +316,20 @@ export class PFExportDialog extends BaseComponent {
     return composeExportFrame({
       frameId,
       scale,
-      width: projectStore.width.value,
-      height: projectStore.height.value,
-      layers: layerStore.layers.value,
+      width: this.exportContext.project.width.value,
+      height: this.exportContext.project.height.value,
+      layers: this.exportContext.layers.layers.value,
       getCelCanvas: (currentFrameId, layerId) =>
-        animationStore.getCelCanvas(currentFrameId, layerId),
+        this.exportContext.animation.getCelCanvas(currentFrameId, layerId),
       useBackground: this.useBackground,
       backgroundColor: this.backgroundColor,
     });
   }
 
   private getSelectedFrameIds(): string[] {
-    const frames = animationStore.frames.value;
+    const frames = this.exportContext.animation.frames.value;
     if (this.frameSelection === "current") {
-      return [animationStore.currentFrameId.value];
+      return [this.exportContext.animation.currentFrameId.value];
     }
     if (this.frameSelection === "all") {
       return frames.map((f) => f.id);
@@ -389,11 +395,11 @@ export class PFExportDialog extends BaseComponent {
 
   private async exportAsAseprite() {
     const { exportAseFile } = await import("../../services/aseprite-service");
-    exportAseFile(`${this.filename}.ase`);
+    exportAseFile(`${this.filename}.ase`, this.exportContext);
   }
 
   private async exportAsPixelForge() {
-    const project = await projectStore.saveProject();
+    const project = await this.exportContext.project.saveProject();
     FileService.saveCompressed(project, `${this.filename}.pf`);
   }
 
@@ -443,7 +449,7 @@ export class PFExportDialog extends BaseComponent {
     frameIds: string[],
     pipeline: ViewEffectPipeline | null
   ) {
-    const frames = animationStore.frames.value;
+    const frames = this.exportContext.animation.frames.value;
     const frameData = frameIds.map((id) => {
       const frame = frames.find((f) => f.id === id);
       return {
@@ -462,8 +468,8 @@ export class PFExportDialog extends BaseComponent {
     pipeline: ViewEffectPipeline | null
   ) {
     // Build custom spritesheet with selected frames and scale
-    const width = projectStore.width.value * this.scale;
-    const height = projectStore.height.value * this.scale;
+    const width = this.exportContext.project.width.value * this.scale;
+    const height = this.exportContext.project.height.value * this.scale;
     const frameCount = frameIds.length;
     const { cols, rows } = this.getSpritesheetGrid(frameCount);
 
@@ -484,7 +490,7 @@ export class PFExportDialog extends BaseComponent {
       },
     };
 
-    const frames = animationStore.frames.value;
+    const frames = this.exportContext.animation.frames.value;
     frameIds.forEach((frameId, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
@@ -555,7 +561,7 @@ export class PFExportDialog extends BaseComponent {
   }
 
   render() {
-    const totalFrames = animationStore.frames.value.length;
+    const totalFrames = this.exportContext.animation.frames.value.length;
     const { width, height } = this.outputSize;
     const frameCount = this.getFrameCount();
 

@@ -161,6 +161,11 @@ class AnimationStore {
     return this.cels.value.get(key)?.canvas;
   }
 
+  getEditableCelCanvas(layerId: string, frameId: string): HTMLCanvasElement | undefined {
+    this.ensureUnlinkedForEdit(layerId, frameId);
+    return this.cels.value.get(getCelKey(layerId, frameId))?.canvas;
+  }
+
   // ===== Frame Management =====
 
   private initializeCelsForFrame(frameId: string) {
@@ -354,6 +359,7 @@ class AnimationStore {
   }
 
   ensureCelIndexBuffer(layerId: string, frameId: string): Uint8Array {
+    this.getEditableCelCanvas(layerId, frameId);
     const result = indexBuffer.ensureCelIndexBuffer(
       this.cels.value,
       layerId,

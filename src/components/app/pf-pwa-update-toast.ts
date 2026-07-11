@@ -2,6 +2,7 @@ import { css, html, nothing } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
+import { getActiveProjectContext } from '../../stores/project-context';
 import { pwaStore } from '../../stores/pwa';
 
 @customElement('pf-pwa-update-toast')
@@ -107,7 +108,8 @@ export class PFPwaUpdateToast extends BaseComponent {
   };
 
   private restart = () => {
-    void pwaStore.restartWithUpdate(() => autoSaveService.saveNow());
+    const context = getActiveProjectContext();
+    void pwaStore.restartWithUpdate(() => autoSaveService.saveNow(context));
   };
 
   render() {
