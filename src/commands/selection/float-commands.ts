@@ -11,8 +11,18 @@ import {
   pasteImageDataWithAlpha,
 } from './pixels';
 
-type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
+type SelectionCommandContext = Pick<ProjectContext, 'animation' | 'selection'>;
 type IndexedSelectionCommandContext = Pick<ProjectContext, 'animation' | 'palette' | 'selection'>;
+
+function getEditableCanvas(
+  context: Pick<ProjectContext, 'animation'>,
+  layerId: string,
+  frameId: string
+): HTMLCanvasElement {
+  const canvas = context.animation.getEditableCelCanvas(layerId, frameId);
+  if (!canvas) throw new Error('Editable cel canvas not found');
+  return canvas;
+}
 
 export interface IndexedFloatPaletteState {
   colors: string[];
@@ -123,8 +133,8 @@ export class CutToFloatCommand implements Command {
   private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
-    _layerId: string,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     mask?: Uint8Array,
@@ -132,14 +142,14 @@ export class CutToFloatCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
-    this.canvas = canvas;
     this.context = context;
+    this.canvas = getEditableCanvas(context, layerId, frameId);
     this.originalBounds = { ...bounds };
     this.shape = shape;
     this.originalMask = mask;
 
     // Capture the pixels we're about to cut
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.fullImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
 
     // Create a working copy for masking and trimming
@@ -214,8 +224,8 @@ export class CommitFloatCommand implements Command {
   private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
-    _layerId: string,
+    layerId: string,
+    frameId: string,
     floatingImageData: ImageData,
     originalBounds: Rect,
     offset: { x: number; y: number },
@@ -225,8 +235,8 @@ export class CommitFloatCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
-    this.canvas = canvas;
     this.context = context;
+    this.canvas = getEditableCanvas(context, layerId, frameId);
     this.floatingImageData = floatingImageData;
     this.shape = shape;
     this.mask = mask;
@@ -234,7 +244,7 @@ export class CommitFloatCommand implements Command {
     this.destinationBounds = getDestinationBounds(originalBounds, offset);
 
     // Capture what's currently at the destination (for undo)
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.overwrittenImageData = ctx.getImageData(
       this.destinationBounds.x,
       this.destinationBounds.y,
@@ -301,7 +311,6 @@ export class CommitIndexedFloatCommand implements Command {
   private readonly context: IndexedSelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
     floatingImageData: ImageData,
     originalBounds: Rect,
     offset: { x: number; y: number },
@@ -311,8 +320,8 @@ export class CommitIndexedFloatCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
-    this.canvas = canvas;
     this.context = context;
+    this.canvas = getEditableCanvas(context, options.layerId, options.frameId);
     this.floatingImageData = floatingImageData;
     this.destinationBounds = getDestinationBounds(originalBounds, offset);
     this.shape = shape;
@@ -333,7 +342,7 @@ export class CommitIndexedFloatCommand implements Command {
       : undefined;
     this.mask = options.mask;
 
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.overwrittenImageData = ctx.getImageData(
       this.destinationBounds.x,
       this.destinationBounds.y,

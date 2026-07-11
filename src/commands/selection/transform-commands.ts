@@ -4,7 +4,17 @@ import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { flipSelectedPixels, pasteImageDataWithAlpha } from './pixels';
 
-type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
+type SelectionCommandContext = Pick<ProjectContext, 'animation' | 'selection'>;
+
+function getEditableCanvas(
+  context: SelectionCommandContext,
+  layerId: string,
+  frameId: string
+): HTMLCanvasElement {
+  const canvas = context.animation.getEditableCelCanvas(layerId, frameId);
+  if (!canvas) throw new Error('Editable cel canvas not found');
+  return canvas;
+}
 
 /**
  * Command for applying a transform (scale and/or rotation) to a selection.
@@ -42,7 +52,8 @@ export class TransformSelectionCommand implements Command {
   private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     originalImageData: ImageData,
     originalBounds: Rect,
     transformedImageData: ImageData,
@@ -56,8 +67,8 @@ export class TransformSelectionCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
-    this.canvas = canvas;
     this.context = context;
+    this.canvas = getEditableCanvas(context, layerId, frameId);
 
     // Generate descriptive name based on what changed
     const hasScale = scale.x !== 1 || scale.y !== 1;
@@ -93,7 +104,7 @@ export class TransformSelectionCommand implements Command {
     this.actualDestY = Math.round(originalCenterY - transformedImageData.height / 2);
 
     // Capture what's at the actual destination before we paste
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.overwrittenAtDestination = ctx.getImageData(
       this.actualDestX,
       this.actualDestY,
@@ -157,23 +168,25 @@ export class FlipSelectionCommand implements Command {
   private originalImageData: ImageData;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     direction: 'horizontal' | 'vertical',
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    context: SelectionCommandContext = getActiveProjectContext()
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
     this.name = `Flip Selection ${direction === 'horizontal' ? 'Horizontal' : 'Vertical'}`;
-    this.canvas = canvas;
+    this.canvas = getEditableCanvas(context, layerId, frameId);
     this.bounds = { ...bounds };
     this.shape = shape;
     this.direction = direction;
     this.mask = mask;
 
     // Capture original pixels
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.originalImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 

@@ -246,6 +246,7 @@ export class FlipLayerCommand implements Command {
   name = 'Flip Layer';
   private layerId: string;
   private direction: 'horizontal' | 'vertical';
+  private frameId: string;
   private readonly context: LayerCommandContext;
 
   constructor(
@@ -256,6 +257,7 @@ export class FlipLayerCommand implements Command {
     this.layerId = layerId;
     this.direction = direction;
     this.context = context;
+    this.frameId = context.animation.currentFrameId.value;
     this.name = `Flip Layer ${direction}`;
   }
 
@@ -268,14 +270,13 @@ export class FlipLayerCommand implements Command {
   }
 
   private flip() {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer || !layer.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
+    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = layer.canvas.width;
-    const height = layer.canvas.height;
+    const width = canvas.width;
+    const height = canvas.height;
 
     // Create temp canvas to draw flipped
     const tempCanvas = document.createElement('canvas');
@@ -286,10 +287,10 @@ export class FlipLayerCommand implements Command {
     tempCtx.save();
     if (this.direction === 'horizontal') {
       tempCtx.scale(-1, 1);
-      tempCtx.drawImage(layer.canvas, -width, 0);
+      tempCtx.drawImage(canvas, -width, 0);
     } else {
       tempCtx.scale(1, -1);
-      tempCtx.drawImage(layer.canvas, 0, -height);
+      tempCtx.drawImage(canvas, 0, -height);
     }
     tempCtx.restore();
 
@@ -298,7 +299,10 @@ export class FlipLayerCommand implements Command {
     ctx.drawImage(tempCanvas, 0, 0);
 
     // Trigger update
-    this.context.layers.updateLayer(this.layerId, {});
+    const visibleLayer = this.context.layers.layers.value.find((layer) => layer.id === this.layerId);
+    if (visibleLayer?.canvas === canvas) {
+      this.context.layers.updateLayer(this.layerId, {});
+    }
   }
 }
 
@@ -307,6 +311,7 @@ export class RotateLayerCommand implements Command {
   name = 'Rotate Layer';
   private layerId: string;
   private angle: number; // 90, 180, -90
+  private frameId: string;
   private readonly context: LayerCommandContext;
 
   constructor(
@@ -317,6 +322,7 @@ export class RotateLayerCommand implements Command {
     this.layerId = layerId;
     this.angle = angle;
     this.context = context;
+    this.frameId = context.animation.currentFrameId.value;
     this.name = `Rotate Layer ${angle}°`;
   }
 
@@ -329,14 +335,13 @@ export class RotateLayerCommand implements Command {
   }
 
   private rotate(angle: number) {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer || !layer.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
+    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = layer.canvas.width;
-    const height = layer.canvas.height;
+    const width = canvas.width;
+    const height = canvas.height;
 
     // Create temp canvas
     const tempCanvas = document.createElement('canvas');
@@ -348,7 +353,7 @@ export class RotateLayerCommand implements Command {
     tempCtx.translate(width / 2, height / 2);
     tempCtx.rotate((angle * Math.PI) / 180);
     tempCtx.translate(-width / 2, -height / 2);
-    tempCtx.drawImage(layer.canvas, 0, 0);
+    tempCtx.drawImage(canvas, 0, 0);
     tempCtx.restore();
 
     // Update layer canvas
@@ -356,7 +361,10 @@ export class RotateLayerCommand implements Command {
     ctx.drawImage(tempCanvas, 0, 0);
 
     // Trigger update
-    this.context.layers.updateLayer(this.layerId, {});
+    const visibleLayer = this.context.layers.layers.value.find((layer) => layer.id === this.layerId);
+    if (visibleLayer?.canvas === canvas) {
+      this.context.layers.updateLayer(this.layerId, {});
+    }
   }
 }
 

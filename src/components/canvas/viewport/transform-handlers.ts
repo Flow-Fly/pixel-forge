@@ -8,7 +8,7 @@ import { getActiveProjectContext, type ProjectContext } from '../../../stores/pr
 import { CutToFloatCommand, TransformSelectionCommand } from '../../../commands/selection-commands';
 import { log } from '../../../utils/log';
 
-type TransformContext = Pick<ProjectContext, 'history' | 'layers' | 'selection'>;
+type TransformContext = Pick<ProjectContext, 'animation' | 'history' | 'layers' | 'selection'>;
 
 /**
  * Transition selection to transforming state if needed.
@@ -37,15 +37,14 @@ function ensureTransformState(context: TransformContext): void {
     const activeLayer = layers.layers.value.find((l) => l.id === activeLayerId);
     if (!activeLayer?.canvas) return;
 
-    const canvas = activeLayer.canvas;
     const bounds = state.bounds;
     const shape = state.shape;
     const mask = state.shape === 'freeform' ? state.mask : undefined;
 
     // Cut to float from the active layer
     const cutCommand = new CutToFloatCommand(
-      canvas,
       activeLayerId || '',
+      context.animation.currentFrameId.value,
       bounds,
       shape,
       mask,
@@ -129,7 +128,8 @@ export function commitTransform(context: TransformContext = getActiveProjectCont
 
   // Create and execute the transform command on the active layer
   const command = new TransformSelectionCommand(
-    activeLayer.canvas,
+    activeLayerId ?? '',
+    context.animation.currentFrameId.value,
     imageData,
     originalBounds,
     transformedImageData,

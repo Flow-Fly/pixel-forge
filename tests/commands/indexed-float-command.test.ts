@@ -226,7 +226,6 @@ function makeCommand(target: IndexedContext) {
   ]);
 
   const command = new CommitIndexedFloatCommand(
-    target.canvas.canvas,
     imageData,
     destinationBounds,
     { x: 0, y: 0 },

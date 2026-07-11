@@ -187,11 +187,10 @@ export class TransformTool extends BaseTool {
       return;
     }
 
-    const canvas = activeLayer.canvas;
-
     // Create and execute the transform command (with offset for movement during transform)
     const command = new TransformSelectionCommand(
-      canvas,
+      activeLayer.id,
+      this.projectContext.animation.currentFrameId.value,
       imageData,
       originalBounds,
       transformedImageData,

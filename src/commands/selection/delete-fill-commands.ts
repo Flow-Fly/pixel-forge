@@ -4,7 +4,17 @@ import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { clearCanvasSelection, fillCanvasSelection } from './pixels';
 
-type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
+type SelectionCommandContext = Pick<ProjectContext, 'animation' | 'selection'>;
+
+function getEditableCanvas(
+  context: SelectionCommandContext,
+  layerId: string,
+  frameId: string
+): HTMLCanvasElement {
+  const canvas = context.animation.getEditableCelCanvas(layerId, frameId);
+  if (!canvas) throw new Error('Editable cel canvas not found');
+  return canvas;
+}
 
 /**
  * Command for deleting selected pixels (without moving).
@@ -24,7 +34,8 @@ export class DeleteSelectionCommand implements Command {
   private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     mask?: Uint8Array,
@@ -32,14 +43,14 @@ export class DeleteSelectionCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
-    this.canvas = canvas;
     this.context = context;
+    this.canvas = getEditableCanvas(context, layerId, frameId);
     this.bounds = { ...bounds };
     this.shape = shape;
     this.mask = mask;
 
     // Capture pixels before deleting
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.deletedImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 
@@ -78,7 +89,8 @@ export class FillSelectionCommand implements Command {
   private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     fillColor: string,
@@ -87,15 +99,15 @@ export class FillSelectionCommand implements Command {
   ) {
     this.id = crypto.randomUUID();
     this.timestamp = Date.now();
-    this.canvas = canvas;
     this.context = context;
+    this.canvas = getEditableCanvas(context, layerId, frameId);
     this.bounds = { ...bounds };
     this.shape = shape;
     this.fillColor = fillColor;
     this.mask = mask;
 
     // Capture pixels before filling
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.previousImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 

@@ -3,7 +3,7 @@ import type { Rect } from '../types/geometry';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
 import { writeIndexRegion } from '../utils/buffer-region';
 
-type DrawingCommandContext = Pick<ProjectContext, 'animation' | 'dirtyRect' | 'layers'>;
+type DrawingCommandContext = Pick<ProjectContext, 'animation' | 'dirtyRect'>;
 
 /**
  * Memory-efficient drawing command that stores only the dirty region.
@@ -43,6 +43,9 @@ export class OptimizedDrawingCommand implements Command {
   }
   get drawLayerId(): string {
     return this.layerId;
+  }
+  get drawFrameId(): string {
+    return this.frameId;
   }
 
   constructor(
@@ -85,10 +88,8 @@ export class OptimizedDrawingCommand implements Command {
   }
 
   execute(): void {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer?.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
+    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
     // Create ImageData from stored array
@@ -109,10 +110,8 @@ export class OptimizedDrawingCommand implements Command {
   }
 
   undo(): void {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer?.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
+    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
     // Create ImageData from stored array
