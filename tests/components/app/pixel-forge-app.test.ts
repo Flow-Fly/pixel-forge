@@ -189,6 +189,45 @@ describe('pixel-forge-app project dialogs', () => {
     expect(dialog?.context).toBe(contextB);
   });
 
+  it('captures a fresh project context each time export is reopened', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    contextA.project.name.value = 'Tab A';
+    contextB.project.name.value = 'Tab B';
+    createdContexts.push(contextA, contextB);
+    setActiveProjectContext(contextB);
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('show-export-dialog'));
+    await element.updateComplete;
+
+    const dialog = element.shadowRoot?.querySelector<HTMLElement & {
+      context: ProjectContext | null;
+      open: boolean;
+      updateComplete: Promise<unknown>;
+    }>('pf-export-dialog');
+    expect(dialog?.context).toBe(contextB);
+
+    dialog?.shadowRoot?.querySelector<HTMLButtonElement>('.btn-cancel')?.click();
+    await dialog?.updateComplete;
+    await element.updateComplete;
+
+    setActiveProjectContext(contextA);
+    window.dispatchEvent(new CustomEvent('show-export-dialog'));
+    await element.updateComplete;
+    await dialog?.updateComplete;
+
+    expect(dialog?.open).toBe(true);
+    expect(dialog?.context).toBe(contextA);
+    expect(dialog?.shadowRoot?.querySelector<HTMLInputElement>('#export-filename')?.value).toBe(
+      'Tab A'
+    );
+  });
+
   it('restores saved workspace state during startup', async () => {
     await import('../../../src/components/app/pixel-forge-app');
     const workspaceState = {
