@@ -140,6 +140,10 @@ class ProjectStore {
   }
 
   async saveProject(): Promise<ProjectFile> {
+    // Canvas pixels are the common output of every editing command. Rebuild
+    // indices here so canvas-only operations cannot persist stale pixel data.
+    this.animation.rebuildAllIndexBuffers(true);
+
     // Convert layers to binary format (including text layer metadata)
     const layers = await Promise.all(
       this.layers.layers.value.map(async (layer) => ({
@@ -212,6 +216,9 @@ class ProjectStore {
 
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
+    // Loading replaces the whole drawing. Drop outgoing cels before palette
+    // restoration can rebuild or remap canvases that no longer belong here.
+    this.animation.cels.value = new Map();
 
     this.setSize(file.width, file.height);
     this.name.value = file.name || DEFAULT_PROJECT_NAME;

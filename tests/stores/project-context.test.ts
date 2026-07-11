@@ -181,11 +181,84 @@ describe("ProjectContext", () => {
     );
 
     contextA.dispose();
-    window.dispatchEvent(new CustomEvent("palette-color-changed"));
+    contextB.palette.updateColor(1, "#abcdef");
 
     expect(contextARebuild).not.toHaveBeenCalled();
     expect(contextBRebuild).toHaveBeenCalledTimes(1);
-    expect(defaultRebuild).toHaveBeenCalledTimes(1);
+    expect(defaultRebuild).not.toHaveBeenCalled();
+  });
+
+  it("keeps palette index remapping inside the context that owns the palette", () => {
+    const contextA = createTestContext(8, 8);
+    const contextB = createTestContext(8, 8);
+    contextA.palette.setPalette(["#ff0000", "#0000ff"]);
+    contextB.palette.setPalette(["#ff0000", "#0000ff"]);
+
+    const setFirstPixel = (context: ProjectContext) => {
+      const layerId = context.layers.layers.value[0].id;
+      const frameId = context.animation.frames.value[0].id;
+      const cel = context.animation.cels.value.get(
+        context.animation.getCelKey(layerId, frameId),
+      );
+      if (!cel) throw new Error("Expected an initial cel");
+
+      const buffer = new Uint8Array(cel.canvas.width * cel.canvas.height);
+      buffer[0] = 1;
+      context.animation.updateCelIndexBuffer(layerId, frameId, buffer);
+      return { layerId, frameId };
+    };
+
+    const pixelA = setFirstPixel(contextA);
+    const pixelB = setFirstPixel(contextB);
+
+    contextA.palette.moveColor(0, 1);
+
+    expect(
+      contextA.animation.getCelIndexBuffer(pixelA.layerId, pixelA.frameId)?.[0],
+    ).toBe(2);
+    expect(
+      contextB.animation.getCelIndexBuffer(pixelB.layerId, pixelB.frameId)?.[0],
+    ).toBe(1);
+  });
+
+  it("remaps a shared linked-cel buffer only once", () => {
+    const context = createTestContext(8, 8);
+    context.palette.setPalette(["#ff0000", "#00ff00", "#0000ff"]);
+    const layerId = context.layers.layers.value[0].id;
+    const firstFrameId = context.animation.frames.value[0].id;
+    const firstCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, firstFrameId),
+    );
+    if (!firstCel) throw new Error("Expected an initial cel");
+
+    const buffer = new Uint8Array(firstCel.canvas.width * firstCel.canvas.height);
+    buffer[0] = 3;
+    context.animation.updateCelIndexBuffer(layerId, firstFrameId, buffer);
+    context.animation.addFrame(false);
+    const secondFrameId = context.animation.currentFrameId.value;
+    context.animation.linkCels(
+      [
+        context.animation.getCelKey(layerId, firstFrameId),
+        context.animation.getCelKey(layerId, secondFrameId),
+      ],
+      "hard",
+    );
+
+    context.animation.rebuildAllIndexBuffers();
+    const firstBuffer = context.animation.getCelIndexBuffer(layerId, firstFrameId);
+    const secondBuffer = context.animation.getCelIndexBuffer(layerId, secondFrameId);
+    expect(firstBuffer).toBe(secondBuffer);
+    if (!firstBuffer) throw new Error("Expected a shared linked-cel buffer");
+    firstBuffer[0] = 3;
+
+    context.palette.removeColorByIndex(1);
+
+    expect(
+      context.animation.getCelIndexBuffer(layerId, firstFrameId)?.[0],
+    ).toBe(2);
+    expect(
+      context.animation.getCelIndexBuffer(layerId, secondFrameId)?.[0],
+    ).toBe(2);
   });
 
   it("keeps default context stores compatible with singleton exports", () => {
@@ -236,28 +309,15 @@ describe("ProjectContext", () => {
   });
 
   it("owns palette sync startup and cleanup", () => {
-    const addListener = vi.spyOn(window, "addEventListener");
-    const removeListener = vi.spyOn(window, "removeEventListener");
     const context = createTestContext(100, 80);
+    const rebuild = vi.spyOn(context.animation, "rebuildAllCelCanvases");
 
-    expect(addListener).toHaveBeenCalledWith(
-      "palette-color-changed",
-      expect.any(Function),
-    );
-    expect(addListener).toHaveBeenCalledWith(
-      "palette-replaced",
-      expect.any(Function),
-    );
+    context.palette.updateColor(1, "#abcdef");
+    expect(rebuild).toHaveBeenCalledTimes(1);
 
     context.dispose();
+    context.palette.updateColor(1, "#fedcba");
 
-    expect(removeListener).toHaveBeenCalledWith(
-      "palette-color-changed",
-      expect.any(Function),
-    );
-    expect(removeListener).toHaveBeenCalledWith(
-      "palette-replaced",
-      expect.any(Function),
-    );
+    expect(rebuild).toHaveBeenCalledTimes(1);
   });
 });

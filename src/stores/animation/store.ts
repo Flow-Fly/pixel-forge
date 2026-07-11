@@ -29,6 +29,7 @@ type AnimationPaletteStore = paletteSync.PaletteIndexLookup &
 export interface AnimationStoreDependencies {
   layers: AnimationLayerStore;
   palette: AnimationPaletteStore;
+  paletteEvents: EventTarget;
   refs: StoreRefs;
 }
 
@@ -66,6 +67,7 @@ class AnimationStore {
   private playbackEngine: PlaybackEngine;
   private readonly layers: AnimationLayerStore;
   private readonly palette: AnimationPaletteStore;
+  private readonly paletteEvents: EventTarget;
   private sharedTransparentCanvas: HTMLCanvasElement | null = null;
   private readonly refs: StoreRefs;
   private cleanupPaletteSync: (() => void) | null = null;
@@ -73,6 +75,7 @@ class AnimationStore {
   constructor(dependencies: AnimationStoreDependencies) {
     this.layers = dependencies.layers;
     this.palette = dependencies.palette;
+    this.paletteEvents = dependencies.paletteEvents;
     this.refs = dependencies.refs;
 
     // Set up playback engine
@@ -112,6 +115,7 @@ class AnimationStore {
     if (this.cleanupPaletteSync) return;
 
     this.cleanupPaletteSync = paletteSync.startPaletteSync(
+      this.paletteEvents,
       this.palette,
       () => this.cels.value,
       (newCels) => { this.cels.value = newCels; },
@@ -378,8 +382,12 @@ class AnimationStore {
     indexBuffer.rebuildAllCelCanvases(this.cels.value, this.palette.colors.value);
   }
 
-  rebuildAllIndexBuffers(): void {
-    this.cels.value = indexBuffer.rebuildAllIndexBuffers(this.cels.value, this.palette);
+  rebuildAllIndexBuffers(addMissingColors = false): void {
+    this.cels.value = indexBuffer.rebuildAllIndexBuffers(
+      this.cels.value,
+      this.palette,
+      addMissingColors
+    );
   }
 
   scanUsedColors(): Set<string> {

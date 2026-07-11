@@ -34,11 +34,15 @@ function remapCelBuffers(
   palette: PaletteIndexLookup,
   options: { skipTextCels?: boolean } = {}
 ): Map<string, Cel> {
+  const remappedBuffers = new Set<Uint8Array>();
+
   for (const cel of cels.values()) {
     if (!cel.indexBuffer) continue;
     if (options.skipTextCels && cel.textCelData) continue;
+    if (remappedBuffers.has(cel.indexBuffer)) continue;
 
     remapBuffer(cel.indexBuffer, mapIndex);
+    remappedBuffers.add(cel.indexBuffer);
   }
 
   return rebuildChangedCels(cels, palette);
@@ -176,6 +180,7 @@ function getReplacementIndex(
  * Returns a cleanup function to stop listening.
  */
 export function startPaletteSync(
+  events: EventTarget,
   palette: PaletteIndexLookup,
   getCels: () => Map<string, Cel>,
   setCels: (cels: Map<string, Cel>) => void,
@@ -232,13 +237,13 @@ export function startPaletteSync(
 
   // Add all listeners
   for (const [event, handler] of Object.entries(handlers)) {
-    window.addEventListener(event, handler as EventListener);
+    events.addEventListener(event, handler as EventListener);
   }
 
   // Return cleanup function
   return () => {
     for (const [event, handler] of Object.entries(handlers)) {
-      window.removeEventListener(event, handler as EventListener);
+      events.removeEventListener(event, handler as EventListener);
     }
   };
 }
