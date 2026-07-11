@@ -173,4 +173,25 @@ describe('pf-project-tabs', () => {
       'The workspace can keep up to 8 projects open at once.'
     );
   });
+
+  it('clears tab-cap feedback after six seconds', async () => {
+    vi.useFakeTimers();
+    workspaceStoreMock.items.value = Array.from({ length: 8 }, (_, index) =>
+      createWorkspaceItem(`project-${index + 1}`, `Project ${index + 1}`)
+    );
+    const element = await createTabs();
+
+    buttonWithLabel(element.shadowRoot!, 'Open project')?.click();
+    await settle(element);
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toContain(
+      'The workspace can keep up to 8 projects open at once.'
+    );
+
+    await vi.advanceTimersByTimeAsync(6000);
+    await settle(element);
+
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toBe('');
+    expect(element.shadowRoot?.querySelector('.error')).toBeNull();
+    vi.useRealTimers();
+  });
 });

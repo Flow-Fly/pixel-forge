@@ -190,6 +190,73 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(normalize(twice)).toEqual(normalize(once));
   });
 
+  it('drops every cel from the previous drawing when loading another project', async () => {
+    const firstProject = await buildSampleProject();
+    const secondProject = structuredClone(firstProject);
+    const secondLayer = secondProject.layers[0];
+    const secondFrame = secondProject.frames[0];
+    secondProject.name = 'Second drawing';
+    secondProject.layers = [{ ...secondLayer, id: 'second-layer' }];
+    secondProject.frames = [
+      {
+        ...secondFrame,
+        id: 'second-frame',
+        cels: secondFrame.cels
+          .filter((cel) => cel.layerId === secondLayer.id)
+          .map((cel) => ({ ...cel, layerId: 'second-layer' })),
+      },
+    ];
+    secondProject.animation.currentFrameIndex = 0;
+
+    vi.useFakeTimers();
+    await projectStore.loadProject(structuredClone(firstProject), false);
+    await vi.runAllTimersAsync();
+    await projectStore.loadProject(secondProject, false);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    const currentLayerIds = new Set(layerStore.layers.value.map((layer) => layer.id));
+    const currentFrameIds = new Set(animationStore.frames.value.map((frame) => frame.id));
+    const currentCels = [...animationStore.cels.value.values()];
+
+    expect(currentCels).toHaveLength(1);
+    expect(currentCels.every((cel) => currentLayerIds.has(cel.layerId))).toBe(true);
+    expect(currentCels.every((cel) => currentFrameIds.has(cel.frameId))).toBe(true);
+  });
+
+  it('serializes palette indices from the current canvas pixels', async () => {
+    paletteStore.setPalette([]);
+    const layerId = layerStore.layers.value[0].id;
+    const frameId = animationStore.frames.value[0].id;
+    const celKey = animationStore.getCelKey(layerId, frameId);
+    const cel = animationStore.cels.value.get(celKey);
+    if (!cel) throw new Error('Expected an initial cel');
+
+    const canvas = {
+      width: 1,
+      height: 1,
+      getContext: () => ({
+        getImageData: () => ({
+          data: new Uint8ClampedArray([255, 0, 0, 255]),
+        }),
+      }),
+    } as unknown as HTMLCanvasElement;
+    const cels = new Map(animationStore.cels.value);
+    cels.set(celKey, {
+      ...cel,
+      canvas,
+      indexBuffer: new Uint8Array([0]),
+      linkedCelId: undefined,
+      linkType: undefined,
+    });
+    animationStore.cels.value = cels;
+
+    const saved = await projectStore.saveProject();
+
+    expect(saved.frames[0].cels[0].indexData).toEqual([1]);
+    expect(saved.palette).toEqual(['#ff0000']);
+  });
+
   it('does not write the legacy compatibility palette after drawing adds a color', async () => {
     await buildSampleProject();
     paletteStore.getOrAddColorForDrawing('#123456');

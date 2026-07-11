@@ -30,6 +30,7 @@ const autoSaveServiceMock = vi.hoisted(() => ({
 }));
 
 const importReferenceImageFileMock = vi.hoisted(() => vi.fn(async () => null));
+const importProjectFilesMock = vi.hoisted(() => vi.fn(async () => null));
 
 vi.mock("../../../src/stores/history", () => ({
   historyStore: historyStoreMock,
@@ -59,6 +60,10 @@ vi.mock("../../../src/services/auto-save", () => ({
 
 vi.mock("../../../src/services/reference-import-action", () => ({
   importReferenceImageFile: importReferenceImageFileMock,
+}));
+
+vi.mock("../../../src/services/project-file-handling", () => ({
+  importProjectFiles: importProjectFilesMock,
 }));
 
 vi.mock("../../../src/commands/layer-commands", () => ({
@@ -424,6 +429,21 @@ describe("pf-menu-bar popovers", () => {
     expect(input.accept).toBe("image/png,image/jpeg,image/webp");
     expect(importReferenceImageFileMock).toHaveBeenCalledTimes(1);
     expect(importReferenceImageFileMock).toHaveBeenCalledWith(contextA, file);
+  });
+
+  it("delegates multiple project files from the File menu to the shared importer", async () => {
+    const first = new File(["first"], "first.pf");
+    const second = new File(["second"], "second.aseprite");
+    const { input } = useReferenceImageInput([first, second]);
+    const element = await createMenuBar();
+
+    await element.openFile();
+    await flushImport();
+
+    expect(input.accept).toBe(".pf,.json,.ase,.aseprite");
+    expect(input.multiple).toBe(true);
+    expect(importProjectFilesMock).toHaveBeenCalledWith([first, second]);
+    expect(projectStoreMock.loadProject).not.toHaveBeenCalled();
   });
 
   it("does nothing when the File menu reference image picker is canceled", async () => {
