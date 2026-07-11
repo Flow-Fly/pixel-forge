@@ -6,11 +6,8 @@ import {
   FlipLayerCommand,
   RotateLayerCommand,
 } from "../../commands/layer-commands";
-// Dynamic imports for file handling - loaded on demand to reduce initial bundle
-// import { importAseFile } from "../../services/aseprite-service";
-// import pako from "pako";
-import { type ProjectFileInput } from "../../types/project";
 import { autoSaveService } from "../../services/auto-save";
+import { importProjectFiles } from "../../services/project-file-handling";
 import { openReferenceImagePicker } from "../../services/reference-image-picker";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
@@ -531,43 +528,22 @@ export class PFMenuBar extends BaseComponent {
   }
 
   /**
-   * Unified open handler that supports:
-   * - .pf (compressed PixelForge project)
-   * - .json (uncompressed PixelForge project)
-   * - .ase, .aseprite (Aseprite files)
+   * Open one or more supported project files through the shared import path.
    */
   async openFile() {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".pf,.json,.ase,.aseprite";
+    input.multiple = true;
 
     input.onchange = async (e: Event) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      const ext = file.name.split(".").pop()?.toLowerCase();
+      const files = Array.from((e.target as HTMLInputElement).files ?? []);
+      if (files.length === 0) return;
 
       try {
-        if (ext === "ase" || ext === "aseprite") {
-          // Aseprite format - lazy load parser
-          const buffer = await file.arrayBuffer();
-          const { importAseFile } = await import("../../services/aseprite-service");
-          await importAseFile(buffer);
-        } else if (ext === "pf") {
-          // Compressed PixelForge format - lazy load pako
-          const buffer = await file.arrayBuffer();
-          const pako = await import("pako");
-          const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
-          const project = JSON.parse(decompressed) as ProjectFileInput;
-          await getActiveProjectContext().project.loadProject(project);
-        } else {
-          // JSON format (uncompressed)
-          const text = await file.text();
-          const project = JSON.parse(text) as ProjectFileInput;
-          await getActiveProjectContext().project.loadProject(project);
-        }
+        await importProjectFiles(files);
       } catch (error) {
-        log.error("Failed to open file:", error);
+        log.error("Failed to import project files:", error);
       }
     };
 

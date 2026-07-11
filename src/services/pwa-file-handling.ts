@@ -1,20 +1,18 @@
-import {
-  projectFileImportService,
-  type ProjectFileImportOutcome,
-  type ProjectFileImportService,
-} from './project-file-import';
+import { projectFileImportService, type ProjectFileImportService } from './project-file-import';
 import { log } from '../utils/log';
+import {
+  dispatchProjectFileImportReport,
+  type ProjectFileImportReport,
+} from './project-file-handling';
 
 type ProjectFileBatchImporter = Pick<ProjectFileImportService, 'importFiles'>;
 
-export interface PwaFileLaunchResult {
-  outcomes: ProjectFileImportOutcome[];
-  unreadableFiles: string[];
-}
+export type PwaFileLaunchResult = ProjectFileImportReport;
 
 export class PwaFileHandlingService {
   private readonly importer: ProjectFileBatchImporter;
   private launchConsumerRegistered = false;
+  private launchQueue: Promise<void> = Promise.resolve();
 
   constructor(importer: ProjectFileBatchImporter) {
     this.importer = importer;
@@ -32,7 +30,16 @@ export class PwaFileHandlingService {
     return true;
   }
 
-  async importLaunch(launchParams: LaunchParams): Promise<PwaFileLaunchResult> {
+  importLaunch(launchParams: LaunchParams): Promise<PwaFileLaunchResult> {
+    const importLaunch = this.launchQueue.then(() => this.readLaunchFiles(launchParams));
+    this.launchQueue = importLaunch.then(
+      () => undefined,
+      () => undefined
+    );
+    return importLaunch;
+  }
+
+  private async readLaunchFiles(launchParams: LaunchParams): Promise<PwaFileLaunchResult> {
     const files: File[] = [];
     const unreadableFiles: string[] = [];
 
@@ -45,10 +52,12 @@ export class PwaFileHandlingService {
       }
     }
 
-    return {
+    const report = {
       outcomes: await this.importer.importFiles(files),
       unreadableFiles,
     };
+    dispatchProjectFileImportReport(report);
+    return report;
   }
 }
 

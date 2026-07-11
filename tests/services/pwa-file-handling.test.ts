@@ -61,4 +61,35 @@ describe('PwaFileHandlingService', () => {
     expect(result.unreadableFiles).toEqual(['private.ase']);
     expect(importer.importFiles).toHaveBeenCalledWith([readable]);
   });
+
+  it('serializes repeated launches before reading their handles', async () => {
+    let releaseFirstFile: (() => void) | undefined;
+    const firstFilePaused = new Promise<void>((resolve) => {
+      releaseFirstFile = resolve;
+    });
+    const first = new File([], 'first.pf');
+    const second = new File([], 'second.pf');
+    const firstHandle = fileHandle(first);
+    vi.mocked(firstHandle.getFile).mockImplementation(async () => {
+      await firstFilePaused;
+      return first;
+    });
+    const secondHandle = fileHandle(second);
+    const importer = { importFiles: vi.fn(async () => []) };
+    const service = new PwaFileHandlingService(importer);
+
+    const firstLaunch = service.importLaunch({ files: [firstHandle] });
+    const secondLaunch = service.importLaunch({ files: [secondHandle] });
+
+    await vi.waitFor(() => {
+      expect(firstHandle.getFile).toHaveBeenCalledOnce();
+    });
+    expect(secondHandle.getFile).not.toHaveBeenCalled();
+
+    releaseFirstFile?.();
+    await Promise.all([firstLaunch, secondLaunch]);
+
+    expect(secondHandle.getFile).toHaveBeenCalledOnce();
+    expect(importer.importFiles.mock.calls.map(([files]) => files)).toEqual([[first], [second]]);
+  });
 });

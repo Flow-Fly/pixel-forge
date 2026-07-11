@@ -38,6 +38,13 @@ import { projectRepository } from "../../services/persistence/indexed-db";
 import { autoSaveService } from "../../services/auto-save";
 import { projectLibrary } from "../../services/project-library";
 import { pwaFileHandling } from "../../services/pwa-file-handling";
+import {
+  PROJECT_FILE_IMPORT_REPORT_EVENT,
+  describeProjectFileImport,
+  importProjectFiles,
+  supportedProjectFiles,
+  type ProjectFileImportReport,
+} from "../../services/project-file-handling";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 import { log } from "../../utils/log";
@@ -233,6 +240,45 @@ export class PixelForgeApp extends BaseComponent {
         transform: translate(-50%, -50%) translateY(-10px);
       }
     }
+
+    .file-import-status {
+      position: fixed;
+      left: 50%;
+      bottom: 42px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      max-width: min(560px, calc(100vw - 32px));
+      padding: 9px 10px 9px 14px;
+      background: rgba(13, 16, 21, 0.97);
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-md);
+      box-shadow: var(--pf-shadow-lg);
+      color: var(--pf-color-text-main);
+      font-size: 12px;
+      line-height: 1.4;
+      z-index: 10000;
+    }
+
+    .file-import-status button {
+      flex: none;
+      min-height: 28px;
+      padding: 4px 8px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      background: transparent;
+      color: var(--pf-color-text-secondary);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .file-import-status button:hover,
+    .file-import-status button:focus-visible {
+      border-color: var(--pf-color-accent);
+      color: var(--pf-color-text-main);
+      outline: none;
+    }
   `;
 
   @state() showResizeDialog = false;
@@ -248,10 +294,13 @@ export class PixelForgeApp extends BaseComponent {
   @state() private hasLibraryProject = false;
   @state() private projectSelectionRequired = false;
   @state() private warningMessage: string | null = null;
+  @state() private fileImportMessage: string | null = null;
 
   private resizeStartY = 0;
   private resizeStartHeight = 0;
   private warningTimer: number | null = null;
+  private fileImportTimer: number | null = null;
+  private fileDropHandlingStarted = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -305,10 +354,16 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+    window.addEventListener(
+      PROJECT_FILE_IMPORT_REPORT_EVENT,
+      this.handleProjectFileImportReport as EventListener
+    );
 
     // Load saved project from IndexedDB after listeners are ready.
     void this.loadSavedProject().finally(() => {
+      if (!this.isConnected) return;
       pwaFileHandling.registerLaunchConsumer();
+      this.startProjectFileDropHandling();
     });
   }
 
@@ -325,6 +380,60 @@ export class PixelForgeApp extends BaseComponent {
       this.warningMessage = null;
       this.warningTimer = null;
     }, 2000);
+  };
+
+  private handleProjectFileImportReport = (
+    event: CustomEvent<ProjectFileImportReport>
+  ) => {
+    const message = describeProjectFileImport(event.detail);
+    if (!message) return;
+
+    if (event.detail.outcomes.some((outcome) => outcome.ok)) {
+      this.hasLibraryProject = true;
+      this.projectSelectionRequired = false;
+      this.showProjectBrowser = false;
+    }
+
+    this.dismissFileImportMessage();
+    this.fileImportMessage = message;
+    this.fileImportTimer = window.setTimeout(() => {
+      this.fileImportMessage = null;
+      this.fileImportTimer = null;
+    }, 6000);
+  };
+
+  private dismissFileImportMessage = () => {
+    if (this.fileImportTimer !== null) {
+      clearTimeout(this.fileImportTimer);
+      this.fileImportTimer = null;
+    }
+    this.fileImportMessage = null;
+  };
+
+  private startProjectFileDropHandling() {
+    if (this.fileDropHandlingStarted) return;
+
+    window.addEventListener("dragover", this.handleProjectFileDragOver);
+    window.addEventListener("drop", this.handleProjectFileDrop);
+    this.fileDropHandlingStarted = true;
+  }
+
+  private handleProjectFileDragOver = (event: DragEvent) => {
+    const files = supportedProjectFiles(getDataTransferFiles(event.dataTransfer));
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  };
+
+  private handleProjectFileDrop = (event: DragEvent) => {
+    const files = supportedProjectFiles(getDataTransferFiles(event.dataTransfer));
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    void importProjectFiles(files).catch((error) => {
+      log.error("Failed to import dropped project files:", error);
+    });
   };
 
   private handleProjectLoaded = async () => {
@@ -552,6 +661,14 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+    window.removeEventListener(
+      PROJECT_FILE_IMPORT_REPORT_EVENT,
+      this.handleProjectFileImportReport as EventListener
+    );
+    window.removeEventListener("dragover", this.handleProjectFileDragOver);
+    window.removeEventListener("drop", this.handleProjectFileDrop);
+    this.fileDropHandlingStarted = false;
+    this.dismissFileImportMessage();
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -745,7 +862,27 @@ export class PixelForgeApp extends BaseComponent {
       ${this.warningMessage
         ? html`<div class="warning-toast">${this.warningMessage}</div>`
         : ""}
+      ${this.fileImportMessage
+        ? html`
+            <div class="file-import-status">
+              <span role="status" aria-live="polite">${this.fileImportMessage}</span>
+              <button type="button" @click=${this.dismissFileImportMessage}>Dismiss</button>
+            </div>
+          `
+        : ""}
       <pf-pwa-update-toast></pf-pwa-update-toast>
     `;
   }
+}
+
+function getDataTransferFiles(dataTransfer: DataTransfer | null): File[] {
+  if (!dataTransfer) return [];
+
+  const files = Array.from(dataTransfer.files);
+  if (files.length > 0) return files;
+
+  return Array.from(dataTransfer.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
 }

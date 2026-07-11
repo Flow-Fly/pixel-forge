@@ -3,8 +3,7 @@
 Use a Chromium browser for the install and service-worker checks. The development server does not register the production service worker, so build and preview the app first.
 
 ```sh
-npm run build
-npm run preview -- --host 127.0.0.1
+npm run pwa:preview
 ```
 
 ## Install
@@ -37,3 +36,19 @@ The menu action is intentionally absent when the browser does not expose an inst
 7. Confirm the current project is saved before the waiting worker activates and version B loads.
 
 To exercise the save-failure path, temporarily make IndexedDB unavailable before choosing **Restart**. Pixel Forge should remain open and explain that the current session stayed open.
+
+## Project file handling
+
+File associations are refreshed when the PWA is installed. After changing the manifest, uninstall Pixel Forge, run `npm run pwa:preview`, and install it again before testing.
+
+1. In Finder, use **Open With → Pixel Forge** for a `.pf` project.
+2. Repeat with `.ase` and `.aseprite` files.
+3. Keep Pixel Forge open and use **Open With → Pixel Forge** again. Confirm the existing app window is focused and each project opens in a new internal tab.
+4. Select multiple supported files in Finder and open them together. Confirm their tab order matches the selection order.
+5. Fill all eight project tabs, then open one more valid project file. Confirm Pixel Forge explains that the import was saved to **Project Library** without replacing the active drawing.
+6. Drag `.pf`, `.json`, `.ase`, and `.aseprite` files onto the app. Confirm they use the same new-project behavior and feedback.
+7. Drop an unsupported file by itself. Confirm Pixel Forge leaves the browser's normal behavior alone.
+8. Deny the browser-owned file-handling permission when prompted, then confirm the open project remains unchanged.
+9. Open Pixel Forge in Firefox or Safari and confirm the editor starts normally. File-menu import and drag-and-drop should still work; operating-system association is unavailable there.
+
+Pixel Forge reads only the files supplied for the current launch. It does not retain file handles, request write permission, or save changes back to the source file.
