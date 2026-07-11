@@ -12,7 +12,13 @@ import {
 } from './project-defaults';
 import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { DB32_COLORS, PALETTE_BY_ID } from '../stores/palette/types';
-import { PROJECT_VERSION, type ProjectFile } from '../types/project';
+import {
+  PROJECT_VERSION,
+  type ProjectFile,
+  type ProjectFileInput,
+} from '../types/project';
+import { normalizeProjectFileImageData } from '../serialization/project-data';
+import { migrateProjectFileForLoad } from '../serialization/project-load';
 
 export type CreateProjectOptions = {
   name?: string;
@@ -82,6 +88,20 @@ export class ProjectLibraryService {
     const id = uuidv4();
     await this.repository.save(id, structuredClone(project));
     await this.loadStoredProject(id, context);
+    return id;
+  }
+
+  /** Persist an imported project under a fresh identity without opening it. */
+  async importProjectFile(project: ProjectFileInput): Promise<string> {
+    const id = uuidv4();
+    const canonicalProject = migrateProjectFileForLoad(
+      normalizeProjectFileImageData(structuredClone(project))
+    );
+
+    await this.repository.save(id, {
+      ...canonicalProject,
+      version: PROJECT_VERSION,
+    });
     return id;
   }
 
