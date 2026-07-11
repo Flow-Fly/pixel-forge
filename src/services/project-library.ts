@@ -127,7 +127,7 @@ export class ProjectLibraryService {
   async deleteProject(id: string, settings: DeleteProjectSettings = {}): Promise<void> {
     const context = settings.context ?? defaultProjectContext;
     if (id === context.project.id.value) {
-      autoSaveService.clearPendingSave(context);
+      await autoSaveService.clearPendingSave(context);
     }
 
     await this.repository.delete(id);

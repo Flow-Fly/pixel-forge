@@ -337,6 +337,40 @@ describe('ProjectLibraryService', () => {
     expect(projects.has('open')).toBe(false);
   });
 
+  it('waits for an in-flight auto-save before deleting the project', async () => {
+    projects.set('open', makeProject('Open'));
+    await openProjectInStore('open', makeProject('Open'));
+    autoSaveService.start();
+
+    let finishWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    repository.save.mockImplementationOnce(async (id: string, project: ProjectFile) => {
+      await writeGate;
+      projects.set(id, cloneProject(project));
+    });
+
+    await historyStore.execute(
+      makeCommand(() => {
+        projectStore.name.value = 'Saving project';
+      })
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const deletion = service.deleteProject('open');
+    await Promise.resolve();
+
+    expect(repository.delete).not.toHaveBeenCalled();
+
+    finishWrite();
+    await deletion;
+
+    expect(projects.has('open')).toBe(false);
+    expect(repository.delete).toHaveBeenCalledWith('open');
+  });
+
   it('does not let an old auto-save timer write the previous project under the new id', async () => {
     projects.set('a', makeProject('Project A'));
     projects.set('b', makeProject('Project B'));

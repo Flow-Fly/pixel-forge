@@ -102,12 +102,16 @@ class AutoSaveService {
     return this.dirtyContexts.value.has(context);
   }
 
-  /** Drop a pending debounce without writing. Used when the open project is deleted. */
-  clearPendingSave(context: ProjectContext = defaultProjectContext) {
+  /**
+   * Drop queued work and wait for a write that has already started.
+   * Deletion can then run after every older write that could recreate the record.
+   */
+  async clearPendingSave(context: ProjectContext = defaultProjectContext): Promise<void> {
     const state = this.getState(context);
     this.clearSaveTimeout(state);
     state.persistedRevision = state.changeRevision;
     this.updateDirtyState(context, state);
+    await state.saveQueue;
   }
 
   /** Run project load/reset work without treating reset signals as user edits. */
