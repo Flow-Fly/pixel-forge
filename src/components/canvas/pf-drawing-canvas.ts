@@ -209,8 +209,8 @@ export class PFDrawingCanvas extends BaseComponent {
     if (!activeLayer?.canvas) return null;
 
     return new CommitFloatCommand(
-      activeLayer.canvas,
       activeLayer.id,
+      context.animation.currentFrameId.value,
       state.imageData,
       state.originalBounds,
       state.currentOffset,

@@ -1,11 +1,9 @@
 import { html, css, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
-import { historyStore, type Command } from '../../stores/history';
-import { historyHighlightStore } from '../../stores/history-highlight';
+import type { Command } from '../../stores/history';
 import { isDrawableCommand } from '../../commands/index';
-import { layerStore } from '../../stores/layers';
-import { projectStore } from '../../stores/project';
+import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import './pf-history-diff-tooltip';
 import './pf-button';
 
@@ -132,9 +130,20 @@ export class PFUndoHistory extends BaseComponent {
   @state() private allPixelsOverwritten = false;
 
   @query('.tooltip-anchor') tooltipAnchor!: HTMLElement;
+  private context: ProjectContext = defaultProjectContext;
 
   connectedCallback() {
     super.connectedCallback();
+    this.subscribeToActiveProjectContext((context) => {
+      if (this.hoverTimeout !== null) {
+        clearTimeout(this.hoverTimeout);
+        this.hoverTimeout = null;
+      }
+      this.context = context;
+      this.tooltipAnchorRect = null;
+      this.allPixelsOverwritten = false;
+      this.requestUpdate();
+    });
     document.addEventListener('keydown', this.handleKeyDown);
   }
 
@@ -148,7 +157,7 @@ export class PFUndoHistory extends BaseComponent {
 
   private handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
-      historyHighlightStore.clear();
+      this.context.historyHighlight.clear();
     }
   };
 
@@ -159,14 +168,15 @@ export class PFUndoHistory extends BaseComponent {
     }
 
     // Debounce hover by 100ms
+    const historyHighlight = this.context.historyHighlight;
+    const target = event.currentTarget as HTMLElement;
     this.hoverTimeout = window.setTimeout(() => {
       // Don't update highlight if we have an expanded item
-      if (historyHighlightStore.expandedCommandId.value === null) {
-        historyHighlightStore.setHighlight(cmd);
+      if (historyHighlight.expandedCommandId.value === null) {
+        historyHighlight.setHighlight(cmd);
       }
 
       // Get anchor rect for tooltip
-      const target = event.currentTarget as HTMLElement;
       this.tooltipAnchorRect = target.getBoundingClientRect();
     }, 100);
   }
@@ -178,15 +188,15 @@ export class PFUndoHistory extends BaseComponent {
     }
 
     // Only clear highlight if not expanded
-    if (historyHighlightStore.expandedCommandId.value === null) {
-      historyHighlightStore.setHighlight(null);
+    if (this.context.historyHighlight.expandedCommandId.value === null) {
+      this.context.historyHighlight.setHighlight(null);
       this.tooltipAnchorRect = null;
     }
   }
 
   private handleClick(cmd: Command, index: number, type: 'undo' | 'redo') {
     // Toggle expanded state
-    historyHighlightStore.toggleExpanded(cmd);
+    this.context.historyHighlight.toggleExpanded(cmd);
 
     // Check if all pixels are overwritten (for patch button state)
     if (isDrawableCommand(cmd)) {
@@ -202,69 +212,84 @@ export class PFUndoHistory extends BaseComponent {
   }
 
   private async revertToHere(index: number, type: 'undo' | 'redo') {
+    const context = this.context;
+    const history = context.history;
+
     if (type === 'undo') {
-      const undoStack = historyStore.undoStack.value;
+      const undoStack = history.undoStack.value;
       const stepsToUndo = undoStack.length - 1 - index;
 
       for (let i = 0; i < stepsToUndo; i++) {
-        await historyStore.undo();
+        await history.undo();
       }
     } else {
       const stepsToRedo = index + 1;
       for (let i = 0; i < stepsToRedo; i++) {
-        await historyStore.redo();
+        await history.redo();
       }
     }
 
     // Clear expanded state
-    historyHighlightStore.clear();
+    context.historyHighlight.clear();
   }
 
   private async patchThisOut(cmd: Command, index: number) {
     if (!isDrawableCommand(cmd)) return;
 
-    // Import patch service dynamically to avoid circular dependency
-    const { computeSafePixels, applyPatch } = await import('../../services/patch-service');
-    const { PatchCommand } = await import('../../commands/patch-command');
-
-    const undoStack = historyStore.undoStack.value;
+    const context = this.context;
+    const history = context.history;
+    const historyHighlight = context.historyHighlight;
+    const frameId = cmd.drawFrameId;
+    const undoStack = history.undoStack.value;
     const subsequentCommands = undoStack.slice(index + 1);
-    const canvasWidth = projectStore.width.value;
+    const canvasWidth = context.project.width.value;
+
+    // Import patch service dynamically to avoid circular dependency
+    const { computeSafePixels, createPatchData } = await import('../../services/patch-service');
+    const { PatchCommand } = await import('../../commands/patch-command');
 
     // Compute safe pixels
     const safePixels = computeSafePixels(cmd, subsequentCommands, canvasWidth);
 
     if (safePixels.size === 0) {
-      this.allPixelsOverwritten = true;
+      if (this.context === context) this.allPixelsOverwritten = true;
       return;
     }
 
-    // Apply patch
-    const patchData = applyPatch(cmd.drawLayerId, cmd, safePixels, canvasWidth);
+    const patchData = createPatchData(
+      context,
+      cmd.drawLayerId,
+      frameId,
+      cmd,
+      safePixels,
+      canvasWidth
+    );
     if (!patchData) {
-      this.allPixelsOverwritten = true;
+      if (this.context === context) this.allPixelsOverwritten = true;
       return;
     }
 
     // Create and execute patch command
     const patchCommand = new PatchCommand(
       cmd.drawLayerId,
+      frameId,
       patchData.bounds,
       patchData.beforeData,
       patchData.afterData,
-      cmd.name
+      cmd.name,
+      context
     );
 
-    await historyStore.execute(patchCommand);
+    await history.execute(patchCommand);
 
     // Clear expanded state
-    historyHighlightStore.clear();
+    historyHighlight.clear();
   }
 
   private isLayerDeleted(cmd: Command): boolean {
     if (!isDrawableCommand(cmd)) return false;
     const layerId = cmd.drawLayerId;
-    const layer = layerStore.layers.value.find(l => l.id === layerId);
+    const layer = this.context.layers.layers.value.find(l => l.id === layerId);
     return !layer;
   }
 
@@ -333,7 +358,7 @@ export class PFUndoHistory extends BaseComponent {
 
   updated() {
     // Render diff canvases after DOM update
-    const expandedCmd = historyHighlightStore.expandedCommand.value;
+    const expandedCmd = this.context.historyHighlight.expandedCommand.value;
     if (expandedCmd && isDrawableCommand(expandedCmd)) {
       this.renderDiffCanvas(expandedCmd, 'before');
       this.renderDiffCanvas(expandedCmd, 'after');
@@ -365,11 +390,11 @@ export class PFUndoHistory extends BaseComponent {
   }
 
   render() {
-    const undoStack = historyStore.undoStack.value;
-    const redoStack = historyStore.redoStack.value;
-    const highlightedId = historyHighlightStore.highlightedCommandId.value;
-    const expandedId = historyHighlightStore.expandedCommandId.value;
-    const highlightedCmd = historyHighlightStore.highlightedCommand.value;
+    const undoStack = this.context.history.undoStack.value;
+    const redoStack = this.context.history.redoStack.value;
+    const highlightedId = this.context.historyHighlight.highlightedCommandId.value;
+    const expandedId = this.context.historyHighlight.expandedCommandId.value;
+    const highlightedCmd = this.context.historyHighlight.highlightedCommand.value;
 
     // Show tooltip only when hovering (not expanded) and have an anchor
     const showTooltip = highlightedId !== null &&

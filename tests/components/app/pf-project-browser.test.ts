@@ -422,6 +422,27 @@ describe('pf-project-browser', () => {
     expect(projectLibraryMock.listProjects).toHaveBeenCalledTimes(2);
   });
 
+  it('saves a targeted inactive open project before duplicating it', async () => {
+    const inactiveProjectContext = {
+      project: {
+        id: { value: 'second-project' },
+        name: { value: 'Second Project' },
+      },
+    };
+    workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) => {
+      if (projectId === 'open-project') return { context: activeProjectContextMock };
+      if (projectId === 'second-project') return { context: inactiveProjectContext };
+      return undefined;
+    });
+    const element = await createBrowser();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Duplicate')?.click();
+    await settle(element);
+
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(inactiveProjectContext);
+    expect(projectLibraryMock.duplicateProject).toHaveBeenCalledWith('second-project');
+  });
+
   it('confirms deletion before deleting a project', async () => {
     activeProjectContextMock.project.id.value = 'different-project';
     const element = await createBrowser();
@@ -436,6 +457,30 @@ describe('pf-project-browser', () => {
 
     expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('open-project', {
       context: activeProjectContextMock,
+    });
+  });
+
+  it('clears pending saves through the targeted inactive open context when deleting', async () => {
+    const inactiveProjectContext = {
+      project: {
+        id: { value: 'second-project' },
+        name: { value: 'Second Project' },
+      },
+    };
+    workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) => {
+      if (projectId === 'open-project') return { context: activeProjectContextMock };
+      if (projectId === 'second-project') return { context: inactiveProjectContext };
+      return undefined;
+    });
+    const element = await createBrowser();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Delete')?.click();
+    await element.updateComplete;
+    confirmDeleteButton(element.shadowRoot!)?.click();
+    await settle(element);
+
+    expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('second-project', {
+      context: inactiveProjectContext,
     });
   });
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { animationStore } from "../../src/stores/animation";
+import { animationStore, EMPTY_CEL_LINK_ID } from "../../src/stores/animation";
 import { colorStore } from "../../src/stores/colors";
 import { dirtyRectStore } from "../../src/stores/dirty-rect";
 import { gridStore } from "../../src/stores/grid";
@@ -319,5 +319,66 @@ describe("ProjectContext", () => {
     context.palette.updateColor(1, "#fedcba");
 
     expect(rebuild).toHaveBeenCalledTimes(1);
+  });
+
+  it("prepares an empty cel for editing without changing another blank frame", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const firstFrameId = context.animation.currentFrameId.value;
+
+    context.animation.addFrame(false);
+    const secondFrameId = context.animation.currentFrameId.value;
+
+    const firstKey = context.animation.getCelKey(layerId, firstFrameId);
+    const secondKey = context.animation.getCelKey(layerId, secondFrameId);
+    const sharedCanvas = context.animation.cels.value.get(firstKey)?.canvas;
+
+    expect(sharedCanvas).toBe(context.animation.cels.value.get(secondKey)?.canvas);
+
+    const editableCanvas = context.animation.getEditableCelCanvas(layerId, firstFrameId);
+    const firstCel = context.animation.cels.value.get(firstKey);
+    const secondCel = context.animation.cels.value.get(secondKey);
+
+    expect(editableCanvas).toBe(firstCel?.canvas);
+    expect(firstCel?.canvas).not.toBe(sharedCanvas);
+    expect(firstCel?.linkedCelId).toBeUndefined();
+    expect(secondCel?.canvas).toBe(sharedCanvas);
+    expect(secondCel?.linkedCelId).toBe(EMPTY_CEL_LINK_ID);
+  });
+
+  it("keeps explicitly hard-linked cels shared when preparing one for editing", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const firstFrameId = context.animation.currentFrameId.value;
+    context.animation.addFrame(false);
+    const secondFrameId = context.animation.currentFrameId.value;
+    const keys = [
+      context.animation.getCelKey(layerId, firstFrameId),
+      context.animation.getCelKey(layerId, secondFrameId),
+    ];
+
+    context.animation.linkCels(keys, "hard");
+    const sharedCanvas = context.animation.cels.value.get(keys[0])?.canvas;
+
+    expect(context.animation.getEditableCelCanvas(layerId, firstFrameId)).toBe(sharedCanvas);
+    expect(context.animation.cels.value.get(keys[1])?.canvas).toBe(sharedCanvas);
+    expect(context.animation.cels.value.get(keys[0])?.linkType).toBe("hard");
+    expect(context.animation.cels.value.get(keys[1])?.linkType).toBe("hard");
+  });
+
+  it("creates an index buffer only for the blank frame being edited", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const firstFrameId = context.animation.currentFrameId.value;
+    context.animation.addFrame(false);
+    const secondFrameId = context.animation.currentFrameId.value;
+
+    context.animation.ensureCelIndexBuffer(layerId, firstFrameId);
+
+    expect(context.animation.getCelIndexBuffer(layerId, firstFrameId)).toBeDefined();
+    expect(context.animation.getCelIndexBuffer(layerId, secondFrameId)).toBeUndefined();
+    expect(context.animation.getCelCanvas(firstFrameId, layerId)).not.toBe(
+      context.animation.getCelCanvas(secondFrameId, layerId)
+    );
   });
 });

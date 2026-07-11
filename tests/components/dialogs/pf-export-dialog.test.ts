@@ -1,12 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '../../../src/components/dialogs/pf-export-dialog';
 import type { PFExportDialog } from '../../../src/components/dialogs/pf-export-dialog';
 import { CRT_PRESETS } from '../../../src/services/view-effects';
+import { FileService } from '../../../src/services/file-service';
+import {
+  createProjectContext,
+  defaultProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../../../src/stores/project-context';
 import { settingsStore } from '../../../src/stores/settings';
 
-function createDialog(): PFExportDialog {
+const createdContexts: ProjectContext[] = [];
+
+function createDialog(context?: ProjectContext): PFExportDialog {
   const dialog = document.createElement('pf-export-dialog') as PFExportDialog;
+  if (context) {
+    (dialog as PFExportDialog & { context: ProjectContext }).context = context;
+  }
   document.body.append(dialog);
   dialog.open = true;
   return dialog;
@@ -20,6 +33,36 @@ describe('pf-export-dialog view-effect export', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    restoreDefaultProjectContext();
+    for (const context of createdContexts.splice(0)) {
+      context.dispose();
+    }
+  });
+
+  it('exports the project context that opened the dialog', async () => {
+    const contextB = createProjectContext();
+    contextB.project.name.value = 'Tab B';
+    createdContexts.push(contextB);
+    setActiveProjectContext(contextB);
+    const projectA = { name: 'Tab A' };
+    const projectB = { name: 'Tab B' };
+    vi.spyOn(defaultProjectContext.project, 'saveProject').mockResolvedValue(
+      projectA as never
+    );
+    vi.spyOn(contextB.project, 'saveProject').mockResolvedValue(projectB as never);
+    const saveCompressed = vi
+      .spyOn(FileService, 'saveCompressed')
+      .mockImplementation(() => {});
+    const dialog = createDialog(contextB);
+    await dialog.updateComplete;
+
+    dialog.shadowRoot?.querySelector<HTMLButtonElement>('.btn-export')?.click();
+    await vi.waitFor(() => {
+      expect(saveCompressed).toHaveBeenCalled();
+    });
+
+    expect(saveCompressed).toHaveBeenCalledWith(projectB, 'Tab B.pf');
   });
 
   it('keeps the opt-in control hidden without an active view effect', async () => {

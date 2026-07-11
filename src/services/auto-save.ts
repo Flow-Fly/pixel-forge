@@ -9,7 +9,10 @@ const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
 interface AutoSaveContextState {
   isDirty: boolean;
+  changeRevision: number;
+  persistedRevision: number;
   saveTimeout: ReturnType<typeof setTimeout> | null;
+  saveQueue: Promise<void>;
   dispose: (() => void) | null;
   suppressSaveCount: number;
 }
@@ -69,8 +72,8 @@ class AutoSaveService {
     const state = this.getState(context);
     if (state.suppressSaveCount > 0) return;
 
-    state.isDirty = true;
-    this.setDirtyContext(context, true);
+    state.changeRevision++;
+    this.updateDirtyState(context, state);
 
     this.clearSaveTimeout(state);
     state.saveTimeout = setTimeout(() => {
@@ -99,12 +102,16 @@ class AutoSaveService {
     return this.dirtyContexts.value.has(context);
   }
 
-  /** Drop a pending debounce without writing. Used when the open project is deleted. */
-  clearPendingSave(context: ProjectContext = defaultProjectContext) {
+  /**
+   * Drop queued work and wait for a write that has already started.
+   * Deletion can then run after every older write that could recreate the record.
+   */
+  async clearPendingSave(context: ProjectContext = defaultProjectContext): Promise<void> {
     const state = this.getState(context);
     this.clearSaveTimeout(state);
-    state.isDirty = false;
-    this.setDirtyContext(context, false);
+    state.persistedRevision = state.changeRevision;
+    this.updateDirtyState(context, state);
+    await state.saveQueue;
   }
 
   /** Run project load/reset work without treating reset signals as user edits. */
@@ -132,24 +139,50 @@ class AutoSaveService {
   private async performSave(
     context: ProjectContext,
     options: { force?: boolean; rethrow?: boolean } = {}
-  ) {
+  ): Promise<void> {
     const state = this.getState(context);
     if (!state.isDirty && !options.force) return;
 
-    const wasDirty = state.isDirty;
-    state.isDirty = false;
-    this.setDirtyContext(context, false);
+    if (options.force) {
+      // Some direct project mutations do not create history entries. A forced
+      // save is itself a request to persist the current state.
+      state.changeRevision++;
+      this.updateDirtyState(context, state);
+    }
+
+    const projectId = context.project.id.value;
+    const requestedRevision = state.changeRevision;
+    const save = state.saveQueue.then(() =>
+      this.writeProject(context, state, projectId, requestedRevision, options)
+    );
+
+    // A failed save must not prevent the next queued request from running.
+    state.saveQueue = save.catch(() => {});
+    await save;
+  }
+
+  private async writeProject(
+    context: ProjectContext,
+    state: AutoSaveContextState,
+    projectId: string,
+    requestedRevision: number,
+    options: { force?: boolean; rethrow?: boolean }
+  ): Promise<void> {
+    if (requestedRevision <= state.persistedRevision) return;
 
     try {
       const projectData = await context.project.saveProject();
       const thumbnail = await createThumbnailSafely(context);
-      await projectRepository.save(context.project.id.value, projectData, {
+      await projectRepository.save(projectId, projectData, {
         thumbnail,
       });
-      context.project.lastSaved.value = Date.now();
+      if (context.project.id.value === projectId) {
+        context.project.lastSaved.value = Date.now();
+      }
+      state.persistedRevision = Math.max(state.persistedRevision, requestedRevision);
+      this.updateDirtyState(context, state);
     } catch (error) {
-      state.isDirty = wasDirty || state.isDirty;
-      this.setDirtyContext(context, state.isDirty);
+      this.updateDirtyState(context, state);
       log.error('Auto-save failed:', error);
       if (options.rethrow) throw error;
     }
@@ -161,7 +194,10 @@ class AutoSaveService {
 
     const state: AutoSaveContextState = {
       isDirty: false,
+      changeRevision: 0,
+      persistedRevision: 0,
       saveTimeout: null,
+      saveQueue: Promise.resolve(),
       dispose: null,
       suppressSaveCount: 0,
     };
@@ -218,6 +254,11 @@ class AutoSaveService {
     }
 
     this.dirtyContexts.value = new Set(this.dirtyContextSet);
+  }
+
+  private updateDirtyState(context: ProjectContext, state: AutoSaveContextState) {
+    state.isDirty = state.persistedRevision < state.changeRevision;
+    this.setDirtyContext(context, state.isDirty);
   }
 }
 

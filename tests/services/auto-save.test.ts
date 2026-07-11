@@ -43,6 +43,22 @@ import {
 
 const createdContexts: ProjectContext[] = [];
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function settleSaveQueue() {
+  for (let index = 0; index < 20; index++) {
+    await Promise.resolve();
+  }
+}
+
 function makeCommand(run?: () => void): Command {
   return {
     id: 'test-cmd',
@@ -169,5 +185,120 @@ describe('AutoSaveService', () => {
     expect(savedProjects.get('project-b')).toBe('Project B edited');
     expect(savedProjects.size).toBe(2);
     expect(createProjectThumbnail).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes saves for one context and writes an edit made during a save afterwards', async () => {
+    const context = createContext('ordered-project', 'First state');
+    const firstWrite = deferred<void>();
+    const secondWrite = deferred<void>();
+
+    vi.mocked(projectRepository.save)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockImplementationOnce(() => secondWrite.promise);
+
+    autoSaveService.start(context);
+    await context.history.execute(makeCommand());
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(2000);
+    await settleSaveQueue();
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(1);
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Second state';
+      })
+    );
+    await Promise.resolve();
+    const forcedSave = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(1);
+
+    firstWrite.resolve();
+    await settleSaveQueue();
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Second state');
+    expect(autoSaveService.isDirty(context)).toBe(true);
+
+    secondWrite.resolve();
+    await forcedSave;
+    expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
+  it('captures the project identity before asynchronous serialization', async () => {
+    const context = createContext('original-project', 'Original project');
+    const serializedProject = await context.project.saveProject();
+    const serialization = deferred<typeof serializedProject>();
+    vi.spyOn(context.project, 'saveProject').mockReturnValueOnce(serialization.promise);
+
+    const save = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    context.project.id.value = 'replacement-project';
+    serialization.resolve(serializedProject);
+    await save;
+
+    expect(projectRepository.save).toHaveBeenCalledWith(
+      'original-project',
+      serializedProject,
+      expect.any(Object)
+    );
+  });
+
+  it('keeps a failed forced save dirty and allows a later retry', async () => {
+    const context = createContext('retry-project', 'Retry project');
+    vi.mocked(projectRepository.save)
+      .mockRejectedValueOnce(new Error('write failed'))
+      .mockResolvedValueOnce();
+
+    await expect(autoSaveService.saveNow(context)).rejects.toThrow('write failed');
+    expect(autoSaveService.isDirty(context)).toBe(true);
+
+    await autoSaveService.saveNow(context);
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(2);
+    expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
+  it('lets a newer queued save clear dirty state after an older save fails', async () => {
+    const context = createContext('failure-order-project', 'Older state');
+    const firstWrite = deferred<void>();
+    vi.mocked(projectRepository.save)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockResolvedValueOnce();
+
+    const olderSave = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+
+    context.project.name.value = 'Newer state';
+    const newerSave = autoSaveService.saveNow(context);
+    firstWrite.reject(new Error('older write failed'));
+
+    await expect(olderSave).rejects.toThrow('older write failed');
+    await newerSave;
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Newer state');
+    expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
+  it('allows separate contexts to save independently', async () => {
+    const contextA = createContext('parallel-a', 'Parallel A');
+    const contextB = createContext('parallel-b', 'Parallel B');
+    const writeA = deferred<void>();
+
+    vi.mocked(projectRepository.save).mockImplementation((id) => {
+      return id === 'parallel-a' ? writeA.promise : Promise.resolve();
+    });
+
+    const saveA = autoSaveService.saveNow(contextA);
+    const saveB = autoSaveService.saveNow(contextB);
+    await saveB;
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(2);
+
+    writeA.resolve();
+    await saveA;
   });
 });

@@ -346,6 +346,33 @@ describe("pf-menu-bar popovers", () => {
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("renames the project where name editing started", async () => {
+    const contextA = createContext("Context A");
+    const contextB = createContext("Context B");
+    setActiveProjectContext(contextA);
+    const element = await createMenuBar();
+
+    element.shadowRoot
+      ?.querySelector<HTMLElement>(".project-name-display")
+      ?.click();
+    await element.updateComplete;
+
+    setActiveProjectContext(contextB);
+    const input = element.shadowRoot?.querySelector<HTMLInputElement>(
+      ".project-name-input"
+    );
+    expect(input).toBeTruthy();
+    input!.value = "Renamed A";
+    input!.dispatchEvent(new FocusEvent("blur"));
+    await vi.waitFor(() => {
+      expect(autoSaveServiceMock.saveNow).toHaveBeenCalled();
+    });
+
+    expect(contextA.project.name.value).toBe("Renamed A");
+    expect(contextB.project.name.value).toBe("Context B");
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextA);
+  });
+
   it("only shows the install action while the browser offers installation", async () => {
     const element = await createMenuBar();
     const fileMenu = menu(element, "file")!;

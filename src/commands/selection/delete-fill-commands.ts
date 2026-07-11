@@ -1,45 +1,32 @@
 import { type Command } from '../../stores/history';
-import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
+import { getActiveProjectContext } from '../../stores/project-context';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { clearCanvasSelection, fillCanvasSelection } from './pixels';
-
-type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
+import { SelectionRegionCommand, type EditableCelCommandContext } from './editable-cel-command';
 
 /**
  * Command for deleting selected pixels (without moving).
  * Execute: clears selected pixels
  * Undo: restores cleared pixels
  */
-export class DeleteSelectionCommand implements Command {
-  id: string;
+export class DeleteSelectionCommand extends SelectionRegionCommand implements Command {
   name = 'Delete Selection';
-  timestamp: number;
 
-  private canvas: HTMLCanvasElement;
-  private bounds: Rect;
-  private shape: SelectionShape;
   private deletedImageData: ImageData;
-  private mask?: Uint8Array;
-  private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     mask?: Uint8Array,
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.canvas = canvas;
-    this.context = context;
-    this.bounds = { ...bounds };
-    this.shape = shape;
-    this.mask = mask;
+    super(layerId, frameId, bounds, shape, mask, context);
 
     // Capture pixels before deleting
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.deletedImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 
@@ -64,38 +51,26 @@ export class DeleteSelectionCommand implements Command {
  * Execute: fills selected pixels with the specified color
  * Undo: restores original pixels
  */
-export class FillSelectionCommand implements Command {
-  id: string;
+export class FillSelectionCommand extends SelectionRegionCommand implements Command {
   name = 'Fill Selection';
-  timestamp: number;
 
-  private canvas: HTMLCanvasElement;
-  private bounds: Rect;
-  private shape: SelectionShape;
   private fillColor: string;
   private previousImageData: ImageData;
-  private mask?: Uint8Array;
-  private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     fillColor: string,
     mask?: Uint8Array,
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.canvas = canvas;
-    this.context = context;
-    this.bounds = { ...bounds };
-    this.shape = shape;
+    super(layerId, frameId, bounds, shape, mask, context);
     this.fillColor = fillColor;
-    this.mask = mask;
 
     // Capture pixels before filling
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.previousImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 

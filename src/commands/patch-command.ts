@@ -2,7 +2,7 @@ import type { Command } from './index';
 import type { Rect } from '../types/geometry';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
 
-type PatchCommandContext = Pick<ProjectContext, 'dirtyRect' | 'layers'>;
+type PatchCommandContext = Pick<ProjectContext, 'animation' | 'dirtyRect'>;
 
 /**
  * Command for selective undo (patching out a specific change).
@@ -16,6 +16,7 @@ export class PatchCommand implements Command {
   timestamp?: number;
 
   private layerId: string;
+  private frameId: string;
   private bounds: Rect;
   private beforeData: Uint8ClampedArray; // Canvas state before patch
   private afterData: Uint8ClampedArray; // Canvas state after patch (with pixels restored)
@@ -37,9 +38,13 @@ export class PatchCommand implements Command {
   get drawLayerId(): string {
     return this.layerId;
   }
+  get drawFrameId(): string {
+    return this.frameId;
+  }
 
   constructor(
     layerId: string,
+    frameId: string,
     bounds: Rect,
     beforeData: Uint8ClampedArray,
     afterData: Uint8ClampedArray,
@@ -50,6 +55,7 @@ export class PatchCommand implements Command {
     this.name = `Patch out: ${originalCommandName}`;
     this.context = context;
     this.layerId = layerId;
+    this.frameId = frameId;
     this.bounds = { ...bounds };
     this.beforeData = beforeData;
     this.afterData = afterData;
@@ -68,10 +74,8 @@ export class PatchCommand implements Command {
   }
 
   private applyData(data: Uint8ClampedArray): void {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer?.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
+    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
     // Rebuild ImageData from the stored array before writing it back.
