@@ -26,9 +26,7 @@ describe('GET /api/health', () => {
       headers: { Origin: 'https://pixel-forge.app' },
     });
 
-    expect(response.headers.get('access-control-allow-origin')).toBe(
-      'https://pixel-forge.app',
-    );
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://pixel-forge.app');
   });
 
   it('does not grant CORS to an unconfigured origin', async () => {
@@ -49,9 +47,7 @@ describe('GET /api/health', () => {
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get('access-control-allow-origin')).toBe(
-      'https://pixel-forge.app',
-    );
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://pixel-forge.app');
     expect(response.headers.has('access-control-allow-credentials')).toBe(false);
   });
 });

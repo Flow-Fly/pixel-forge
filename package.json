@@ -3,7 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["shared", "server"],
+  "workspaces": [
+    "shared",
+    "server"
+  ],
   "scripts": {
     "dev": "npm run shared:build && vite",
     "build": "npm run shared:build && tsc && vite build",

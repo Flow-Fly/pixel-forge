@@ -14,7 +14,7 @@ export function createApp(config: ServerConfig): Hono {
     cors({
       allowMethods: ['GET'],
       origin: (origin) => (allowedOrigins.has(origin) ? origin : undefined),
-    }),
+    })
   );
 
   app.get('/api/health', (context) =>
@@ -23,7 +23,7 @@ export function createApp(config: ServerConfig): Hono {
       service: 'pixel-forge-api',
       status: 'ok',
       version: SERVER_VERSION,
-    }),
+    })
   );
 
   return app;

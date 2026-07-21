@@ -1,11 +1,7 @@
 import { serve, type ServerType } from '@hono/node-server';
 import { createApp, SERVER_VERSION } from './app.js';
 import type { ServerConfig } from './config.js';
-import {
-  consoleServerLogger,
-  errorMessage,
-  type ServerLogger,
-} from './logger.js';
+import { consoleServerLogger, errorMessage, type ServerLogger } from './logger.js';
 
 export interface RunningServer {
   readonly port: number;
@@ -21,7 +17,7 @@ function closeServer(server: ServerType): Promise<void> {
 function createRunningServer(
   server: ServerType,
   port: number,
-  logger: ServerLogger,
+  logger: ServerLogger
 ): RunningServer {
   let shutdownPromise: Promise<void> | undefined;
 
@@ -47,7 +43,7 @@ function createRunningServer(
 
 export function startServer(
   config: ServerConfig,
-  logger: ServerLogger = consoleServerLogger,
+  logger: ServerLogger = consoleServerLogger
 ): Promise<RunningServer> {
   const app = createApp(config);
 
@@ -57,7 +53,7 @@ export function startServer(
       ({ port }) => {
         server.off('error', reject);
         server.on('error', (error) =>
-          logger.error('server.error', { message: errorMessage(error) }),
+          logger.error('server.error', { message: errorMessage(error) })
         );
         logger.info('server.started', {
           port,
@@ -65,7 +61,7 @@ export function startServer(
           version: SERVER_VERSION,
         });
         resolve(createRunningServer(server, port, logger));
-      },
+      }
     );
 
     server.once('error', reject);

@@ -25,7 +25,7 @@ describe('startServer', () => {
         buildRevision: 'test-revision',
         port: 0,
       },
-      logger,
+      logger
     );
 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);
@@ -57,7 +57,7 @@ describe('startServer', () => {
           allowedOrigins: ['http://localhost:5173'],
           buildRevision: 'test-revision',
           port: address.port,
-        }),
+        })
       ).rejects.toMatchObject({ code: 'EADDRINUSE' });
     } finally {
       await new Promise<void>((resolve, reject) => {

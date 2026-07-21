@@ -1,15 +1,8 @@
 import { parseServerConfig } from './config.js';
-import {
-  consoleServerLogger,
-  errorMessage,
-  type ServerLogger,
-} from './logger.js';
+import { consoleServerLogger, errorMessage, type ServerLogger } from './logger.js';
 import { startServer, type RunningServer } from './server.js';
 
-function registerShutdownSignals(
-  server: RunningServer,
-  logger: ServerLogger,
-): void {
+function registerShutdownSignals(server: RunningServer, logger: ServerLogger): void {
   const shutdown = (signal: NodeJS.Signals): void => {
     void server.shutdown(signal).catch(() => {
       logger.error('server.shutdown_exit', { signal });

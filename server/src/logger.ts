@@ -1,6 +1,4 @@
-export type ServerLogDetails = Readonly<
-  Record<string, boolean | number | string | undefined>
->;
+export type ServerLogDetails = Readonly<Record<string, boolean | number | string | undefined>>;
 
 export interface ServerLogger {
   error(event: string, details: ServerLogDetails): void;
@@ -10,7 +8,7 @@ export interface ServerLogger {
 function writeLog(
   write: (message: string) => void,
   event: string,
-  details: ServerLogDetails,
+  details: ServerLogDetails
 ): void {
   write(JSON.stringify({ event, ...details }));
 }

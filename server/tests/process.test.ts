@@ -30,7 +30,7 @@ function startProcess(environment: Record<string, string>): ChildProcessWithoutN
 function waitForOutput(
   child: ChildProcessWithoutNullStreams,
   stream: 'stderr' | 'stdout',
-  text: string,
+  text: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let output = '';
@@ -52,7 +52,7 @@ function waitForOutput(
 }
 
 async function waitForExit(
-  child: ChildProcessWithoutNullStreams,
+  child: ChildProcessWithoutNullStreams
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return { code: child.exitCode, signal: child.signalCode };
