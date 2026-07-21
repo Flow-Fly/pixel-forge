@@ -29,16 +29,19 @@ handoff.
 
 Every delivery brief names the outcome, acceptance criteria, non-goals, write
 boundaries, contract and runtime surfaces, risk gates, verification, and
-dependencies. Preserve product decisions in the owning issue, not only in chat.
+dependencies. It includes a canonical Linked task issues list with exact issue
+numbers; copy that list into the draft PR body. Preserve product decisions in
+the owning task or parent issue, not only in chat.
 
 Implementation PRs open as drafts and remain drafts through whole-slice
-simplification. Mark a PR ready only after every linked issue is implemented,
-simplified, and green. Then reconcile exact-head review, CI, Fallow, and
-unresolved findings. Return valid repairs to the original worker. Merge an
-eligible PR into develop only after explicit human approval. Stop for human
-direction after two unsuccessful review or repair attempts or whenever a
-product, privacy, security, destructive, auth, launch, or manual-playtest
-decision is required.
+simplification. Mark a PR ready only after every linked issue's acceptance
+criteria are satisfied, the complete diff is simplified, and checks are green.
+Then reconcile exact-head review, CI, Fallow, and unresolved findings. Move the
+PR back to draft before returning valid repairs to the original worker, then
+repeat simplification and exact-head review. Merge an eligible PR into develop
+only after explicit human approval. Stop for human direction after two
+unsuccessful review or repair attempts or whenever a product, privacy,
+security, destructive, auth, launch, or manual-playtest decision is required.
 
 Keep orchestration observable and sequential. When running as a subagent,
 return an exact next-agent handoff instead of recursive hidden delegation.

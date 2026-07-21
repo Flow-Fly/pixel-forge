@@ -48,7 +48,7 @@ Before acting, read the live GitHub state rather than relying on a previous
 conversation:
 
 - the initiative and parent chain;
-- the candidate delivery issue and its comments;
+- the candidate delivery slice, every linked task issue, and their comments;
 - linked dependencies and sibling status;
 - open pull requests and their exact head commits;
 - current checks and unresolved review findings;
@@ -81,6 +81,8 @@ When an initiative, outcome, or capability is too broad:
 Every delivery slice contains a compact delivery brief:
 
 - parent and source-of-truth links;
+- a canonical `Linked task issues` list with exact issue numbers, copied into
+  the draft pull request body;
 - intended outcome;
 - acceptance criteria through public behavior;
 - explicit non-goals and write boundaries;
@@ -103,14 +105,14 @@ The worker receives one approved delivery slice.
 
 Before editing:
 
-1. Verify the exact issue, branch, base, and current `origin/develop` head.
+1. Verify the exact delivery slice, linked task issues, branch, base, and
+   current `origin/develop` head.
 2. Confirm every linked task issue is ready, low risk, unblocked, and free of a
    human stop label.
 3. Probe whether the named artifact already exists before treating it as new.
-4. Verify every linked task issue meets the worker permission gate.
-5. Map the contract shift across types, runtime behavior, persistence,
+4. Map the contract shift across types, runtime behavior, persistence,
    UI state, tests, active documentation, and peer readers or writers.
-6. Stop if the approved seam cannot represent the required behavior, an issue
+5. Stop if the approved seam cannot represent the required behavior, an issue
    hides a product decision, or the change expands beyond one delivery slice.
 
 ### Implementation rules
@@ -123,6 +125,8 @@ Before editing:
 - Do not mix later simplification into an unfinished implementation commit.
 - Push the branch and open a draft pull request after the first meaningful
   commit so progress, decisions, and checks remain visible in GitHub.
+- Copy the delivery brief's canonical `Linked task issues` list into the draft
+  pull request body and keep it current as the slice is shaped.
 
 ### Tests and verification
 
@@ -149,8 +153,9 @@ git diff --check
 ```
 
 The worker keeps the draft pull request updated against `develop`. After every
-linked issue is implemented and green, it stops for whole-slice
-simplification. The pull request remains a draft during simplification.
+linked issue's acceptance criteria are satisfied and the implementation checks
+are green, it stops for whole-slice simplification. The pull request remains a
+draft during simplification.
 
 ## 3. Simplify — `slice-simplifier`
 
@@ -178,8 +183,9 @@ visible there.
 If simplification changes code, create one focused simplification commit and
 rerun the affected checks before review.
 
-When simplification is complete and all checks are green, the workflow director
-marks the pull request ready for independent review.
+When every linked issue's acceptance criteria are satisfied, the complete diff
+is simplified, and all checks are green, the workflow director marks the pull
+request ready for independent review.
 
 ## 4. Review — `pr-reviewer`
 
@@ -189,7 +195,7 @@ merges. Do not review a draft pull request as the final delivery verdict.
 
 Always verify:
 
-- the delivery issue and parent intent;
+- every linked task issue and parent intent;
 - acceptance criteria and non-goals;
 - the actual diff rather than the author summary;
 - directness and correctness of the changed path;
@@ -225,9 +231,11 @@ changes, discard the stale verdict and review the new exact head.
 ## 5. Repair and continue
 
 Valid review findings return to the original implementation task. The repair
-stays inside the same pull request and receives a focused follow-up commit.
-Then rerun checks, simplification when the repair changed structure, and
-exact-head review.
+stays inside the same pull request. The director moves the pull request back to
+draft before repair begins. The worker adds a focused follow-up commit, then
+reruns checks and simplification when the repair changed structure. When the
+repaired head is simplified and green, the director marks the pull request
+ready and requests a new exact-head review.
 
 After two unsuccessful review or repair attempts, the director stops for human
 direction.

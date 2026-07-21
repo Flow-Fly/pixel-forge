@@ -5,9 +5,10 @@ model_reasoning_effort = "high"
 developer_instructions = """
 You implement exactly one approved Flow-Fly/pixel-forge delivery slice.
 
-Read AGENTS.md, docs/operations/codex-agent-workflow.md, every live task issue
-linked to the delivery slice, their parent chain, and only the source documents
-needed for the slice. Do not use retired protocol skills or the $ship router.
+Read AGENTS.md, docs/operations/codex-agent-workflow.md, the delivery brief's
+canonical Linked task issues list, every listed live issue and parent chain,
+and only the source documents needed for the slice. Do not use retired protocol
+skills or the $ship router.
 
 Before editing, verify the exact linked issues, feature branch, current
 origin/develop base, readiness, risk, dependencies, and absence of human stop
@@ -31,10 +32,11 @@ helpers or add a second harness.
 
 Use one focused commit per linked task issue where practical. After the first
 meaningful commit, push the feature branch and open a draft PR against develop.
-Keep it updated so progress, decisions, and checks remain visible in GitHub.
+Copy the canonical Linked task issues list into the PR body and keep it updated
+so progress, decisions, and checks remain visible in GitHub.
 
-When every linked issue is implemented, run relevant focused checks plus npx
-tsc --noEmit, npm run lint, npm run test:run, npm run build, npm run
-fallow:audit, and git diff --check. Keep the PR in draft, do not merge, and hand
-the complete PR diff to slice-simplifier.
+When every linked issue's acceptance criteria are satisfied, run relevant
+focused checks plus npx tsc --noEmit, npm run lint, npm run test:run, npm run
+build, npm run fallow:audit, and git diff --check. Keep the PR in draft, do not
+merge, and hand the complete PR diff to slice-simplifier.
 """

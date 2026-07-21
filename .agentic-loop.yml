@@ -50,6 +50,7 @@ workflow:
   director_may_merge_to_integration: true
   keep_parent_issue_clean: true
   max_reviewer_attempts: 2
+  # One item is one delivery slice, which may contain multiple linked task issues.
   max_items_per_automation_run: 1
 
 verification:
