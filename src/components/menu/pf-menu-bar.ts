@@ -17,6 +17,7 @@ import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 import { log } from "../../utils/log";
 import { settingsStore } from "../../stores/settings";
 import { pwaStore } from "../../stores/pwa";
+import { panelStore } from "../../stores/panels";
 import {
   CRT_EFFECT_ID,
   CRT_PRESETS,
@@ -649,6 +650,10 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("show-accent-color-dialog"));
   }
 
+  toggleTimeline() {
+    panelStore.togglePanel("timeline");
+  }
+
   private startEditingName() {
     this.editingProjectContext = getActiveProjectContext();
     this.isEditingName = true;
@@ -686,6 +691,7 @@ export class PFMenuBar extends BaseComponent {
     const projectName = context.project.name.value;
     const guidedProject = context.guidedDrawing.active;
     const activeCrtPreset = this.getActiveCrtPreset();
+    const timelineVisible = !panelStore.isCollapsed("timeline");
 
     return html`
       <div class="brand" aria-label="Pixel Forge">
@@ -850,6 +856,16 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${() => context.viewport.resetView()}>
             Fit to Viewport <span class="shortcut">0</span>
           </div>
+          <button
+            class="menu-item"
+            type="button"
+            aria-pressed=${String(timelineVisible)}
+            @click=${this.toggleTimeline}
+          >
+            <span>Timeline</span>
+            <span class="effect-marker" aria-hidden="true">${timelineVisible ? "✓" : ""}</span>
+          </button>
+          <div class="divider"></div>
           <div class="menu-item" @click=${() => context.grid.togglePixelGrid()}>
             ${context.grid.pixelGridEnabled.value ? "✓ " : "   "}Pixel Grid
             <span class="shortcut">${formatShortcut("mod+g")}</span>
