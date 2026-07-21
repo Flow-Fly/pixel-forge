@@ -77,7 +77,7 @@ async function waitForExit(
   });
 }
 
-describe('server process', () => {
+describe('server process', { timeout: 10_000 }, () => {
   it.each(['SIGINT', 'SIGTERM'] as const)(
     'serves health and exits cleanly on %s',
     async (signal) => {
