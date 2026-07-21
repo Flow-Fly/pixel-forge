@@ -6,10 +6,13 @@ import { projectLibrary } from '../../services/project-library';
 import type { ProjectMeta } from '../../services/persistence/project-repository';
 import { getActiveProjectContext } from '../../stores/project-context';
 import { workspaceStore } from '../../stores/workspace';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 
 @customElement('pf-project-browser')
 export class PFProjectBrowser extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: block;
       color: var(--pf-color-text-main);
@@ -25,7 +28,7 @@ export class PFProjectBrowser extends BaseComponent {
       background: rgba(13, 16, 21, 0.96);
       border: 1px solid var(--pf-color-border);
       border-radius: var(--pf-radius-md);
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
     }
 
     dialog::backdrop {
@@ -331,6 +334,7 @@ export class PFProjectBrowser extends BaseComponent {
       <dialog
         aria-labelledby="project-browser-title"
         class="browser-dialog"
+        data-scrollbar="both"
         closedby=${canDismissBrowser ? 'any' : 'none'}
         @cancel=${this.handleBrowserDialogCancel}
         @click=${this.handleBrowserBackdropClick}
@@ -372,7 +376,7 @@ export class PFProjectBrowser extends BaseComponent {
             ? html`<div class="error" role="alert">${this.errorMessage}</div>`
             : nothing}
 
-          <div class="project-list">
+          <div class="project-list" data-scrollbar="vertical">
             ${this.isLoading
               ? html`<div class="loading">Loading projects...</div>`
               : this.renderProjectGrid()}
@@ -471,6 +475,7 @@ export class PFProjectBrowser extends BaseComponent {
       <dialog
         aria-labelledby="delete-project-title"
         class="delete-dialog"
+        data-scrollbar="vertical"
         closedby="any"
         @click=${this.handleDeleteBackdropClick}
         @close=${this.handleDeleteDialogClose}

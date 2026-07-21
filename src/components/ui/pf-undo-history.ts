@@ -4,12 +4,15 @@ import { BaseComponent } from '../../core/base-component';
 import type { Command } from '../../stores/history';
 import { isDrawableCommand } from '../../commands/index';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 import './pf-history-diff-tooltip';
 import './pf-button';
 
 @customElement('pf-undo-history')
 export class PFUndoHistory extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: flex;
       flex-direction: column;
@@ -402,7 +405,7 @@ export class PFUndoHistory extends BaseComponent {
                         this.tooltipAnchorRect !== null;
 
     return html`
-      <div class="list">
+      <div class="list" data-scrollbar="vertical">
         ${undoStack.map((cmd, i) => {
           const isHighlighted = cmd.id === highlightedId;
           const isExpanded = cmd.id === expandedId;

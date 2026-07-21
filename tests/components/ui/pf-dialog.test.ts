@@ -43,6 +43,15 @@ describe('pf-dialog', () => {
     expect(slotText(dialog, 'actions')).toContain('Apply');
   });
 
+  it('marks the dialog as a vertical scroll surface', async () => {
+    const dialog = createDialog();
+    await settle(dialog);
+
+    expect(dialog.shadowRoot?.querySelector('.dialog')?.getAttribute('data-scrollbar')).toBe(
+      'vertical'
+    );
+  });
+
   it('emits pf-close from the header close button', async () => {
     const dialog = createDialog();
     const closeSpy = vi.fn();

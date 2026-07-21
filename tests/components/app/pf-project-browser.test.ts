@@ -210,6 +210,10 @@ describe('pf-project-browser', () => {
     const dialog = projectDialog(element.shadowRoot!);
     expect(dialog?.open).toBe(true);
     expect(dialog?.getAttribute('closedby')).toBe('none');
+    expect(dialog?.getAttribute('data-scrollbar')).toBe('both');
+    expect(element.shadowRoot?.querySelector('.project-list')?.getAttribute('data-scrollbar')).toBe(
+      'vertical'
+    );
     expect(element.shadowRoot?.textContent).toContain('Project Library');
     expect(element.shadowRoot?.textContent).toContain('Open Project');
     expect(element.shadowRoot?.textContent).toContain('Second Project');
@@ -451,6 +455,9 @@ describe('pf-project-browser', () => {
     await element.updateComplete;
 
     expect(projectLibraryMock.deleteProject).not.toHaveBeenCalled();
+    expect(
+      element.shadowRoot?.querySelector('.delete-dialog')?.getAttribute('data-scrollbar')
+    ).toBe('vertical');
 
     confirmDeleteButton(element.shadowRoot!)?.click();
     await settle(element);

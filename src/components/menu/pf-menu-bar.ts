@@ -18,6 +18,7 @@ import { log } from "../../utils/log";
 import { settingsStore } from "../../stores/settings";
 import { pwaStore } from "../../stores/pwa";
 import { panelStore } from "../../stores/panels";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
 import {
   CRT_EFFECT_ID,
   CRT_PRESETS,
@@ -43,6 +44,8 @@ export class PFMenuBar extends BaseComponent {
   private editingProjectContext: ProjectContext | null = null;
 
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: flex;
       height: 100%;
@@ -205,7 +208,7 @@ export class PFMenuBar extends BaseComponent {
       background-color: rgba(13, 16, 21, 0.98);
       border: 1px solid var(--pf-color-border);
       border-radius: var(--pf-radius-sm);
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
       color: var(--pf-color-text-main);
       min-width: 186px;
       margin: 0; /* Important for anchor positioning */
@@ -737,6 +740,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-file"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "file")}
@@ -810,6 +814,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-edit"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "edit")}
@@ -840,6 +845,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-view"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "view")}
@@ -905,6 +911,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-image"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "image")}

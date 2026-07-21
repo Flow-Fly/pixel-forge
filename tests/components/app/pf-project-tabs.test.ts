@@ -100,6 +100,14 @@ describe('pf-project-tabs', () => {
     expect(inactiveButton?.getAttribute('aria-current')).toBe('false');
   });
 
+  it('marks the tab strip as a horizontal scroll surface', async () => {
+    const element = await createTabs();
+
+    expect(element.shadowRoot?.querySelector('.tab-list')?.getAttribute('data-scrollbar')).toBe(
+      'horizontal'
+    );
+  });
+
   it('marks dirty projects in the tab label', async () => {
     autoSaveServiceMock.dirtyContexts.add(projectB.context);
 
