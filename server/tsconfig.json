@@ -16,5 +16,5 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests", "vitest.config.ts"]
+  "include": ["src", "tests", "drizzle.config.ts", "vitest.config.ts", "vitest.database.config.ts"]
 }
