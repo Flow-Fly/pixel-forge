@@ -2,6 +2,7 @@ import { signal } from '../../core/signal';
 import { shouldPreserveNativeKeyboardBehavior } from './native-keyboard-behavior';
 
 type ShortcutAction = () => void;
+type ShortcutCondition = () => boolean;
 
 interface Shortcut {
   key: string;
@@ -9,6 +10,7 @@ interface Shortcut {
   modifiers: string[];
   action: ShortcutAction;
   description: string;
+  when?: ShortcutCondition;
   quick?: boolean;           // If true, tool is temporary while key held
   releaseAction?: ShortcutAction; // Called on key release (for quick tools)
 }
@@ -35,6 +37,7 @@ class KeyboardService {
       quick?: boolean;
       releaseAction?: ShortcutAction;
       physicalCode?: string;
+      when?: ShortcutCondition;
     }
   ) {
     const id = this.getShortcutId(key, modifiers);
@@ -51,6 +54,7 @@ class KeyboardService {
       modifiers,
       action,
       description,
+      when: options?.when,
       quick: options?.quick,
       releaseAction: options?.releaseAction,
     };
@@ -104,7 +108,7 @@ class KeyboardService {
     if (e.altKey) modifiers.push('alt');
 
     const physicalShortcut = this.physicalShortcuts.get(this.getShortcutId(e.code, modifiers));
-    if (physicalShortcut) {
+    if (physicalShortcut && this.isShortcutAvailable(physicalShortcut)) {
       return {
         id: this.getShortcutId(physicalShortcut.key, modifiers),
         shortcut: physicalShortcut,
@@ -113,7 +117,11 @@ class KeyboardService {
 
     const id = this.getShortcutId(this.getLogicalKey(e), modifiers);
     const shortcut = this.shortcuts.get(id);
-    return shortcut ? { id, shortcut } : null;
+    return shortcut && this.isShortcutAvailable(shortcut) ? { id, shortcut } : null;
+  }
+
+  private isShortcutAvailable(shortcut: Shortcut): boolean {
+    return shortcut.when?.() ?? true;
   }
 
   private handleKeyDown(e: KeyboardEvent) {

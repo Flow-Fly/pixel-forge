@@ -38,7 +38,12 @@ type RegisterCall = [
   modifiers: string[],
   action: () => void,
   description: string,
-  options?: { quick?: boolean; releaseAction?: () => void; physicalCode?: string },
+  options?: {
+    quick?: boolean;
+    releaseAction?: () => void;
+    physicalCode?: string;
+    when?: () => boolean;
+  },
 ];
 
 function comboFromCall([key, modifiers]: RegisterCall): string {
@@ -440,6 +445,10 @@ describe('registerShortcuts', () => {
       setActiveProjectContext(normalContext);
       shortcutAction('1')?.();
       expect(normalZoom).toHaveBeenCalledWith(1);
+      const digitSeven = (keyboardServiceMock.register.mock.calls as RegisterCall[]).find(
+        ([key, modifiers]) => key === '7' && modifiers.length === 0,
+      );
+      expect(digitSeven?.[4]?.when?.()).toBe(false);
     } finally {
       restoreDefaultProjectContext();
       guidedContext.dispose();
@@ -471,7 +480,11 @@ describe('registerShortcuts', () => {
 
     try {
       registerShortcuts();
-      shortcutAction('9')?.();
+      const digitNine = (keyboardServiceMock.register.mock.calls as RegisterCall[]).find(
+        ([key, modifiers]) => key === '9' && modifiers.length === 0,
+      );
+      expect(digitNine?.[4]?.when?.()).toBe(false);
+      digitNine?.[2]();
 
       expect(context.colors.primaryColor.value).toBe('#abcdef');
     } finally {

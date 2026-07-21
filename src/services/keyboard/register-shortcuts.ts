@@ -40,6 +40,7 @@ interface ShortcutRegistration {
     quick?: boolean;
     releaseAction?: ShortcutAction;
     physicalCode?: string;
+    when?: () => boolean;
   };
 }
 
@@ -600,6 +601,15 @@ function selectGuideColorOrZoom(level: number) {
   context.colors.updateLightnessVariations(color);
 }
 
+function isGuideColorOrZoomAvailable(level: number): boolean {
+  const context = getActiveProjectContext();
+  const session = context.guidedDrawing.session.value;
+  if (!session) return isZoomLevel(level);
+
+  const guideColorCount = session.guideColorCount ?? highestGuideNumber(session.target);
+  return level <= guideColorCount && Boolean(context.palette.mainColors.value[level - 1]);
+}
+
 function isZoomLevel(level: number): level is 1 | 2 | 3 | 4 | 5 | 6 {
   return level >= 1 && level <= 6;
 }
@@ -625,7 +635,10 @@ const viewShortcuts: ShortcutGroup = [
       level <= 6
         ? `Zoom ${[100, 200, 400, 800, 1600, 3200][level - 1]}% / Guide color ${level}`
         : `Guide color ${level}`,
-    options: { physicalCode: `Digit${level}` },
+    options: {
+      physicalCode: `Digit${level}`,
+      when: () => isGuideColorOrZoomAvailable(level),
+    },
   })),
 ];
 

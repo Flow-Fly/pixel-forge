@@ -124,4 +124,19 @@ describe('keyboard service native control behavior', () => {
     expect(action).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
   });
+
+  it('does not consume an unavailable physical digit shortcut', () => {
+    const action = vi.fn();
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    keyboardService.register('1', [], action, 'Test unavailable digit', {
+      physicalCode: 'Digit1',
+      when: () => false,
+    });
+
+    const event = keyDown(canvas, '&', 'Digit1');
+
+    expect(action).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
 });
