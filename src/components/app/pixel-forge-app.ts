@@ -372,6 +372,8 @@ export class PixelForgeApp extends BaseComponent {
   private resizeStartHeight = 0;
   private sidebarResizeStartX = 0;
   private sidebarResizeStartWidth = DEFAULT_SIDEBAR_WIDTH;
+  private sidebarResizePointerId: number | null = null;
+  private sidebarResizeHandle: HTMLElement | null = null;
   private previousBodyCursor = "";
   private previousBodyUserSelect = "";
   private warningTimer: number | null = null;
@@ -820,37 +822,57 @@ export class PixelForgeApp extends BaseComponent {
 
   private handleSidebarResizeStart = (event: PointerEvent) => {
     const { min, max } = this.sidebarWidthBounds;
-    if (event.button !== 0 || min === max) return;
+    if (this.isResizingSidebar || event.button !== 0 || min === max) return;
 
     event.preventDefault();
     event.stopPropagation();
     this.isResizingSidebar = true;
     this.sidebarResizeStartX = event.clientX;
     this.sidebarResizeStartWidth = this.sidebarWidth;
+    this.sidebarResizePointerId = event.pointerId;
+    this.sidebarResizeHandle = event.currentTarget as HTMLElement;
     this.previousBodyCursor = document.body.style.cursor;
     this.previousBodyUserSelect = document.body.style.userSelect;
 
+    try {
+      this.sidebarResizeHandle.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Document listeners remain the fallback when capture is unavailable.
+    }
     document.addEventListener("pointermove", this.handleSidebarResizeMove);
     document.addEventListener("pointerup", this.handleSidebarResizeEnd);
     document.addEventListener("pointercancel", this.handleSidebarResizeEnd);
+    window.addEventListener("blur", this.handleSidebarResizeBlur);
     document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
   };
 
   private handleSidebarResizeMove = (event: PointerEvent) => {
-    if (!this.isResizingSidebar) return;
+    if (
+      !this.isResizingSidebar ||
+      event.pointerId !== this.sidebarResizePointerId
+    ) {
+      return;
+    }
 
     event.preventDefault();
     const dragDistance = this.sidebarResizeStartX - event.clientX;
     this.applySidebarWidth(this.sidebarResizeStartWidth + dragDistance);
   };
 
-  private handleSidebarResizeEnd = () => {
+  private handleSidebarResizeEnd = (event: PointerEvent) => {
+    if (event.pointerId !== this.sidebarResizePointerId) return;
+    this.stopSidebarResize(true);
+  };
+
+  private handleSidebarResizeBlur = () => {
     this.stopSidebarResize(true);
   };
 
   private stopSidebarResize(persist: boolean) {
     const wasResizing = this.isResizingSidebar;
+    const pointerId = this.sidebarResizePointerId;
+    const resizeHandle = this.sidebarResizeHandle;
     if (wasResizing && persist) {
       this.applySidebarWidth(
         persistSidebarWidth(this.sidebarWidth, window.innerWidth)
@@ -858,9 +880,18 @@ export class PixelForgeApp extends BaseComponent {
     }
 
     this.isResizingSidebar = false;
+    this.sidebarResizePointerId = null;
+    this.sidebarResizeHandle = null;
     document.removeEventListener("pointermove", this.handleSidebarResizeMove);
     document.removeEventListener("pointerup", this.handleSidebarResizeEnd);
     document.removeEventListener("pointercancel", this.handleSidebarResizeEnd);
+    window.removeEventListener("blur", this.handleSidebarResizeBlur);
+    if (
+      pointerId !== null &&
+      resizeHandle?.hasPointerCapture?.(pointerId)
+    ) {
+      resizeHandle.releasePointerCapture(pointerId);
+    }
     if (wasResizing) {
       document.body.style.cursor = this.previousBodyCursor;
       document.body.style.userSelect = this.previousBodyUserSelect;
@@ -910,6 +941,7 @@ export class PixelForgeApp extends BaseComponent {
         tabindex=${canResize ? 0 : -1}
         ?hidden=${!canResize}
         @pointerdown=${this.handleSidebarResizeStart}
+        @lostpointercapture=${this.handleSidebarResizeEnd}
         @keydown=${this.handleSidebarResizeKeydown}
       ></div>
     `;

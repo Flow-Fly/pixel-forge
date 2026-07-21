@@ -604,6 +604,57 @@ describe('pixel-forge-app project dialogs', () => {
     expect(element.style.getPropertyValue('--pf-sidebar-width')).toBe('360px');
   }, 15_000);
 
+  it('tracks one pointer and cleans up when the browser loses focus', async () => {
+    vi.stubGlobal('innerWidth', 1280);
+    await import('../../../src/components/app/pixel-forge-app');
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await element.updateComplete;
+    const separator = element.shadowRoot?.querySelector<HTMLElement>('.sidebar-resize-handle');
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    Object.assign(separator ?? {}, {
+      setPointerCapture,
+      hasPointerCapture: () => true,
+      releasePointerCapture,
+    });
+
+    separator?.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 7,
+        button: 0,
+        clientX: 992,
+        cancelable: true,
+      })
+    );
+    document.dispatchEvent(
+      new PointerEvent('pointermove', { pointerId: 8, clientX: 800, cancelable: true })
+    );
+    expect(element.style.getPropertyValue('--pf-sidebar-width')).toBe('288px');
+    document.dispatchEvent(new PointerEvent('pointerup', { pointerId: 8 }));
+    expect(document.body.style.cursor).toBe('ew-resize');
+
+    document.dispatchEvent(
+      new PointerEvent('pointermove', { pointerId: 7, clientX: 920, cancelable: true })
+    );
+    window.dispatchEvent(new Event('blur'));
+    await element.updateComplete;
+
+    expect(setPointerCapture).toHaveBeenCalledWith(7);
+    expect(releasePointerCapture).toHaveBeenCalledWith(7);
+    expect(element.style.getPropertyValue('--pf-sidebar-width')).toBe('360px');
+    expect(localStorage.getItem('pf-sidebar-width')).toBe('360');
+    expect(document.body.style.cursor).toBe('');
+    expect(document.body.style.userSelect).toBe('');
+
+    document.dispatchEvent(
+      new PointerEvent('pointermove', { pointerId: 7, clientX: 800, cancelable: true })
+    );
+    expect(element.style.getPropertyValue('--pf-sidebar-width')).toBe('360px');
+  }, 15_000);
+
   it('supports arrow-key resizing and Home reset', async () => {
     vi.stubGlobal('innerWidth', 1280);
     await import('../../../src/components/app/pixel-forge-app');
