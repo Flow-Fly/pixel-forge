@@ -35,6 +35,7 @@
     "server:dev": "npm run dev --workspace @pixel-forge/server",
     "server:lint": "npm run lint --workspace @pixel-forge/server",
     "server:start": "npm run start --workspace @pixel-forge/server",
+    "server:storage:ready": "npm run storage:ready --workspace @pixel-forge/server",
     "server:test": "npm run test --workspace @pixel-forge/server",
     "server:typecheck": "npm run typecheck --workspace @pixel-forge/server"
   },

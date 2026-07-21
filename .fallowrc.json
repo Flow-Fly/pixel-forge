@@ -7,6 +7,7 @@
     "server/src/commands/database-compatibility.ts",
     "server/src/commands/database-migrate.ts",
     "server/src/commands/database-readiness.ts",
+    "server/src/commands/storage-readiness.ts",
     "index.html"
   ],
   "dynamicallyLoaded": ["src/tools/**"],

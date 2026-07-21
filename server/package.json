@@ -16,6 +16,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src tests drizzle.config.ts vitest.config.ts vitest.database.config.ts",
     "start": "node dist/index.js",
+    "storage:ready": "npm run build && node dist/commands/storage-readiness.js",
     "test": "npm run build && vitest run --config vitest.config.ts",
     "test:database": "npm run build && vitest run --config vitest.database.config.ts",
     "typecheck": "tsc -p tsconfig.json"

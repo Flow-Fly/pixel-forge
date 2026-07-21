@@ -38,6 +38,7 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
     },
     endpoint: config.endpoint,
     forcePathStyle: config.forcePathStyle,
+    maxAttempts: 1,
     region: config.region,
   });
 
