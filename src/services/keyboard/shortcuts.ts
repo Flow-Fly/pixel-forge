@@ -1,4 +1,5 @@
 import { signal } from '../../core/signal';
+import { shouldPreserveNativeKeyboardBehavior } from './native-keyboard-behavior';
 
 type ShortcutAction = () => void;
 
@@ -51,35 +52,6 @@ class KeyboardService {
   }
 
   /**
-   * Check if the event originated from an input element, including inside Shadow DOM.
-   */
-  private isTypingInInput(e: KeyboardEvent): boolean {
-    // Fast path: check direct target first (covers most cases)
-    const target = e.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-      return true;
-    }
-    if (target instanceof HTMLElement && target.isContentEditable) {
-      return true;
-    }
-
-    // Shadow DOM: check first few elements of composed path
-    // Inputs are always near the start, no need to traverse entire path
-    const path = e.composedPath();
-    const checkDepth = Math.min(path.length, 5);
-    for (let i = 0; i < checkDepth; i++) {
-      const el = path[i];
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        return true;
-      }
-      if (el instanceof HTMLElement && el.isContentEditable) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
    * Get the logical key from a keyboard event.
    * On Mac, Alt+key produces special characters (e.g., Alt+1 = ¡).
    * We use e.code to get the physical key when Alt is pressed.
@@ -105,8 +77,7 @@ class KeyboardService {
   private handleKeyDown(e: KeyboardEvent) {
     if (!this.enabled.get()) return;
 
-    // Ignore if typing in an input (including inside Shadow DOM)
-    if (this.isTypingInInput(e)) {
+    if (shouldPreserveNativeKeyboardBehavior(e)) {
       return;
     }
 
