@@ -8,7 +8,8 @@ this workflow through retired protocol skills or the generic `$ship` router.
 
 Before changing the repository, read:
 
-- the live GitHub issue, its parent chain, and linked pull request;
+- the live delivery slice, every linked task issue and parent chain, and the
+  linked pull request;
 - `docs/operations/codex-agent-workflow.md`;
 - `.agentic-loop.yml`;
 - the source files and active documentation that own the requested behavior.
@@ -34,8 +35,12 @@ Use this hierarchy:
 Initiative -> Outcome -> Capability -> Delivery slice -> Task
 ```
 
-A delivery slice fits one reviewable pull request. If an item needs multiple
-pull requests, treat it as a capability and slice it again.
+A delivery slice fits one reviewable pull request. It may close multiple task
+issues when they share one product outcome, runtime surface, and verification
+path. Keep each linked issue's acceptance criteria explicit and, where
+practical, use one focused commit per issue. Do not batch unrelated work merely
+to make a pull request larger. If an item needs multiple pull requests, treat
+it as a capability and slice it again.
 
 GitHub issues, labels, pull requests, checks, and review comments are durable
 workflow state. `ready-for-agent` is implementation permission only when the
@@ -43,9 +48,14 @@ issue is also `risk:low` and has none of `needs-human`, `not-ready-for-agent`,
 `agent:blocked`, `risk:medium`, or `risk:high`.
 
 Start delivery branches from current `origin/develop` and use the `dev-`
-prefix. Pull requests target `develop`. A reviewed, mergeable, green delivery
-pull request may be merged into `develop` by the workflow director. Only the
-project owner promotes `develop` to `main`.
+prefix. Implementation pull requests target `develop` and open as drafts early
+so progress and decisions remain visible. The PR body keeps a canonical
+`Linked task issues` list with exact issue numbers. A PR becomes ready for
+independent review only after every linked issue's acceptance criteria are
+satisfied, the complete diff is simplified, and checks are green. A reviewed,
+mergeable, green delivery pull request may be merged into `develop` by the
+workflow director after explicit human approval. Only the project owner
+promotes `develop` to `main`.
 
 ## Implementation style
 
