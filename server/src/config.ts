@@ -1,5 +1,6 @@
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:5173'];
 const DEFAULT_BUILD_REVISION = 'development';
+const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3001;
 const BUILD_REVISION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const INVALID_ORIGINS_MESSAGE = 'CORS_ALLOWED_ORIGINS must contain only explicit HTTP(S) origins';
@@ -7,6 +8,7 @@ const INVALID_ORIGINS_MESSAGE = 'CORS_ALLOWED_ORIGINS must contain only explicit
 export interface ServerConfig {
   readonly allowedOrigins: readonly string[];
   readonly buildRevision: string;
+  readonly host: string;
   readonly port: number;
 }
 
@@ -64,10 +66,18 @@ function parseBuildRevision(value: string | undefined): string {
   return value;
 }
 
+function parseHost(value: string | undefined): string {
+  if (value === undefined) return DEFAULT_HOST;
+  if (value === '127.0.0.1' || value === '0.0.0.0') return value;
+
+  throw new Error('HOST must equal 127.0.0.1 or 0.0.0.0');
+}
+
 export function parseServerConfig(environment: ServerEnvironment): ServerConfig {
   return {
     allowedOrigins: parseAllowedOrigins(environment.CORS_ALLOWED_ORIGINS),
     buildRevision: parseBuildRevision(environment.BUILD_REVISION),
+    host: parseHost(environment.HOST),
     port: parsePort(environment.PORT),
   };
 }

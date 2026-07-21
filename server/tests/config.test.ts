@@ -6,6 +6,7 @@ describe('parseServerConfig', () => {
     expect(parseServerConfig({})).toEqual({
       allowedOrigins: ['http://localhost:5173'],
       buildRevision: 'development',
+      host: '127.0.0.1',
       port: 3001,
     });
   });
@@ -15,17 +16,23 @@ describe('parseServerConfig', () => {
       parseServerConfig({
         BUILD_REVISION: 'abc123',
         CORS_ALLOWED_ORIGINS: 'https://pixel-forge.app,http://127.0.0.1:5173',
+        HOST: '0.0.0.0',
         PORT: '8080',
       })
     ).toEqual({
       allowedOrigins: ['https://pixel-forge.app', 'http://127.0.0.1:5173'],
       buildRevision: 'abc123',
+      host: '0.0.0.0',
       port: 8080,
     });
   });
 
   it('allows port zero for ephemeral test servers', () => {
     expect(parseServerConfig({ PORT: '0' }).port).toBe(0);
+  });
+
+  it.each(['localhost', '::', '', 'example.com'])('rejects invalid HOST %j', (host) => {
+    expect(() => parseServerConfig({ HOST: host })).toThrow('HOST must equal 127.0.0.1 or 0.0.0.0');
   });
 
   it.each(['-1', '65536', '3000px', '3.5', ''])('rejects invalid PORT %j', (port) => {

@@ -32,6 +32,7 @@ shell when you need to override the safe local defaults:
 
 ```sh
 PORT=3100 \
+HOST=127.0.0.1 \
 CORS_ALLOWED_ORIGINS=http://localhost:5173 \
 BUILD_REVISION=local-test \
 npm run server:dev
@@ -124,6 +125,13 @@ export STORAGE_FORCE_PATH_STYLE=true
 npm run server:storage:ready
 ```
 
+Plain HTTP storage endpoints are accepted without an extra flag only on the
+loopback interface. The Compose server uses the isolated service name
+`minio`, so it supplies the exact
+`STORAGE_INSECURE_HTTP_CONFIRM=local-container-network` interlock. Do not use
+that interlock to connect to remote object storage; remote endpoints must use
+HTTPS.
+
 Readiness performs only a bucket-level availability check. It emits a small
 `storage.ready` or `storage.not_ready` event without logging the endpoint,
 bucket, credentials, or raw SDK error.
@@ -143,6 +151,58 @@ reads and compares those bytes, deletes that exact key, and verifies that it is
 missing. The integration suite uses another unique per-run prefix. Cleanup
 deletes only the exact keys created by that run: neither path lists objects,
 deletes a broad prefix, removes a bucket, or provisions storage.
+
+## Build and smoke the server container
+
+The server image always builds from the repository root because npm's lockfile
+and workspace declarations live there. The multi-stage `Dockerfile.server`
+builds the shared and server workspaces, then copies only production packages,
+compiled server files, and committed migrations into the runtime stage. Its
+Node 22 patch image is pinned by digest.
+
+Use the full source commit as the image identity:
+
+```sh
+export PIXEL_FORGE_IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose build server
+```
+
+This creates `pixel-forge-server:<commit-sha>`. Do not publish or deploy a
+`latest` tag. CI follows the same convention with `github.sha` and never logs
+in to a registry or pushes the image.
+
+The container runs as the unprivileged `node` user, listens on runtime `PORT`,
+and sets `HOST=0.0.0.0` so Docker can route traffic to it. Direct local Node
+execution keeps the safer `127.0.0.1` default. The Compose service also drops
+Linux capabilities, enables `no-new-privileges`, and mounts its root filesystem
+read-only. It has no application volume or scheduled process.
+
+Run the complete disposable smoke from the repository root:
+
+```sh
+npm run server:container:smoke
+```
+
+The command creates a uniquely named Compose project with the validated
+`pixel-forge-container-smoke-` prefix and ephemeral host ports. It does not
+inherit a generic `COMPOSE_PROJECT_NAME`, so its cleanup cannot silently target
+an ordinary development project. The smoke builds the `linux/amd64` image,
+waits for PostgreSQL and MinIO, bootstraps only the local development bucket,
+applies committed migrations, runs both dependency readiness commands,
+requests `/api/health`, verifies the non-root Linux identity, sends `SIGTERM`,
+and requires the structured shutdown-complete event. Its exit trap removes
+only that smoke project's containers and volumes; cleanup failure makes the
+smoke fail.
+
+The public `/api/health` route remains process liveness only. Database and
+storage readiness stay separate commands; container startup never hides a
+dependency probe inside the public route.
+
+Docker Desktop could not start on the owner's workstation while this slice was
+developed. GitHub Actions' Linux Docker engine is therefore the canonical
+image-build and runtime-smoke evidence. The local command is documented and is
+the path to re-run after Docker Desktop is repaired; this slice does not repair
+the workstation installation.
 
 ## Stop or reset local services
 
@@ -194,6 +254,9 @@ npm run server:typecheck
 npm run server:lint
 npm run server:test
 npm run server:build
+npm run server:check
+npm run server:container:build
+npm run server:container:smoke
 npm run server:start
 npm run server:db:generate
 npm run server:db:migrate
@@ -203,6 +266,7 @@ npm run server:db:test
 npm run server:storage:ready
 npm run server:storage:compat
 npm run server:storage:test
+npm run shared:check
 ```
 
 `server:test` builds the workspace, exercises the Hono app, starts a real HTTP

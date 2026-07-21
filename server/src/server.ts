@@ -49,7 +49,7 @@ export function startServer(
 
   return new Promise((resolve, reject) => {
     const server = serve(
-      { fetch: app.fetch, hostname: '127.0.0.1', port: config.port },
+      { fetch: app.fetch, hostname: config.host, port: config.port },
       ({ port }) => {
         server.off('error', reject);
         server.on('error', (error) =>

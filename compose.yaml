@@ -52,6 +52,42 @@ services:
     volumes:
       - pixel-forge-postgres-data:/var/lib/postgresql/data
 
+  server:
+    image: pixel-forge-server:${PIXEL_FORGE_IMAGE_REVISION:-development}
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    depends_on:
+      minio-bootstrap:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      BUILD_REVISION: ${PIXEL_FORGE_IMAGE_REVISION:-development}
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      DATABASE_MAX_CONNECTIONS: '4'
+      DATABASE_SAFETY_CONFIRM: non-production
+      DATABASE_URL: postgresql://pixel_forge:pixel_forge_local@postgres:5432/pixel_forge_dev
+      HOST: 0.0.0.0
+      PORT: '3001'
+      STORAGE_ACCESS_KEY_ID: pixel_forge
+      STORAGE_BUCKET: pixel-forge-dev
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_FORCE_PATH_STYLE: 'true'
+      STORAGE_INSECURE_HTTP_CONFIRM: local-container-network
+      STORAGE_REGION: us-east-1
+      STORAGE_SECRET_ACCESS_KEY: pixel_forge_local_secret
+    ports:
+      - '127.0.0.1:3001:3001'
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
+    restart: 'no'
+
 volumes:
   pixel-forge-minio-data:
   pixel-forge-postgres-data:

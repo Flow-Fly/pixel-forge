@@ -67,3 +67,34 @@ describe('storage configuration', () => {
     );
   });
 });
+
+describe('container network storage configuration', () => {
+  it('allows plain HTTP with the exact local container confirmation', () => {
+    expect(
+      parseStorageConfig({
+        ...validEnvironment,
+        STORAGE_ENDPOINT: 'http://minio:9000',
+        STORAGE_INSECURE_HTTP_CONFIRM: 'local-container-network',
+      }).endpoint
+    ).toBe('http://minio:9000');
+  });
+
+  it('rejects plain HTTP on a non-loopback host without the exact confirmation', () => {
+    expect(() =>
+      parseStorageConfig({
+        ...validEnvironment,
+        STORAGE_ENDPOINT: 'http://minio:9000',
+      })
+    ).toThrow('STORAGE_ENDPOINT must be');
+  });
+
+  it('does not extend the local confirmation to another HTTP host', () => {
+    expect(() =>
+      parseStorageConfig({
+        ...validEnvironment,
+        STORAGE_ENDPOINT: 'http://objects.example.com',
+        STORAGE_INSECURE_HTTP_CONFIRM: 'local-container-network',
+      })
+    ).toThrow('STORAGE_ENDPOINT must be');
+  });
+});
