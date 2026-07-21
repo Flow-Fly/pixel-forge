@@ -51,7 +51,7 @@ function hasSafeTransport(endpoint: URL, insecureHttpConfirmation: string | unde
   return (
     endpoint.protocol === 'https:' ||
     isLoopbackHost(endpoint.hostname) ||
-    insecureHttpConfirmation === INSECURE_HTTP_CONFIRMATION
+    (endpoint.hostname === 'minio' && insecureHttpConfirmation === INSECURE_HTTP_CONFIRMATION)
   );
 }
 

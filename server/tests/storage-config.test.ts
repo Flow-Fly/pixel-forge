@@ -87,4 +87,14 @@ describe('container network storage configuration', () => {
       })
     ).toThrow('STORAGE_ENDPOINT must be');
   });
+
+  it('does not extend the local confirmation to another HTTP host', () => {
+    expect(() =>
+      parseStorageConfig({
+        ...validEnvironment,
+        STORAGE_ENDPOINT: 'http://objects.example.com',
+        STORAGE_INSECURE_HTTP_CONFIRM: 'local-container-network',
+      })
+    ).toThrow('STORAGE_ENDPOINT must be');
+  });
 });

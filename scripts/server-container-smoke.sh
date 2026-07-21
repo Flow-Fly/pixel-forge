@@ -10,7 +10,11 @@ export COMPOSE_PROJECT_NAME="${project_name}"
 export PIXEL_FORGE_IMAGE_REVISION="${image_revision}"
 
 compose() {
-  docker compose --project-name "${project_name}" "$@"
+  docker compose \
+    --project-name "${project_name}" \
+    --file compose.yaml \
+    --file compose.smoke.yaml \
+    "$@"
 }
 
 cleanup() {
@@ -21,13 +25,19 @@ cleanup() {
     compose logs --no-color || true
   fi
 
-  compose down --volumes --remove-orphans || true
+  if ! compose down --volumes --remove-orphans; then
+    printf '%s\n' 'Container smoke cleanup failed.' >&2
+    if ((exit_code == 0)); then
+      exit_code=1
+    fi
+  fi
+
   exit "${exit_code}"
 }
 
 trap cleanup EXIT
 
-compose up --detach --build --wait server
+compose up --detach --build --wait --wait-timeout 180 server
 
 compose exec --tty=false server node server/dist/commands/database-migrate.js
 compose exec --tty=false server node server/dist/commands/database-readiness.js
@@ -37,21 +47,30 @@ runtime_identity="$(
   compose exec --tty=false server node -e \
     "process.stdout.write(process.platform + ' ' + process.arch + ' uid=' + String(process.getuid?.() ?? -1))"
 )"
+printf '%s\n' "Runtime identity: ${runtime_identity}"
 [[ "${runtime_identity}" == "linux x64 uid="* ]]
 [[ "${runtime_identity}" != *"uid=0" ]]
 
 image_identity="$(docker image inspect "${image_name}" --format '{{.Architecture}} {{.Config.User}}')"
+printf '%s\n' "Image identity: ${image_identity}"
 [[ "${image_identity}" == "amd64 node" ]]
 
-liveness="$(curl --fail-with-body --silent http://127.0.0.1:3001/api/health)"
+server_address="$(compose port server 3001)"
+liveness="$(curl --fail-with-body --silent "http://${server_address}/api/health")"
+printf '%s\n' "Liveness response: ${liveness}"
 grep --fixed-strings --quiet "\"revision\":\"${image_revision}\"" <<<"${liveness}"
 grep --fixed-strings --quiet '"status":"ok"' <<<"${liveness}"
 
 server_container="$(compose ps --quiet server)"
 docker kill --signal SIGTERM "${server_container}" >/dev/null
 
-exit_code="$(docker wait "${server_container}")"
-[[ "${exit_code}" == "0" ]]
+for _ in {1..20}; do
+  [[ "$(docker inspect "${server_container}" --format '{{.State.Running}}')" == "false" ]] && break
+  sleep 1
+done
+
+[[ "$(docker inspect "${server_container}" --format '{{.State.Running}}')" == "false" ]]
+[[ "$(docker inspect "${server_container}" --format '{{.State.ExitCode}}')" == "0" ]]
 [[ "$(docker inspect "${server_container}" --format '{{.State.OOMKilled}}')" == "false" ]]
 
 server_logs="$(docker logs "${server_container}" 2>&1)"

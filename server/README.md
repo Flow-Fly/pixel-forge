@@ -183,12 +183,13 @@ Run the complete disposable smoke from the repository root:
 npm run server:container:smoke
 ```
 
-The command creates a uniquely named Compose project, builds the
-`linux/amd64` image, waits for PostgreSQL and MinIO, bootstraps only the local
-development bucket, applies committed migrations, runs both dependency
-readiness commands, requests `/api/health`, verifies the non-root Linux
-identity, sends `SIGTERM`, and requires the structured shutdown-complete event.
-Its exit trap removes only that smoke project's containers and volumes.
+The command creates a uniquely named Compose project with ephemeral host ports,
+builds the `linux/amd64` image, waits for PostgreSQL and MinIO, bootstraps only
+the local development bucket, applies committed migrations, runs both
+dependency readiness commands, requests `/api/health`, verifies the non-root
+Linux identity, sends `SIGTERM`, and requires the structured shutdown-complete
+event. Its exit trap removes only that smoke project's containers and volumes;
+cleanup failure makes the smoke fail.
 
 The public `/api/health` route remains process liveness only. Database and
 storage readiness stay separate commands; container startup never hides a

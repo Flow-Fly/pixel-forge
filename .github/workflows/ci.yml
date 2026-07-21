@@ -52,6 +52,7 @@ jobs:
 
   server-container:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       COMPOSE_PROJECT_NAME: pixel-forge-smoke-${{ github.run_id }}-${{ github.run_attempt }}
       PIXEL_FORGE_IMAGE_REVISION: ${{ github.sha }}
