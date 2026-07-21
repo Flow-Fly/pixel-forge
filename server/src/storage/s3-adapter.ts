@@ -16,18 +16,14 @@ function isMissingObject(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
 
   const candidate = error as {
-    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
     readonly name?: string;
   };
-  return (
-    candidate.name === 'NoSuchKey' ||
-    candidate.name === 'NotFound' ||
-    candidate.$metadata?.httpStatusCode === 404
-  );
+  return candidate.name === 'NoSuchKey' || candidate.Code === 'NoSuchKey';
 }
 
-function storageFailure(message: string, cause: unknown): Error {
-  return new Error(message, { cause });
+function storageFailure(message: string): Error {
+  return new Error(message);
 }
 
 export function createS3BlobStorage(config: StorageConfig): BlobStorage {
@@ -46,8 +42,8 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
     async checkReadiness() {
       try {
         await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
-      } catch (error) {
-        throw storageFailure('Blob storage readiness check failed', error);
+      } catch {
+        throw storageFailure('Blob storage readiness check failed');
       }
     },
 
@@ -59,8 +55,8 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
       requireKey(key);
       try {
         await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
-      } catch (error) {
-        throw storageFailure('Blob deletion failed', error);
+      } catch {
+        throw storageFailure('Blob deletion failed');
       }
     },
 
@@ -74,7 +70,7 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
         return await response.Body.transformToByteArray();
       } catch (error) {
         if (isMissingObject(error)) return undefined;
-        throw storageFailure('Blob read failed', error);
+        throw storageFailure('Blob read failed');
       }
     },
 
@@ -82,8 +78,8 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
       requireKey(key);
       try {
         await client.send(new PutObjectCommand({ Bucket: config.bucket, Body: bytes, Key: key }));
-      } catch (error) {
-        throw storageFailure('Blob write failed', error);
+      } catch {
+        throw storageFailure('Blob write failed');
       }
     },
   };

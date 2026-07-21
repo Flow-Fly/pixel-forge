@@ -48,7 +48,8 @@ ports bind only to the loopback interface. The one-shot `minio-bootstrap`
 service creates only the local `pixel-forge-dev` bucket after MinIO is healthy.
 
 ```sh
-docker compose up -d --wait postgres minio minio-bootstrap
+docker compose up -d --wait postgres minio
+docker compose run --rm --no-deps minio-bootstrap
 ```
 
 `docker compose ps` should report both long-running services as healthy and

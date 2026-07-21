@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { consoleServerLogger, errorMessage } from '../logger.js';
 import type { BlobStorage } from '../storage/blob-storage.js';
-import { requireSafeLocalStorageTarget } from '../storage/config.js';
+import { requireSafeLocalStorageTarget, type StorageConfig } from '../storage/config.js';
 import { createS3BlobStorage } from '../storage/s3-adapter.js';
 
 const COMPATIBILITY_PREFIX = 'storage-compatibility';
@@ -19,8 +19,43 @@ async function cleanupOwnedKey(storage: BlobStorage, key: string): Promise<boole
   }
 }
 
+async function verifyCompatibility(storage: BlobStorage, key: string): Promise<void> {
+  await storage.checkReadiness();
+  const expected = randomBytes(257);
+  await storage.put(key, expected);
+  const actual = await storage.get(key);
+  if (!actual || !Buffer.from(actual).equals(expected)) {
+    throw new Error('Storage did not preserve the probe bytes');
+  }
+
+  await storage.delete(key);
+  if (await storage.get(key)) {
+    throw new Error('Storage did not remove the probe object');
+  }
+}
+
+async function runCompatibility(config: StorageConfig): Promise<boolean> {
+  const storage = createS3BlobStorage(config);
+  const key = `${COMPATIBILITY_PREFIX}/${randomUUID()}/probe.bin`;
+  let operationSucceeded = false;
+
+  try {
+    await verifyCompatibility(storage, key);
+    operationSucceeded = true;
+  } catch {
+    consoleServerLogger.error('storage.compatibility_failed', {
+      message: 'Storage compatibility operation failed',
+      stage: 'operation',
+    });
+  }
+
+  const cleanupSucceeded = await cleanupOwnedKey(storage, key);
+  storage.close();
+  return operationSucceeded && cleanupSucceeded;
+}
+
 async function main(): Promise<void> {
-  let config;
+  let config: StorageConfig;
   try {
     config = requireSafeLocalStorageTarget(process.env);
   } catch (error) {
@@ -32,35 +67,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  const storage = createS3BlobStorage(config);
-  const key = `${COMPATIBILITY_PREFIX}/${randomUUID()}/probe.bin`;
-  try {
-    await storage.checkReadiness();
-    const expected = randomBytes(257);
-    await storage.put(key, expected);
-    const actual = await storage.get(key);
-    if (!actual || !Buffer.from(actual).equals(expected)) {
-      throw new Error('Storage did not preserve the probe bytes');
-    }
-
-    await storage.delete(key);
-    if (await storage.get(key)) {
-      throw new Error('Storage did not remove the probe object');
-    }
-  } catch {
-    consoleServerLogger.error('storage.compatibility_failed', {
-      message: 'Storage compatibility operation failed',
-      stage: 'operation',
-    });
+  if (!(await runCompatibility(config))) {
     process.exitCode = 1;
-  } finally {
-    if (!(await cleanupOwnedKey(storage, key))) process.exitCode = 1;
-    storage.close();
+    return;
   }
-
-  if (process.exitCode !== 1) {
-    consoleServerLogger.info('storage.compatibility_complete', { status: 'complete' });
-  }
+  consoleServerLogger.info('storage.compatibility_complete', { status: 'complete' });
 }
 
 void main();
