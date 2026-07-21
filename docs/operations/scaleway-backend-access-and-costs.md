@@ -123,7 +123,7 @@ make the architecture incapable of overspend.
 | Serverless SQL storage | €0.000272/GB-hour | Continues while data is stored |
 | Serverless SQL backup | Included daily backup retained seven days | Restore activity can wake/bill compute |
 | Managed PostgreSQL `DB-DEV-S` main node | €0.0156/hour | Storage, backup, topology, and options are additional |
-| Standard Multi-AZ Object Storage | €0.01606/GB-month | Requests/ingress included; recheck current regional price |
+| Standard Multi-AZ Object Storage | €0.0146/GB-month | Requests/ingress included; recheck current regional price |
 | Object Storage egress | First 75 GB/month included, then €0.01/GB | Confirm account and traffic applicability |
 | Private Container Registry | €0.027/GB-month | Intra-region transfer is free |
 | Cockpit Scaleway data/default retention | Included | Default metrics 31 days; logs/traces seven days |
@@ -140,7 +140,7 @@ container_memory = max(0, gb_seconds - remaining_free_gb_seconds) * 0.000001
 serverless_sql_compute = active_vcpu_hours * 0.13572
 serverless_sql_storage = average_database_gb * 730 * 0.000272
 managed_db_node = node_hourly_price * 730
-object_storage = average_project_blob_gb * 0.01606
+object_storage = average_project_blob_gb * 0.0146
 private_registry = retained_private_image_gb * 0.027
 cockpit_alerts = active_rules * active_days * 0.015
 billable_egress = max(0, egress_gb - applicable_free_egress_gb) * 0.01
@@ -167,14 +167,14 @@ for real use.
 Example fixed usage assumptions:
 
 - 1 GB average Serverless SQL storage: €0.19856/month;
-- 10 GB average private project objects: €0.16060/month;
+- 10 GB average private project objects: €0.14600/month;
 - 5 GB retained private images: €0.135/month;
 - default Cockpit retention and no paid alert rule: €0;
 - container usage within the still-available account free tier: €0.
 
-Fixed estimate: **€0.49416/month**, rounded to about **€0.50**, plus
+Fixed estimate: **€0.47956/month**, rounded to about **€0.48**, plus
 Serverless SQL wakes and any billable traffic. For example, 100 isolated
-five-minute wake windows add about €1.13, producing roughly €1.63 before tax.
+five-minute wake windows add about €1.13, producing roughly €1.61 before tax.
 Actual session duration can cost more; adjacent activity may share an active
 window. This is the cheapest credible scenario, not a guaranteed bill.
 
@@ -186,14 +186,14 @@ This scenario deliberately leaves headroom below €25:
 | --- | ---: |
 | 100 active one-vCPU Serverless SQL hours | €13.57200 |
 | 1 GB average SQL storage | €0.19856 |
-| 10 GB Multi-AZ project objects | €0.16060 |
+| 10 GB Multi-AZ project objects | €0.14600 |
 | 5 GB private registry images | €0.13500 |
 | 100,000 billable container vCPU-seconds beyond free tier | €1.00000 |
 | 100,000 billable container GB-seconds beyond free tier | €0.10000 |
 | Two Cockpit alert rules for 30 days | €0.90000 |
 | Egress within applicable free allowance | €0.00000 |
-| **Estimated usage** | **€16.06616** |
-| **Unallocated owner ceiling headroom** | **€8.93384** |
+| **Estimated usage** | **€16.05156** |
+| **Unallocated owner ceiling headroom** | **€8.94844** |
 
 The headroom absorbs estimate error; it is not an instruction to consume more.
 At €20 forecast or observed monthly usage, stop discretionary changes and

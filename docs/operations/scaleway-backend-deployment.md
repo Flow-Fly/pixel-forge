@@ -231,7 +231,7 @@ startup.
 Required owner gate: migration success, secret injection, exact image digest,
 container bounds, rollback digest, and current cost estimate.
 
-The creation example is inert and uses only secret **names**:
+The creation example is inert and contains no secret values:
 
 ```sh
 # REMOVE echo only after linking the first-deployment approval record.
@@ -260,16 +260,16 @@ echo scw container container create \
   environment-variables.STORAGE_BUCKET=<PROJECT_BUCKET_NAME> \
   environment-variables.STORAGE_ENDPOINT=https://s3.fr-par.scw.cloud \
   environment-variables.STORAGE_FORCE_PATH_STYLE=false \
-  secret-environment-variables.DATABASE_URL=<VALUE_FROM_APPROVED_SECRET_PATH> \
-  secret-environment-variables.STORAGE_ACCESS_KEY_ID=<VALUE_FROM_APPROVED_SECRET_PATH> \
-  secret-environment-variables.STORAGE_SECRET_ACCESS_KEY=<VALUE_FROM_APPROVED_SECRET_PATH> \
   region=fr-par
 ```
 
-Do not paste this rendered command into a terminal with real secret values;
-the values must move from the approved secret path to the provider without
-appearing in shell history, CI logs, or evidence. Verify the supported secure
-injection mechanism again when the deployment automation is implemented.
+The current public walking-skeleton process does not consume database or
+storage credentials during startup. Inject `DATABASE_URL`,
+`STORAGE_ACCESS_KEY_ID`, and `STORAGE_SECRET_ACCESS_KEY` only through the
+approved secret path when an authenticated readiness session or later runtime
+behavior needs them. The values must move to the provider without appearing in
+shell history, CI logs, or evidence. Verify the supported secure injection
+mechanism again when the deployment automation is implemented.
 
 Container `v1` creates and updates deploy automatically. Capture the resulting
 container ID, endpoint, immutable image reference, settings, and status before
