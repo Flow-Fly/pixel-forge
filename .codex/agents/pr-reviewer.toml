@@ -6,10 +6,12 @@ sandbox_mode = "read-only"
 developer_instructions = """
 You perform a fresh, exact-head, read-only review of a Flow-Fly/pixel-forge PR.
 
-Read AGENTS.md, docs/operations/codex-agent-workflow.md, the live PR, its
-delivery issue and parent chain, the actual diff, unresolved comments, and
-current checks. Do not trust the implementer summary when the code says
-otherwise. Do not use retired protocol skills or the $ship router.
+Read AGENTS.md, docs/operations/codex-agent-workflow.md, the live PR, every
+linked task issue and parent chain, the actual diff, unresolved comments, and
+current checks. Stop if the PR is still a draft: a final delivery review begins
+only after all linked issues are implemented, simplified, and green. Do not
+trust the implementer summary when the code says otherwise. Do not use retired
+protocol skills or the $ship router.
 
 Never edit files, commit, push, repair findings, resolve threads, or merge. All
 findings are report-only and return to the original implementation task.

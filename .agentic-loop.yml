@@ -43,6 +43,8 @@ workflow:
   branch_prefix: "dev-"
   integration_branch: "develop"
   stable_branch: "main"
+  implementation_prs_start_as_draft: true
+  allow_multi_issue_delivery_slices: true
   require_spec_pr: false
   require_human_merge: true
   director_may_merge_to_integration: true

@@ -31,10 +31,16 @@ Initiative -> Outcome -> Capability -> Delivery slice -> Task
 - **Outcome:** a meaningful product result.
 - **Capability:** a related body of behavior that may still need slicing.
 - **Delivery slice:** the lowest planning item implemented in one pull request.
-- **Task:** a commit-sized checklist item inside a delivery slice.
+  It may group multiple closely related task issues.
+- **Task:** a commit-sized checklist item inside a delivery slice. A task issue
+  keeps its own acceptance criteria and, where practical, its own focused
+  commit.
 
 If an item needs multiple pull requests, it is a capability and must be sliced
-again. Avoid names based on nesting depth such as "sub-sub-issue."
+again. Multiple task issues belong in one delivery slice only when they share a
+product outcome, runtime surface, and verification path. Do not batch unrelated
+work merely to make a pull request larger. Avoid names based on nesting depth
+such as "sub-sub-issue."
 
 ## Durable state
 
@@ -51,9 +57,9 @@ conversation:
 Use exact issue, branch, base, and head references in every handoff. If live
 state contradicts the handoff, stop without editing and report the mismatch.
 
-`ready-for-agent` is a permission grant. A worker issue must also be
-`risk:low` and must not carry `needs-human`, `not-ready-for-agent`,
-`agent:blocked`, `risk:medium`, or `risk:high`.
+`ready-for-agent` is a permission grant. Every task issue included in a worker
+slice must also be `risk:low` and must not carry `needs-human`,
+`not-ready-for-agent`, `agent:blocked`, `risk:medium`, or `risk:high`.
 
 ## 1. Shape and manage — `workflow-director`
 
@@ -98,12 +104,13 @@ The worker receives one approved delivery slice.
 Before editing:
 
 1. Verify the exact issue, branch, base, and current `origin/develop` head.
-2. Confirm the issue is ready, low risk, unblocked, and free of a human stop
-   label.
+2. Confirm every linked task issue is ready, low risk, unblocked, and free of a
+   human stop label.
 3. Probe whether the named artifact already exists before treating it as new.
-4. Map the contract shift across types, runtime behavior, persistence,
+4. Verify every linked task issue meets the worker permission gate.
+5. Map the contract shift across types, runtime behavior, persistence,
    UI state, tests, active documentation, and peer readers or writers.
-5. Stop if the approved seam cannot represent the required behavior, the issue
+6. Stop if the approved seam cannot represent the required behavior, an issue
    hides a product decision, or the change expands beyond one delivery slice.
 
 ### Implementation rules
@@ -112,8 +119,10 @@ Before editing:
 - Keep control flow direct and names domain-specific.
 - Trace integration work from trigger to visible or persisted outcome.
 - Implement only the approved behavior and record adjacent cleanup separately.
-- Use one focused commit per linked task or issue.
+- Use one focused commit per linked task issue where practical.
 - Do not mix later simplification into an unfinished implementation commit.
+- Push the branch and open a draft pull request after the first meaningful
+  commit so progress, decisions, and checks remain visible in GitHub.
 
 ### Tests and verification
 
@@ -139,14 +148,15 @@ npm run fallow:audit
 git diff --check
 ```
 
-The worker pushes the feature branch and opens or updates a non-draft pull
-request against `develop`, then stops for whole-slice simplification.
+The worker keeps the draft pull request updated against `develop`. After every
+linked issue is implemented and green, it stops for whole-slice
+simplification. The pull request remains a draft during simplification.
 
 ## 3. Simplify — `slice-simplifier`
 
-Simplification runs once after all implementation tasks in the delivery slice
-are complete. Its scope is the complete diff from `origin/develop` to the pull
-request head.
+Simplification runs once after all linked issues and implementation tasks in
+the delivery slice are complete. Its scope is the complete diff from
+`origin/develop` to the pull request head.
 
 Review for:
 
@@ -168,11 +178,14 @@ visible there.
 If simplification changes code, create one focused simplification commit and
 rerun the affected checks before review.
 
+When simplification is complete and all checks are green, the workflow director
+marks the pull request ready for independent review.
+
 ## 4. Review — `pr-reviewer`
 
 Review runs in a fresh context at the exact pull request head. It is strictly
 read-only: no file edits, commits, pushes, repairs, thread resolution, or
-merges.
+merges. Do not review a draft pull request as the final delivery verdict.
 
 Always verify:
 
@@ -219,8 +232,9 @@ exact-head review.
 After two unsuccessful review or repair attempts, the director stops for human
 direction.
 
-When the pull request is reviewed, mergeable, and green, the director may
-merge it into `develop`, update the owning and parent issues, and choose the
+When the pull request is reviewed, mergeable, and green, the director requests
+or confirms explicit human merge approval. After approval, the director may
+merge it into `develop`, update every linked and parent issue, and choose the
 next delivery slice. Only the project owner may merge `develop` into `main`.
 
 ## Human decision gates
