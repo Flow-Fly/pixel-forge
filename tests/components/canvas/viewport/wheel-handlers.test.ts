@@ -43,7 +43,6 @@ function createCallbacks() {
   return {
     requestUpdate: vi.fn(),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 } as DOMRect),
-    contains: () => false,
   };
 }
 

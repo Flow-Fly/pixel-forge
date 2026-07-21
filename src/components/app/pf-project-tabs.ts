@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 import {
   WORKSPACE_OPEN_ITEM_LIMIT,
   workspaceItemLimitMessage,
@@ -12,6 +13,8 @@ import {
 @customElement('pf-project-tabs')
 export class PFProjectTabs extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: block;
       container-type: inline-size;
@@ -38,7 +41,6 @@ export class PFProjectTabs extends BaseComponent {
       padding: 0;
       list-style: none;
       overflow-x: auto;
-      scrollbar-width: thin;
     }
 
     .tab-item {
@@ -266,7 +268,7 @@ export class PFProjectTabs extends BaseComponent {
 
     return html`
       <nav class="tabs" aria-label="Open projects">
-        <ul class="tab-list">
+        <ul class="tab-list" data-scrollbar="horizontal">
           ${items.map((item) => {
             const isActive = item.id === activeItemId;
             const isDirty = autoSaveService.isDirty(item.context);

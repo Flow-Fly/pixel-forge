@@ -1,6 +1,7 @@
 import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
 /**
  * Reusable dialog/modal component with backdrop, close behaviors, and slot-based content.
@@ -27,6 +28,8 @@ import { BaseComponent } from "../../core/base-component";
 @customElement("pf-dialog")
 export class PFDialog extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: none;
     }
@@ -51,7 +54,7 @@ export class PFDialog extends BaseComponent {
       border: 1px solid var(--pf-color-border, #333);
       border-radius: var(--pf-radius-md);
       padding: 16px;
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
       max-height: 90vh;
       overflow-y: auto;
     }
@@ -199,6 +202,7 @@ export class PFDialog extends BaseComponent {
       <div class="overlay" @click=${this.handleBackdropClick}>
         <div
           class="dialog"
+          data-scrollbar="vertical"
           style="width: ${this.width}"
           @click=${this.handleDialogClick}
         >

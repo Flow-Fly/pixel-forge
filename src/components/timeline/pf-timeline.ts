@@ -3,6 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext } from '../../stores/project-context';
 import { AddLayerCommand, RemoveLayerCommand } from '../../commands/layer-commands';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 import './pf-playback-controls';
 import './pf-onion-skin-controls';
 import './pf-timeline-header';
@@ -13,6 +14,8 @@ import type { PFTimelineHeader } from './pf-timeline-header';
 @customElement('pf-timeline')
 export class PFTimeline extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: flex;
       flex-direction: column;
@@ -98,35 +101,6 @@ export class PFTimeline extends BaseComponent {
         linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px) 0 0 / 32px 32px,
         var(--pf-color-bg-dark);
 
-      /* Firefox scrollbar styling */
-      scrollbar-width: thin;
-      scrollbar-color: var(--pf-color-scrollbar-thumb, #555)
-        var(--pf-color-scrollbar-track, #2a2a2a);
-    }
-
-    /* Webkit (Chrome, Safari, Edge) scrollbar styling */
-    .scroll-container::-webkit-scrollbar {
-      width: 10px;
-      height: 10px;
-    }
-
-    .scroll-container::-webkit-scrollbar-track {
-      background: var(--pf-color-scrollbar-track, #2a2a2a);
-      border-radius: var(--pf-radius-sm);
-    }
-
-    .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--pf-color-scrollbar-thumb, #555);
-      border-radius: var(--pf-radius-sm);
-      border: 2px solid var(--pf-color-scrollbar-track, #2a2a2a);
-    }
-
-    .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--pf-color-scrollbar-thumb-hover, #777);
-    }
-
-    .scroll-container::-webkit-scrollbar-corner {
-      background: var(--pf-color-scrollbar-track, #2a2a2a);
     }
 
     .layers-column {
@@ -329,6 +303,7 @@ export class PFTimeline extends BaseComponent {
       </div>
       <div
         class="scroll-container can-pan ${this.isPanning ? 'panning' : ''}"
+        data-scrollbar="both"
         @scroll=${this.handleScroll}
         @mousedown=${this.handlePanStart}
         @wheel=${this.handleWheel}

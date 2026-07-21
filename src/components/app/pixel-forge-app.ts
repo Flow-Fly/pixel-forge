@@ -49,12 +49,15 @@ import {
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
 import { log } from "../../utils/log";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: grid;
       grid-template-columns: 56px 1fr 288px; /* Toolbar, Workspace, Panels */
@@ -183,7 +186,7 @@ export class PixelForgeApp extends BaseComponent {
       flex-direction: column;
       overflow-y: auto;
       overflow-x: hidden;
-      box-shadow: -1px 0 0 rgba(255, 255, 255, 0.025) inset;
+      --pf-scrollbar-surface-shadow: -1px 0 0 rgba(255, 255, 255, 0.025) inset;
     }
 
     .panels > * {
@@ -813,7 +816,7 @@ export class PixelForgeApp extends BaseComponent {
           : ""}
       </main>
 
-      <aside class="panels">
+      <aside class="panels" data-scrollbar="vertical">
         ${isTimelineCollapsed
           ? html`
               <pf-panel header="Layers" collapsible panel-id="layers" bordered>

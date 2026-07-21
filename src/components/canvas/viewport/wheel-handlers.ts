@@ -28,7 +28,7 @@ function normalizeWheelDelta(delta: number, deltaMode: number): number {
 }
 
 /**
- * Handle wheel events on the viewport content.
+ * Handle wheel events on the viewport host.
  */
 export function handleWheel(
   e: WheelEvent,

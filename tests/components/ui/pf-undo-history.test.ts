@@ -179,6 +179,14 @@ describe('pf-undo-history active project context', () => {
     vi.restoreAllMocks();
   });
 
+  it('marks the history list as a vertical scroll surface', async () => {
+    const panel = await createHistoryPanel(createTestContext());
+
+    expect(panel.shadowRoot?.querySelector('.list')?.getAttribute('data-scrollbar')).toBe(
+      'vertical'
+    );
+  });
+
   it('shows and reverts only the active project history', async () => {
     const contextA = createTestContext();
     const contextB = createTestContext();

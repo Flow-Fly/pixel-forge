@@ -161,6 +161,17 @@ describe('timeline active project context binding', () => {
     expect(contextB.history.undoStack.value).toHaveLength(0);
   });
 
+  it('marks the timeline body as scrollable while keeping its synchronized header hidden', async () => {
+    const timeline = await createTimeline();
+
+    expect(
+      timeline.shadowRoot?.querySelector('.scroll-container')?.getAttribute('data-scrollbar')
+    ).toBe('both');
+    expect(
+      timeline.shadowRoot?.querySelector('.header-frames')?.hasAttribute('data-scrollbar')
+    ).toBe(false);
+  });
+
   it('records playback frame actions in the active context history', async () => {
     const contextA = createContext('Context A');
     const contextB = createContext('Context B');

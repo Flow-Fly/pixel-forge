@@ -213,6 +213,14 @@ describe("pf-menu-bar popovers", () => {
     }
   });
 
+  it("marks every menu popover as a vertical scroll surface", async () => {
+    const element = await createMenuBar();
+    const popovers = element.shadowRoot?.querySelectorAll<HTMLElement>("[popover]") ?? [];
+
+    expect(popovers).toHaveLength(4);
+    expect([...popovers].every((popover) => popover.dataset.scrollbar === "vertical")).toBe(true);
+  });
+
   it("opens File from a click", async () => {
     const element = await createMenuBar();
     const fileButton = button(element, "file");
