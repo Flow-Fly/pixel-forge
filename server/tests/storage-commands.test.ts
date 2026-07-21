@@ -17,10 +17,11 @@ const storageEnvironment = {
   STORAGE_SECRET_ACCESS_KEY: 'private-local-secret',
 };
 
-async function runStorageReadiness(
+async function runStorageCommand(
+  command: 'storage-compatibility' | 'storage-readiness',
   environment: Record<string, string | undefined>
 ): Promise<CommandResult> {
-  const child = spawn(process.execPath, ['dist/commands/storage-readiness.js'], {
+  const child = spawn(process.execPath, [`dist/commands/${command}.js`], {
     cwd: new URL('..', import.meta.url),
     env: { ...process.env, ...environment },
     stdio: 'pipe',
@@ -39,7 +40,7 @@ async function runStorageReadiness(
 
 describe('storage readiness command', () => {
   it('reports missing configuration without attempting readiness', async () => {
-    const result = await runStorageReadiness({
+    const result = await runStorageCommand('storage-readiness', {
       ...storageEnvironment,
       STORAGE_SECRET_ACCESS_KEY: undefined,
     });
@@ -51,7 +52,7 @@ describe('storage readiness command', () => {
   });
 
   it('reports an unavailable service without credentials or raw SDK errors', async () => {
-    const result = await runStorageReadiness(storageEnvironment);
+    const result = await runStorageCommand('storage-readiness', storageEnvironment);
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('"event":"storage.not_ready"');
@@ -59,5 +60,14 @@ describe('storage readiness command', () => {
     expect(result.stderr).not.toContain(storageEnvironment.STORAGE_SECRET_ACCESS_KEY);
     expect(result.stderr).not.toContain('ECONNREFUSED');
     expect(result.stdout).not.toContain('storage.ready');
+  });
+
+  it('refuses compatibility mutation before connecting without the safety interlock', async () => {
+    const result = await runStorageCommand('storage-compatibility', storageEnvironment);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('STORAGE_SAFETY_CONFIRM must equal local-non-production');
+    expect(result.stderr).not.toContain(storageEnvironment.STORAGE_SECRET_ACCESS_KEY);
+    expect(result.stdout).toBe('');
   });
 });

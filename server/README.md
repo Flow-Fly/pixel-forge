@@ -2,9 +2,9 @@
 
 This workspace contains the local Node 22 and Hono walking skeleton. The public
 health route proves only that the process and build are alive. PostgreSQL
-readiness, migrations, and compatibility checks are explicit commands; they do
-not run during normal server startup. Object-storage, authentication, and sync
-belong to later delivery slices.
+and object-storage readiness and compatibility checks are explicit commands;
+they do not run during normal server startup. Authentication and sync belong
+to later delivery slices.
 
 ## Run locally
 
@@ -40,14 +40,21 @@ npm run server:dev
 `CORS_ALLOWED_ORIGINS` accepts a comma-separated list of exact HTTP or HTTPS
 origins. Wildcards, paths, query strings, and empty entries are rejected.
 
-## Run PostgreSQL locally
+## Run PostgreSQL and MinIO locally
 
-The root `compose.yaml` defines one local-development PostgreSQL service with
-disposable credentials. It binds only to the loopback interface.
+The root `compose.yaml` defines local-development PostgreSQL and MinIO services
+with disposable credentials. Their database, object API, and MinIO console
+ports bind only to the loopback interface. The one-shot `minio-bootstrap`
+service creates only the local `pixel-forge-dev` bucket after MinIO is healthy.
 
 ```sh
-docker compose up -d --wait postgres
+docker compose up -d --wait postgres minio minio-bootstrap
 ```
+
+`docker compose ps` should report both long-running services as healthy and
+`minio-bootstrap` as successfully exited. PostgreSQL remains available at
+`127.0.0.1:5432`, MinIO's S3-compatible endpoint at `127.0.0.1:9000`, and its
+local console at `127.0.0.1:9001`.
 
 Database commands require an explicit URL. Commands that apply committed
 migrations also require the exact non-production confirmation. Neither value
@@ -99,7 +106,44 @@ closing its database connections. The compatibility subprocess also deletes
 its uniquely named probe inside the checked transaction. The test does not
 truncate a table or create, drop, or reset a database.
 
-## Stop or reset local PostgreSQL
+## Verify local object storage
+
+Storage commands require explicit S3-compatible settings. MinIO uses path-style
+requests locally. The normal server process does not read or require these
+values.
+
+```sh
+export STORAGE_ENDPOINT=http://127.0.0.1:9000
+export STORAGE_REGION=us-east-1
+export STORAGE_BUCKET=pixel-forge-dev
+export STORAGE_ACCESS_KEY_ID=pixel_forge
+export STORAGE_SECRET_ACCESS_KEY=pixel_forge_local_secret
+export STORAGE_FORCE_PATH_STYLE=true
+
+npm run server:storage:ready
+```
+
+Readiness performs only a bucket-level availability check. It emits a small
+`storage.ready` or `storage.not_ready` event without logging the endpoint,
+bucket, credentials, or raw SDK error.
+
+Mutation and integration commands additionally require the exact local safety
+confirmation and refuse non-loopback endpoints:
+
+```sh
+export STORAGE_SAFETY_CONFIRM=local-non-production
+
+npm run server:storage:compat
+npm run server:storage:test
+```
+
+The compatibility command writes arbitrary bytes to one uniquely named key,
+reads and compares those bytes, deletes that exact key, and verifies that it is
+missing. The integration suite uses another unique per-run prefix. Cleanup
+deletes only the exact keys created by that run: neither path lists objects,
+deletes a broad prefix, removes a bucket, or provisions storage.
+
+## Stop or reset local services
 
 Stop the service while preserving its local volume:
 
@@ -107,16 +151,18 @@ Stop the service while preserving its local volume:
 docker compose down
 ```
 
-If the disposable local data is no longer useful, remove only this Compose
-project's containers and named volumes:
+If the disposable local database and object data are no longer useful, remove
+only this Compose project's containers and named volumes:
 
 ```sh
 docker compose down --volumes
 ```
 
-The second command permanently deletes the local development database. Never
-use it as a production recovery procedure. Production migrations and recovery
-remain explicit owner-gated operations outside this repository slice.
+The second command permanently deletes this Compose project's local PostgreSQL
+and MinIO data. It is the only documented broad cleanup and is a manual local
+reset, not part of an integration test. Never use it as a production recovery
+procedure. Production storage, migrations, and recovery remain explicit
+owner-gated operations outside this repository slice.
 
 ## Verify health
 
@@ -136,8 +182,7 @@ The response is deterministic apart from the configured build revision:
 ```
 
 This public route never probes or describes database or storage dependencies.
-Those diagnostics will be separate, operator-gated endpoints after the
-corresponding adapters exist.
+Those checks remain separate, operator-run commands.
 
 ## Commands
 
@@ -154,6 +199,9 @@ npm run server:db:migrate
 npm run server:db:ready
 npm run server:db:compat
 npm run server:db:test
+npm run server:storage:ready
+npm run server:storage:compat
+npm run server:storage:test
 ```
 
 `server:test` builds the workspace, exercises the Hono app, starts a real HTTP
