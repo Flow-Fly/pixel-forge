@@ -14,6 +14,7 @@ export class PFProjectTabs extends BaseComponent {
   static styles = css`
     :host {
       display: block;
+      container-type: inline-size;
       border-bottom: 1px solid var(--pf-color-border);
       background: linear-gradient(180deg, rgba(17, 21, 28, 0.96), rgba(10, 13, 18, 0.92));
       box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
@@ -29,6 +30,7 @@ export class PFProjectTabs extends BaseComponent {
 
     .tab-list {
       display: flex;
+      flex: 1 1 auto;
       align-items: end;
       gap: 4px;
       min-width: 0;
@@ -41,6 +43,7 @@ export class PFProjectTabs extends BaseComponent {
 
     .tab-item {
       display: flex;
+      flex: 0 0 auto;
       align-items: stretch;
       min-width: 0;
       border: 1px solid var(--pf-color-border);
@@ -105,6 +108,7 @@ export class PFProjectTabs extends BaseComponent {
     }
 
     .close-button,
+    .active-close-button,
     .add-button {
       display: grid;
       place-items: center;
@@ -115,11 +119,13 @@ export class PFProjectTabs extends BaseComponent {
     }
 
     .close-button:hover:not(:disabled),
+    .active-close-button:hover,
     .add-button:hover {
       background: rgba(255, 255, 255, 0.06);
       color: var(--pf-color-text-main);
     }
 
+    .active-close-button,
     .add-button {
       align-self: stretch;
       height: 34px;
@@ -128,6 +134,20 @@ export class PFProjectTabs extends BaseComponent {
       border-radius: 6px 6px 0 0;
       color: var(--pf-color-text-muted);
       background: rgba(10, 13, 18, 0.62);
+    }
+
+    .active-close-button {
+      display: none;
+    }
+
+    @container (max-width: 1024px) {
+      .tab-item.active .close-button {
+        display: none;
+      }
+
+      .active-close-button {
+        display: grid;
+      }
     }
 
     .error {
@@ -239,6 +259,8 @@ export class PFProjectTabs extends BaseComponent {
   render() {
     const items = workspaceStore.items.value;
     const activeItemId = workspaceStore.activeItemId.value;
+    const activeItem = items.find((item) => item.id === activeItemId);
+    const activeCloseLabel = activeItem ? `Close ${this.projectName(activeItem)}` : '';
     const canClose = items.length > 1;
     const canOpenAnotherProject = items.length < WORKSPACE_OPEN_ITEM_LIMIT;
 
@@ -278,6 +300,21 @@ export class PFProjectTabs extends BaseComponent {
             `;
           })}
         </ul>
+        ${
+          canClose && activeItem
+            ? html`
+                <button
+                  class="active-close-button"
+                  type="button"
+                  aria-label=${activeCloseLabel}
+                  title=${activeCloseLabel}
+                  @click=${() => this.closeItem(activeItem.id)}
+                >
+                  x
+                </button>
+              `
+            : ''
+        }
         <button
           class="add-button"
           type="button"
