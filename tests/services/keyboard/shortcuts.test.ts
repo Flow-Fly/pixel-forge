@@ -26,6 +26,7 @@ describe('keyboard service native control behavior', () => {
       keyboardService.unregister(shortcut.key, []);
     }
     keyboardService.unregister('x', []);
+    keyboardService.unregister('1', []);
   });
 
   it.each(TEST_SHORTCUTS)(
@@ -68,6 +69,72 @@ describe('keyboard service native control behavior', () => {
     keyboardService.register('x', [], action, 'Test text entry');
 
     const event = keyDown(input, 'x', 'KeyX');
+
+    expect(action).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('matches an opted-in physical digit code across keyboard layouts', () => {
+    const action = vi.fn();
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    keyboardService.register('1', [], action, 'Test physical digit', {
+      physicalCode: 'Digit1',
+    });
+
+    const qwertyEvent = keyDown(canvas, '1', 'Digit1');
+    const azertyEvent = keyDown(canvas, '&', 'Digit1');
+
+    expect(action).toHaveBeenCalledTimes(2);
+    expect(qwertyEvent.defaultPrevented).toBe(true);
+    expect(azertyEvent.defaultPrevented).toBe(true);
+  });
+
+  it('does not apply an unmodified physical digit shortcut to modified input', () => {
+    const action = vi.fn();
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    keyboardService.register('1', [], action, 'Test physical digit', {
+      physicalCode: 'Digit1',
+    });
+    const event = new KeyboardEvent('keydown', {
+      key: '&',
+      code: 'Digit1',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    canvas.dispatchEvent(event);
+
+    expect(action).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('preserves text-entry behavior for an opted-in physical digit code', () => {
+    const action = vi.fn();
+    const input = document.createElement('input');
+    document.body.append(input);
+    keyboardService.register('1', [], action, 'Test physical digit', {
+      physicalCode: 'Digit1',
+    });
+
+    const event = keyDown(input, '&', 'Digit1');
+
+    expect(action).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('does not consume an unavailable physical digit shortcut', () => {
+    const action = vi.fn();
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    keyboardService.register('1', [], action, 'Test unavailable digit', {
+      physicalCode: 'Digit1',
+      when: () => false,
+    });
+
+    const event = keyDown(canvas, '&', 'Digit1');
 
     expect(action).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
