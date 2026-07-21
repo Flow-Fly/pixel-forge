@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["shared"],
+  "workspaces": ["shared", "server"],
   "scripts": {
     "dev": "npm run shared:build && vite",
     "build": "npm run shared:build && tsc && vite build",
@@ -22,7 +22,13 @@
     "shared:build": "npm run build --workspace @pixel-forge/shared",
     "shared:node-test": "npm run test:node --workspace @pixel-forge/shared",
     "shared:test": "npm run test --workspace @pixel-forge/shared",
-    "shared:typecheck": "npm run typecheck --workspace @pixel-forge/shared"
+    "shared:typecheck": "npm run typecheck --workspace @pixel-forge/shared",
+    "server:build": "npm run build --workspace @pixel-forge/server",
+    "server:dev": "npm run dev --workspace @pixel-forge/server",
+    "server:lint": "npm run lint --workspace @pixel-forge/server",
+    "server:start": "npm run start --workspace @pixel-forge/server",
+    "server:test": "npm run test --workspace @pixel-forge/server",
+    "server:typecheck": "npm run typecheck --workspace @pixel-forge/server"
   },
   "dependencies": {
     "@pixel-forge/shared": "0.1.0",
