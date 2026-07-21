@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';
 
 function startProcess(environment: Record<string, string>): ChildProcessWithoutNullStreams {
@@ -36,7 +35,8 @@ function waitForOutput(
 
     function onData(chunk: string): void {
       output += chunk;
-      if (output.includes(text)) succeed();
+      const completeLines = output.split('\n').slice(0, -1);
+      if (completeLines.some((line) => line.includes(text))) succeed();
     }
 
     function onExit(code: number | null, signal: NodeJS.Signals | null): void {
@@ -54,15 +54,27 @@ function waitForOutput(
 async function waitForExit(
   child: ChildProcessWithoutNullStreams
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return { code: child.exitCode, signal: child.signalCode };
-  }
+  return new Promise((resolve, reject) => {
+    function cleanup(): void {
+      clearTimeout(timeout);
+      child.off('exit', onExit);
+    }
 
-  const [code, signal] = await once(child, 'exit');
-  return {
-    code: code as number | null,
-    signal: signal as NodeJS.Signals | null,
-  };
+    function onExit(code: number | null, signal: NodeJS.Signals | null): void {
+      cleanup();
+      resolve({ code, signal });
+    }
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out waiting for the server process to exit'));
+    }, 5_000);
+
+    child.once('exit', onExit);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      onExit(child.exitCode, child.signalCode);
+    }
+  });
 }
 
 describe('server process', () => {
