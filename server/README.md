@@ -23,6 +23,9 @@ npm run server:dev
 The defaults serve the API on `http://127.0.0.1:3001` and allow browser
 requests from `http://localhost:5173`.
 
+`PORT=0` asks Node to choose an available ephemeral port for automated smoke
+tests; the `server.started` event reports the port that was actually bound.
+
 The server does not load `.env` files implicitly. Set process values in your
 shell when you need to override the safe local defaults:
 

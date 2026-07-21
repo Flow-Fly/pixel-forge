@@ -28,17 +28,21 @@ describe('startServer', () => {
       logger
     );
 
-    const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);
-    expect(response.status).toBe(200);
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);
+      expect(response.status).toBe(200);
 
-    await Promise.all([server.shutdown('test'), server.shutdown('test')]);
+      await Promise.all([server.shutdown('test'), server.shutdown('test')]);
 
-    expect(logger.events.map(({ event }) => event)).toEqual([
-      'server.started',
-      'server.shutdown_started',
-      'server.shutdown_complete',
-    ]);
-    await expect(fetch(`http://127.0.0.1:${server.port}/api/health`)).rejects.toThrow();
+      expect(logger.events.map(({ event }) => event)).toEqual([
+        'server.started',
+        'server.shutdown_started',
+        'server.shutdown_complete',
+      ]);
+      await expect(fetch(`http://127.0.0.1:${server.port}/api/health`)).rejects.toThrow();
+    } finally {
+      await server.shutdown('test cleanup');
+    }
   });
 
   it('rejects when the configured port cannot be bound', async () => {

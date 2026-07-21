@@ -24,9 +24,13 @@ describe('parseServerConfig', () => {
     });
   });
 
-  it.each(['0', '65536', '3000px', '3.5', ''])('rejects invalid PORT %j', (port) => {
+  it('allows port zero for ephemeral test servers', () => {
+    expect(parseServerConfig({ PORT: '0' }).port).toBe(0);
+  });
+
+  it.each(['-1', '65536', '3000px', '3.5', ''])('rejects invalid PORT %j', (port) => {
     expect(() => parseServerConfig({ PORT: port })).toThrow(
-      'PORT must be an integer between 1 and 65535'
+      'PORT must be an integer between 0 and 65535'
     );
   });
 
@@ -46,7 +50,26 @@ describe('parseServerConfig', () => {
 
   it('rejects an explicitly empty build revision', () => {
     expect(() => parseServerConfig({ BUILD_REVISION: '' })).toThrow(
-      'BUILD_REVISION must not be empty'
+      'BUILD_REVISION must be 1 to 64 URL-safe characters'
+    );
+  });
+
+  it.each(['contains spaces', '../revision', 'a'.repeat(65), 'line\nbreak'])(
+    'rejects unsafe BUILD_REVISION %j',
+    (buildRevision) => {
+      expect(() => parseServerConfig({ BUILD_REVISION: buildRevision })).toThrow(
+        'BUILD_REVISION must be 1 to 64 URL-safe characters'
+      );
+    }
+  );
+
+  it('does not echo malformed origin values in errors', () => {
+    const malformedOrigin = 'https://token@example.com/private?secret=value';
+
+    expect(() => parseServerConfig({ CORS_ALLOWED_ORIGINS: malformedOrigin })).toThrowError(
+      expect.objectContaining({
+        message: expect.not.stringContaining(malformedOrigin),
+      })
     );
   });
 });

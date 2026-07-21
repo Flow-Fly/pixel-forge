@@ -1,23 +1,21 @@
 import { parseServerConfig } from './config.js';
-import { consoleServerLogger, errorMessage, type ServerLogger } from './logger.js';
-import { startServer, type RunningServer } from './server.js';
-
-function registerShutdownSignals(server: RunningServer, logger: ServerLogger): void {
-  const shutdown = (signal: NodeJS.Signals): void => {
-    void server.shutdown(signal).catch(() => {
-      logger.error('server.shutdown_exit', { signal });
-      process.exitCode = 1;
-    });
-  };
-
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
-}
+import { registerShutdownSignals } from './lifecycle.js';
+import { consoleServerLogger, errorMessage } from './logger.js';
+import { startServer } from './server.js';
 
 async function main(): Promise<void> {
-  const config = parseServerConfig(process.env);
-  const server = await startServer(config, consoleServerLogger);
-  registerShutdownSignals(server, consoleServerLogger);
+  const shutdownSignals = registerShutdownSignals(process, consoleServerLogger, () => {
+    process.exitCode = 1;
+  });
+
+  try {
+    const config = parseServerConfig(process.env);
+    const server = await startServer(config, consoleServerLogger);
+    shutdownSignals.attach(server);
+  } catch (error) {
+    shutdownSignals.dispose();
+    throw error;
+  }
 }
 
 void main().catch((error: unknown) => {
