@@ -32,7 +32,14 @@ function parseDatabaseUrl(value: string | undefined): URL {
 
   const databaseName = readDatabaseName(url);
   const isPostgres = url.protocol === 'postgres:' || url.protocol === 'postgresql:';
-  if (!isPostgres || !url.hostname || !databaseName || databaseName.includes('/')) {
+  const hasDatabaseOverride = url.searchParams.has('database');
+  if (
+    !isPostgres ||
+    !url.hostname ||
+    !databaseName ||
+    databaseName.includes('/') ||
+    hasDatabaseOverride
+  ) {
     throw new Error(INVALID_DATABASE_URL_MESSAGE);
   }
 

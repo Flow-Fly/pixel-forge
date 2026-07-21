@@ -22,6 +22,7 @@ describe('parseDatabaseConfig', () => {
     'postgresql://localhost',
     'postgresql://localhost/database/extra',
     'postgresql://localhost/%',
+    'postgresql://localhost/pixel_forge_dev?database=postgres',
   ])('rejects invalid DATABASE_URL %j without echoing it', (databaseUrl) => {
     let error: unknown;
     try {
