@@ -7,7 +7,6 @@ import { requireSafeDatabaseTarget } from '../src/database/config.js';
 import { migrateDatabase } from '../src/database/migrate.js';
 
 const execFileAsync = promisify(execFile);
-const COMPATIBILITY_META_KEY = 'database_compatibility:last_checked';
 
 async function cleanupOwnedRecords(
   database: DatabaseAdapter,
@@ -75,15 +74,6 @@ describe('PostgreSQL metadata seam', () => {
       );
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('"event":"database.compatibility_complete"');
-    }
-
-    const database = createDatabaseAdapter(config);
-    try {
-      await expect(database.getAppMeta(COMPATIBILITY_META_KEY)).resolves.toMatchObject({
-        key: COMPATIBILITY_META_KEY,
-      });
-    } finally {
-      await database.close();
     }
   });
 });

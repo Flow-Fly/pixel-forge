@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { createDatabaseAdapter } from '../database/adapter.js';
 import { requireSafeDatabaseTarget } from '../database/config.js';
 import { migrateDatabase } from '../database/migrate.js';
 import { consoleServerLogger, errorMessage } from '../logger.js';
 
-const COMPATIBILITY_META_KEY = 'database_compatibility:last_checked';
+const COMPATIBILITY_META_PREFIX = 'database_compatibility:';
 
 async function main(): Promise<void> {
   let config;
@@ -33,11 +34,16 @@ async function main(): Promise<void> {
   try {
     await database.checkReadiness();
     const checkedAt = new Date().toISOString();
+    const checkKey = `${COMPATIBILITY_META_PREFIX}${randomUUID()}`;
     await database.transaction(async (transaction) => {
-      await transaction.setAppMeta(COMPATIBILITY_META_KEY, checkedAt);
-      const record = await transaction.getAppMeta(COMPATIBILITY_META_KEY);
+      await transaction.setAppMeta(checkKey, checkedAt);
+      const record = await transaction.getAppMeta(checkKey);
       if (record?.value !== checkedAt) {
         throw new Error('Compatibility transaction did not persist its metadata');
+      }
+      await transaction.deleteAppMeta(checkKey);
+      if (await transaction.getAppMeta(checkKey)) {
+        throw new Error('Compatibility transaction did not remove its metadata');
       }
     });
     await database.close();

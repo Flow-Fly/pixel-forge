@@ -80,8 +80,8 @@ database.
 npm run server:db:compat
 ```
 
-The command is safe to re-run. It writes only the
-`database_compatibility:last_checked` metadata key. Failures return a non-zero
+The command is safe to re-run. Its transaction uses one uniquely named probe
+record and deletes that record before committing. Failures return a non-zero
 exit code and emit a structured stage without printing the connection URL or a
 raw driver error.
 
@@ -95,10 +95,9 @@ The integration command uses the same `DATABASE_SAFETY_CONFIRM=non-production`
 interlock and administrative-database refusal as migration commands.
 
 The test generates unique metadata keys and removes those exact keys before
-closing its database connections. The compatibility subprocess updates the
-same durable `database_compatibility:last_checked` key as the documented
-command. The test does not truncate a table or create, drop, or reset a
-database.
+closing its database connections. The compatibility subprocess also deletes
+its uniquely named probe inside the checked transaction. The test does not
+truncate a table or create, drop, or reset a database.
 
 ## Stop or reset local PostgreSQL
 
