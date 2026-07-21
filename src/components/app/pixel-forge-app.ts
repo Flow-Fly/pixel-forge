@@ -60,6 +60,7 @@ import { log } from "../../utils/log";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
+const SIDEBAR_KEYBOARD_STEP = 16;
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -872,9 +873,9 @@ export class PixelForgeApp extends BaseComponent {
 
     let requestedWidth: number;
     if (event.key === "ArrowLeft") {
-      requestedWidth = this.sidebarWidth + 16;
+      requestedWidth = this.sidebarWidth + SIDEBAR_KEYBOARD_STEP;
     } else if (event.key === "ArrowRight") {
-      requestedWidth = this.sidebarWidth - 16;
+      requestedWidth = this.sidebarWidth - SIDEBAR_KEYBOARD_STEP;
     } else if (event.key === "Home") {
       this.applySidebarWidth(resetSidebarWidth(window.innerWidth));
       event.preventDefault();
@@ -890,6 +891,29 @@ export class PixelForgeApp extends BaseComponent {
       persistSidebarWidth(requestedWidth, window.innerWidth)
     );
   };
+
+  private renderSidebarResizeHandle() {
+    const bounds = this.sidebarWidthBounds;
+    const canResize = bounds.min < bounds.max;
+
+    return html`
+      <div
+        class="sidebar-resize-handle ${this.isResizingSidebar ? "resizing" : ""}"
+        role="separator"
+        aria-label="Resize workspace panels"
+        aria-orientation="vertical"
+        aria-valuemin=${bounds.min}
+        aria-valuemax=${bounds.max}
+        aria-valuenow=${this.sidebarWidth}
+        aria-valuetext="${this.sidebarWidth} pixels"
+        title="Resize panels. Use arrow keys; Home resets."
+        tabindex=${canResize ? 0 : -1}
+        ?hidden=${!canResize}
+        @pointerdown=${this.handleSidebarResizeStart}
+        @keydown=${this.handleSidebarResizeKeydown}
+      ></div>
+    `;
+  }
 
   private renderFileImportStatus() {
     return html`
@@ -918,8 +942,6 @@ export class PixelForgeApp extends BaseComponent {
       panelStore.panelStates.value.timeline?.collapsed ?? false;
     const activeProject = activeProjectContext.value.project;
     const deleteProjectName = this.getDeleteProjectName(activeProject);
-    const sidebarBounds = this.sidebarWidthBounds;
-    const canResizeSidebar = sidebarBounds.min < sidebarBounds.max;
 
     return html`
       <header class="menu-bar">
@@ -971,21 +993,7 @@ export class PixelForgeApp extends BaseComponent {
           : ""}
       </main>
 
-      <div
-        class="sidebar-resize-handle ${this.isResizingSidebar ? "resizing" : ""}"
-        role="separator"
-        aria-label="Resize workspace panels"
-        aria-orientation="vertical"
-        aria-valuemin=${sidebarBounds.min}
-        aria-valuemax=${sidebarBounds.max}
-        aria-valuenow=${this.sidebarWidth}
-        aria-valuetext="${this.sidebarWidth} pixels"
-        title="Resize panels. Use arrow keys; Home resets."
-        tabindex=${canResizeSidebar ? 0 : -1}
-        ?hidden=${!canResizeSidebar}
-        @pointerdown=${this.handleSidebarResizeStart}
-        @keydown=${this.handleSidebarResizeKeydown}
-      ></div>
+      ${this.renderSidebarResizeHandle()}
 
       <aside class="panels" data-scrollbar="vertical">
         ${isTimelineCollapsed
