@@ -2,18 +2,22 @@ import { signal } from '../../core/signal';
 import { shouldPreserveNativeKeyboardBehavior } from './native-keyboard-behavior';
 
 type ShortcutAction = () => void;
+type ShortcutCondition = () => boolean;
 
 interface Shortcut {
   key: string;
+  physicalCode?: string;
   modifiers: string[];
   action: ShortcutAction;
   description: string;
+  when?: ShortcutCondition;
   quick?: boolean;           // If true, tool is temporary while key held
   releaseAction?: ShortcutAction; // Called on key release (for quick tools)
 }
 
 class KeyboardService {
   private shortcuts: Map<string, Shortcut> = new Map();
+  private physicalShortcuts: Map<string, Shortcut> = new Map();
   private activeQuickKeys: Set<string> = new Set(); // Track held quick-tool keys
 
   // Signal to track if shortcuts are enabled (e.g. disable when typing in input)
@@ -29,21 +33,43 @@ class KeyboardService {
     modifiers: string[],
     action: ShortcutAction,
     description: string,
-    options?: { quick?: boolean; releaseAction?: ShortcutAction }
+    options?: {
+      quick?: boolean;
+      releaseAction?: ShortcutAction;
+      physicalCode?: string;
+      when?: ShortcutCondition;
+    }
   ) {
     const id = this.getShortcutId(key, modifiers);
-    this.shortcuts.set(id, {
+    const previousShortcut = this.shortcuts.get(id);
+    if (previousShortcut?.physicalCode) {
+      this.physicalShortcuts.delete(
+        this.getShortcutId(previousShortcut.physicalCode, previousShortcut.modifiers)
+      );
+    }
+
+    const shortcut = {
       key,
+      physicalCode: options?.physicalCode,
       modifiers,
       action,
       description,
+      when: options?.when,
       quick: options?.quick,
       releaseAction: options?.releaseAction,
-    });
+    };
+    this.shortcuts.set(id, shortcut);
+    if (shortcut.physicalCode) {
+      this.physicalShortcuts.set(this.getShortcutId(shortcut.physicalCode, modifiers), shortcut);
+    }
   }
 
   unregister(key: string, modifiers: string[]) {
     const id = this.getShortcutId(key, modifiers);
+    const shortcut = this.shortcuts.get(id);
+    if (shortcut?.physicalCode) {
+      this.physicalShortcuts.delete(this.getShortcutId(shortcut.physicalCode, modifiers));
+    }
     this.shortcuts.delete(id);
   }
 
@@ -81,9 +107,21 @@ class KeyboardService {
     if (e.shiftKey) modifiers.push('shift');
     if (e.altKey) modifiers.push('alt');
 
+    const physicalShortcut = this.physicalShortcuts.get(this.getShortcutId(e.code, modifiers));
+    if (physicalShortcut && this.isShortcutAvailable(physicalShortcut)) {
+      return {
+        id: this.getShortcutId(physicalShortcut.key, modifiers),
+        shortcut: physicalShortcut,
+      };
+    }
+
     const id = this.getShortcutId(this.getLogicalKey(e), modifiers);
     const shortcut = this.shortcuts.get(id);
-    return shortcut ? { id, shortcut } : null;
+    return shortcut && this.isShortcutAvailable(shortcut) ? { id, shortcut } : null;
+  }
+
+  private isShortcutAvailable(shortcut: Shortcut): boolean {
+    return shortcut.when?.() ?? true;
   }
 
   private handleKeyDown(e: KeyboardEvent) {
