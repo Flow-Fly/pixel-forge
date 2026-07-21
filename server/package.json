@@ -10,10 +10,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "npm run build && node dist/commands/database-migrate.js",
+    "db:ready": "npm run build && node dist/commands/database-readiness.js",
     "dev": "tsx watch src/index.ts",
-    "lint": "eslint src tests drizzle.config.ts vitest.config.ts",
+    "lint": "eslint src tests drizzle.config.ts vitest.config.ts vitest.database.config.ts",
     "start": "node dist/index.js",
     "test": "npm run build && vitest run --config vitest.config.ts",
+    "test:database": "vitest run --config vitest.database.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

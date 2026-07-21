@@ -1,6 +1,13 @@
 {
   "$schema": "https://docs.fallow.tools/schema/fallowrc.json",
-  "entry": ["src/main.ts", "shared/src/index.ts", "server/src/index.ts", "index.html"],
+  "entry": [
+    "src/main.ts",
+    "shared/src/index.ts",
+    "server/src/index.ts",
+    "server/src/commands/database-migrate.ts",
+    "server/src/commands/database-readiness.ts",
+    "index.html"
+  ],
   "dynamicallyLoaded": ["src/tools/**"],
   "usedClassMembers": [
     "styles",
