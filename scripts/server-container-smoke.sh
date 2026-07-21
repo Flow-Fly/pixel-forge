@@ -5,6 +5,7 @@ set -Eeuo pipefail
 readonly project_name="${COMPOSE_PROJECT_NAME:-pixel-forge-container-smoke-$$}"
 readonly image_revision="${PIXEL_FORGE_IMAGE_REVISION:-$(git rev-parse HEAD)}"
 readonly image_name="pixel-forge-server:${image_revision}"
+readonly shutdown_wait_seconds=20
 
 export COMPOSE_PROJECT_NAME="${project_name}"
 export PIXEL_FORGE_IMAGE_REVISION="${image_revision}"
@@ -48,8 +49,7 @@ runtime_identity="$(
     "process.stdout.write(process.platform + ' ' + process.arch + ' uid=' + String(process.getuid?.() ?? -1))"
 )"
 printf '%s\n' "Runtime identity: ${runtime_identity}"
-[[ "${runtime_identity}" == "linux x64 uid="* ]]
-[[ "${runtime_identity}" != *"uid=0" ]]
+[[ "${runtime_identity}" =~ ^linux\ x64\ uid=[1-9][0-9]*$ ]]
 
 image_identity="$(docker image inspect "${image_name}" --format '{{.Architecture}} {{.Config.User}}')"
 printf '%s\n' "Image identity: ${image_identity}"
@@ -64,14 +64,17 @@ grep --fixed-strings --quiet '"status":"ok"' <<<"${liveness}"
 server_container="$(compose ps --quiet server)"
 docker kill --signal SIGTERM "${server_container}" >/dev/null
 
-for _ in {1..20}; do
+for ((elapsed_seconds = 0; elapsed_seconds < shutdown_wait_seconds; elapsed_seconds += 1)); do
   [[ "$(docker inspect "${server_container}" --format '{{.State.Running}}')" == "false" ]] && break
   sleep 1
 done
 
-[[ "$(docker inspect "${server_container}" --format '{{.State.Running}}')" == "false" ]]
-[[ "$(docker inspect "${server_container}" --format '{{.State.ExitCode}}')" == "0" ]]
-[[ "$(docker inspect "${server_container}" --format '{{.State.OOMKilled}}')" == "false" ]]
+container_state="$(
+  docker inspect "${server_container}" \
+    --format '{{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}'
+)"
+printf '%s\n' "Stopped container state: ${container_state}"
+[[ "${container_state}" == 'false exit=0 oom=false' ]]
 
 server_logs="$(docker logs "${server_container}" 2>&1)"
 grep --fixed-strings --quiet '"event":"server.shutdown_started"' <<<"${server_logs}"
