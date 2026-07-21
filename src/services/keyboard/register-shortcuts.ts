@@ -39,6 +39,8 @@ interface ShortcutRegistration {
   options?: {
     quick?: boolean;
     releaseAction?: ShortcutAction;
+    physicalCode?: string;
+    when?: () => boolean;
   };
 }
 
@@ -580,6 +582,44 @@ const colorShortcuts: ShortcutGroup = [
   },
 ];
 
+function selectGuideColorOrZoom(level: number) {
+  const context = getActiveProjectContext();
+  const session = context.guidedDrawing.session.value;
+
+  if (!session) {
+    if (isZoomLevel(level)) context.viewport.zoomToLevel(level);
+    return;
+  }
+
+  const guideColorCount = session.guideColorCount ?? highestGuideNumber(session.target);
+  if (level > guideColorCount) return;
+
+  const color = context.palette.mainColors.value[level - 1];
+  if (!color) return;
+
+  context.colors.setPrimaryColor(color);
+  context.colors.updateLightnessVariations(color);
+}
+
+function isGuideColorOrZoomAvailable(level: number): boolean {
+  const context = getActiveProjectContext();
+  const session = context.guidedDrawing.session.value;
+  if (!session) return isZoomLevel(level);
+
+  const guideColorCount = session.guideColorCount ?? highestGuideNumber(session.target);
+  return level <= guideColorCount && Boolean(context.palette.mainColors.value[level - 1]);
+}
+
+function isZoomLevel(level: number): level is 1 | 2 | 3 | 4 | 5 | 6 {
+  return level >= 1 && level <= 6;
+}
+
+function highestGuideNumber(target: Uint8Array): number {
+  let highest = 0;
+  for (const guideNumber of target) highest = Math.max(highest, guideNumber);
+  return highest;
+}
+
 const viewShortcuts: ShortcutGroup = [
   {
     key: '0',
@@ -587,11 +627,18 @@ const viewShortcuts: ShortcutGroup = [
     action: () => getActiveProjectContext().viewport.resetView(),
     description: 'Fit to window',
   },
-  ...([1, 2, 3, 4, 5, 6] as const).map((level) => ({
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((level) => ({
     key: String(level),
     modifiers: [],
-    action: () => getActiveProjectContext().viewport.zoomToLevel(level),
-    description: `Zoom ${[100, 200, 400, 800, 1600, 3200][level - 1]}%`,
+    action: () => selectGuideColorOrZoom(level),
+    description:
+      level <= 6
+        ? `Zoom ${[100, 200, 400, 800, 1600, 3200][level - 1]}% / Guide color ${level}`
+        : `Guide color ${level}`,
+    options: {
+      physicalCode: `Digit${level}`,
+      when: () => isGuideColorOrZoomAvailable(level),
+    },
   })),
 ];
 
