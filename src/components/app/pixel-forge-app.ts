@@ -48,6 +48,14 @@ import {
 } from "../../services/project-file-handling";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  clampSidebarWidth,
+  getSidebarWidthBounds,
+  persistSidebarWidth,
+  readSidebarWidth,
+  resetSidebarWidth,
+} from "../../stores/sidebar-width";
 import { log } from "../../utils/log";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
@@ -60,7 +68,7 @@ export class PixelForgeApp extends BaseComponent {
 
     :host {
       display: grid;
-      grid-template-columns: 56px 1fr 288px; /* Toolbar, Workspace, Panels */
+      grid-template-columns: 56px minmax(0, 1fr) var(--pf-sidebar-width, 288px);
       grid-template-rows: 52px 36px 1fr 28px; /* Menu, ContextBar, Main, Status */
       width: 100vw;
       height: 100vh;
@@ -193,6 +201,51 @@ export class PixelForgeApp extends BaseComponent {
       flex-shrink: 0;
     }
 
+    .sidebar-resize-handle {
+      grid-column: 3;
+      grid-row: 3;
+      align-self: stretch;
+      justify-self: start;
+      width: 11px;
+      z-index: 2;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      cursor: ew-resize;
+      touch-action: none;
+      transform: translateX(-50%);
+    }
+
+    .sidebar-resize-handle::before {
+      content: "";
+      position: absolute;
+      inset-block: 0;
+      left: 50%;
+      width: 2px;
+      background: var(--pf-color-border-strong);
+      opacity: 0.5;
+      transform: translateX(-50%);
+      transition:
+        background-color 0.15s,
+        opacity 0.15s;
+    }
+
+    .sidebar-resize-handle:hover::before,
+    .sidebar-resize-handle:focus-visible::before,
+    .sidebar-resize-handle.resizing::before {
+      background: var(--pf-color-accent);
+      opacity: 1;
+    }
+
+    .sidebar-resize-handle:focus-visible {
+      outline: 1px solid var(--pf-color-accent);
+      outline-offset: -2px;
+    }
+
+    .sidebar-resize-handle[hidden] {
+      display: none;
+    }
+
     .status-bar {
       grid-column: 1 / -1;
       grid-row: 4;
@@ -307,6 +360,8 @@ export class PixelForgeApp extends BaseComponent {
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
+  @state() private sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+  @state() private isResizingSidebar = false;
   @state() private hasLibraryProject = false;
   @state() private projectSelectionRequired = false;
   @state() private warningMessage: string | null = null;
@@ -314,6 +369,10 @@ export class PixelForgeApp extends BaseComponent {
 
   private resizeStartY = 0;
   private resizeStartHeight = 0;
+  private sidebarResizeStartX = 0;
+  private sidebarResizeStartWidth = DEFAULT_SIDEBAR_WIDTH;
+  private previousBodyCursor = "";
+  private previousBodyUserSelect = "";
   private warningTimer: number | null = null;
   private fileImportTimer: number | null = null;
   private fileDropHandlingStarted = false;
@@ -322,6 +381,9 @@ export class PixelForgeApp extends BaseComponent {
 
   connectedCallback() {
     super.connectedCallback();
+    this.applySidebarWidth(readSidebarWidth(window.innerWidth));
+    window.addEventListener("resize", this.handleWindowResize);
+
     // Load saved timeline height
     const savedHeight = localStorage.getItem("pf-timeline-height");
     if (savedHeight) {
@@ -645,6 +707,8 @@ export class PixelForgeApp extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.stopSidebarResize(false);
+    window.removeEventListener("resize", this.handleWindowResize);
     document.removeEventListener("mousemove", this.handleTimelineResizeMove);
     document.removeEventListener("mouseup", this.handleTimelineResizeEnd);
     window.removeEventListener("project-loaded", this.handleProjectLoaded);
@@ -738,6 +802,95 @@ export class PixelForgeApp extends BaseComponent {
     localStorage.setItem("pf-timeline-height", String(this.timelineHeight));
   };
 
+  private get sidebarWidthBounds() {
+    return getSidebarWidthBounds(window.innerWidth);
+  }
+
+  private applySidebarWidth(width: number) {
+    this.sidebarWidth = clampSidebarWidth(width, window.innerWidth);
+    this.style.setProperty("--pf-sidebar-width", `${this.sidebarWidth}px`);
+  }
+
+  private handleWindowResize = () => {
+    this.stopSidebarResize(false);
+    this.applySidebarWidth(readSidebarWidth(window.innerWidth));
+    this.requestUpdate();
+  };
+
+  private handleSidebarResizeStart = (event: PointerEvent) => {
+    const { min, max } = this.sidebarWidthBounds;
+    if (event.button !== 0 || min === max) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.isResizingSidebar = true;
+    this.sidebarResizeStartX = event.clientX;
+    this.sidebarResizeStartWidth = this.sidebarWidth;
+    this.previousBodyCursor = document.body.style.cursor;
+    this.previousBodyUserSelect = document.body.style.userSelect;
+
+    document.addEventListener("pointermove", this.handleSidebarResizeMove);
+    document.addEventListener("pointerup", this.handleSidebarResizeEnd);
+    document.addEventListener("pointercancel", this.handleSidebarResizeEnd);
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  private handleSidebarResizeMove = (event: PointerEvent) => {
+    if (!this.isResizingSidebar) return;
+
+    event.preventDefault();
+    const dragDistance = this.sidebarResizeStartX - event.clientX;
+    this.applySidebarWidth(this.sidebarResizeStartWidth + dragDistance);
+  };
+
+  private handleSidebarResizeEnd = () => {
+    this.stopSidebarResize(true);
+  };
+
+  private stopSidebarResize(persist: boolean) {
+    const wasResizing = this.isResizingSidebar;
+    if (wasResizing && persist) {
+      this.applySidebarWidth(
+        persistSidebarWidth(this.sidebarWidth, window.innerWidth)
+      );
+    }
+
+    this.isResizingSidebar = false;
+    document.removeEventListener("pointermove", this.handleSidebarResizeMove);
+    document.removeEventListener("pointerup", this.handleSidebarResizeEnd);
+    document.removeEventListener("pointercancel", this.handleSidebarResizeEnd);
+    if (wasResizing) {
+      document.body.style.cursor = this.previousBodyCursor;
+      document.body.style.userSelect = this.previousBodyUserSelect;
+    }
+  }
+
+  private handleSidebarResizeKeydown = (event: KeyboardEvent) => {
+    const { min, max } = this.sidebarWidthBounds;
+    if (min === max) return;
+
+    let requestedWidth: number;
+    if (event.key === "ArrowLeft") {
+      requestedWidth = this.sidebarWidth + 16;
+    } else if (event.key === "ArrowRight") {
+      requestedWidth = this.sidebarWidth - 16;
+    } else if (event.key === "Home") {
+      this.applySidebarWidth(resetSidebarWidth(window.innerWidth));
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.applySidebarWidth(
+      persistSidebarWidth(requestedWidth, window.innerWidth)
+    );
+  };
+
   private renderFileImportStatus() {
     return html`
       <span class="visually-hidden" role="status" aria-live="polite"
@@ -765,6 +918,8 @@ export class PixelForgeApp extends BaseComponent {
       panelStore.panelStates.value.timeline?.collapsed ?? false;
     const activeProject = activeProjectContext.value.project;
     const deleteProjectName = this.getDeleteProjectName(activeProject);
+    const sidebarBounds = this.sidebarWidthBounds;
+    const canResizeSidebar = sidebarBounds.min < sidebarBounds.max;
 
     return html`
       <header class="menu-bar">
@@ -815,6 +970,22 @@ export class PixelForgeApp extends BaseComponent {
             `
           : ""}
       </main>
+
+      <div
+        class="sidebar-resize-handle ${this.isResizingSidebar ? "resizing" : ""}"
+        role="separator"
+        aria-label="Resize workspace panels"
+        aria-orientation="vertical"
+        aria-valuemin=${sidebarBounds.min}
+        aria-valuemax=${sidebarBounds.max}
+        aria-valuenow=${this.sidebarWidth}
+        aria-valuetext="${this.sidebarWidth} pixels"
+        title="Resize panels. Use arrow keys; Home resets."
+        tabindex=${canResizeSidebar ? 0 : -1}
+        ?hidden=${!canResizeSidebar}
+        @pointerdown=${this.handleSidebarResizeStart}
+        @keydown=${this.handleSidebarResizeKeydown}
+      ></div>
 
       <aside class="panels" data-scrollbar="vertical">
         ${isTimelineCollapsed
