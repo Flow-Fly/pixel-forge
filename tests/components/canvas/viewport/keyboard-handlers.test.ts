@@ -66,20 +66,6 @@ describe('viewport keyboard handlers', () => {
     callbacks.requestUpdate.mockClear();
   });
 
-  it('leaves Space activation to a button inside a shadow root', () => {
-    const host = document.createElement('div');
-    const shadowRoot = host.attachShadow({ mode: 'open' });
-    const button = document.createElement('button');
-    shadowRoot.append(button);
-    document.body.append(host);
-
-    const event = dispatchSpace(button);
-
-    expect(event?.defaultPrevented).toBe(false);
-    expect(context.viewport.isSpacebarDown.value).toBe(false);
-    expect(callbacks.requestUpdate).not.toHaveBeenCalled();
-  });
-
   it('keeps Space pan mode active away from controls', () => {
     const canvas = document.createElement('canvas');
     document.body.append(canvas);

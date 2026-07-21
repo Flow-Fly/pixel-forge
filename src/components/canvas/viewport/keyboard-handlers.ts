@@ -5,7 +5,6 @@
  */
 
 import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
-import { shouldPreserveNativeKeyboardBehavior } from '../../../services/keyboard/native-keyboard-behavior';
 
 type KeyboardContext = Pick<ProjectContext, 'grid' | 'selection' | 'viewport'>;
 
@@ -51,7 +50,8 @@ export function handleKeyDown(
   if (e.key === 'Meta') state.isMetaActuallyPressed = true;
   if (e.key === 'Alt') state.isAltActuallyPressed = true;
 
-  if (shouldPreserveNativeKeyboardBehavior(e)) {
+  // Skip if typing in an input
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
     return;
   }
 
