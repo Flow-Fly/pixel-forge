@@ -8,7 +8,6 @@ export const scrollbarStyles = css`
   [data-scrollbar] {
     scrollbar-color: var(--pf-color-scrollbar-thumb) var(--pf-color-scrollbar-track);
     scrollbar-width: thin;
-    overscroll-behavior: contain;
     box-shadow:
       var(--pf-scrollbar-surface-shadow, 0 0 transparent),
       var(--pf-scrollbar-rail-shadow, 0 0 transparent);
