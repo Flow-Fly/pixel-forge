@@ -1,12 +1,13 @@
 import { html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
+import { checkboxStyles } from '../../styles/editor-control-styles';
 import { defaultProjectContext } from '../../stores/project-context';
 import type { OnionSkinSettings } from '../../types/animation';
 
 @customElement('pf-onion-skin-controls')
 export class PFOnionSkinControls extends BaseComponent {
-  static styles = css`
+  static styles = [css`
     :host {
       display: flex;
       align-items: center;
@@ -32,10 +33,6 @@ export class PFOnionSkinControls extends BaseComponent {
       gap: 4px;
       cursor: pointer;
       user-select: none;
-    }
-
-    input[type='checkbox'] {
-      accent-color: var(--pf-color-primary);
     }
 
     input[type='number'] {
@@ -69,7 +66,7 @@ export class PFOnionSkinControls extends BaseComponent {
       color: var(--pf-color-primary);
       background-color: var(--pf-color-primary-transparent);
     }
-  `;
+  `, checkboxStyles];
 
   private context = defaultProjectContext;
 
