@@ -3,6 +3,7 @@
   "entry": [
     "src/main.ts",
     "shared/src/index.ts",
+    "server/src/index.ts",
     "index.html"
   ],
   "dynamicallyLoaded": [
