@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  databaseNameFromUrl,
-  parseDatabaseConfig,
-  requireSafeDatabaseTarget,
-} from '../src/database/config.js';
+import { parseDatabaseConfig, requireSafeDatabaseTarget } from '../src/database/config.js';
 
 describe('parseDatabaseConfig', () => {
   it('parses an explicit PostgreSQL target with a bounded pool', () => {
@@ -75,6 +71,6 @@ describe('requireSafeDatabaseTarget', () => {
       DATABASE_URL: 'postgresql://compat.example.com/pixel_forge_compat',
     });
 
-    expect(databaseNameFromUrl(config.url)).toBe('pixel_forge_compat');
+    expect(config.url).toBe('postgresql://compat.example.com/pixel_forge_compat');
   });
 });

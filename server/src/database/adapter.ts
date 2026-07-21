@@ -4,11 +4,7 @@ import postgres from 'postgres';
 import type { DatabaseConfig } from './config.js';
 import { appMeta } from './schema.js';
 
-export interface AppMetaRecord {
-  readonly key: string;
-  readonly updatedAt: Date;
-  readonly value: string;
-}
+export type AppMetaRecord = typeof appMeta.$inferSelect;
 
 export interface AppMetaSession {
   deleteAppMeta(key: string): Promise<void>;
@@ -36,7 +32,40 @@ export function createDatabaseAdapter(config: DatabaseConfig): DatabaseAdapter {
   const database = drizzle(client);
   let closePromise: Promise<void> | undefined;
 
+  function createAppMetaSession(
+    databaseSession: Pick<typeof database, 'delete' | 'insert' | 'select'>
+  ): AppMetaSession {
+    return {
+      async deleteAppMeta(key) {
+        await databaseSession.delete(appMeta).where(eq(appMeta.key, key));
+      },
+
+      async getAppMeta(key) {
+        const [record] = await databaseSession
+          .select()
+          .from(appMeta)
+          .where(eq(appMeta.key, key))
+          .limit(1);
+        return record;
+      },
+
+      async setAppMeta(key, value) {
+        await databaseSession
+          .insert(appMeta)
+          .values({ key, value })
+          .onConflictDoUpdate({
+            set: { updatedAt: new Date(), value },
+            target: appMeta.key,
+          });
+      },
+    };
+  }
+
+  const appMetaSession = createAppMetaSession(database);
+
   return {
+    ...appMetaSession,
+
     async checkReadiness() {
       await database.execute(sql`select 1`);
     },
@@ -46,51 +75,9 @@ export function createDatabaseAdapter(config: DatabaseConfig): DatabaseAdapter {
       return closePromise;
     },
 
-    async deleteAppMeta(key) {
-      await database.delete(appMeta).where(eq(appMeta.key, key));
-    },
-
-    async getAppMeta(key) {
-      const [record] = await database.select().from(appMeta).where(eq(appMeta.key, key)).limit(1);
-      return record;
-    },
-
-    async setAppMeta(key, value) {
-      await database
-        .insert(appMeta)
-        .values({ key, value })
-        .onConflictDoUpdate({
-          set: { updatedAt: new Date(), value },
-          target: appMeta.key,
-        });
-    },
-
     transaction(work) {
       return database.transaction((databaseTransaction) =>
-        work({
-          async deleteAppMeta(key) {
-            await databaseTransaction.delete(appMeta).where(eq(appMeta.key, key));
-          },
-
-          async getAppMeta(key) {
-            const [record] = await databaseTransaction
-              .select()
-              .from(appMeta)
-              .where(eq(appMeta.key, key))
-              .limit(1);
-            return record;
-          },
-
-          async setAppMeta(key, value) {
-            await databaseTransaction
-              .insert(appMeta)
-              .values({ key, value })
-              .onConflictDoUpdate({
-                set: { updatedAt: new Date(), value },
-                target: appMeta.key,
-              });
-          },
-        })
+        work(createAppMetaSession(databaseTransaction))
       );
     },
   };

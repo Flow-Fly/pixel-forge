@@ -56,7 +56,7 @@ function parseMaxConnections(value: string | undefined): number {
   return maxConnections;
 }
 
-export function databaseNameFromUrl(url: string): string {
+function databaseNameFromUrl(url: string): string {
   return readDatabaseName(parseDatabaseUrl(url));
 }
 

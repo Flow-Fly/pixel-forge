@@ -33,9 +33,16 @@ describe('PostgreSQL metadata seam', () => {
       ).rejects.toThrow('rollback probe');
       await expect(database.getAppMeta(rolledBackKey)).resolves.toBeUndefined();
     } finally {
-      await database.deleteAppMeta(committedKey).catch(() => undefined);
-      await database.deleteAppMeta(rolledBackKey).catch(() => undefined);
+      const deletionResults = await Promise.allSettled([
+        database.deleteAppMeta(committedKey),
+        database.deleteAppMeta(rolledBackKey),
+      ]);
       await Promise.all([database.close(), database.close()]);
+
+      const deletionFailure = deletionResults.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected'
+      );
+      if (deletionFailure) throw deletionFailure.reason;
     }
   });
 });

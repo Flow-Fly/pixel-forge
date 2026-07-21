@@ -57,4 +57,18 @@ describe('database commands', () => {
     expect(result.stderr).not.toContain('secret');
     expect(result.stdout).toBe('');
   });
+
+  it('reports a failed readiness query without a ready event or connection details', async () => {
+    const databaseUrl = 'postgresql://pixel_forge:secret@127.0.0.1:1/pixel_forge_dev';
+    const result = await runCommand('database-readiness', {
+      DATABASE_URL: databaseUrl,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('"event":"database.not_ready"');
+    expect(result.stderr).toContain('"stage":"query"');
+    expect(result.stderr).not.toContain(databaseUrl);
+    expect(result.stderr).not.toContain('secret');
+    expect(result.stdout).not.toContain('database.ready');
+  });
 });
