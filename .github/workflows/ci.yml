@@ -54,8 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      COMPOSE_PROJECT_NAME: pixel-forge-smoke-${{ github.run_id }}-${{ github.run_attempt }}
       PIXEL_FORGE_IMAGE_REVISION: ${{ github.sha }}
+      PIXEL_FORGE_SMOKE_PROJECT_NAME: pixel-forge-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
 

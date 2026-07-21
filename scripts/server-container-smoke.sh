@@ -2,12 +2,17 @@
 
 set -Eeuo pipefail
 
-readonly project_name="${COMPOSE_PROJECT_NAME:-pixel-forge-container-smoke-$$}"
+readonly smoke_project_prefix='pixel-forge-container-smoke-'
+readonly project_name="${PIXEL_FORGE_SMOKE_PROJECT_NAME:-${smoke_project_prefix}$$}"
 readonly image_revision="${PIXEL_FORGE_IMAGE_REVISION:-$(git rev-parse HEAD)}"
 readonly image_name="pixel-forge-server:${image_revision}"
 readonly shutdown_wait_seconds=20
 
-export COMPOSE_PROJECT_NAME="${project_name}"
+if [[ "${project_name}" != "${smoke_project_prefix}"* ]]; then
+  printf '%s\n' "PIXEL_FORGE_SMOKE_PROJECT_NAME must start with ${smoke_project_prefix}" >&2
+  exit 1
+fi
+
 export PIXEL_FORGE_IMAGE_REVISION="${image_revision}"
 
 compose() {
