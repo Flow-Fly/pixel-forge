@@ -1,8 +1,11 @@
 # Scaleway backend deployment runbook
 
-Status: preparation only  
-Owner: Pixel Forge project owner  
-Tracking capability: [#264](https://github.com/Flow-Fly/pixel-forge/issues/264)  
+Status: preparation only
+
+Owner: Pixel Forge project owner
+
+Tracking capability: [#264](https://github.com/Flow-Fly/pixel-forge/issues/264)
+
 Last source review: 2026-07-21
 
 This runbook describes the proposed first production deployment of the backend

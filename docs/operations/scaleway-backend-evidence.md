@@ -1,7 +1,9 @@
 # Scaleway backend evidence and sign-off templates
 
-Status: blank templates only  
-Owner: Pixel Forge project owner  
+Status: blank templates only
+
+Owner: Pixel Forge project owner
+
 Tracking capability: [#264](https://github.com/Flow-Fly/pixel-forge/issues/264)
 
 Copy the relevant template into the owner-approved private operational record

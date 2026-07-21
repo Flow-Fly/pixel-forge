@@ -1,8 +1,11 @@
 # Scaleway backend access and cost controls
 
-Status: preparation only  
-Owner: Pixel Forge project owner  
-Tracking capability: [#264](https://github.com/Flow-Fly/pixel-forge/issues/264)  
+Status: preparation only
+
+Owner: Pixel Forge project owner
+
+Tracking capability: [#264](https://github.com/Flow-Fly/pixel-forge/issues/264)
+
 Last price and permission review: 2026-07-21
 
 This document prepares decisions; it does not grant access or authorize spend.
