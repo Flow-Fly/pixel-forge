@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "db:compat": "npm run build && node dist/commands/database-compatibility.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "npm run build && node dist/commands/database-migrate.js",
     "db:ready": "npm run build && node dist/commands/database-readiness.js",

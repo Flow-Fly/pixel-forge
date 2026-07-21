@@ -27,6 +27,7 @@
     "shared:test": "npm run test --workspace @pixel-forge/shared",
     "shared:typecheck": "npm run typecheck --workspace @pixel-forge/shared",
     "server:build": "npm run build --workspace @pixel-forge/server",
+    "server:db:compat": "npm run db:compat --workspace @pixel-forge/server",
     "server:db:generate": "npm run db:generate --workspace @pixel-forge/server",
     "server:db:migrate": "npm run db:migrate --workspace @pixel-forge/server",
     "server:db:ready": "npm run db:ready --workspace @pixel-forge/server",

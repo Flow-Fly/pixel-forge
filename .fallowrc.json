@@ -4,6 +4,7 @@
     "src/main.ts",
     "shared/src/index.ts",
     "server/src/index.ts",
+    "server/src/commands/database-compatibility.ts",
     "server/src/commands/database-migrate.ts",
     "server/src/commands/database-readiness.ts",
     "index.html"
