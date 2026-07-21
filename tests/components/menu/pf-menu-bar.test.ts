@@ -79,6 +79,7 @@ import {
   pwaStore,
   type BeforeInstallPromptEvent,
 } from "../../../src/stores/pwa";
+import { panelStore } from "../../../src/stores/panels";
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -193,6 +194,7 @@ describe("pf-menu-bar popovers", () => {
   beforeEach(() => {
     setViewport(800, 600);
     localStorage.clear();
+    panelStore.reset();
     settingsStore.setActiveViewEffect(null);
     projectStoreMock.name.value = "Untitled";
     vi.clearAllMocks();
@@ -296,6 +298,33 @@ describe("pf-menu-bar popovers", () => {
     expect(exportDialogRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
     expect(fileMenu?.hasAttribute("data-open")).toBe(false);
+  });
+
+  it("shows and persists timeline visibility from the View menu", async () => {
+    const element = await createMenuBar();
+    const viewButton = button(element, "view");
+    const viewMenu = menu(element, "view")!;
+    const timelineItem = menuItem(viewMenu, "Timeline");
+
+    expect(timelineItem).toBeInstanceOf(HTMLButtonElement);
+    expect(timelineItem?.getAttribute("aria-pressed")).toBe("true");
+
+    viewButton?.click();
+    timelineItem?.click();
+    await element.updateComplete;
+
+    expect(panelStore.isCollapsed("timeline")).toBe(true);
+    expect(timelineItem?.getAttribute("aria-pressed")).toBe("false");
+    expect(JSON.parse(localStorage.getItem("pf-panel-states") ?? "{}")).toMatchObject({
+      timeline: { collapsed: true },
+    });
+
+    viewButton?.click();
+    timelineItem?.click();
+    await element.updateComplete;
+
+    expect(panelStore.isCollapsed("timeline")).toBe(false);
+    expect(timelineItem?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("selects a live CRT profile from the Image menu", async () => {

@@ -1,4 +1,5 @@
 import { signal } from '../../core/signal';
+import { shouldPreserveNativeKeyboardBehavior } from './native-keyboard-behavior';
 
 type ShortcutAction = () => void;
 
@@ -51,35 +52,6 @@ class KeyboardService {
   }
 
   /**
-   * Check if the event originated from an input element, including inside Shadow DOM.
-   */
-  private isTypingInInput(e: KeyboardEvent): boolean {
-    // Fast path: check direct target first (covers most cases)
-    const target = e.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-      return true;
-    }
-    if (target instanceof HTMLElement && target.isContentEditable) {
-      return true;
-    }
-
-    // Shadow DOM: check first few elements of composed path
-    // Inputs are always near the start, no need to traverse entire path
-    const path = e.composedPath();
-    const checkDepth = Math.min(path.length, 5);
-    for (let i = 0; i < checkDepth; i++) {
-      const el = path[i];
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        return true;
-      }
-      if (el instanceof HTMLElement && el.isContentEditable) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
    * Get the logical key from a keyboard event.
    * On Mac, Alt+key produces special characters (e.g., Alt+1 = ¡).
    * We use e.code to get the physical key when Alt is pressed.
@@ -102,37 +74,35 @@ class KeyboardService {
     return e.key;
   }
 
-  private handleKeyDown(e: KeyboardEvent) {
-    if (!this.enabled.get()) return;
-
-    // Ignore if typing in an input (including inside Shadow DOM)
-    if (this.isTypingInInput(e)) {
-      return;
-    }
-
+  private getShortcutForEvent(e: KeyboardEvent): { id: string; shortcut: Shortcut } | null {
     const modifiers: string[] = [];
     if (e.ctrlKey) modifiers.push('ctrl');
     if (e.metaKey) modifiers.push('meta');
     if (e.shiftKey) modifiers.push('shift');
     if (e.altKey) modifiers.push('alt');
 
-    const key = this.getLogicalKey(e);
-    const id = this.getShortcutId(key, modifiers);
-
+    const id = this.getShortcutId(this.getLogicalKey(e), modifiers);
     const shortcut = this.shortcuts.get(id);
-    if (shortcut) {
-      e.preventDefault();
+    return shortcut ? { id, shortcut } : null;
+  }
 
-      // For quick tools, track that this key is held and only fire once
-      if (shortcut.quick) {
-        if (this.activeQuickKeys.has(id)) {
-          return; // Already activated, don't repeat
-        }
-        this.activeQuickKeys.add(id);
-      }
+  private handleKeyDown(e: KeyboardEvent) {
+    if (!this.enabled.get()) return;
 
-      shortcut.action();
+    if (shouldPreserveNativeKeyboardBehavior(e)) return;
+
+    const match = this.getShortcutForEvent(e);
+    if (!match) return;
+
+    e.preventDefault();
+
+    // For quick tools, track that this key is held and only fire once
+    if (match.shortcut.quick) {
+      if (this.activeQuickKeys.has(match.id)) return;
+      this.activeQuickKeys.add(match.id);
     }
+
+    match.shortcut.action();
   }
 
   private handleKeyUp(e: KeyboardEvent) {

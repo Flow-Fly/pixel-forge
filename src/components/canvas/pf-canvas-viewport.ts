@@ -1,6 +1,7 @@
 import { html } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
+import { shouldPreserveNativeKeyboardBehavior } from '../../services/keyboard/native-keyboard-behavior';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import './pf-selection-overlay';
 import './pf-marching-ants-overlay';
@@ -237,6 +238,8 @@ export class PFCanvasViewport extends BaseComponent {
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
+    if (shouldPreserveNativeKeyboardBehavior(e)) return;
+
     handleKeyDown(e, this.keyboardState, this.keyboardCallbacks, this.context);
   };
 
