@@ -7,6 +7,7 @@ docs:
 github:
   bootstrap_label: "status: bootstrap"
   ready_label: "ready-for-agent"
+  not_ready_label: "not-ready-for-agent"
   blocked_label: "agent:blocked"
   complete_label: "agent:complete"
   tracking_label: "agentic-loop"
@@ -33,6 +34,7 @@ triage:
     - "ready-for-agent"
   ready_excludes:
     - "needs-human"
+    - "not-ready-for-agent"
     - "agent:blocked"
     - "risk:medium"
     - "risk:high"
