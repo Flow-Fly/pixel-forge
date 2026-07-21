@@ -40,5 +40,6 @@ jobs:
         uses: fallow-rs/fallow@v2
         with:
           command: audit
+          version: 3.2.0
           artifacts-dir: .fallow/ci
           no-cache: true
