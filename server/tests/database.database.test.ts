@@ -1,8 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { createDatabaseAdapter } from '../src/database/adapter.js';
+import { createDatabaseAdapter, type DatabaseAdapter } from '../src/database/adapter.js';
 import { parseDatabaseConfig } from '../src/database/config.js';
 import { migrateDatabase } from '../src/database/migrate.js';
+
+async function cleanupOwnedRecords(
+  database: DatabaseAdapter,
+  keys: readonly string[]
+): Promise<void> {
+  const deletionResults = await Promise.allSettled(keys.map((key) => database.deleteAppMeta(key)));
+  await Promise.all([database.close(), database.close()]);
+
+  const deletionFailure = deletionResults.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected'
+  );
+  if (deletionFailure) throw deletionFailure.reason;
+}
 
 describe('PostgreSQL metadata seam', () => {
   it('migrates, probes, transacts, rolls back, and cleans up owned records', async () => {
@@ -33,16 +46,7 @@ describe('PostgreSQL metadata seam', () => {
       ).rejects.toThrow('rollback probe');
       await expect(database.getAppMeta(rolledBackKey)).resolves.toBeUndefined();
     } finally {
-      const deletionResults = await Promise.allSettled([
-        database.deleteAppMeta(committedKey),
-        database.deleteAppMeta(rolledBackKey),
-      ]);
-      await Promise.all([database.close(), database.close()]);
-
-      const deletionFailure = deletionResults.find(
-        (result): result is PromiseRejectedResult => result.status === 'rejected'
-      );
-      if (deletionFailure) throw deletionFailure.reason;
+      await cleanupOwnedRecords(database, [committedKey, rolledBackKey]);
     }
   });
 });
