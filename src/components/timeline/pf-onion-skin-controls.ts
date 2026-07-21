@@ -35,10 +35,6 @@ export class PFOnionSkinControls extends BaseComponent {
       user-select: none;
     }
 
-    input[type='checkbox'] {
-      accent-color: var(--pf-color-primary);
-    }
-
     input[type='number'] {
       width: 40px;
       background: var(--pf-color-bg-input);

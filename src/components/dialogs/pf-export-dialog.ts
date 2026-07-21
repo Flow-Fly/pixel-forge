@@ -107,11 +107,6 @@ export class PFExportDialog extends BaseComponent {
       gap: 8px;
     }
 
-    .checkbox-group input[type="checkbox"] {
-      width: auto;
-      accent-color: var(--pf-color-accent, #4a9eff);
-    }
-
     .checkbox-group label {
       margin: 0;
       color: var(--pf-color-text-main, #e0e0e0);

@@ -107,9 +107,6 @@ export class PFBrushPanel extends BaseComponent {
       cursor: pointer;
     }
 
-    .brush-options input[type="checkbox"] {
-      cursor: pointer;
-    }
   `, checkboxStyles];
 
   @state() private editingBrush: Brush | null = null;

@@ -7,6 +7,7 @@ export const checkboxStyles = css`
     block-size: 16px;
     flex: 0 0 auto;
     margin: 0;
+    padding: 0;
     appearance: none;
     display: inline-grid;
     place-content: center;
