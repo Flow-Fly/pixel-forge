@@ -19,6 +19,7 @@ import { settingsStore } from "../../stores/settings";
 import { pwaStore } from "../../stores/pwa";
 import { panelStore } from "../../stores/panels";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
+import { menuItemStyles } from "../../styles/editor-control-styles";
 import {
   CRT_EFFECT_ID,
   CRT_PRESETS,
@@ -45,6 +46,7 @@ export class PFMenuBar extends BaseComponent {
 
   static styles = css`
     ${scrollbarStyles}
+    ${menuItemStyles}
 
     :host {
       display: flex;
@@ -225,29 +227,15 @@ export class PFMenuBar extends BaseComponent {
       background-color: transparent;
     }
 
-    .menu-item {
-      padding: 7px 12px;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-      font-size: var(--pf-font-size-sm);
-      color: var(--pf-color-text-secondary);
-      text-transform: none;
-    }
-
-    button.menu-item {
-      align-items: center;
-      background: none;
-      border: 0;
-      font: inherit;
-      text-align: left;
-      width: 100%;
-    }
-
-    .menu-item:hover:not(:disabled) {
+    .menu-item:hover:not(:disabled),
+    .menu-item:focus-visible {
       background-color: var(--pf-color-primary-transparent);
       color: var(--pf-color-text-main);
+    }
+
+    .menu-item:focus-visible {
+      outline: 1px solid var(--pf-color-accent);
+      outline-offset: -2px;
     }
 
     button.menu-item:disabled {

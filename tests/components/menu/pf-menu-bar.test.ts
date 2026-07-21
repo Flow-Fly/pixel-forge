@@ -221,6 +221,17 @@ describe("pf-menu-bar popovers", () => {
     expect([...popovers].every((popover) => popover.dataset.scrollbar === "vertical")).toBe(true);
   });
 
+  it("keeps button-backed menu actions native and explicitly typed", async () => {
+    const element = await createMenuBar();
+    const itemButtons =
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>("button.menu-item") ?? [];
+
+    expect(itemButtons.length).toBeGreaterThan(0);
+    expect([...itemButtons].every((item) => item.type === "button")).toBe(true);
+    expect(menuItem(menu(element, "file")!, "New Guided Drawing")?.tagName).toBe("BUTTON");
+    expect(menuItem(menu(element, "file")!, "New Project")?.tagName).toBe("DIV");
+  });
+
   it("opens File from a click", async () => {
     const element = await createMenuBar();
     const fileButton = button(element, "file");
