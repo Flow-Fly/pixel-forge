@@ -3,6 +3,8 @@ import { cors } from 'hono/cors';
 import serverPackage from '../package.json' with { type: 'json' };
 import type { ServerConfig } from './config.js';
 
+export const SERVER_VERSION = serverPackage.version;
+
 export function createApp(config: ServerConfig): Hono {
   const allowedOrigins = new Set(config.allowedOrigins);
   const app = new Hono();
@@ -20,7 +22,7 @@ export function createApp(config: ServerConfig): Hono {
       revision: config.buildRevision,
       service: 'pixel-forge-api',
       status: 'ok',
-      version: serverPackage.version,
+      version: SERVER_VERSION,
     }),
   );
 
