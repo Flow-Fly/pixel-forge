@@ -74,36 +74,35 @@ class KeyboardService {
     return e.key;
   }
 
-  private handleKeyDown(e: KeyboardEvent) {
-    if (!this.enabled.get()) return;
-
-    if (shouldPreserveNativeKeyboardBehavior(e)) {
-      return;
-    }
-
+  private getShortcutForEvent(e: KeyboardEvent): { id: string; shortcut: Shortcut } | null {
     const modifiers: string[] = [];
     if (e.ctrlKey) modifiers.push('ctrl');
     if (e.metaKey) modifiers.push('meta');
     if (e.shiftKey) modifiers.push('shift');
     if (e.altKey) modifiers.push('alt');
 
-    const key = this.getLogicalKey(e);
-    const id = this.getShortcutId(key, modifiers);
-
+    const id = this.getShortcutId(this.getLogicalKey(e), modifiers);
     const shortcut = this.shortcuts.get(id);
-    if (shortcut) {
-      e.preventDefault();
+    return shortcut ? { id, shortcut } : null;
+  }
 
-      // For quick tools, track that this key is held and only fire once
-      if (shortcut.quick) {
-        if (this.activeQuickKeys.has(id)) {
-          return; // Already activated, don't repeat
-        }
-        this.activeQuickKeys.add(id);
-      }
+  private handleKeyDown(e: KeyboardEvent) {
+    if (!this.enabled.get()) return;
 
-      shortcut.action();
+    if (shouldPreserveNativeKeyboardBehavior(e)) return;
+
+    const match = this.getShortcutForEvent(e);
+    if (!match) return;
+
+    e.preventDefault();
+
+    // For quick tools, track that this key is held and only fire once
+    if (match.shortcut.quick) {
+      if (this.activeQuickKeys.has(match.id)) return;
+      this.activeQuickKeys.add(match.id);
     }
+
+    match.shortcut.action();
   }
 
   private handleKeyUp(e: KeyboardEvent) {
