@@ -95,8 +95,10 @@ The integration command uses the same `DATABASE_SAFETY_CONFIRM=non-production`
 interlock and administrative-database refusal as migration commands.
 
 The test generates unique metadata keys and removes those exact keys before
-closing its database connections. It does not truncate a table or create,
-drop, or reset a database.
+closing its database connections. The compatibility subprocess updates the
+same durable `database_compatibility:last_checked` key as the documented
+command. The test does not truncate a table or create, drop, or reset a
+database.
 
 ## Stop or reset local PostgreSQL
 

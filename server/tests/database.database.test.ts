@@ -83,7 +83,7 @@ describe('PostgreSQL metadata seam', () => {
         key: COMPATIBILITY_META_KEY,
       });
     } finally {
-      await cleanupOwnedRecords(database, [COMPATIBILITY_META_KEY]);
+      await database.close();
     }
   });
 });
