@@ -15,17 +15,26 @@ describe('storage configuration', () => {
     expect(parseStorageConfig(validEnvironment)).toEqual({
       accessKeyId: 'pixel_forge',
       bucket: 'pixel-forge-dev',
-      endpoint: 'http://127.0.0.1:9000/',
+      endpoint: 'http://127.0.0.1:9000',
       forcePathStyle: true,
       region: 'us-east-1',
       secretAccessKey: 'pixel_forge_local',
     });
   });
 
+  it('keeps a parsed endpoint valid when commands pass configuration onward', () => {
+    const config = parseStorageConfig(validEnvironment);
+
+    expect(
+      parseStorageConfig({ ...validEnvironment, STORAGE_ENDPOINT: config.endpoint }).endpoint
+    ).toBe(config.endpoint);
+  });
+
   it.each([
     ['STORAGE_ACCESS_KEY_ID', undefined, 'STORAGE_ACCESS_KEY_ID is required'],
     ['STORAGE_BUCKET', 'Invalid_Bucket', 'STORAGE_BUCKET must be a portable'],
     ['STORAGE_ENDPOINT', 'https://user:secret@example.com', 'STORAGE_ENDPOINT must be'],
+    ['STORAGE_ENDPOINT', 'http://objects.example.com', 'STORAGE_ENDPOINT must be'],
     ['STORAGE_FORCE_PATH_STYLE', 'yes', 'STORAGE_FORCE_PATH_STYLE must equal'],
     ['STORAGE_REGION', '/', 'STORAGE_REGION must contain'],
     ['STORAGE_SECRET_ACCESS_KEY', '', 'STORAGE_SECRET_ACCESS_KEY is required'],

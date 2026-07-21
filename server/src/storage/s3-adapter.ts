@@ -8,6 +8,8 @@ import {
 import type { BlobStorage } from './blob-storage.js';
 import type { StorageConfig } from './config.js';
 
+const STORAGE_REQUEST_TIMEOUT_MS = 5_000;
+
 function requireKey(key: string): void {
   if (key.length === 0) throw new Error('Blob key must not be empty');
 }
@@ -26,6 +28,10 @@ function storageFailure(message: string): Error {
   return new Error(message);
 }
 
+function requestOptions(): { readonly abortSignal: AbortSignal } {
+  return { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) };
+}
+
 export function createS3BlobStorage(config: StorageConfig): BlobStorage {
   const client = new S3Client({
     credentials: {
@@ -41,7 +47,7 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
   return {
     async checkReadiness() {
       try {
-        await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
+        await client.send(new HeadBucketCommand({ Bucket: config.bucket }), requestOptions());
       } catch {
         throw storageFailure('Blob storage readiness check failed');
       }
@@ -54,7 +60,10 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
     async delete(key) {
       requireKey(key);
       try {
-        await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+        await client.send(
+          new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
+          requestOptions()
+        );
       } catch {
         throw storageFailure('Blob deletion failed');
       }
@@ -64,7 +73,8 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
       requireKey(key);
       try {
         const response = await client.send(
-          new GetObjectCommand({ Bucket: config.bucket, Key: key })
+          new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+          requestOptions()
         );
         if (!response.Body) throw new Error('Object body is missing');
         return await response.Body.transformToByteArray();
@@ -77,7 +87,10 @@ export function createS3BlobStorage(config: StorageConfig): BlobStorage {
     async put(key, bytes) {
       requireKey(key);
       try {
-        await client.send(new PutObjectCommand({ Bucket: config.bucket, Body: bytes, Key: key }));
+        await client.send(
+          new PutObjectCommand({ Bucket: config.bucket, Body: bytes, Key: key }),
+          requestOptions()
+        );
       } catch {
         throw storageFailure('Blob write failed');
       }
