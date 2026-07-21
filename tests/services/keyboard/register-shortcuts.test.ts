@@ -12,6 +12,7 @@ import {
   setActiveProjectContext,
 } from '../../../src/stores/project-context';
 import { selectionStore } from '../../../src/stores/selection';
+import { GUIDED_DRAWING_VERSION } from '../../../src/types/guided-drawing';
 
 const keyboardServiceMock = vi.hoisted(() => ({
   register: vi.fn(),
@@ -37,7 +38,7 @@ type RegisterCall = [
   modifiers: string[],
   action: () => void,
   description: string,
-  options?: { quick?: boolean; releaseAction?: () => void },
+  options?: { quick?: boolean; releaseAction?: () => void; physicalCode?: string },
 ];
 
 function comboFromCall([key, modifiers]: RegisterCall): string {
@@ -290,7 +291,7 @@ describe('registerShortcuts', () => {
     const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
     const descriptionsByCombo = new Map(calls.map((call) => [comboFromCall(call), call[3]]));
 
-    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(79);
+    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(82);
     expect(descriptionsByCombo.get('Alt')).toBe('Quick eyedropper');
     expect(descriptionsByCombo.get('0')).toBe('Fit to window');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+0`)).toBe('Opacity 100%');
@@ -394,6 +395,85 @@ describe('registerShortcuts', () => {
       expect(defaultGuides).not.toHaveBeenCalled();
       expect(defaultUndo).not.toHaveBeenCalled();
       expect(defaultProjectContext.selection.state.value.type).toBe('none');
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  it('routes physical digit shortcuts through the current guided project', () => {
+    const guidedContext = createProjectContext();
+    const normalContext = createProjectContext();
+    const guideColors = Array.from({ length: 9 }, (_, index) => `#${String(index + 1).repeat(6)}`);
+    guidedContext.palette.mainColors.value = guideColors;
+    guidedContext.palette.rebuildColorMap();
+    guidedContext.guidedDrawing.start({
+      version: GUIDED_DRAWING_VERSION,
+      width: 9,
+      height: 1,
+      target: Uint8Array.from({ length: 9 }, (_, index) => index + 1),
+      guideColorCount: 9,
+      settings: {
+        longSide: 9,
+        paletteSource: 'generated',
+        maxColors: 9,
+        mapping: 'color',
+        simplifyIsolatedPixels: false,
+      },
+      createdAt: 1,
+    });
+    const normalZoom = vi.spyOn(normalContext.viewport, 'zoomToLevel');
+
+    try {
+      registerShortcuts();
+
+      setActiveProjectContext(guidedContext);
+      for (let guideNumber = 1; guideNumber <= 9; guideNumber++) {
+        const call = (keyboardServiceMock.register.mock.calls as RegisterCall[]).find(
+          ([key, modifiers]) => key === String(guideNumber) && modifiers.length === 0
+        );
+        expect(call?.[4]?.physicalCode).toBe(`Digit${guideNumber}`);
+        call?.[2]();
+        expect(guidedContext.colors.primaryColor.value).toBe(guideColors[guideNumber - 1]);
+      }
+
+      setActiveProjectContext(normalContext);
+      shortcutAction('1')?.();
+      expect(normalZoom).toHaveBeenCalledWith(1);
+    } finally {
+      restoreDefaultProjectContext();
+      guidedContext.dispose();
+      normalContext.dispose();
+    }
+  });
+
+  it('leaves a missing guided color unchanged', () => {
+    const context = createProjectContext();
+    context.palette.mainColors.value = ['#111111'];
+    context.palette.rebuildColorMap();
+    context.colors.setPrimaryColor('#abcdef');
+    context.guidedDrawing.start({
+      version: GUIDED_DRAWING_VERSION,
+      width: 1,
+      height: 1,
+      target: Uint8Array.from([1]),
+      guideColorCount: 1,
+      settings: {
+        longSide: 1,
+        paletteSource: 'generated',
+        maxColors: 1,
+        mapping: 'color',
+        simplifyIsolatedPixels: false,
+      },
+      createdAt: 1,
+    });
+    setActiveProjectContext(context);
+
+    try {
+      registerShortcuts();
+      shortcutAction('9')?.();
+
+      expect(context.colors.primaryColor.value).toBe('#abcdef');
     } finally {
       restoreDefaultProjectContext();
       context.dispose();
