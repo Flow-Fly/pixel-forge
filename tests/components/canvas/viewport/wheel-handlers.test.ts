@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleGlobalWheel, handleWheel } from '../../../../src/components/canvas/viewport/wheel-handlers';
+import { handleWheel } from '../../../../src/components/canvas/viewport/wheel-handlers';
 import type { KeyboardState } from '../../../../src/components/canvas/viewport/keyboard-handlers';
 import { viewportStore } from '../../../../src/stores/viewport';
 
@@ -28,10 +28,6 @@ vi.mock('../../../../src/stores/tools', () => ({
 vi.mock('../../../../src/stores/tool-settings', () => ({
   getToolSize: () => 1,
   setToolSize: () => undefined,
-}));
-
-vi.mock('../../../../src/components/canvas/viewport/pan-handlers', () => ({
-  isClickOnUI: () => false,
 }));
 
 function createKeyboardState(overrides: Partial<KeyboardState> = {}): KeyboardState {
@@ -92,23 +88,16 @@ describe('viewport wheel handlers', () => {
     expect(callbacks.requestUpdate).toHaveBeenCalledOnce();
   });
 
-  it('keeps global wheel handling for trackpad pan only', () => {
+  it('pans for pixel-mode trackpad gestures', () => {
     const callbacks = createCallbacks();
-    const mouseWheel = new WheelEvent('wheel', {
-      deltaY: 60,
-      deltaMode: WheelEvent.DOM_DELTA_PIXEL,
-    });
     const trackpadPan = new WheelEvent('wheel', {
       deltaX: 12,
       deltaY: 8,
       deltaMode: WheelEvent.DOM_DELTA_PIXEL,
     });
 
-    handleGlobalWheel(mouseWheel, callbacks);
-    expect(viewportStore.panX.value).toBe(0);
-    expect(viewportStore.panY.value).toBe(0);
+    handleWheel(trackpadPan, createKeyboardState(), callbacks);
 
-    handleGlobalWheel(trackpadPan, callbacks);
     expect(viewportStore.panX.value).toBe(-12);
     expect(viewportStore.panY.value).toBe(-8);
     expect(callbacks.requestUpdate).toHaveBeenCalledOnce();

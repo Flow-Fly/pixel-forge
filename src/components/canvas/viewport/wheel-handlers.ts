@@ -8,14 +8,12 @@ import { toolStore } from '../../../stores/tools';
 import { getToolSize, setToolSize } from '../../../stores/tool-settings';
 import { getActiveProjectContext, type ProjectContext } from '../../../stores/project-context';
 import type { KeyboardState } from './keyboard-handlers';
-import { isClickOnUI } from './pan-handlers';
 
 type WheelContext = Pick<ProjectContext, 'viewport'>;
 
 export interface WheelHandlerCallbacks {
   requestUpdate: () => void;
   getBoundingClientRect: () => DOMRect;
-  contains: (node: Node) => boolean;
 }
 
 function normalizeWheelDelta(delta: number, deltaMode: number): number {
@@ -72,39 +70,6 @@ export function handleWheel(
   }
 
   // Trackpad two-finger scroll = pan.
-  context.viewport.panBy(-e.deltaX, -e.deltaY);
-  callbacks.requestUpdate();
-}
-
-/**
- * Global wheel handler to allow trackpad panning from outside the canvas.
- * Only handles trackpad gestures (deltaMode === 0), not mouse wheel.
- */
-export function handleGlobalWheel(
-  e: WheelEvent,
-  callbacks: WheelHandlerCallbacks,
-  context: WheelContext = getActiveProjectContext()
-): void {
-  // Skip if event originated from within this component (already handled by local handler)
-  if (callbacks.contains(e.target as Node)) return;
-
-  // Skip if on UI elements
-  if (isClickOnUI(e)) return;
-
-  // Skip pinch gestures (ctrlKey is injected by macOS for pinch)
-  if (e.ctrlKey) return;
-
-  const absX = Math.abs(e.deltaX);
-  const absY = Math.abs(e.deltaY);
-  const isWheelLike =
-    e.deltaMode === WheelEvent.DOM_DELTA_LINE ||
-    e.deltaMode === WheelEvent.DOM_DELTA_PAGE ||
-    (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && absX < 1 && absY >= 40);
-
-  if (isWheelLike) return;
-
-  // Trackpad two-finger scroll = pan
-  e.preventDefault();
   context.viewport.panBy(-e.deltaX, -e.deltaY);
   callbacks.requestUpdate();
 }
