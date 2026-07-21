@@ -126,6 +126,23 @@ describe('pf-project-tabs', () => {
     expect(workspaceStoreMock.closeProject).toHaveBeenCalledWith('project-a');
   });
 
+  it('keeps a compact close action bound to the active project', async () => {
+    workspaceStoreMock.items.value = Array.from({ length: 8 }, (_, index) =>
+      createWorkspaceItem(`project-${index + 1}`, `Long Project Name ${index + 1}`)
+    );
+    workspaceStoreMock.activeItemId.value = 'project-8';
+    const element = await createTabs();
+
+    const compactCloseButton =
+      element.shadowRoot?.querySelector<HTMLButtonElement>('.active-close-button');
+    expect(compactCloseButton?.getAttribute('aria-label')).toBe('Close Long Project Name 8');
+
+    compactCloseButton?.click();
+    await settle(element);
+
+    expect(workspaceStoreMock.closeProject).toHaveBeenCalledWith('project-8');
+  });
+
   it('closes a tab through the same path on middle click', async () => {
     const element = await createTabs();
     const tabButton = buttonWithLabel(element.shadowRoot!, 'Project A');
