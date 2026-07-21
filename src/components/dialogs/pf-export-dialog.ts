@@ -1,6 +1,7 @@
 import { html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
+import { checkboxStyles } from "../../styles/editor-control-styles";
 import {
   defaultProjectContext,
   getActiveProjectContext,
@@ -59,7 +60,7 @@ const VIEW_EFFECT_EXPORT_FORMATS = new Set<ExportFormat>([
 
 @customElement("pf-export-dialog")
 export class PFExportDialog extends BaseComponent {
-  static styles = css`
+  static styles = [css`
     .form-group {
       margin-bottom: 16px;
     }
@@ -189,7 +190,7 @@ export class PFExportDialog extends BaseComponent {
     .btn-export:hover {
       background: var(--pf-color-accent-hover, #3a8eef);
     }
-  `;
+  `, checkboxStyles];
 
   @property({ type: Boolean }) open = false;
   @property({ attribute: false }) context: ProjectContext | null = null;

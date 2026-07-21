@@ -1,20 +1,13 @@
-import { html, css, LitElement } from "lit";
+import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { SignalWatcher } from "@lit-labs/signals";
 import { getOptionValue, setOptionValue, type StoreType } from "./store-accessor";
+import { checkboxStyles } from "../../../styles/editor-control-styles";
 import "../../ui/pf-form-field";
 
 @customElement("pf-option-checkbox")
 export class PfOptionCheckbox extends SignalWatcher(LitElement) {
-  static styles = css`
-    input[type="checkbox"] {
-      width: 14px;
-      height: 14px;
-      margin: 0;
-      cursor: pointer;
-      accent-color: var(--pf-color-accent);
-    }
-  `;
+  static styles = checkboxStyles;
 
   @property({ type: String }) label = "";
   @property({ type: String }) store: StoreType = "brush";
