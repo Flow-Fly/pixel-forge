@@ -30,16 +30,29 @@ function parseEndpoint(value: string, insecureHttpConfirmation: string | undefin
     throw new Error(INVALID_ENDPOINT_MESSAGE);
   }
 
-  const isHttp = endpoint.protocol === 'http:' || endpoint.protocol === 'https:';
-  const isOrigin = endpoint.origin === value;
-  const allowsLocalHttp =
-    isLoopbackHost(endpoint.hostname) || insecureHttpConfirmation === INSECURE_HTTP_CONFIRMATION;
-  const hasTransportSecurity = endpoint.protocol === 'https:' || allowsLocalHttp;
-  if (!isHttp || !isOrigin || !hasTransportSecurity || endpoint.username || endpoint.password) {
+  if (
+    !isHttpProtocol(endpoint) ||
+    endpoint.origin !== value ||
+    !hasSafeTransport(endpoint, insecureHttpConfirmation) ||
+    endpoint.username ||
+    endpoint.password
+  ) {
     throw new Error(INVALID_ENDPOINT_MESSAGE);
   }
 
   return endpoint;
+}
+
+function isHttpProtocol(endpoint: URL): boolean {
+  return endpoint.protocol === 'http:' || endpoint.protocol === 'https:';
+}
+
+function hasSafeTransport(endpoint: URL, insecureHttpConfirmation: string | undefined): boolean {
+  return (
+    endpoint.protocol === 'https:' ||
+    isLoopbackHost(endpoint.hostname) ||
+    insecureHttpConfirmation === INSECURE_HTTP_CONFIRMATION
+  );
 }
 
 function parseBucket(value: string): string {

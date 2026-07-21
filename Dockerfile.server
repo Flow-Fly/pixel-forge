@@ -33,6 +33,7 @@ WORKDIR /app
 COPY --chown=node:node --from=production-dependencies /app/node_modules ./node_modules
 COPY --chown=node:node --from=build /app/server/dist ./server/dist
 COPY --chown=node:node --from=build /app/server/drizzle ./server/drizzle
+COPY --chown=node:node --from=build /app/server/package.json ./server/package.json
 
 USER node
 
