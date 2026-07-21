@@ -1,4 +1,13 @@
-/** Current project file format version. Extraction does not change this value. */
+/**
+ * Current project file format version.
+ *
+ * Any serialized schema change must bump this value in the same pull request.
+ * Extraction alone is not a format change.
+ *
+ * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added
+ * `layers[].continuous`, 4.0.0 removed `ephemeralPalette` and added reference
+ * layer data, and 4.1.0 added optional guided drawing sessions.
+ */
 export const PROJECT_VERSION = '4.1.0';
 export const GUIDED_DRAWING_VERSION = 1;
 

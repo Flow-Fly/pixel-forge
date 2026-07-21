@@ -11,6 +11,16 @@ import {
   type ProjectLayerFile,
 } from './project';
 
+const LAYER_TYPES: ReadonlySet<unknown> = new Set(['image', 'group', 'text', 'reference']);
+const BLEND_MODES: ReadonlySet<unknown> = new Set([
+  'normal',
+  'multiply',
+  'screen',
+  'overlay',
+  'darken',
+  'lighten',
+]);
+
 export function decodeProjectFile(value: unknown): ProjectFile {
   assertProjectFileInput(value);
   const normalized = normalizeProjectFileImageData(value);
@@ -77,18 +87,11 @@ function assertLayer(
   assertImport(isRecord(value), 'layer data is incomplete');
   assertImport(isNonEmptyString(value.id), 'layer ids must be strings');
   assertImport(typeof value.name === 'string', 'layer name is invalid');
-  assertImport(
-    value.type === undefined ||
-      ['image', 'group', 'text', 'reference'].includes(String(value.type)),
-    'layer type is invalid'
-  );
+  assertImport(value.type === undefined || LAYER_TYPES.has(value.type), 'layer type is invalid');
   assertImport(typeof value.visible === 'boolean', 'layer visibility is invalid');
   assertImport(isFiniteNumber(value.opacity), 'layer opacity is invalid');
   assertImport(
-    value.blendMode === undefined ||
-      ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten'].includes(
-        String(value.blendMode)
-      ),
+    value.blendMode === undefined || BLEND_MODES.has(value.blendMode),
     'layer blend mode is invalid'
   );
   assertImport(

@@ -25,7 +25,10 @@ export type ProjectLoadStores = {
     tags: WritableSignal<FrameTag[]>;
     addFrame: (duplicate?: boolean) => void;
     deleteFrame: (frameId: string) => void;
-    getCelCanvas: (frameId: string, layerId: string) => HTMLCanvasElement | undefined;
+    getCelCanvas: (
+      frameId: string,
+      layerId: string
+    ) => HTMLCanvasElement | undefined;
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
     linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
@@ -74,10 +77,14 @@ type LinkedCelGroup = {
 // marker for shared transparent cels.
 const EMPTY_CEL_LINK_ID = '__empty__';
 
-export function restoreProjectPaletteForLoad(stores: ProjectLoadStores, file: ProjectFile): void {
+export function restoreProjectPaletteForLoad(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): void {
   const { palette } = stores;
 
-  const filePalette = file.palette && Array.isArray(file.palette) ? file.palette : [];
+  const filePalette =
+    file.palette && Array.isArray(file.palette) ? file.palette : [];
 
   if (filePalette.length > 0) {
     palette.setPalette(filePalette);
@@ -112,7 +119,10 @@ export async function hydrateProjectFrames(
   deletePlaceholderFrame(stores, placeholderFrameId);
 }
 
-export function restoreProjectAnimationState(stores: ProjectLoadStores, file: ProjectFile): void {
+export function restoreProjectAnimationState(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): void {
   const { animation } = stores;
 
   animation.fps.value = file.animation.fps;
@@ -123,11 +133,17 @@ export function restoreProjectAnimationState(stores: ProjectLoadStores, file: Pr
   }
 }
 
-export function restoreProjectFrameTags(stores: ProjectLoadStores, file: ProjectFile): void {
-  stores.animation.tags.value = file.tags && Array.isArray(file.tags) ? file.tags : [];
+export function restoreProjectFrameTags(
+  stores: ProjectLoadStores,
+  file: ProjectFile
+): void {
+  stores.animation.tags.value =
+    file.tags && Array.isArray(file.tags) ? file.tags : [];
 }
 
-export function refreshProjectPaletteAfterLoad(stores: ProjectLoadStores): void {
+export function refreshProjectPaletteAfterLoad(
+  stores: ProjectLoadStores
+): void {
   const { palette } = stores;
 
   palette.refreshUsedColors();
@@ -228,7 +244,10 @@ function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
   return animation.frames.value[0]?.id;
 }
 
-function addLoadedFrame(stores: ProjectLoadStores, frameFile: ProjectFrameFile): Frame {
+function addLoadedFrame(
+  stores: ProjectLoadStores,
+  frameFile: ProjectFrameFile
+): Frame {
   const { animation } = stores;
 
   animation.addFrame(false);
@@ -267,7 +286,8 @@ function giveSharedTransparentCelOwnCanvas(
   if (
     !cel ||
     cel.linkedCelId !== EMPTY_CEL_LINK_ID ||
-    (!hasProjectImageData(celFile.data) && !(celFile.indexData && celFile.indexData.length > 0))
+    !hasProjectImageData(celFile.data)
+    && !(celFile.indexData && celFile.indexData.length > 0)
   ) {
     return;
   }
@@ -340,7 +360,11 @@ function restoreTextCelData(
   celFile: ProjectCelFile
 ): void {
   if (celFile.textCelData) {
-    stores.animation.setTextCelData(celFile.layerId, frameId, celFile.textCelData);
+    stores.animation.setTextCelData(
+      celFile.layerId,
+      frameId,
+      celFile.textCelData
+    );
   }
 }
 
