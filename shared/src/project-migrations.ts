@@ -1,4 +1,4 @@
-import type { LegacyProjectFile, ProjectFile, ProjectFrameFile } from './project';
+import type { LegacyProjectFile, ProjectFile, ProjectFrameFile } from './project.js';
 
 export function migrateProjectFileForLoad(file: LegacyProjectFile): ProjectFile {
   const fileWithoutEphemeral = stripEphemeralPalette(file);

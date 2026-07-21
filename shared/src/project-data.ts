@@ -1,4 +1,4 @@
-import type { LegacyProjectImageData, ProjectFile, ProjectFileInput } from './project';
+import type { LegacyProjectImageData, ProjectFile, ProjectFileInput } from './project.js';
 
 declare function atob(data: string): string;
 
@@ -28,7 +28,30 @@ export function normalizeProjectFileImageData(file: ProjectFileInput): ProjectFi
 export function normalizeProjectImageData(data: LegacyProjectImageData): Uint8Array {
   if (data instanceof Uint8Array) return data;
   if (typeof data === 'string') return decodeLegacyBase64ImageData(data);
+  if (!isSerializedProjectImageData(data)) {
+    throw new TypeError('Invalid serialized project image data');
+  }
   return serializedBytesToUint8Array(data);
+}
+
+function isProjectByte(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255;
+}
+
+export function isProjectByteArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every(isProjectByte);
+}
+
+export function isSerializedProjectImageData(value: unknown): value is Record<string, number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  // Serialized Uint8Arrays have contiguous 0..length-1 keys. Requiring that
+  // shape keeps normalization allocations bounded by the supplied entries.
+  return Object.entries(value).every(
+    ([key, byte], index) => key === String(index) && isProjectByte(byte)
+  );
 }
 
 export function hasProjectImageData(data: Uint8Array): boolean {
@@ -36,18 +59,7 @@ export function hasProjectImageData(data: Uint8Array): boolean {
 }
 
 function serializedBytesToUint8Array(data: Record<string, number>): Uint8Array {
-  const keys = Object.keys(data)
-    .map(Number)
-    .filter((key) => Number.isInteger(key) && key >= 0)
-    .sort((a, b) => a - b);
-
-  if (keys.length === 0) return new Uint8Array(0);
-
-  const bytes = new Uint8Array(keys[keys.length - 1] + 1);
-  for (const key of keys) {
-    bytes[key] = data[String(key)] ?? 0;
-  }
-  return bytes;
+  return Uint8Array.from(Object.values(data));
 }
 
 function decodeLegacyBase64ImageData(data: string): Uint8Array {

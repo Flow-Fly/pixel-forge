@@ -1,5 +1,9 @@
-import { normalizeProjectFileImageData } from './project-data';
-import { migrateProjectFileForLoad } from './project-migrations';
+import {
+  isProjectByteArray,
+  isSerializedProjectImageData,
+  normalizeProjectFileImageData,
+} from './project-data.js';
+import { migrateProjectFileForLoad } from './project-migrations.js';
 import {
   GUIDED_DRAWING_VERSION,
   type GuidedDrawingSessionFile,
@@ -9,7 +13,7 @@ import {
   type ProjectFileInput,
   type ProjectFrameFile,
   type ProjectLayerFile,
-} from './project';
+} from './project.js';
 
 const LAYER_TYPES: ReadonlySet<unknown> = new Set(['image', 'group', 'text', 'reference']);
 const BLEND_MODES: ReadonlySet<unknown> = new Set([
@@ -124,7 +128,7 @@ function assertCel(
   assertImport(isNonEmptyString(value.layerId), 'cel layer id is invalid');
   assertImport(isImageData(value.data), 'cel image data is invalid');
   assertImport(
-    value.indexData === undefined || isNumberArray(value.indexData),
+    value.indexData === undefined || isProjectByteArray(value.indexData),
     'cel index data is invalid'
   );
   assertImport(
@@ -190,7 +194,7 @@ function assertGuide(value: unknown): asserts value is GuidedDrawingSessionFile 
   assertImport(value.version === GUIDED_DRAWING_VERSION, 'guided drawing version is unsupported');
   assertImport(isPositiveInteger(value.width), 'guided drawing width is invalid');
   assertImport(isPositiveInteger(value.height), 'guided drawing height is invalid');
-  assertImport(isNumberArray(value.target), 'guided drawing target is missing');
+  assertImport(isProjectByteArray(value.target), 'guided drawing target is invalid');
   assertImport(
     value.target.length === value.width * value.height,
     'guided drawing target size is invalid'
@@ -235,18 +239,7 @@ function isProjectImageData(value: unknown): value is Uint8Array {
 
 function isLegacyProjectImageData(value: unknown): value is LegacyProjectImageData {
   if (isProjectImageData(value) || typeof value === 'string') return true;
-  if (!isRecord(value)) return false;
-  return Object.entries(value).every(([key, byte]) => {
-    const index = Number(key);
-    return (
-      Number.isInteger(index) &&
-      index >= 0 &&
-      typeof byte === 'number' &&
-      Number.isInteger(byte) &&
-      byte >= 0 &&
-      byte <= 255
-    );
-  });
+  return isSerializedProjectImageData(value);
 }
 
 function assertOptionalStringArray(value: unknown, detail: string): void {
@@ -255,10 +248,6 @@ function assertOptionalStringArray(value: unknown, detail: string): void {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-function isNumberArray(value: unknown): value is number[] {
-  return Array.isArray(value) && value.every(isFiniteNumber);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

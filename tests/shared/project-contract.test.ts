@@ -85,9 +85,13 @@ function completeProject(): ProjectFile {
   };
 }
 
+function serializedProject(): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(completeProject())) as Record<string, unknown>;
+}
+
 describe('shared ProjectFile contract', () => {
   it('decodes a complete current project and restores serialized bytes', () => {
-    const serialized = JSON.parse(JSON.stringify(completeProject())) as unknown;
+    const serialized = serializedProject();
 
     const decoded = decodeProjectFile(serialized);
 
@@ -100,6 +104,35 @@ describe('shared ProjectFile contract', () => {
     expect(decoded.layers[0].data).toEqual(Uint8Array.from([1, 2, 3]));
     expect(decoded.layers[1].referenceData?.bytes).toEqual(Uint8Array.from([4, 5, 6]));
     expect(decoded.frames[0].cels[0].data).toEqual(Uint8Array.from([7, 8, 9]));
+  });
+
+  it.each([
+    ['leading-zero', { '01': 1 }],
+    ['sparse', { 0: 1, 2: 3 }],
+    ['unbounded-sparse', { 1_000_000: 1 }],
+  ])('rejects %s serialized byte keys before normalization', (_name, data) => {
+    const serialized = serializedProject();
+    const layers = serialized.layers as Array<Record<string, unknown>>;
+    layers[0].data = data;
+
+    expect(() => decodeProjectFile(serialized)).toThrow('layer image data is invalid');
+  });
+
+  it.each([
+    ['negative', -1],
+    ['above-byte', 256],
+    ['fractional', 1.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('rejects %s cel and guide byte values', (_name, value) => {
+    const invalidCel = completeProject();
+    invalidCel.frames[0].cels[0].indexData = [value];
+
+    const invalidGuide = completeProject();
+    invalidGuide.guidedDrawing!.target[0] = value;
+
+    expect(() => decodeProjectFile(invalidCel)).toThrow('cel index data is invalid');
+    expect(() => decodeProjectFile(invalidGuide)).toThrow('guided drawing target is invalid');
   });
 
   it('rejects representative invalid project payloads', () => {
