@@ -91,6 +91,9 @@ Run the real database integration test while the local service is healthy:
 npm run server:db:test
 ```
 
+The integration command uses the same `DATABASE_SAFETY_CONFIRM=non-production`
+interlock and administrative-database refusal as migration commands.
+
 The test generates unique metadata keys and removes those exact keys before
 closing its database connections. It does not truncate a table or create,
 drop, or reset a database.

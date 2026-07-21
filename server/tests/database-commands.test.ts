@@ -71,4 +71,18 @@ describe('database commands', () => {
     expect(result.stderr).not.toContain('secret');
     expect(result.stdout).not.toContain('database.ready');
   });
+
+  it('contains synchronous driver option failures inside the structured boundary', async () => {
+    const secretOption = 'private-target-value';
+    const result = await runCommand('database-readiness', {
+      DATABASE_URL: `postgresql://localhost/pixel_forge_dev?target_session_attrs=${secretOption}`,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('"event":"database.not_ready"');
+    expect(result.stderr).toContain('"stage":"query"');
+    expect(result.stderr).not.toContain(secretOption);
+    expect(result.stderr).not.toContain('at parseOptions');
+    expect(result.stdout).toBe('');
+  });
 });

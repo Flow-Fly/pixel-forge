@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { createDatabaseAdapter, type DatabaseAdapter } from '../src/database/adapter.js';
-import { parseDatabaseConfig } from '../src/database/config.js';
+import { requireSafeDatabaseTarget } from '../src/database/config.js';
 import { migrateDatabase } from '../src/database/migrate.js';
+
+const execFileAsync = promisify(execFile);
+const COMPATIBILITY_META_KEY = 'database_compatibility:last_checked';
 
 async function cleanupOwnedRecords(
   database: DatabaseAdapter,
@@ -19,7 +24,7 @@ async function cleanupOwnedRecords(
 
 describe('PostgreSQL metadata seam', () => {
   it('migrates, probes, transacts, rolls back, and cleans up owned records', async () => {
-    const config = parseDatabaseConfig(process.env);
+    const config = requireSafeDatabaseTarget(process.env);
     const suffix = randomUUID();
     const committedKey = `integration:committed:${suffix}`;
     const rolledBackKey = `integration:rolled-back:${suffix}`;
@@ -47,6 +52,38 @@ describe('PostgreSQL metadata seam', () => {
       await expect(database.getAppMeta(rolledBackKey)).resolves.toBeUndefined();
     } finally {
       await cleanupOwnedRecords(database, [committedKey, rolledBackKey]);
+    }
+  });
+
+  it('runs the public compatibility command and safely re-runs it', async () => {
+    const config = requireSafeDatabaseTarget(process.env);
+    const environment = {
+      ...process.env,
+      DATABASE_SAFETY_CONFIRM: 'non-production',
+      DATABASE_URL: config.url,
+    };
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await execFileAsync(
+        process.execPath,
+        ['dist/commands/database-compatibility.js'],
+        {
+          cwd: new URL('..', import.meta.url),
+          env: environment,
+          timeout: 10_000,
+        }
+      );
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('"event":"database.compatibility_complete"');
+    }
+
+    const database = createDatabaseAdapter(config);
+    try {
+      await expect(database.getAppMeta(COMPATIBILITY_META_KEY)).resolves.toMatchObject({
+        key: COMPATIBILITY_META_KEY,
+      });
+    } finally {
+      await cleanupOwnedRecords(database, [COMPATIBILITY_META_KEY]);
     }
   });
 });
