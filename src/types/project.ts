@@ -1,89 +1,17 @@
-import type { FrameTag } from './animation';
-import type { LayerType, BlendMode } from './layer';
-import type { ReferenceLayerData } from './reference';
-import type { TextLayerData, TextCelData } from './text';
-import type { GuidedDrawingSessionFile } from './guided-drawing';
-
-/**
- * Current project file format version.
- *
- * RULE: any change to the ProjectFile schema below must bump this constant
- * in the same PR, and the field must be annotated with the version that
- * introduced it (see existing `v2.1+` / `v3.0+` annotations).
- *
- * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added `layers[].continuous`,
- * 4.0.0 removed `ephemeralPalette` and added reference layer data.
- * 4.1.0 added optional durable guided drawing sessions.
- */
-export const PROJECT_VERSION = '4.1.0';
-
-export type ProjectImageData = Uint8Array;
-export type LegacyProjectImageData =
-  | ProjectImageData
-  | string
-  | Record<string, number>;
-
-export interface ProjectLayerFile {
-  id: string;
-  name: string;
-  type?: LayerType;          // v2.1+: 'image' | 'text'; v4.0+: 'reference' (default: 'image')
-  visible: boolean;
-  opacity: number;
-  blendMode?: BlendMode;     // v2.1+: blend mode (default: 'normal')
-  continuous?: boolean;      // v3.2+: continuous layer (new cels linked to previous frame)
-  data: ProjectImageData;    // v2.0+: binary PNG bytes
-  textData?: TextLayerData;  // v2.1+: text layer metadata (font, color)
-  referenceData?: ReferenceLayerData; // v4.0+: reference image bytes and transform
-}
-
-export interface ProjectCelFile {
-  layerId: string;
-  data: ProjectImageData;        // v2.0+: binary PNG bytes
-  indexData?: number[];          // v3.0+: palette indices for indexed color mode
-  linkedCelId?: string;          // v2.2+: linked cel group ID (cels with same ID share canvas)
-  linkType?: 'soft' | 'hard';    // v2.2+: 'soft' = auto-break on edit, 'hard' = user explicit
-  textCelData?: TextCelData;     // v2.1+: text content and position
-}
-
-export interface ProjectFrameFile {
-  id: string;
-  duration: number;
-  cels: ProjectCelFile[];
-}
-
-export interface ProjectFile {
-  version: string;
-  name?: string; // Optional for backwards compatibility
-  width: number;
-  height: number;
-  palette?: string[]; // v3.0+: indexed color palette (hex strings)
-  layers: ProjectLayerFile[];
-  frames: ProjectFrameFile[];
-  animation: {
-    fps: number;
-    currentFrameIndex: number;
-  };
-  tags?: FrameTag[]; // Frame tags (v2.0+, optional for backward compat)
-  guidedDrawing?: GuidedDrawingSessionFile; // v4.1+: optional numbered drawing guide
-}
-
-export type ProjectLayerFileInput = Omit<ProjectLayerFile, 'data'> & {
-  data: LegacyProjectImageData;
-  referenceData?: Omit<ReferenceLayerData, 'bytes'> & {
-    bytes: LegacyProjectImageData;
-  };
-};
-
-export type ProjectCelFileInput = Omit<ProjectCelFile, 'data'> & {
-  data: LegacyProjectImageData;
-};
-
-export type ProjectFrameFileInput = Omit<ProjectFrameFile, 'cels'> & {
-  cels: ProjectCelFileInput[];
-};
-
-export type ProjectFileInput = Omit<ProjectFile, 'layers' | 'frames'> & {
-  ephemeralPalette?: string[]; // v3.1-v3.2 legacy colors folded into palette on load
-  layers: ProjectLayerFileInput[];
-  frames: ProjectFrameFileInput[];
-};
+// Keep existing client imports stable while the shared workspace owns the
+// persisted project contract.
+export {
+  PROJECT_VERSION,
+  assertProjectFile,
+  decodeProjectFile,
+  type LegacyProjectImageData,
+  type ProjectCelFile,
+  type ProjectCelFileInput,
+  type ProjectFile,
+  type ProjectFileInput,
+  type ProjectFrameFile,
+  type ProjectFrameFileInput,
+  type ProjectImageData,
+  type ProjectLayerFile,
+  type ProjectLayerFileInput,
+} from '@pixel-forge/shared';

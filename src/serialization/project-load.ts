@@ -9,8 +9,9 @@ import type {
 } from '../types/project';
 import { loadImageDataToCanvas } from '../utils/canvas-binary';
 import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
-import { normalizeHex } from '../stores/palette/color-utils';
 import { hasProjectImageData } from './project-data';
+
+export { migrateProjectFileForLoad } from '@pixel-forge/shared';
 
 type WritableSignal<T> = {
   value: T;
@@ -24,10 +25,7 @@ export type ProjectLoadStores = {
     tags: WritableSignal<FrameTag[]>;
     addFrame: (duplicate?: boolean) => void;
     deleteFrame: (frameId: string) => void;
-    getCelCanvas: (
-      frameId: string,
-      layerId: string
-    ) => HTMLCanvasElement | undefined;
+    getCelCanvas: (frameId: string, layerId: string) => HTMLCanvasElement | undefined;
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
     linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
@@ -72,38 +70,14 @@ type LinkedCelGroup = {
   linkType: CelLinkType;
 };
 
-type LegacyProjectFile = ProjectFile & {
-  ephemeralPalette?: string[];
-};
-
 // Keep this boundary free of store imports; this mirrors the animation store
 // marker for shared transparent cels.
 const EMPTY_CEL_LINK_ID = '__empty__';
 
-export function migrateProjectFileForLoad(file: LegacyProjectFile): ProjectFile {
-  const fileWithoutEphemeral = stripEphemeralPalette(file);
-  if (!shouldFoldEphemeralPalette(file)) return fileWithoutEphemeral;
-
-  const basePalette = Array.isArray(file.palette) ? file.palette : [];
-  const legacyPalette = file.ephemeralPalette ?? [];
-  const { palette, oldIndexToNewIndex } =
-    foldEphemeralPalette(basePalette, legacyPalette);
-
-  return {
-    ...fileWithoutEphemeral,
-    palette,
-    frames: remapLegacyEphemeralIndices(file.frames, oldIndexToNewIndex),
-  };
-}
-
-export function restoreProjectPaletteForLoad(
-  stores: ProjectLoadStores,
-  file: ProjectFile
-): void {
+export function restoreProjectPaletteForLoad(stores: ProjectLoadStores, file: ProjectFile): void {
   const { palette } = stores;
 
-  const filePalette =
-    file.palette && Array.isArray(file.palette) ? file.palette : [];
+  const filePalette = file.palette && Array.isArray(file.palette) ? file.palette : [];
 
   if (filePalette.length > 0) {
     palette.setPalette(filePalette);
@@ -138,10 +112,7 @@ export async function hydrateProjectFrames(
   deletePlaceholderFrame(stores, placeholderFrameId);
 }
 
-export function restoreProjectAnimationState(
-  stores: ProjectLoadStores,
-  file: ProjectFile
-): void {
+export function restoreProjectAnimationState(stores: ProjectLoadStores, file: ProjectFile): void {
   const { animation } = stores;
 
   animation.fps.value = file.animation.fps;
@@ -152,17 +123,11 @@ export function restoreProjectAnimationState(
   }
 }
 
-export function restoreProjectFrameTags(
-  stores: ProjectLoadStores,
-  file: ProjectFile
-): void {
-  stores.animation.tags.value =
-    file.tags && Array.isArray(file.tags) ? file.tags : [];
+export function restoreProjectFrameTags(stores: ProjectLoadStores, file: ProjectFile): void {
+  stores.animation.tags.value = file.tags && Array.isArray(file.tags) ? file.tags : [];
 }
 
-export function refreshProjectPaletteAfterLoad(
-  stores: ProjectLoadStores
-): void {
+export function refreshProjectPaletteAfterLoad(stores: ProjectLoadStores): void {
   const { palette } = stores;
 
   palette.refreshUsedColors();
@@ -263,10 +228,7 @@ function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
   return animation.frames.value[0]?.id;
 }
 
-function addLoadedFrame(
-  stores: ProjectLoadStores,
-  frameFile: ProjectFrameFile
-): Frame {
+function addLoadedFrame(stores: ProjectLoadStores, frameFile: ProjectFrameFile): Frame {
   const { animation } = stores;
 
   animation.addFrame(false);
@@ -305,8 +267,7 @@ function giveSharedTransparentCelOwnCanvas(
   if (
     !cel ||
     cel.linkedCelId !== EMPTY_CEL_LINK_ID ||
-    !hasProjectImageData(celFile.data)
-    && !(celFile.indexData && celFile.indexData.length > 0)
+    (!hasProjectImageData(celFile.data) && !(celFile.indexData && celFile.indexData.length > 0))
   ) {
     return;
   }
@@ -379,95 +340,8 @@ function restoreTextCelData(
   celFile: ProjectCelFile
 ): void {
   if (celFile.textCelData) {
-    stores.animation.setTextCelData(
-      celFile.layerId,
-      frameId,
-      celFile.textCelData
-    );
+    stores.animation.setTextCelData(celFile.layerId, frameId, celFile.textCelData);
   }
-}
-
-function shouldFoldEphemeralPalette(file: LegacyProjectFile): boolean {
-  return (
-    compareVersions(file.version, '4.0.0') < 0 &&
-    Array.isArray(file.ephemeralPalette) &&
-    file.ephemeralPalette.length > 0
-  );
-}
-
-function stripEphemeralPalette(file: LegacyProjectFile): ProjectFile {
-  const currentFile = { ...file };
-  delete currentFile.ephemeralPalette;
-  return currentFile;
-}
-
-function foldEphemeralPalette(
-  basePalette: string[],
-  legacyPalette: string[]
-): { palette: string[]; oldIndexToNewIndex: Map<number, number> } {
-  const palette = basePalette.map(color => normalizeHex(color));
-  const colorToIndex = new Map<string, number>();
-  const oldIndexToNewIndex = new Map<number, number>();
-
-  palette.forEach((color, index) => {
-    if (!colorToIndex.has(color)) {
-      colorToIndex.set(color, index + 1);
-    }
-  });
-
-  legacyPalette.forEach((color, index) => {
-    const oldIndex = basePalette.length + index + 1;
-    const normalized = normalizeHex(color);
-    const existingIndex = colorToIndex.get(normalized);
-
-    if (existingIndex !== undefined) {
-      oldIndexToNewIndex.set(oldIndex, existingIndex);
-      return;
-    }
-
-    palette.push(normalized);
-    const newIndex = palette.length;
-    colorToIndex.set(normalized, newIndex);
-    oldIndexToNewIndex.set(oldIndex, newIndex);
-  });
-
-  return { palette, oldIndexToNewIndex };
-}
-
-function remapLegacyEphemeralIndices(
-  frames: ProjectFrameFile[],
-  oldIndexToNewIndex: Map<number, number>
-): ProjectFrameFile[] {
-  if (oldIndexToNewIndex.size === 0) return frames;
-
-  return frames.map(frame => ({
-    ...frame,
-    cels: frame.cels.map(cel => ({
-      ...cel,
-      indexData: cel.indexData
-        ? cel.indexData.map(index => oldIndexToNewIndex.get(index) ?? index)
-        : cel.indexData,
-    })),
-  }));
-}
-
-function compareVersions(a: string, b: string): number {
-  const aParts = parseVersion(a);
-  const bParts = parseVersion(b);
-
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-
-  return 0;
-}
-
-function parseVersion(version: string): number[] {
-  return version
-    .split('.')
-    .map(part => Number.parseInt(part, 10))
-    .map(part => (Number.isFinite(part) ? part : 0));
 }
 
 function trackLinkedCelGroup(

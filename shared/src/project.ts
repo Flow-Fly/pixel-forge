@@ -6,6 +6,7 @@ export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' 
 
 export type LayerType = 'image' | 'group' | 'text' | 'reference';
 export type ReferenceLayerPosition = 'above' | 'below';
+export type CelLinkType = 'soft' | 'hard';
 export type ProjectImageData = Uint8Array;
 export type LegacyProjectImageData = ProjectImageData | string | Record<string, number>;
 
@@ -80,7 +81,7 @@ export interface ProjectCelFile {
   data: ProjectImageData;
   indexData?: number[];
   linkedCelId?: string;
-  linkType?: 'soft' | 'hard';
+  linkType?: CelLinkType;
   textCelData?: TextCelData;
 }
 
