@@ -1,4 +1,40 @@
 services:
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_PASSWORD: pixel_forge_local_secret
+      MINIO_ROOT_USER: pixel_forge
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', '--silent', 'http://localhost:9000/minio/health/ready']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - pixel-forge-minio-data:/data
+
+  minio-bootstrap:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_PASSWORD: pixel_forge_local_secret
+      MINIO_ROOT_USER: pixel_forge
+      STORAGE_SAFETY_CONFIRM: local-non-production
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        test "$$STORAGE_SAFETY_CONFIRM" = "local-non-production"
+        mc alias set pixel-forge http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing pixel-forge/pixel-forge-dev
+    restart: 'no'
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -17,4 +53,5 @@ services:
       - pixel-forge-postgres-data:/var/lib/postgresql/data
 
 volumes:
+  pixel-forge-minio-data:
   pixel-forge-postgres-data:
