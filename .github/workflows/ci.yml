@@ -50,12 +50,13 @@ jobs:
           artifacts-dir: .fallow/ci
           no-cache: true
 
-  server-image:
+  server-container:
     runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: pixel-forge-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+      PIXEL_FORGE_IMAGE_REVISION: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build linux/amd64 server image
-        env:
-          IMAGE_TAG: pixel-forge-server:${{ github.sha }}
-        run: docker build --platform linux/amd64 --file Dockerfile.server --tag "$IMAGE_TAG" .
+      - name: Build and smoke the linux/amd64 server image
+        run: npm run server:container:smoke

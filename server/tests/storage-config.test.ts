@@ -30,6 +30,25 @@ describe('storage configuration', () => {
     ).toBe(config.endpoint);
   });
 
+  it('allows plain HTTP on an explicitly confirmed local container network', () => {
+    expect(
+      parseStorageConfig({
+        ...validEnvironment,
+        STORAGE_ENDPOINT: 'http://minio:9000',
+        STORAGE_INSECURE_HTTP_CONFIRM: 'local-container-network',
+      }).endpoint
+    ).toBe('http://minio:9000');
+  });
+
+  it('rejects plain HTTP on a non-loopback host without the exact confirmation', () => {
+    expect(() =>
+      parseStorageConfig({
+        ...validEnvironment,
+        STORAGE_ENDPOINT: 'http://minio:9000',
+      })
+    ).toThrow('STORAGE_ENDPOINT must be');
+  });
+
   it.each([
     ['STORAGE_ACCESS_KEY_ID', undefined, 'STORAGE_ACCESS_KEY_ID is required'],
     ['STORAGE_BUCKET', 'Invalid_Bucket', 'STORAGE_BUCKET must be a portable'],

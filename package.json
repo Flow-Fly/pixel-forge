@@ -30,6 +30,7 @@
     "server:build": "npm run build --workspace @pixel-forge/server",
     "server:check": "npm run server:typecheck && npm run server:lint && npm run server:test",
     "server:container:build": "docker build --platform linux/amd64 --file Dockerfile.server --tag pixel-forge-server:development .",
+    "server:container:smoke": "bash scripts/server-container-smoke.sh",
     "server:db:compat": "npm run db:compat --workspace @pixel-forge/server",
     "server:db:generate": "npm run db:generate --workspace @pixel-forge/server",
     "server:db:migrate": "npm run db:migrate --workspace @pixel-forge/server",

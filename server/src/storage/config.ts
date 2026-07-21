@@ -1,4 +1,5 @@
 const SAFE_STORAGE_CONFIRMATION = 'local-non-production';
+const INSECURE_HTTP_CONFIRMATION = 'local-container-network';
 const INVALID_ENDPOINT_MESSAGE =
   'STORAGE_ENDPOINT must be an explicit HTTPS origin or loopback HTTP origin without credentials';
 const BUCKET_PATTERN = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
@@ -21,7 +22,7 @@ function requireValue(environment: StorageEnvironment, name: string): string {
   return value;
 }
 
-function parseEndpoint(value: string): URL {
+function parseEndpoint(value: string, insecureHttpConfirmation: string | undefined): URL {
   let endpoint: URL;
   try {
     endpoint = new URL(value);
@@ -31,7 +32,9 @@ function parseEndpoint(value: string): URL {
 
   const isHttp = endpoint.protocol === 'http:' || endpoint.protocol === 'https:';
   const isOrigin = endpoint.origin === value;
-  const hasTransportSecurity = endpoint.protocol === 'https:' || isLoopbackHost(endpoint.hostname);
+  const allowsLocalHttp =
+    isLoopbackHost(endpoint.hostname) || insecureHttpConfirmation === INSECURE_HTTP_CONFIRMATION;
+  const hasTransportSecurity = endpoint.protocol === 'https:' || allowsLocalHttp;
   if (!isHttp || !isOrigin || !hasTransportSecurity || endpoint.username || endpoint.password) {
     throw new Error(INVALID_ENDPOINT_MESSAGE);
   }
@@ -67,7 +70,10 @@ export function parseStorageConfig(environment: StorageEnvironment): StorageConf
   return {
     accessKeyId: requireValue(environment, 'STORAGE_ACCESS_KEY_ID'),
     bucket: parseBucket(requireValue(environment, 'STORAGE_BUCKET')),
-    endpoint: parseEndpoint(requireValue(environment, 'STORAGE_ENDPOINT')).origin,
+    endpoint: parseEndpoint(
+      requireValue(environment, 'STORAGE_ENDPOINT'),
+      environment.STORAGE_INSECURE_HTTP_CONFIRM
+    ).origin,
     forcePathStyle: parseForcePathStyle(requireValue(environment, 'STORAGE_FORCE_PATH_STYLE')),
     region: parseRegion(requireValue(environment, 'STORAGE_REGION')),
     secretAccessKey: requireValue(environment, 'STORAGE_SECRET_ACCESS_KEY'),
