@@ -84,6 +84,7 @@ describe('server process', { timeout: 10_000 }, () => {
       const child = startProcess({
         BUILD_REVISION: 'process-test',
         CORS_ALLOWED_ORIGINS: 'http://localhost:5173',
+        HOST: '127.0.0.1',
         PORT: '0',
       });
 

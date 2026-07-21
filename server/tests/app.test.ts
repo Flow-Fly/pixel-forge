@@ -4,6 +4,7 @@ import { createApp } from '../src/app.js';
 const app = createApp({
   allowedOrigins: ['https://pixel-forge.app'],
   buildRevision: 'abc123',
+  host: '127.0.0.1',
   port: 3001,
 });
 

@@ -23,6 +23,7 @@ describe('startServer', () => {
       {
         allowedOrigins: ['http://localhost:5173'],
         buildRevision: 'test-revision',
+        host: '127.0.0.1',
         port: 0,
       },
       logger
@@ -60,6 +61,7 @@ describe('startServer', () => {
         startServer({
           allowedOrigins: ['http://localhost:5173'],
           buildRevision: 'test-revision',
+          host: '127.0.0.1',
           port: address.port,
         })
       ).rejects.toMatchObject({ code: 'EADDRINUSE' });
