@@ -64,3 +64,78 @@ export const checkboxStyles = css`
     }
   }
 `;
+
+export const rangeStyles = css`
+  input[type='range'] {
+    inline-size: 60px;
+    block-size: 16px;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  input[type='range']::-webkit-slider-runnable-track {
+    block-size: 6px;
+    border: 1px solid var(--pf-color-border-strong);
+    border-radius: var(--pf-radius-sm);
+    background: var(--pf-color-bg-tertiary);
+  }
+
+  input[type='range']::-moz-range-track {
+    block-size: 6px;
+    border: 1px solid var(--pf-color-border-strong);
+    border-radius: var(--pf-radius-sm);
+    background: var(--pf-color-bg-tertiary);
+  }
+
+  input[type='range']::-webkit-slider-thumb {
+    inline-size: 14px;
+    block-size: 14px;
+    margin-block-start: -5px;
+    appearance: none;
+    border: 1px solid var(--pf-color-accent-hover);
+    border-radius: 0;
+    background: var(--pf-color-accent);
+  }
+
+  input[type='range']::-moz-range-thumb {
+    inline-size: 14px;
+    block-size: 14px;
+    border: 1px solid var(--pf-color-accent-hover);
+    border-radius: 0;
+    background: var(--pf-color-accent);
+  }
+
+  input[type='range']:hover:not(:disabled)::-webkit-slider-runnable-track {
+    border-color: var(--pf-color-accent);
+  }
+
+  input[type='range']:hover:not(:disabled)::-moz-range-track {
+    border-color: var(--pf-color-accent);
+  }
+
+  input[type='range']:hover:not(:disabled)::-webkit-slider-thumb {
+    background: var(--pf-color-accent-hover);
+  }
+
+  input[type='range']:hover:not(:disabled)::-moz-range-thumb {
+    background: var(--pf-color-accent-hover);
+  }
+
+  input[type='range']:focus-visible {
+    outline: 2px solid var(--pf-color-accent-hover);
+    outline-offset: 2px;
+  }
+
+  input[type='range']:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  @media (forced-colors: active) {
+    input[type='range'] {
+      appearance: auto;
+    }
+  }
+`;

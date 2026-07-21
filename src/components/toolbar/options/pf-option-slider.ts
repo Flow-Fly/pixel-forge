@@ -2,39 +2,13 @@ import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { SignalWatcher } from "@lit-labs/signals";
 import { getOptionValue, setOptionValue, type StoreType } from "./store-accessor";
+import { rangeStyles } from "../../../styles/editor-control-styles";
 import "../../ui/pf-form-field";
 
 @customElement("pf-option-slider")
 export class PfOptionSlider extends SignalWatcher(LitElement) {
   static styles = css`
-    input[type="range"] {
-      width: 60px;
-      height: 4px;
-      -webkit-appearance: none;
-      appearance: none;
-      background: var(--pf-color-bg-input);
-      border-radius: var(--pf-radius-sm);
-      cursor: pointer;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 12px;
-      height: 12px;
-      background: var(--pf-color-accent);
-      border-radius: 0;
-      cursor: pointer;
-    }
-
-    input[type="range"]::-moz-range-thumb {
-      width: 12px;
-      height: 12px;
-      background: var(--pf-color-accent);
-      border-radius: 0;
-      cursor: pointer;
-      border: none;
-    }
+    ${rangeStyles}
 
     .value {
       min-width: 32px;
