@@ -7,6 +7,7 @@ docs:
 github:
   bootstrap_label: "status: bootstrap"
   ready_label: "ready-for-agent"
+  not_ready_label: "not-ready-for-agent"
   blocked_label: "agent:blocked"
   complete_label: "agent:complete"
   tracking_label: "agentic-loop"
@@ -33,22 +34,29 @@ triage:
     - "ready-for-agent"
   ready_excludes:
     - "needs-human"
+    - "not-ready-for-agent"
     - "agent:blocked"
     - "risk:medium"
     - "risk:high"
 
 workflow:
   branch_prefix: "dev-"
+  integration_branch: "develop"
+  stable_branch: "main"
   require_spec_pr: false
   require_human_merge: true
+  director_may_merge_to_integration: true
   keep_parent_issue_clean: true
   max_reviewer_attempts: 2
   max_items_per_automation_run: 1
 
 verification:
   commands:
+    - "npx tsc --noEmit"
+    - "npm run lint"
     - "npm run test:run"
     - "npm run build"
+    - "npm run fallow:audit"
     - "git diff --check"
 
 human:
