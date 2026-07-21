@@ -8,7 +8,6 @@ import {
   CutToFloatCommand,
   FillSelectionCommand,
 } from '../../commands/selection-commands';
-import { panelStore } from '../../stores/panels';
 import { shapeSettings } from '../../stores/tool-settings';
 import { workspaceStore } from '../../stores/workspace';
 import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
@@ -626,12 +625,6 @@ const brushSizeAndPanelShortcuts: ShortcutGroup = [
     modifiers: [],
     action: () => setToolSizeBy(1),
     description: 'Increase brush size',
-  },
-  {
-    key: 'Tab',
-    modifiers: [],
-    action: () => panelStore.togglePanel('timeline'),
-    description: 'Toggle timeline',
   },
   {
     key: 'g',

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { MOD_PRIMARY } from '../../../src/utils/platform';
 import { toolRegistry } from '../../../src/tools/tool-registry';
+import { globalShortcutCategories } from '../../../src/services/keyboard/shortcut-definitions';
 import { clipboardStore } from '../../../src/stores/clipboard';
 import { toolStore } from '../../../src/stores/tools';
 import {
@@ -289,7 +290,7 @@ describe('registerShortcuts', () => {
     const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
     const descriptionsByCombo = new Map(calls.map((call) => [comboFromCall(call), call[3]]));
 
-    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(80);
+    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(79);
     expect(descriptionsByCombo.get('Alt')).toBe('Quick eyedropper');
     expect(descriptionsByCombo.get('0')).toBe('Fit to window');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+0`)).toBe('Opacity 100%');
@@ -308,6 +309,18 @@ describe('registerShortcuts', () => {
       .filter((call) => comboFromCall(call) === 'Enter')
       .map((call) => call[3]);
     expect(enterDescriptions).toEqual(['Play/Stop', 'Commit selection']);
+  });
+
+  it('leaves unmodified Tab available for native focus navigation', () => {
+    registerShortcuts();
+
+    const registeredCombos = (keyboardServiceMock.register.mock.calls as RegisterCall[]).map(
+      comboFromCall
+    );
+    const displayedShortcuts = globalShortcutCategories.flatMap((category) => category.shortcuts);
+
+    expect(registeredCombos).not.toContain('Tab');
+    expect(displayedShortcuts).not.toContainEqual({ key: 'tab', action: 'Toggle timeline' });
   });
 
   it('dispatches the project browser event for the open project shortcut', () => {
