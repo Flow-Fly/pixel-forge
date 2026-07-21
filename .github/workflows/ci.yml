@@ -19,10 +19,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
           cache: npm
 
       - run: npm ci
+
+      - name: Shared workspace checks
+        run: npm run shared:check
+
+      - name: Server workspace checks
+        run: npm run server:check
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -43,3 +49,13 @@ jobs:
           version: 3.2.0
           artifacts-dir: .fallow/ci
           no-cache: true
+
+  server-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build linux/amd64 server image
+        env:
+          IMAGE_TAG: pixel-forge-server:${{ github.sha }}
+        run: docker build --platform linux/amd64 --file Dockerfile.server --tag "$IMAGE_TAG" .
