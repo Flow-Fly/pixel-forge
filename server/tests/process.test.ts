@@ -17,20 +17,37 @@ function waitForOutput(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let output = '';
-    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${text}`)), 5_000);
+
+    function cleanup(): void {
+      clearTimeout(timeout);
+      child[stream].off('data', onData);
+      child.off('exit', onExit);
+    }
+
+    function succeed(): void {
+      cleanup();
+      resolve(output);
+    }
+
+    function fail(error: Error): void {
+      cleanup();
+      reject(error);
+    }
+
+    function onData(chunk: string): void {
+      output += chunk;
+      if (output.includes(text)) succeed();
+    }
+
+    function onExit(code: number | null, signal: NodeJS.Signals | null): void {
+      fail(new Error(`Server exited before ${text}: code=${code} signal=${signal}`));
+    }
+
+    const timeout = setTimeout(() => fail(new Error(`Timed out waiting for ${text}`)), 5_000);
 
     child[stream].setEncoding('utf8');
-    child[stream].on('data', (chunk: string) => {
-      output += chunk;
-      if (!output.includes(text)) return;
-
-      clearTimeout(timeout);
-      resolve(output);
-    });
-    child.once('exit', (code, signal) => {
-      clearTimeout(timeout);
-      reject(new Error(`Server exited before ${text}: code=${code} signal=${signal}`));
-    });
+    child[stream].on('data', onData);
+    child.once('exit', onExit);
   });
 }
 
