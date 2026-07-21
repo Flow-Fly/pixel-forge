@@ -9,8 +9,9 @@ import type {
 } from '../types/project';
 import { loadImageDataToCanvas } from '../utils/canvas-binary';
 import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
-import { normalizeHex } from '../stores/palette/color-utils';
 import { hasProjectImageData } from './project-data';
+
+export { migrateProjectFileForLoad } from '@pixel-forge/shared';
 
 type WritableSignal<T> = {
   value: T;
@@ -72,29 +73,9 @@ type LinkedCelGroup = {
   linkType: CelLinkType;
 };
 
-type LegacyProjectFile = ProjectFile & {
-  ephemeralPalette?: string[];
-};
-
 // Keep this boundary free of store imports; this mirrors the animation store
 // marker for shared transparent cels.
 const EMPTY_CEL_LINK_ID = '__empty__';
-
-export function migrateProjectFileForLoad(file: LegacyProjectFile): ProjectFile {
-  const fileWithoutEphemeral = stripEphemeralPalette(file);
-  if (!shouldFoldEphemeralPalette(file)) return fileWithoutEphemeral;
-
-  const basePalette = Array.isArray(file.palette) ? file.palette : [];
-  const legacyPalette = file.ephemeralPalette ?? [];
-  const { palette, oldIndexToNewIndex } =
-    foldEphemeralPalette(basePalette, legacyPalette);
-
-  return {
-    ...fileWithoutEphemeral,
-    palette,
-    frames: remapLegacyEphemeralIndices(file.frames, oldIndexToNewIndex),
-  };
-}
 
 export function restoreProjectPaletteForLoad(
   stores: ProjectLoadStores,
@@ -385,89 +366,6 @@ function restoreTextCelData(
       celFile.textCelData
     );
   }
-}
-
-function shouldFoldEphemeralPalette(file: LegacyProjectFile): boolean {
-  return (
-    compareVersions(file.version, '4.0.0') < 0 &&
-    Array.isArray(file.ephemeralPalette) &&
-    file.ephemeralPalette.length > 0
-  );
-}
-
-function stripEphemeralPalette(file: LegacyProjectFile): ProjectFile {
-  const currentFile = { ...file };
-  delete currentFile.ephemeralPalette;
-  return currentFile;
-}
-
-function foldEphemeralPalette(
-  basePalette: string[],
-  legacyPalette: string[]
-): { palette: string[]; oldIndexToNewIndex: Map<number, number> } {
-  const palette = basePalette.map(color => normalizeHex(color));
-  const colorToIndex = new Map<string, number>();
-  const oldIndexToNewIndex = new Map<number, number>();
-
-  palette.forEach((color, index) => {
-    if (!colorToIndex.has(color)) {
-      colorToIndex.set(color, index + 1);
-    }
-  });
-
-  legacyPalette.forEach((color, index) => {
-    const oldIndex = basePalette.length + index + 1;
-    const normalized = normalizeHex(color);
-    const existingIndex = colorToIndex.get(normalized);
-
-    if (existingIndex !== undefined) {
-      oldIndexToNewIndex.set(oldIndex, existingIndex);
-      return;
-    }
-
-    palette.push(normalized);
-    const newIndex = palette.length;
-    colorToIndex.set(normalized, newIndex);
-    oldIndexToNewIndex.set(oldIndex, newIndex);
-  });
-
-  return { palette, oldIndexToNewIndex };
-}
-
-function remapLegacyEphemeralIndices(
-  frames: ProjectFrameFile[],
-  oldIndexToNewIndex: Map<number, number>
-): ProjectFrameFile[] {
-  if (oldIndexToNewIndex.size === 0) return frames;
-
-  return frames.map(frame => ({
-    ...frame,
-    cels: frame.cels.map(cel => ({
-      ...cel,
-      indexData: cel.indexData
-        ? cel.indexData.map(index => oldIndexToNewIndex.get(index) ?? index)
-        : cel.indexData,
-    })),
-  }));
-}
-
-function compareVersions(a: string, b: string): number {
-  const aParts = parseVersion(a);
-  const bParts = parseVersion(b);
-
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-
-  return 0;
-}
-
-function parseVersion(version: string): number[] {
-  return version
-    .split('.')
-    .map(part => Number.parseInt(part, 10))
-    .map(part => (Number.isFinite(part) ? part : 0));
 }
 
 function trackLinkedCelGroup(
