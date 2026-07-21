@@ -139,3 +139,28 @@ export const rangeStyles = css`
     }
   }
 `;
+
+export const menuItemStyles = css`
+  .menu-item {
+    box-sizing: border-box;
+    inline-size: 100%;
+    min-block-size: 30px;
+    margin: 0;
+    padding: 7px 12px;
+    border: 0;
+    background: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    color: var(--pf-color-text-secondary);
+    cursor: pointer;
+    font-family: var(--pf-font-mono);
+    font-size: var(--pf-font-size-sm);
+    font-weight: 400;
+    line-height: 1.25;
+    letter-spacing: 0;
+    text-align: start;
+    text-transform: none;
+  }
+`;
