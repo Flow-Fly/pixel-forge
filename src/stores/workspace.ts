@@ -366,12 +366,6 @@ export class WorkspaceStore {
 
     try {
       await this.projectLibrary.deleteProject(projectId);
-    } catch (error) {
-      this.resumeAutoSaveIfOpen(item);
-      throw error;
-    }
-
-    try {
       return this.commitProjectDeletion(item);
     } catch (error) {
       this.resumeAutoSaveIfOpen(item);
@@ -421,19 +415,18 @@ export class WorkspaceStore {
   }
 
   private replaceLastDeletedItem(deletedItem: WorkspaceItem): WorkspaceItem {
+    const deletedIndex = this.items.value.findIndex(
+      (item) => item.id === deletedItem.id && item.context === deletedItem.context,
+    );
+    if (deletedIndex === -1) {
+      throw new Error("Deleted workspace item was not found.");
+    }
+
     const replacementContext = createProjectContext();
     const replacementItem = {
       id: createWorkspaceItemId(),
       context: replacementContext,
     };
-    const deletedIndex = this.items.value.findIndex(
-      (item) => item.id === deletedItem.id && item.context === deletedItem.context,
-    );
-    if (deletedIndex === -1) {
-      replacementContext.dispose();
-      throw new Error("Deleted workspace item was not found.");
-    }
-
     const nextItems = [...this.items.value];
     nextItems[deletedIndex] = replacementItem;
     this.items.value = nextItems;
