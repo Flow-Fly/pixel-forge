@@ -41,4 +41,21 @@ describe('product events', () => {
   ])('rejects unapproved payload %#', (payload) => {
     expect(parseProductEvent(payload)).toBeUndefined();
   });
+
+  it('validates and retains the same dimension value', () => {
+    let sourceReads = 0;
+    const dimensions = Object.defineProperty({}, 'source', {
+      enumerable: true,
+      get: () => {
+        sourceReads += 1;
+        return sourceReads === 1 ? 'blank' : 'portrait.pf';
+      },
+    });
+
+    expect(parseProductEvent({ name: 'project_created', dimensions })).toEqual({
+      name: 'project_created',
+      dimensions: { source: 'blank' },
+    });
+    expect(sourceReads).toBe(1);
+  });
 });

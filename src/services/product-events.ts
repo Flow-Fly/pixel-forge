@@ -47,9 +47,8 @@ export type ProductEvent = {
 
 export function parseProductEvent(value: unknown): ProductEvent | undefined {
   if (!isRecord(value) || !hasExactKeys(value, ['name', 'dimensions'])) return undefined;
-  if (!isRecord(value.dimensions)) return undefined;
-
   const dimensions = value.dimensions;
+  if (!isRecord(dimensions)) return undefined;
 
   switch (value.name) {
     case 'editor_loaded':
@@ -78,38 +77,44 @@ export function parseProductEvent(value: unknown): ProductEvent | undefined {
 
 function parseEditorLoaded(dimensions: Record<string, unknown>): ProductEvent | undefined {
   if (!hasExactKeys(dimensions, ['entryPoint'])) return undefined;
-  if (!isAllowedValue(dimensions.entryPoint, ENTRY_POINTS)) return undefined;
-  return createEvent('editor_loaded', { entryPoint: dimensions.entryPoint });
+  const entryPoint = dimensions.entryPoint;
+  if (!isAllowedValue(entryPoint, ENTRY_POINTS)) return undefined;
+  return createEvent('editor_loaded', { entryPoint });
 }
 
 function parseProjectCreated(dimensions: Record<string, unknown>): ProductEvent | undefined {
   if (!hasExactKeys(dimensions, ['source'])) return undefined;
-  if (!isAllowedValue(dimensions.source, PROJECT_CREATION_SOURCES)) return undefined;
-  return createEvent('project_created', { source: dimensions.source });
+  const source = dimensions.source;
+  if (!isAllowedValue(source, PROJECT_CREATION_SOURCES)) return undefined;
+  return createEvent('project_created', { source });
 }
 
 function parseProjectOpened(dimensions: Record<string, unknown>): ProductEvent | undefined {
   if (!hasExactKeys(dimensions, ['source'])) return undefined;
-  if (!isAllowedValue(dimensions.source, PROJECT_OPEN_SOURCES)) return undefined;
-  return createEvent('project_opened', { source: dimensions.source });
+  const source = dimensions.source;
+  if (!isAllowedValue(source, PROJECT_OPEN_SOURCES)) return undefined;
+  return createEvent('project_opened', { source });
 }
 
 function parseFirstDrawingAction(dimensions: Record<string, unknown>): ProductEvent | undefined {
   if (!hasExactKeys(dimensions, ['tool'])) return undefined;
-  if (!isAllowedValue(dimensions.tool, DRAWING_TOOLS)) return undefined;
-  return createEvent('first_drawing_action', { tool: dimensions.tool });
+  const tool = dimensions.tool;
+  if (!isAllowedValue(tool, DRAWING_TOOLS)) return undefined;
+  return createEvent('first_drawing_action', { tool });
 }
 
 function parseProjectSaved(dimensions: Record<string, unknown>): ProductEvent | undefined {
   if (!hasExactKeys(dimensions, ['destination'])) return undefined;
-  if (!isAllowedValue(dimensions.destination, SAVE_DESTINATIONS)) return undefined;
-  return createEvent('project_saved', { destination: dimensions.destination });
+  const destination = dimensions.destination;
+  if (!isAllowedValue(destination, SAVE_DESTINATIONS)) return undefined;
+  return createEvent('project_saved', { destination });
 }
 
 function parseExportCompleted(dimensions: Record<string, unknown>): ProductEvent | undefined {
   if (!hasExactKeys(dimensions, ['format'])) return undefined;
-  if (!isAllowedValue(dimensions.format, EXPORT_FORMATS)) return undefined;
-  return createEvent('export_completed', { format: dimensions.format });
+  const format = dimensions.format;
+  if (!isAllowedValue(format, EXPORT_FORMATS)) return undefined;
+  return createEvent('export_completed', { format });
 }
 
 function createEvent<Name extends ProductEventName>(
