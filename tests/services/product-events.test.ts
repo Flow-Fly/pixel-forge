@@ -58,4 +58,49 @@ describe('product events', () => {
     });
     expect(sourceReads).toBe(1);
   });
+
+  it('validates and retains the same event name', () => {
+    let nameReads = 0;
+    const input = Object.defineProperties(
+      {},
+      {
+        name: {
+          enumerable: true,
+          get: () => {
+            nameReads += 1;
+            return nameReads === 1 ? 'tutorial_started' : 'private-project-name';
+          },
+        },
+        dimensions: {
+          enumerable: true,
+          value: {},
+        },
+      }
+    );
+
+    expect(parseProductEvent(input)).toEqual({
+      name: 'tutorial_started',
+      dimensions: {},
+    });
+    expect(nameReads).toBe(1);
+  });
+
+  it('rejects hidden and symbol-keyed dimensions', () => {
+    const hiddenDimensions = Object.defineProperty({ source: 'blank' }, 'filename', {
+      enumerable: false,
+      value: 'portrait.pf',
+    });
+    const privateField = Symbol('private-field');
+    const symbolDimensions = {
+      source: 'blank',
+      [privateField]: 'portrait.pf',
+    };
+
+    expect(
+      parseProductEvent({ name: 'project_created', dimensions: hiddenDimensions })
+    ).toBeUndefined();
+    expect(
+      parseProductEvent({ name: 'project_created', dimensions: symbolDimensions })
+    ).toBeUndefined();
+  });
 });

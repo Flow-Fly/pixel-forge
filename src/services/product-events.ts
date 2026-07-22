@@ -47,10 +47,11 @@ export type ProductEvent = {
 
 export function parseProductEvent(value: unknown): ProductEvent | undefined {
   if (!isRecord(value) || !hasExactKeys(value, ['name', 'dimensions'])) return undefined;
+  const name = value.name;
   const dimensions = value.dimensions;
   if (!isRecord(dimensions)) return undefined;
 
-  switch (value.name) {
+  switch (name) {
     case 'editor_loaded':
       return parseEditorLoaded(dimensions);
     case 'project_created':
@@ -69,7 +70,7 @@ export function parseProductEvent(value: unknown): ProductEvent | undefined {
     case 'tutorial_completed':
     case 'tutorial_skipped':
       if (!hasExactKeys(dimensions, [])) return undefined;
-      return createEvent(value.name, {});
+      return createEvent(name, {});
     default:
       return undefined;
   }
@@ -142,7 +143,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
-  const keys = Object.keys(value);
+  const keys = Reflect.ownKeys(value);
   return (
     keys.length === expectedKeys.length &&
     expectedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
