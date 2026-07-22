@@ -520,10 +520,12 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleProjectFileDrop = (event: DragEvent) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+
+    event.preventDefault();
     const files = supportedProjectFiles(getDataTransferFiles(event.dataTransfer));
     if (files.length === 0) return;
 
-    event.preventDefault();
     void importProjectFiles(files).catch((error) => {
       log.error("Failed to import dropped project files:", error);
     });

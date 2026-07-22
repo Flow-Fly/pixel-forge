@@ -398,7 +398,7 @@ describe('pixel-forge-app project dialogs', () => {
     });
   });
 
-  it('imports supported dropped files without intercepting unrelated files', async () => {
+  it('imports supported dropped files and prevents unsupported drops from navigating away', async () => {
     await import('../../../src/components/app/pixel-forge-app');
     const element = document.createElement('pixel-forge-app') as HTMLElement;
     document.body.append(element);
@@ -421,7 +421,7 @@ describe('pixel-forge-app project dialogs', () => {
     const unsupportedDrop = fileTransferEvent('drop', [notes]);
     window.dispatchEvent(unsupportedDrop);
 
-    expect(unsupportedDrop.defaultPrevented).toBe(false);
+    expect(unsupportedDrop.defaultPrevented).toBe(true);
     expect(projectFileHandlingMock.importProjectFiles).not.toHaveBeenCalled();
   });
 
