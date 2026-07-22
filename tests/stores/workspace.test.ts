@@ -455,6 +455,102 @@ describe("WorkspaceStore", () => {
     expect(openedDispose).not.toHaveBeenCalled();
   });
 
+  it("lets an in-flight open finish before deleting the same project", async () => {
+    const initialContext = createTestContext("Initial Project");
+    const opening = createDeferred();
+    const projectLibrary = createProjectLibraryMock();
+    vi.mocked(projectLibrary.openProject).mockImplementationOnce(
+      async (projectId, settings = {}) => {
+        await opening.promise;
+        if (settings.context) settings.context.project.id.value = projectId;
+        return makeProjectFile(`Project ${projectId}`);
+      },
+    );
+    const workspace = new WorkspaceStore({
+      initialContext,
+      initialItemId: "initial-project",
+      projectLibrary,
+      autoSave: createAutoSaveMock(),
+    });
+
+    const open = workspace.openProject("project-a");
+    await vi.waitFor(() => expect(projectLibrary.openProject).toHaveBeenCalledOnce());
+    const deletion = workspace.deleteProject("project-a");
+
+    expect(projectLibrary.deleteProject).not.toHaveBeenCalled();
+    opening.resolve();
+    await open;
+    await deletion;
+
+    expect(projectLibrary.deleteProject).toHaveBeenCalledWith("project-a");
+    expect(workspace.getProjectItem("project-a")).toBeUndefined();
+  });
+
+  it("waits for same-project deletion before a reopen and keeps other projects concurrent", async () => {
+    const deletedContext = createTestContext("Project A");
+    deletedContext.project.id.value = "project-a";
+    const deletion = createDeferred();
+    const projectLibrary = createProjectLibraryMock();
+    vi.mocked(projectLibrary.deleteProject).mockImplementationOnce(() => deletion.promise);
+    vi.mocked(projectLibrary.openProject).mockImplementation(async (projectId, settings = {}) => {
+      if (projectId === "project-a") throw new Error("Project not found");
+      if (settings.context) settings.context.project.id.value = projectId;
+      return makeProjectFile(`Project ${projectId}`);
+    });
+    const workspace = new WorkspaceStore({
+      initialContext: deletedContext,
+      initialItemId: "project-a",
+      projectLibrary,
+      autoSave: createAutoSaveMock(),
+    });
+
+    const deleteResult = workspace.deleteProject("project-a");
+    await vi.waitFor(() => expect(projectLibrary.deleteProject).toHaveBeenCalledOnce());
+    const reopen = workspace.openProject("project-a");
+    const unrelatedOpen = workspace.openProject("project-b");
+
+    await expect(unrelatedOpen).resolves.toMatchObject({ ok: true, projectId: "project-b" });
+    expect(projectLibrary.openProject).not.toHaveBeenCalledWith(
+      "project-a",
+      expect.any(Object),
+    );
+
+    deletion.resolve();
+    await deleteResult;
+    await expect(reopen).rejects.toThrow("Project not found");
+  });
+
+  it("does not reopen a project that was closed while its deletion was pending", async () => {
+    const deletedContext = createTestContext("Project A");
+    const remainingContext = createTestContext("Project B");
+    deletedContext.project.id.value = "project-a";
+    remainingContext.project.id.value = "project-b";
+    const deletion = createDeferred();
+    const projectLibrary = createProjectLibraryMock();
+    vi.mocked(projectLibrary.deleteProject).mockImplementationOnce(() => deletion.promise);
+    vi.mocked(projectLibrary.openProject).mockRejectedValueOnce(new Error("Project not found"));
+    const workspace = new WorkspaceStore({
+      initialContext: deletedContext,
+      initialItemId: "project-a",
+      projectLibrary,
+      autoSave: createAutoSaveMock(),
+    });
+    workspace.addContext(remainingContext, { id: "project-b", activate: false });
+
+    const deleteResult = workspace.deleteProject("project-a");
+    await vi.waitFor(() => expect(projectLibrary.deleteProject).toHaveBeenCalledOnce());
+    expect(workspace.close("project-a").ok).toBe(true);
+    const reopen = workspace.openProject("project-a");
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(projectLibrary.openProject).not.toHaveBeenCalled();
+    deletion.resolve();
+    await deleteResult;
+    await expect(reopen).rejects.toThrow("Project not found");
+    expect(workspace.items.value.map((item) => item.id)).toEqual(["project-b"]);
+  });
+
   it("installs a replacement when another project closes during deletion", async () => {
     const deletedContext = createTestContext("Project A");
     const closingContext = createTestContext("Project B");

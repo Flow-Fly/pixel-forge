@@ -87,8 +87,11 @@ function getBase64Payload(data: string): string {
     throw new TypeError('Invalid legacy base64 data URL');
   }
 
-  const metadata = data.slice(0, commaIndex).toLowerCase();
-  if (!metadata.includes(';base64')) {
+  const metadataTokens = data.slice(5, commaIndex).split(';');
+  const hasBase64Token = metadataTokens
+    .slice(1)
+    .some((token) => token.toLowerCase() === 'base64');
+  if (!hasBase64Token) {
     throw new TypeError('Unsupported legacy image data URL: expected base64');
   }
   return data.slice(commaIndex + 1);

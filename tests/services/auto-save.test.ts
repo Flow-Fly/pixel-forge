@@ -161,6 +161,33 @@ describe('AutoSaveService', () => {
     expect(autoSaveService.isDirty(context)).toBe(false);
   });
 
+  it('records edits made while paused and saves them after restart', async () => {
+    const context = createContext('paused-edit-project', 'Before deletion');
+    autoSaveService.start(context);
+    await autoSaveService.pause(context);
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Edited while deletion was pending';
+      })
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(2500);
+
+    expect(autoSaveService.isDirty(context)).toBe(true);
+    expect(projectRepository.save).not.toHaveBeenCalled();
+
+    autoSaveService.start(context);
+    await vi.advanceTimersByTimeAsync(2500);
+
+    expect(projectRepository.save).toHaveBeenCalledWith(
+      'paused-edit-project',
+      expect.objectContaining({ name: 'Edited while deletion was pending' }),
+      expect.any(Object)
+    );
+    expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
   it('keeps saving until an edit made during a write is persisted', async () => {
     const context = createContext('reload-project', 'First state');
     const firstWrite = deferred<void>();

@@ -463,7 +463,7 @@ export class PFProjectBrowser extends BaseComponent {
         <div class="card-actions">
           <button type="button" @click=${() => this.startRename(project)}>Rename</button>
           <button type="button" @click=${() => this.duplicateProject(project.id)}>Duplicate</button>
-          <button class="danger" type="button" @click=${() => (this.deleteTarget = project)}>
+          <button class="danger" type="button" @click=${() => this.startDelete(project)}>
             Delete
           </button>
         </div>
@@ -621,6 +621,12 @@ export class PFProjectBrowser extends BaseComponent {
     this.renamingProjectId = null;
     this.renameValue = '';
   };
+
+  private startDelete(project: ProjectMeta) {
+    this.errorMessage = '';
+    this.deleteErrorMessage = '';
+    this.deleteTarget = project;
+  }
 
   private async duplicateProject(id: string) {
     this.errorMessage = '';

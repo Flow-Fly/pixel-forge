@@ -531,6 +531,28 @@ describe('pf-project-browser', () => {
     expect(confirmDeleteButton(element.shadowRoot!)?.disabled).toBe(false);
   });
 
+  it('clears a stale delete failure before opening a new confirmation', async () => {
+    workspaceStoreMock.deleteProject.mockRejectedValueOnce(new Error('first delete failed'));
+    const element = await createBrowser();
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await element.updateComplete;
+    confirmDeleteButton(element.shadowRoot!)?.click();
+    await settle(element);
+    expect(element.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'first delete failed'
+    );
+
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    requestNativeCancel(deleteDialog);
+    await settle(element);
+    projectAction(element.shadowRoot!, 'Second Project', 'Delete')?.click();
+    await settle(element);
+
+    expect(element.shadowRoot?.querySelector('[role="alert"]')).toBeNull();
+    expect(deleteDialog?.open).toBe(true);
+  });
+
   it('routes inactive open project deletion through the workspace lifecycle', async () => {
     const inactiveProjectContext = {
       project: {

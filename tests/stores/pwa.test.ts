@@ -66,9 +66,11 @@ describe('PwaStore install prompt', () => {
 
 describe('PwaStore update flow', () => {
   let store: PwaStore;
+  let reload: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    store = new PwaStore();
+    reload = vi.fn();
+    store = new PwaStore(reload);
   });
 
   afterEach(() => {
@@ -90,8 +92,36 @@ describe('PwaStore update flow', () => {
     expect(await store.restartWithUpdate(save)).toBe(true);
 
     expect(calls).toEqual(['save', 'update']);
-    expect(update).toHaveBeenCalledWith(true);
-    expect(store.updateAvailable.value).toBe(false);
+    expect(update).toHaveBeenCalledWith(false);
+    expect(reload).not.toHaveBeenCalled();
+    expect(store.applyingUpdate.value).toBe(true);
+
+    await store.handleUpdateControlling();
+
+    expect(calls).toEqual(['save', 'update', 'save']);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the updated session open and retryable when the final save fails', async () => {
+    const save = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('storage full'))
+      .mockResolvedValue(undefined);
+    const update = vi.fn().mockResolvedValue(undefined);
+    store.setUpdateHandler(update);
+    store.showUpdate();
+
+    expect(await store.restartWithUpdate(save)).toBe(true);
+    await store.handleUpdateControlling();
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(store.updateAvailable.value).toBe(true);
+    expect(store.applyingUpdate.value).toBe(false);
+    expect(store.updateError.value).toContain('could not save');
+
+    expect(await store.restartWithUpdate(save)).toBe(true);
+    expect(update).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
   });
 
   it('dismisses the notice without applying the update', () => {

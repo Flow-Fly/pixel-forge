@@ -149,7 +149,10 @@ describe('TransformTool active project context', () => {
     commitSelectionTransform(context);
 
     expect(execute).toHaveBeenCalledOnce();
+    const command = execute.mock.calls[0][0];
+    command.execute();
     expect(getEditableCelCanvas).toHaveBeenCalledWith(originLayer.id, originFrameId);
     expect(getEditableCelCanvas).not.toHaveBeenCalledWith(otherLayer.id, otherFrameId);
+    expect(context.selection.state.value.type).toBe('none');
   });
 });

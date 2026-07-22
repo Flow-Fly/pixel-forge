@@ -174,6 +174,12 @@ export class PFDialog extends BaseComponent {
     document.removeEventListener("keydown", this.handleKeyDown);
   }
 
+  protected willUpdate(changedProperties: PropertyValues<this>) {
+    if (changedProperties.has("open") && this.open) {
+      this.previouslyFocused = this.deepestActiveElement(document);
+    }
+  }
+
   private handleKeyDown = (e: KeyboardEvent) => {
     if (!this.open) return;
 
@@ -193,8 +199,7 @@ export class PFDialog extends BaseComponent {
     if (!changedProperties.has("open")) return;
 
     if (this.open) {
-      this.previouslyFocused = document.activeElement as HTMLElement | null;
-      this.focusableElements()[0]?.focus();
+      this.focusDialog();
     } else {
       this.restoreFocus();
     }
@@ -237,6 +242,7 @@ export class PFDialog extends BaseComponent {
     const focusable = this.focusableElements();
     if (focusable.length === 0) {
       event.preventDefault();
+      this.dialogSurface()?.focus();
       return;
     }
 
@@ -248,6 +254,36 @@ export class PFDialog extends BaseComponent {
 
     event.preventDefault();
     (isLeavingStart ? focusable.at(-1) : focusable[0])?.focus();
+  }
+
+  private focusDialog() {
+    (this.focusableElements()[0] ?? this.dialogSurface())?.focus();
+  }
+
+  private ensureDialogFocus = () => {
+    queueMicrotask(() => {
+      if (!this.open) return;
+
+      const activeElement = this.deepestActiveElement(document);
+      const focusIsInside = activeElement
+        ? this.contains(activeElement) || Boolean(this.shadowRoot?.contains(activeElement))
+        : false;
+      if (focusIsInside && this.focusableElements().length > 0) return;
+
+      this.dialogSurface()?.focus();
+    });
+  };
+
+  private dialogSurface() {
+    return this.shadowRoot?.querySelector<HTMLElement>(".dialog");
+  }
+
+  private deepestActiveElement(root: Document | ShadowRoot): HTMLElement | null {
+    let activeElement = root.activeElement;
+    while (activeElement?.shadowRoot?.activeElement) {
+      activeElement = activeElement.shadowRoot.activeElement;
+    }
+    return activeElement instanceof HTMLElement ? activeElement : null;
   }
 
   private restoreFocus() {
@@ -270,13 +306,14 @@ export class PFDialog extends BaseComponent {
           role="dialog"
           aria-modal="true"
           aria-labelledby="dialog-title"
+          tabindex="-1"
           data-scrollbar="vertical"
           style="width: ${this.width}"
           @click=${this.handleDialogClick}
         >
           <div class="header">
             <span class="title" id="dialog-title">
-              <slot name="title"></slot>
+              <slot name="title" @slotchange=${this.ensureDialogFocus}></slot>
             </span>
             ${this.showCloseButton
               ? html`<button
@@ -288,10 +325,10 @@ export class PFDialog extends BaseComponent {
               : nothing}
           </div>
           <div class="content">
-            <slot></slot>
+            <slot @slotchange=${this.ensureDialogFocus}></slot>
           </div>
           <div class="actions">
-            <slot name="actions"></slot>
+            <slot name="actions" @slotchange=${this.ensureDialogFocus}></slot>
           </div>
         </div>
       </div>

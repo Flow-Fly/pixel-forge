@@ -10,6 +10,7 @@ export interface BeforeInstallPromptEvent extends Event {
 
 type StandaloneNavigator = Navigator & { standalone?: boolean };
 type UpdateServiceWorker = (reloadPage?: boolean) => Promise<void>;
+type SaveOpenProjects = () => Promise<void>;
 
 export class PwaStore {
   readonly installAvailable = signal(false);
@@ -20,6 +21,15 @@ export class PwaStore {
   private installPrompt: BeforeInstallPromptEvent | null = null;
   private listeningForInstall = false;
   private updateServiceWorker: UpdateServiceWorker | null = null;
+  private updateActivated = false;
+  private saveOpenProjects: SaveOpenProjects | null = null;
+  private initialSave: Promise<void> | null = null;
+  private finalizingUpdate: Promise<boolean> | null = null;
+  private readonly reloadPage: () => void;
+
+  constructor(reloadPage = () => window.location.reload()) {
+    this.reloadPage = reloadPage;
+  }
 
   start() {
     if (this.listeningForInstall) return;
@@ -38,6 +48,10 @@ export class PwaStore {
     this.listeningForInstall = false;
     this.clearInstallPrompt();
     this.updateServiceWorker = null;
+    this.updateActivated = false;
+    this.saveOpenProjects = null;
+    this.initialSave = null;
+    this.finalizingUpdate = null;
     this.updateAvailable.value = false;
     this.applyingUpdate.value = false;
     this.updateError.value = null;
@@ -58,6 +72,7 @@ export class PwaStore {
   }
 
   showUpdate() {
+    this.updateActivated = false;
     this.updateError.value = null;
     this.updateAvailable.value = true;
   }
@@ -67,34 +82,96 @@ export class PwaStore {
     this.updateError.value = null;
   }
 
-  async restartWithUpdate(saveCurrentProject: () => Promise<void>) {
+  async restartWithUpdate(saveOpenProjects: SaveOpenProjects) {
     if (!this.updateAvailable.value || !this.updateServiceWorker || this.applyingUpdate.value) {
       return false;
     }
 
     this.applyingUpdate.value = true;
     this.updateError.value = null;
+    this.saveOpenProjects = saveOpenProjects;
 
+    const initialSave = saveOpenProjects();
+    this.initialSave = initialSave;
     try {
-      await saveCurrentProject();
+      await initialSave;
     } catch {
-      this.updateError.value =
-        'Pixel Forge could not save before restarting. Your current session stayed open.';
-      this.applyingUpdate.value = false;
-      return false;
-    }
-
-    try {
-      this.updateAvailable.value = false;
-      await this.updateServiceWorker(true);
-      return true;
-    } catch {
-      this.updateAvailable.value = true;
-      this.updateError.value = 'The update could not be started. Your current session stayed open.';
+      this.showSaveFailure();
       return false;
     } finally {
-      this.applyingUpdate.value = false;
+      if (this.initialSave === initialSave) {
+        this.initialSave = null;
+      }
     }
+
+    if (this.updateActivated) {
+      return this.reloadAfterSuccessfulSave();
+    }
+
+    try {
+      // vite-plugin-pwa ignores this argument in current versions. Passing
+      // false documents that its controlling callback, not the updater,
+      // owns the eventual reload.
+      await this.updateServiceWorker(false);
+      return true;
+    } catch {
+      this.saveOpenProjects = null;
+      this.applyingUpdate.value = false;
+      this.updateError.value = 'The update could not be started. Your current session stayed open.';
+      return false;
+    }
+  }
+
+  async handleUpdateControlling(): Promise<boolean> {
+    this.updateActivated = true;
+    this.updateAvailable.value = true;
+
+    if (this.finalizingUpdate) return this.finalizingUpdate;
+
+    const saveOpenProjects = this.saveOpenProjects;
+    if (!saveOpenProjects) {
+      this.applyingUpdate.value = false;
+      return false;
+    }
+
+    const finalizingUpdate = this.finishActivatedUpdate(saveOpenProjects);
+    this.finalizingUpdate = finalizingUpdate;
+    try {
+      return await finalizingUpdate;
+    } finally {
+      if (this.finalizingUpdate === finalizingUpdate) {
+        this.finalizingUpdate = null;
+      }
+    }
+  }
+
+  private async finishActivatedUpdate(saveOpenProjects: SaveOpenProjects): Promise<boolean> {
+    try {
+      await this.initialSave;
+      await saveOpenProjects();
+    } catch {
+      this.showSaveFailure();
+      return false;
+    }
+
+    return this.reloadAfterSuccessfulSave();
+  }
+
+  private reloadAfterSuccessfulSave(): true {
+    this.updateAvailable.value = false;
+    this.updateError.value = null;
+    this.applyingUpdate.value = false;
+    this.saveOpenProjects = null;
+    this.reloadPage();
+    return true;
+  }
+
+  private showSaveFailure() {
+    this.updateAvailable.value = true;
+    this.applyingUpdate.value = false;
+    this.saveOpenProjects = null;
+    this.updateError.value =
+      'Pixel Forge could not save before restarting. Your current session stayed open.';
   }
 
   private handleBeforeInstallPrompt = (event: Event) => {

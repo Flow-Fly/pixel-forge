@@ -122,6 +122,7 @@ export class WorkspaceStore {
   private readonly projectLibrary: WorkspaceProjectLibrary;
   private readonly autoSave: WorkspaceAutoSave;
   private readonly workspaceState: WorkspaceStatePersistence;
+  private readonly projectMutations = new Map<string, Promise<void>>();
   private isRestoringWorkspace = false;
 
   constructor(options: WorkspaceStoreOptions = {}) {
@@ -169,6 +170,15 @@ export class WorkspaceStore {
   async openProject(
     projectId: string,
     options: WorkspaceProjectOptions = {},
+  ): Promise<WorkspaceProjectResult> {
+    return this.runProjectMutation(projectId, () =>
+      this.openProjectWithoutMutationGate(projectId, options),
+    );
+  }
+
+  private async openProjectWithoutMutationGate(
+    projectId: string,
+    options: WorkspaceProjectOptions,
   ): Promise<WorkspaceProjectResult> {
     const existingItem = this.getProjectItem(projectId);
     if (existingItem) {
@@ -353,6 +363,14 @@ export class WorkspaceStore {
   }
 
   async deleteProject(projectId: string): Promise<WorkspaceDeleteResult> {
+    return this.runProjectMutation(projectId, () =>
+      this.deleteProjectWithoutMutationGate(projectId),
+    );
+  }
+
+  private async deleteProjectWithoutMutationGate(
+    projectId: string,
+  ): Promise<WorkspaceDeleteResult> {
     const item = this.getProjectItem(projectId);
     if (!item) {
       await this.projectLibrary.deleteProject(projectId);
@@ -371,6 +389,25 @@ export class WorkspaceStore {
       this.resumeAutoSaveIfOpen(item);
       throw error;
     }
+  }
+
+  private runProjectMutation<Result>(
+    projectId: string,
+    mutate: () => Promise<Result>,
+  ): Promise<Result> {
+    const previousMutation = this.projectMutations.get(projectId) ?? Promise.resolve();
+    const mutation = previousMutation.catch(() => {}).then(mutate);
+    const settledMutation = mutation.then(
+      () => {},
+      () => {},
+    );
+    this.projectMutations.set(projectId, settledMutation);
+    void settledMutation.then(() => {
+      if (this.projectMutations.get(projectId) === settledMutation) {
+        this.projectMutations.delete(projectId);
+      }
+    });
+    return mutation;
   }
 
   async restoreWorkspace(state: WorkspaceState): Promise<boolean> {

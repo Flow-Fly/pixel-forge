@@ -38,19 +38,19 @@ class AutoSaveService {
   start(context: ProjectContext = defaultProjectContext) {
     const state = this.getState(context);
     this.blockedContexts.delete(context);
-    if (state.dispose) return;
-
-    let firstRun = true;
-    state.dispose = effect(() => {
-      // Subscribe to history changes (execute/undo/redo/clear all bump this)
-      context.history.version.get();
-      if (firstRun) {
-        // Don't schedule a save just for booting up
-        firstRun = false;
-        return;
-      }
-      this.markDirty(context);
-    });
+    if (!state.dispose) {
+      let firstRun = true;
+      state.dispose = effect(() => {
+        // Subscribe to history changes (execute/undo/redo/clear all bump this)
+        context.history.version.get();
+        if (firstRun) {
+          // Don't schedule a save just for booting up
+          firstRun = false;
+          return;
+        }
+        this.markDirty(context);
+      });
+    }
 
     this.attachDocumentListeners();
     if (state.isDirty && !state.saveTimeout) {
@@ -76,11 +76,12 @@ class AutoSaveService {
   /** Mark the project dirty and (re)schedule a debounced save. */
   markDirty(context: ProjectContext = defaultProjectContext) {
     const state = this.getState(context);
-    if (state.suppressSaveCount > 0 || this.blockedContexts.has(context)) return;
+    if (state.suppressSaveCount > 0) return;
 
     state.changeRevision++;
     this.updateDirtyState(context, state);
 
+    if (this.blockedContexts.has(context)) return;
     this.scheduleSave(context, state);
   }
 
@@ -108,20 +109,14 @@ class AutoSaveService {
     } while (this.isDirty(context));
   }
 
-  /** Pause observation, cancel scheduled work, and wait for a started write. */
+  /** Block writes while continuing to record edits, then wait for a started write. */
   async pause(context: ProjectContext = defaultProjectContext): Promise<void> {
     this.blockedContexts.add(context);
     const state = this.contextState.get(context);
     if (!state) return;
 
-    state.dispose?.();
-    state.dispose = null;
     this.clearSaveTimeout(state);
     await state.saveQueue;
-
-    if (!this.hasStartedContexts()) {
-      this.detachDocumentListeners();
-    }
   }
 
   isDirty(context: ProjectContext = defaultProjectContext): boolean {

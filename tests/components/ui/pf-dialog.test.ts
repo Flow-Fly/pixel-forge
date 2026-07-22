@@ -71,6 +71,41 @@ describe('pf-dialog', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it('restores focus to an opener inside nested shadow roots', async () => {
+    const outer = document.createElement('div');
+    const outerRoot = outer.attachShadow({ mode: 'open' });
+    const inner = document.createElement('span');
+    const innerRoot = inner.attachShadow({ mode: 'open' });
+    const opener = document.createElement('button');
+    opener.textContent = 'Open nested dialog';
+    innerRoot.append(opener);
+    outerRoot.append(inner);
+    document.body.append(outer);
+    opener.focus();
+
+    const dialog = createDialog();
+    await settle(dialog);
+    dialog.close();
+    await settle(dialog);
+
+    expect(outerRoot.activeElement).toBe(inner);
+    expect(innerRoot.activeElement).toBe(opener);
+  });
+
+  it('keeps focus on the dialog surface when pending controls disappear', async () => {
+    const dialog = createDialog();
+    await settle(dialog);
+    dialog.querySelector<HTMLButtonElement>('[slot="actions"]')?.focus();
+
+    dialog.showCloseButton = false;
+    dialog.querySelector('[slot="actions"]')?.remove();
+    await settle(dialog);
+
+    const surface = dialog.shadowRoot?.querySelector<HTMLElement>('.dialog');
+    expect(surface?.tabIndex).toBe(-1);
+    expect(dialog.shadowRoot?.activeElement).toBe(surface);
+  });
+
   it('marks the dialog as a vertical scroll surface', async () => {
     const dialog = createDialog();
     await settle(dialog);

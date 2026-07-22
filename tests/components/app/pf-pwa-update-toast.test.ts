@@ -101,7 +101,7 @@ describe('pf-pwa-update-toast', () => {
     await flushUpdate(element);
 
     expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledOnce();
-    expect(update).toHaveBeenCalledWith(true);
+    expect(update).toHaveBeenCalledWith(false);
     expect(autoSaveServiceMock.saveUntilClean.mock.invocationCallOrder[0]).toBeLessThan(
       update.mock.invocationCallOrder[0]
     );
@@ -125,7 +125,7 @@ describe('pf-pwa-update-toast', () => {
     expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledTimes(2);
     expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextA);
     expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextB);
-    expect(update).toHaveBeenCalledWith(true);
+    expect(update).toHaveBeenCalledWith(false);
   });
 
   it('rechecks every open project when one becomes dirty while another is saving', async () => {
@@ -146,7 +146,7 @@ describe('pf-pwa-update-toast', () => {
     await flushUpdate(element);
 
     expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledTimes(4);
-    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(true));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(false));
   });
 
   it('saves a project opened and dirtied while the first save is in flight', async () => {
@@ -182,7 +182,7 @@ describe('pf-pwa-update-toast', () => {
     workspaceStoreMock.items.value = [{ context: contextA }, { context: contextB }];
     finishFirstSave();
 
-    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(true));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(false));
     expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextB);
   });
 
