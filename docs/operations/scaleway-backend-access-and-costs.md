@@ -38,11 +38,11 @@ write, and full-access capabilities. Prefer the narrow sets below over
 | Principal | Intended use | Proposed permissions | Explicitly denied by role design |
 | --- | --- | --- | --- |
 | Owner | Approvals and exceptional recovery | Human account with strong authentication; temporarily delegates narrowly scoped policies | Routine CI or runtime use |
-| Read-only auditor | Inventory, cost, and evidence checks | `ContainersReadOnly`, `ContainerRegistryReadOnly`, database read-only set for the selected product, `ObjectStorageBucketsRead`, `ObservabilityReadOnly`, and IAM metadata read-only when required | All mutation and secret-version access |
+| Read-only auditor | Inventory, cost, and evidence checks | `ContainersReadOnly`, `ContainerRegistryReadOnly`, `ServerlessSQLDatabaseReadOnly` or `RelationalDatabasesReadOnly` for provider metadata, `ObjectStorageBucketsRead`, `ObservabilityReadOnly`, and IAM metadata read-only when required | All mutation and secret-version access |
 | Deployment application | Push an approved digest and update the approved container | `ContainerRegistryFullAccess` and `ContainersFullAccess`, project-scoped; add `PrivateNetworksReadOnly` only for the Managed PostgreSQL topology | Database data, migration credentials, runtime object access, website-bucket deployment |
 | Provisioning application | One approved resource-creation session | Temporary product-specific full access only for resources named in that approval; bucket-policy access only while installing the reviewed policy | Persistent runtime or ordinary deployment use; revoke after the session |
 | Migration application/database role | One approved migration | Database DDL on the selected Pixel Forge database only; for Serverless SQL, evaluate `ServerlessSQLDatabaseReadWrite` rather than full resource administration | Resource creation/deletion, container deployment, object storage, unrelated databases |
-| Runtime application/database role | Serve API requests | Database DML on the application schema; object `Get`, `Put`, and `Delete`, plus only the bucket-level access required by readiness, restricted to the private project bucket/prefix | DDL, provider administration, bucket creation/deletion/policy changes, registry, deployment, website bucket |
+| Runtime application/database role | Serve API requests | `ServerlessSQLDatabaseDataReadWrite` when that IAM path is used, plus a native PostgreSQL DML-only role on the application schema; object `Get`, `Put`, and `Delete`, plus only the bucket-level access required by readiness, restricted to the private project bucket/prefix | DDL, provider administration, bucket creation/deletion/policy changes, registry, deployment, website bucket |
 | DNS operator | Add or roll back the one approved `api` record | Cloudflare token scoped to DNS edit for the `pixel-forge.app` zone | Other zones, account settings, unrelated records |
 
 Scaleway project-level Object Storage sets can be broader than the one bucket
@@ -55,6 +55,15 @@ private project bucket and a denied operation against `pixel-forge.app`.
 Do not invent a narrower permission name if the live console does not offer
 it. Stop and ask the owner whether to use a reviewed resource policy, a
 separate Scaleway Project, or a different credential boundary.
+
+Scaleway resource IAM and PostgreSQL database roles are separate boundaries.
+For the Managed PostgreSQL fallback, `RelationalDatabasesReadOnly` lets an
+auditor inspect provider resource metadata; the runtime receives no provider
+database-administration permission and uses only a native PostgreSQL DML role.
+For Serverless SQL, `ServerlessSQLDatabaseDataReadWrite` excludes table-shape
+and resource-setting changes. The migration identity may use
+`ServerlessSQLDatabaseReadWrite`, which includes table-structure changes but
+not database creation or settings, only for the approved migration window.
 
 ## Secret names and consumers
 
@@ -214,7 +223,7 @@ live estimates favor the managed service.
 
 ## Cheaper alternatives not selected
 
-- `STARDUST1-S` is listed around €0.43/month before attached storage, public
+- `STARDUST1-S` is listed around €0.10/month before attached storage, public
   addressing, backups, and operator time. Self-hosting the API and PostgreSQL
   there would be cheaper on the provider invoice, but it transfers patching,
   database durability, backups, monitoring, incident response, and capacity
