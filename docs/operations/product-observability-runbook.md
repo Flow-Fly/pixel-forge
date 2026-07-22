@@ -56,17 +56,22 @@ Complete all of these before the first deployment:
    - **Zone → Workers Routes → Write**;
    - **Zone → Zone → Read**.
    Restrict **Account Resources** to the one account that owns Pixel Forge. For
-   both zone permission rows, restrict **Zone Resources** to the single
-   `pixel-forge.app` zone. Do not select all accounts or all zones.
+   **Workers Routes → Write**, restrict **Zone Resources** to the single
+   `pixel-forge.app` zone. For **Zone → Read**, select **All zones from an
+   account** and choose only the Pixel Forge account. Do not select all
+   accounts or allow route writes on any other zone.
 
    Wrangler reads the committed `zone_name` in
    `workers/telemetry/wrangler.jsonc`, calls Cloudflare's `GET /zones` endpoint
-   to resolve it to a zone ID, and then publishes the route. **Zone → Zone →
-   Read** is required only for that name lookup; it does not authorize DNS
-   changes. Do not add Account Settings, User Details, Memberships, KV, R2,
-   Tail, Logs, DNS Read, DNS Write, or any other permission. Cloudflare's
-   template currently includes several unrelated grants and is not acceptable
-   unchanged. See Cloudflare's [API token permission
+   with the account ID to resolve it to a zone ID, and then publishes the
+   route. Cloudflare requires account-scoped visibility for this `zone_name`
+   lookup when an API token is used. **Zone → Zone → Read** remains read-only
+   and does not authorize DNS changes. Do not add Account Settings, User
+   Details, Memberships, KV, R2, Tail, Logs, DNS Read, DNS Write, or any other
+   permission. Cloudflare's template currently includes several unrelated
+   grants and is not acceptable unchanged. See Cloudflare's [Wrangler route
+   configuration](https://developers.cloudflare.com/workers/wrangler/configuration/#routes),
+   [API token permission
    definitions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/),
    [`GET /zones` permission
    requirement](https://developers.cloudflare.com/api/resources/zones/methods/list/),
