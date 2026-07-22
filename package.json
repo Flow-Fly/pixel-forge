@@ -46,6 +46,7 @@
     "server:test": "npm run test --workspace @pixel-forge/server",
     "server:typecheck": "npm run typecheck --workspace @pixel-forge/server",
     "telemetry:dev": "npm run dev --workspace @pixel-forge/telemetry-worker",
+    "telemetry:dry-run": "wrangler deploy --dry-run --strict --config workers/telemetry/wrangler.jsonc",
     "telemetry:report": "npm run shared:build && node scripts/telemetry-report.mjs",
     "telemetry:test": "npm run test --workspace @pixel-forge/telemetry-worker",
     "telemetry:typecheck": "npm run typecheck --workspace @pixel-forge/telemetry-worker"

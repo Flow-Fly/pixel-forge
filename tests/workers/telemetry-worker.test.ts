@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { handleTelemetryRequest } from '../../workers/telemetry/src/index';
 
 function createEnvironment(options: { rateLimitSuccess?: boolean } = {}) {
@@ -33,14 +35,36 @@ function telemetryRequest(body: string, headers: HeadersInit = {}): Request {
 }
 
 describe('telemetry Worker', () => {
+  it('keeps persisted logs, invocation logs, and traces disabled', async () => {
+    const repositoryRoot = process.env.INIT_CWD ?? process.cwd();
+    const configPath = resolve(repositoryRoot, 'workers/telemetry/wrangler.jsonc');
+    const source = await readFile(configPath, 'utf8');
+    const config = JSON.parse(source.replace(/,\s*(?=[}\]])/g, ''));
+
+    expect(config.observability).toEqual({
+      enabled: false,
+      logs: {
+        enabled: false,
+        invocation_logs: false,
+        persist: false,
+      },
+      traces: {
+        enabled: false,
+        persist: false,
+      },
+    });
+  });
+
   it('writes only the approved event and dimension', async () => {
     const { env, limit, writeDataPoint } = createEnvironment();
 
     const result = await handleTelemetryRequest(
-      telemetryRequest(JSON.stringify({
-        name: 'project_created',
-        dimensions: { source: 'guided_drawing' },
-      })),
+      telemetryRequest(
+        JSON.stringify({
+          name: 'project_created',
+          dimensions: { source: 'guided_drawing' },
+        })
+      ),
       env
     );
 

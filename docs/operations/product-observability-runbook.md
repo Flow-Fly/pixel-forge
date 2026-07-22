@@ -17,6 +17,8 @@ owner deliberately deploys it.
 - Rate limit: one identifier-free, shared `product-events` key, nominally 60
   requests per 60 seconds per Cloudflare location
 - Retention: Cloudflare's fixed three months
+- Persisted Worker logs and traces: disabled
+- Worker invocation logs: disabled
 
 The rate limiter is deliberately not keyed by IP address, user, session,
 account, device, or geography. Cloudflare documents its Rate Limiting API as
@@ -48,11 +50,15 @@ Complete all of these before the first deployment:
    that it arrives.
 4. Create a GitHub environment named `telemetry-production`. Add a required
    reviewer if the repository plan supports environment protection.
-5. Create a deployment token using Cloudflare's **Edit Cloudflare Workers**
-   template, restricted to the one Cloudflare account and the
-   `pixel-forge.app` zone. The template grants Account Workers Scripts Write
-   and Zone Workers Routes Write; remove unrelated resource scopes where the
-   dashboard permits it.
+5. Create a **Custom token** rather than using the broad **Edit Cloudflare
+   Workers** template. Grant exactly these two permission rows:
+   - **Account → Workers Scripts → Write**;
+   - **Zone → Workers Routes → Write**.
+   Set **Account Resources** to include only the account that owns Pixel Forge,
+   and **Zone Resources** to include only the `pixel-forge.app` zone. Do not add
+   Account Settings, User Details, Memberships, KV, R2, Tail, Logs, DNS, or any
+   other permission. Cloudflare's template currently includes several of
+   those unrelated grants and is not acceptable unchanged.
 6. Store the account ID as `CLOUDFLARE_ACCOUNT_ID` and the deployment token as
    `CLOUDFLARE_API_TOKEN` in the `telemetry-production` GitHub environment.
    Never expose either value to the browser or repository.
@@ -77,6 +83,44 @@ The repository workflow is manual-only:
    `pixel-forge.app/api/telemetry` route.
 
 No push, merge, or application deployment automatically deploys this Worker.
+
+## Preserve the no-log default
+
+Cloudflare enables persisted observability by default for newly created
+Workers. Pixel Forge overrides that default in `workers/telemetry/wrangler.jsonc`:
+
+```json
+{
+  "observability": {
+    "enabled": false,
+    "logs": {
+      "enabled": false,
+      "invocation_logs": false,
+      "persist": false
+    },
+    "traces": {
+      "enabled": false,
+      "persist": false
+    }
+  }
+}
+```
+
+Keep this block on every environment and deployment. Do not enable Workers
+Logs or traces in the dashboard, add an observability destination, attach a
+Tail Worker, or enable Workers Logpush without reopening the privacy boundary.
+Before deployment, validate the committed source of truth without publishing:
+
+```sh
+npx wrangler deploy --dry-run --strict \
+  --config workers/telemetry/wrangler.jsonc
+```
+
+Routine failure evidence remains the bounded HTTP response, the fixed
+Analytics Engine rejection marker, GitHub deployment history, and the owner
+report. Real-time tailing can expose request metadata to the active viewer even
+when it is not persisted, so use it only for an explicitly approved live
+incident and stop it immediately afterward.
 
 ## Verify ingestion
 
@@ -170,4 +214,8 @@ afterward:
 - <https://developers.cloudflare.com/analytics/analytics-engine/sampling/>
 - <https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/>
 - <https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/>
+- <https://developers.cloudflare.com/workers/wrangler/configuration/#observability>
+- <https://developers.cloudflare.com/workers/observability/logs/workers-logs/>
+- <https://developers.cloudflare.com/fundamentals/api/reference/permissions/>
+- <https://developers.cloudflare.com/api/resources/workers/subresources/routes/methods/create/>
 - <https://developers.cloudflare.com/email-service/get-started/route-emails/>

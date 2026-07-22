@@ -31,7 +31,7 @@ jobs:
         run: npm run server:check
 
       - name: Telemetry worker checks
-        run: npm run telemetry:typecheck && npm run telemetry:test
+        run: npm run telemetry:typecheck && npm run telemetry:test && npm run telemetry:dry-run
 
       - name: Typecheck
         run: npx tsc --noEmit

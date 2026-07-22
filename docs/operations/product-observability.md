@@ -94,6 +94,13 @@ privacy-invalid event may write only the fixed operational marker
 write submitted fields. Rate-limited and early boundary rejections write no
 row.
 
+Cloudflare Workers observability is explicitly disabled in the committed
+configuration. Persisted logs and traces are off, and invocation logs are off,
+so request, response, header, and invocation metadata are not copied into
+Workers Logs outside the approved Analytics Engine rows. These settings must
+remain explicit because Cloudflare enables persisted observability by default
+for newly created Workers.
+
 Workers Analytics Engine retains rows for Cloudflare's fixed three-month
 period. Pixel Forge has no per-row deletion workflow or identity with which to
 find a person's row; rows expire automatically.

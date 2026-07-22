@@ -4,17 +4,29 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-22",
   "workers_dev": false,
+  "observability": {
+    "enabled": false,
+    "logs": {
+      "enabled": false,
+      "invocation_logs": false,
+      "persist": false,
+    },
+    "traces": {
+      "enabled": false,
+      "persist": false,
+    },
+  },
   "routes": [
     {
       "pattern": "pixel-forge.app/api/telemetry",
-      "zone_name": "pixel-forge.app"
-    }
+      "zone_name": "pixel-forge.app",
+    },
   ],
   "analytics_engine_datasets": [
     {
       "binding": "PRODUCT_EVENTS",
-      "dataset": "pixel_forge_product_events"
-    }
+      "dataset": "pixel_forge_product_events",
+    },
   ],
   "ratelimits": [
     {
@@ -22,8 +34,8 @@
       "namespace_id": "1001",
       "simple": {
         "limit": 60,
-        "period": 60
-      }
-    }
-  ]
+        "period": 60,
+      },
+    },
+  ],
 }
