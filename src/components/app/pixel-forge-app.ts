@@ -366,6 +366,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() private isResizingSidebar = false;
   @state() private hasLibraryProject = false;
   @state() private projectSelectionRequired = false;
+  @state() private isDeletingCurrentProject = false;
   @state() private warningMessage: string | null = null;
   @state() private fileImportMessage: string | null = null;
 
@@ -596,6 +597,8 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleDeleteCurrentProject = () => {
+    if (this.isDeletingCurrentProject) return;
+
     this.deleteCurrentProjectContext = getActiveProjectContext();
     this.showDeleteCurrentDialog = true;
   };
@@ -642,18 +645,22 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private confirmDeleteCurrentProject = async () => {
-    const context =
-      this.deleteCurrentProjectContext ?? getActiveProjectContext();
-    this.dismissDeleteCurrentProject();
+    const context = this.deleteCurrentProjectContext;
+    if (!context || this.isDeletingCurrentProject) return;
+
+    this.isDeletingCurrentProject = true;
 
     try {
       const result = await workspaceStore.deleteProject(context.project.id.value);
+      this.dismissDeleteCurrentProject();
       if (result.installedReplacement) {
         this.handleCurrentProjectDeleted();
       }
     } catch (error) {
       log.error("Failed to delete project:", error);
       this.showWarning("Could not delete project");
+    } finally {
+      this.isDeletingCurrentProject = false;
     }
   };
 
@@ -1107,6 +1114,9 @@ export class PixelForgeApp extends BaseComponent {
 
       <pf-dialog
         ?open=${this.showDeleteCurrentDialog}
+        .closeOnBackdrop=${!this.isDeletingCurrentProject}
+        .closeOnEscape=${!this.isDeletingCurrentProject}
+        .showCloseButton=${!this.isDeletingCurrentProject}
         width="360px"
         @pf-close=${this.dismissDeleteCurrentProject}
       >
@@ -1116,6 +1126,7 @@ export class PixelForgeApp extends BaseComponent {
           <button
             type="button"
             class="secondary"
+            ?disabled=${this.isDeletingCurrentProject}
             @click=${this.dismissDeleteCurrentProject}
           >
             Cancel
@@ -1123,9 +1134,10 @@ export class PixelForgeApp extends BaseComponent {
           <button
             type="button"
             class="primary"
+            ?disabled=${this.isDeletingCurrentProject}
             @click=${this.confirmDeleteCurrentProject}
           >
-            Delete
+            ${this.isDeletingCurrentProject ? "Deleting..." : "Delete"}
           </button>
         </div>
       </pf-dialog>

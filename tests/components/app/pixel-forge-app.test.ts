@@ -171,6 +171,59 @@ describe('pixel-forge-app project dialogs', () => {
     expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('project-b');
   });
 
+  it('guards current-project deletion while the request is pending', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const context = createProjectContext();
+    context.project.id.value = 'project-to-delete';
+    createdContexts.push(context);
+    setActiveProjectContext(context);
+    let finishDelete!: () => void;
+    workspaceStoreMock.deleteProject.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDelete = () =>
+            resolve({
+              activeItem: null,
+              installedReplacement: true,
+            });
+        })
+    );
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('delete-current-project'));
+    await element.updateComplete;
+    const deleteButton = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'pf-dialog button.primary'
+    );
+
+    deleteButton?.click();
+    deleteButton?.click();
+    await element.updateComplete;
+
+    const pendingDialog = element.shadowRoot?.querySelector<HTMLElement & {
+      closeOnBackdrop: boolean;
+      closeOnEscape: boolean;
+      showCloseButton: boolean;
+    }>('pf-dialog');
+    const pendingDeleteButton = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'pf-dialog button.primary'
+    );
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledOnce();
+    expect(pendingDeleteButton?.disabled).toBe(true);
+    expect(pendingDeleteButton?.textContent).toContain('Deleting...');
+    expect(pendingDialog?.closeOnBackdrop).toBe(false);
+    expect(pendingDialog?.closeOnEscape).toBe(false);
+    expect(pendingDialog?.showCloseButton).toBe(false);
+
+    finishDelete();
+    await vi.waitFor(() => {
+      expect(pendingDialog?.open).toBe(false);
+    });
+  });
+
   it('opens export with the project active when the action starts', async () => {
     await import('../../../src/components/app/pixel-forge-app');
     const contextA = createProjectContext();

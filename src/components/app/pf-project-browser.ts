@@ -301,9 +301,11 @@ export class PFProjectBrowser extends BaseComponent {
   @state() private projects: ProjectMeta[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
+  @state() private deleteErrorMessage = '';
   @state() private renamingProjectId: string | null = null;
   @state() private renameValue = '';
   @state() private deleteTarget: ProjectMeta | null = null;
+  @state() private isDeletingProject = false;
   @query('.browser-dialog') private browserDialog?: HTMLDialogElement;
   @query('.delete-dialog') private deleteDialog?: HTMLDialogElement;
   private thumbnailUrls = new Map<string, string>();
@@ -477,7 +479,8 @@ export class PFProjectBrowser extends BaseComponent {
         aria-labelledby="delete-project-title"
         class="delete-dialog"
         data-scrollbar="vertical"
-        closedby="any"
+        closedby=${this.isDeletingProject ? 'none' : 'any'}
+        @cancel=${this.handleDeleteDialogCancel}
         @click=${this.handleDeleteBackdropClick}
         @close=${this.handleDeleteDialogClose}
       >
@@ -489,12 +492,25 @@ export class PFProjectBrowser extends BaseComponent {
               <p>
                 Delete "${project.name}" from this browser?
               </p>
+              ${this.deleteErrorMessage
+                ? html`<div class="error" role="alert">${this.deleteErrorMessage}</div>`
+                : nothing}
               <div class="dialog-actions">
-                <button type="button" class="secondary" @click=${this.cancelDelete}>
+                <button
+                  type="button"
+                  class="secondary"
+                  ?disabled=${this.isDeletingProject}
+                  @click=${this.cancelDelete}
+                >
                   Cancel
                 </button>
-                <button type="button" class="primary danger" @click=${this.confirmDelete}>
-                  Delete
+                <button
+                  type="button"
+                  class="primary danger"
+                  ?disabled=${this.isDeletingProject}
+                  @click=${this.confirmDelete}
+                >
+                  ${this.isDeletingProject ? 'Deleting...' : 'Delete'}
                 </button>
               </div>
             `
@@ -506,6 +522,7 @@ export class PFProjectBrowser extends BaseComponent {
   private async loadProjects() {
     this.isLoading = true;
     this.errorMessage = '';
+    this.deleteErrorMessage = '';
 
     try {
       const projects = await projectLibrary.listProjects();
@@ -622,16 +639,18 @@ export class PFProjectBrowser extends BaseComponent {
 
   private confirmDelete = async () => {
     const project = this.deleteTarget;
-    if (!project) return;
+    if (!project || this.isDeletingProject) return;
 
     this.errorMessage = '';
-    this.deleteTarget = null;
+    this.deleteErrorMessage = '';
+    this.isDeletingProject = true;
 
     try {
       const activeContext = getActiveProjectContext();
       const deletedOpenProject = project.id === activeContext.project.id.value;
       const result = await workspaceStore.deleteProject(project.id);
       await this.loadProjects();
+      this.deleteTarget = null;
 
       if (deletedOpenProject && result.installedReplacement) {
         this.dispatchEvent(
@@ -639,7 +658,11 @@ export class PFProjectBrowser extends BaseComponent {
         );
       }
     } catch (error) {
-      this.errorMessage = this.errorText(error, 'Failed to delete project.');
+      const message = this.errorText(error, 'Failed to delete project.');
+      this.errorMessage = message;
+      this.deleteErrorMessage = message;
+    } finally {
+      this.isDeletingProject = false;
     }
   };
 
@@ -740,11 +763,18 @@ export class PFProjectBrowser extends BaseComponent {
   };
 
   private cancelDelete = () => {
+    if (this.isDeletingProject) return;
     this.closeNativeDialog(this.deleteDialog);
   };
 
+  private handleDeleteDialogCancel = (event: Event) => {
+    if (this.isDeletingProject) {
+      event.preventDefault();
+    }
+  };
+
   private handleDeleteBackdropClick = (event: MouseEvent) => {
-    if (event.target !== event.currentTarget) return;
+    if (this.isDeletingProject || event.target !== event.currentTarget) return;
 
     const dialog = event.currentTarget as HTMLDialogElement;
     if (!this.clickIsInsideDialog(dialog, event)) {
@@ -753,8 +783,9 @@ export class PFProjectBrowser extends BaseComponent {
   };
 
   private handleDeleteDialogClose = () => {
-    if (!this.isDisconnecting) {
+    if (!this.isDisconnecting && !this.isDeletingProject) {
       this.deleteTarget = null;
+      this.deleteErrorMessage = '';
     }
   };
 

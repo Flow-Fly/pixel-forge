@@ -476,6 +476,61 @@ describe('pf-project-browser', () => {
     expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('open-project');
   });
 
+  it('guards project deletion while the request is pending', async () => {
+    let finishDelete!: () => void;
+    workspaceStoreMock.deleteProject.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDelete = () =>
+            resolve({
+              activeItem: { context: activeProjectContextMock },
+              installedReplacement: false,
+            });
+        })
+    );
+    const element = await createBrowser();
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await element.updateComplete;
+    const deleteButton = confirmDeleteButton(element.shadowRoot!);
+    deleteButton?.click();
+    deleteButton?.click();
+    await element.updateComplete;
+
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledOnce();
+    expect(deleteDialog?.open).toBe(true);
+    expect(deleteDialog?.getAttribute('closedby')).toBe('none');
+    expect(confirmDeleteButton(element.shadowRoot!)?.disabled).toBe(true);
+    expect(confirmDeleteButton(element.shadowRoot!)?.textContent).toContain('Deleting...');
+
+    requestNativeCancel(deleteDialog);
+    clickNativeBackdrop(deleteDialog);
+    expect(deleteDialog?.open).toBe(true);
+
+    finishDelete();
+    await settle(element);
+
+    expect(deleteDialog?.open).toBe(false);
+  });
+
+  it('keeps a delete failure visible and available to retry', async () => {
+    workspaceStoreMock.deleteProject.mockRejectedValueOnce(new Error('storage failed'));
+    const element = await createBrowser();
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await element.updateComplete;
+    confirmDeleteButton(element.shadowRoot!)?.click();
+    await settle(element);
+
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    expect(deleteDialog?.open).toBe(true);
+    expect(deleteDialog?.querySelector('[role="alert"]')?.textContent).toContain(
+      'storage failed'
+    );
+    expect(confirmDeleteButton(element.shadowRoot!)?.disabled).toBe(false);
+  });
+
   it('routes inactive open project deletion through the workspace lifecycle', async () => {
     const inactiveProjectContext = {
       project: {
