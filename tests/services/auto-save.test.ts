@@ -151,20 +151,65 @@ describe('AutoSaveService', () => {
     expect(autoSaveService.isDirty(context)).toBe(true);
 
     autoSaveService.start(context);
-    await context.history.execute(
-      makeCommand(() => {
-        context.project.name.value = 'Edited after restart';
-      })
-    );
-    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(2500);
 
     expect(projectRepository.save).toHaveBeenCalledWith(
       'paused-project',
-      expect.objectContaining({ name: 'Edited after restart' }),
+      expect.objectContaining({ name: 'Paused project' }),
       expect.any(Object)
     );
     expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
+  it('keeps saving until an edit made during a write is persisted', async () => {
+    const context = createContext('reload-project', 'First state');
+    const firstWrite = deferred<void>();
+    vi.mocked(projectRepository.save)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockResolvedValueOnce();
+
+    autoSaveService.start(context);
+    const stableSave = autoSaveService.saveUntilClean(context);
+    await settleSaveQueue();
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Edited during save';
+      })
+    );
+    await Promise.resolve();
+    firstWrite.resolve();
+    await stableSave;
+
+    expect(projectRepository.save).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Edited during save');
+    expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
+  it('rejects a forced save queued after pause and never writes it', async () => {
+    const context = createContext('deleted-project', 'Deleted project');
+    autoSaveService.start(context);
+    await autoSaveService.pause(context);
+
+    await expect(autoSaveService.saveNow(context)).rejects.toThrow('paused');
+    expect(projectRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('turns pause into a barrier against a forced save already serializing', async () => {
+    const context = createContext('concurrent-delete-project', 'Concurrent delete');
+    const serializedProject = await context.project.saveProject();
+    const serialization = deferred<typeof serializedProject>();
+    vi.spyOn(context.project, 'saveProject').mockReturnValueOnce(serialization.promise);
+    autoSaveService.start(context);
+
+    const forcedSave = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    const pause = autoSaveService.pause(context);
+    serialization.resolve(serializedProject);
+
+    await expect(forcedSave).rejects.toThrow('paused');
+    await pause;
+    expect(projectRepository.save).not.toHaveBeenCalled();
   });
 
   it('saves after undo', async () => {

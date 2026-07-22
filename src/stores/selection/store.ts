@@ -351,7 +351,9 @@ class SelectionStore {
     imageData: ImageData,
     bounds: Rect,
     shape: SelectionShape,
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    targetLayerId: string | null = null,
+    targetFrameId: string | null = null
   ) {
     this.state.value = {
       type: 'transforming',
@@ -364,6 +366,8 @@ class SelectionStore {
       previewData: null,
       shape,
       mask,
+      targetLayerId,
+      targetFrameId,
     };
   }
 
@@ -644,6 +648,8 @@ class SelectionStore {
     scale: { x: number; y: number };
     shape: SelectionShape;
     mask?: Uint8Array;
+    targetLayerId: string | null;
+    targetFrameId: string | null;
   } | null {
     const s = this.state.value;
     if (s.type !== 'transforming') return null;
@@ -656,6 +662,8 @@ class SelectionStore {
       scale: s.scale,
       shape: s.shape,
       mask: s.mask,
+      targetLayerId: s.targetLayerId,
+      targetFrameId: s.targetFrameId,
     };
   }
 

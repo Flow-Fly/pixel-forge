@@ -12,8 +12,18 @@ export function commitSelectionTransform(context: SelectionTransformContext): vo
   const transformState = selection.getTransformState();
   if (!transformState) return;
 
-  const { imageData, originalBounds, currentBounds, currentOffset, rotation, scale, shape, mask } =
-    transformState;
+  const {
+    imageData,
+    originalBounds,
+    currentBounds,
+    currentOffset,
+    rotation,
+    scale,
+    shape,
+    mask,
+    targetLayerId,
+    targetFrameId,
+  } = transformState;
   const hasRotation = rotation !== 0;
   const hasScale = scale.x !== 1 || scale.y !== 1;
   const hasMovement = currentOffset.x !== 0 || currentOffset.y !== 0;
@@ -23,10 +33,11 @@ export function commitSelectionTransform(context: SelectionTransformContext): vo
     return;
   }
 
-  const activeLayerId = layers.activeLayerId.value;
-  const activeLayer = layers.layers.value.find((layer) => layer.id === activeLayerId);
-  if (!activeLayer?.canvas) {
-    log.error('Active layer canvas not found');
+  const layerId = targetLayerId ?? layers.activeLayerId.value;
+  const frameId = targetFrameId ?? context.animation.currentFrameId.value;
+  const targetLayer = layers.layers.value.find((layer) => layer.id === layerId);
+  if (!targetLayer?.canvas || !frameId) {
+    log.error('Selection transform target not found');
     selection.cancelTransform();
     return;
   }
@@ -37,9 +48,8 @@ export function commitSelectionTransform(context: SelectionTransformContext): vo
     return;
   }
 
-  const frameId = context.animation.currentFrameId.value;
   const command = new TransformSelectionCommand(
-    activeLayer.id,
+    targetLayer.id,
     frameId,
     imageData,
     originalBounds,

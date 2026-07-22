@@ -224,6 +224,44 @@ describe('pixel-forge-app project dialogs', () => {
     });
   });
 
+  it('keeps a failed current-project deletion inline and announced', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const context = createProjectContext();
+    context.project.id.value = 'project-delete-failure';
+    createdContexts.push(context);
+    setActiveProjectContext(context);
+    workspaceStoreMock.deleteProject.mockRejectedValueOnce(new Error('delete failed'));
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('delete-current-project'));
+    await element.updateComplete;
+    element.shadowRoot?.querySelector<HTMLButtonElement>('pf-dialog button.primary')?.click();
+
+    await vi.waitFor(() => {
+      const alert = element.shadowRoot?.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain('Could not delete project');
+    });
+    expect(element.shadowRoot?.querySelector<HTMLElement>('pf-dialog')?.open).toBe(true);
+  });
+
+  it('warns before unload when any autosaved project is dirty', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const inactiveContext = createProjectContext();
+    createdContexts.push(inactiveContext);
+    autoSaveService.start(inactiveContext);
+    autoSaveService.markDirty(inactiveContext);
+    const element = document.createElement('pixel-forge-app') as HTMLElement;
+    document.body.append(element);
+    const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it('opens export with the project active when the action starts', async () => {
     await import('../../../src/components/app/pixel-forge-app');
     const contextA = createProjectContext();

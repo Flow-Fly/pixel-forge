@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const autoSaveServiceMock = vi.hoisted(() => ({
   saveNow: vi.fn(),
+  saveUntilClean: vi.fn(),
+  isDirty: vi.fn(),
 }));
 
 const workspaceStoreMock = vi.hoisted(() => ({
@@ -47,6 +49,8 @@ describe('pf-pwa-update-toast', () => {
     document.body.replaceChildren();
     vi.clearAllMocks();
     autoSaveServiceMock.saveNow.mockResolvedValue(undefined);
+    autoSaveServiceMock.saveUntilClean.mockResolvedValue(undefined);
+    autoSaveServiceMock.isDirty.mockReturnValue(false);
     workspaceStoreMock.items.value = [{ context: defaultProjectContext }];
     pwaStore.stop();
   });
@@ -96,9 +100,9 @@ describe('pf-pwa-update-toast', () => {
     element.shadowRoot?.querySelector<HTMLButtonElement>('.restart')?.click();
     await flushUpdate(element);
 
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledOnce();
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledWith(true);
-    expect(autoSaveServiceMock.saveNow.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(autoSaveServiceMock.saveUntilClean.mock.invocationCallOrder[0]).toBeLessThan(
       update.mock.invocationCallOrder[0]
     );
   });
@@ -118,10 +122,31 @@ describe('pf-pwa-update-toast', () => {
     setActiveProjectContext(contextA);
     await flushUpdate(element);
 
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledTimes(2);
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextA);
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextB);
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledTimes(2);
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextA);
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextB);
     expect(update).toHaveBeenCalledWith(true);
+  });
+
+  it('rechecks every open project when one becomes dirty while another is saving', async () => {
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    createdContexts.push(contextA, contextB);
+    workspaceStoreMock.items.value = [{ context: contextA }, { context: contextB }];
+    autoSaveServiceMock.isDirty
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false);
+    const update = vi.fn().mockResolvedValue(undefined);
+    pwaStore.setUpdateHandler(update);
+    pwaStore.showUpdate();
+    const element = await createToast();
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.restart')?.click();
+    await flushUpdate(element);
+
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledTimes(4);
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(true));
   });
 
   it('keeps the session open when an inactive project cannot be saved', async () => {
@@ -133,7 +158,7 @@ describe('pf-pwa-update-toast', () => {
       { context: activeContext },
       { context: inactiveContext },
     ];
-    autoSaveServiceMock.saveNow.mockImplementation(async (context) => {
+    autoSaveServiceMock.saveUntilClean.mockImplementation(async (context) => {
       if (context === inactiveContext) throw new Error('storage full');
     });
     const update = vi.fn().mockResolvedValue(undefined);
@@ -144,7 +169,7 @@ describe('pf-pwa-update-toast', () => {
     element.shadowRoot?.querySelector<HTMLButtonElement>('.restart')?.click();
     await flushUpdate(element);
 
-    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(inactiveContext);
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(inactiveContext);
     expect(update).not.toHaveBeenCalled();
     expect(element.shadowRoot?.querySelector('.error')?.textContent).toContain(
       'current session stayed open'
@@ -153,7 +178,7 @@ describe('pf-pwa-update-toast', () => {
 
   it('explains a save failure and does not restart', async () => {
     const update = vi.fn().mockResolvedValue(undefined);
-    autoSaveServiceMock.saveNow.mockRejectedValue(new Error('storage full'));
+    autoSaveServiceMock.saveUntilClean.mockRejectedValue(new Error('storage full'));
     pwaStore.setUpdateHandler(update);
     pwaStore.showUpdate();
     const element = await createToast();

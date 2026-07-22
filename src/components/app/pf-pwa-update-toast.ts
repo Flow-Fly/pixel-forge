@@ -4,6 +4,7 @@ import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
 import { pwaStore } from '../../stores/pwa';
 import { workspaceStore } from '../../stores/workspace';
+import type { ProjectContext } from '../../stores/project-context';
 
 @customElement('pf-pwa-update-toast')
 export class PFPwaUpdateToast extends BaseComponent {
@@ -109,10 +110,14 @@ export class PFPwaUpdateToast extends BaseComponent {
 
   private restart = () => {
     const openContexts = workspaceStore.items.value.map((item) => item.context);
-    void pwaStore.restartWithUpdate(async () => {
-      await Promise.all(openContexts.map((context) => autoSaveService.saveNow(context)));
-    });
+    void pwaStore.restartWithUpdate(() => this.saveOpenProjectsUntilClean(openContexts));
   };
+
+  private async saveOpenProjectsUntilClean(openContexts: ProjectContext[]) {
+    do {
+      await Promise.all(openContexts.map((context) => autoSaveService.saveUntilClean(context)));
+    } while (openContexts.some((context) => autoSaveService.isDirty(context)));
+  }
 
   render() {
     if (!pwaStore.updateAvailable.value) return nothing;

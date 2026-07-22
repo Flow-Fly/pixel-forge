@@ -2,6 +2,9 @@ import type { LegacyProjectImageData, ProjectFile, ProjectFileInput } from './pr
 
 declare function atob(data: string): string;
 
+const LEGACY_BASE64_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?|[A-Za-z0-9+/]{4})?$/;
+
 export function normalizeProjectFileImageData(file: ProjectFileInput): ProjectFile {
   return {
     ...file,
@@ -64,12 +67,14 @@ function serializedBytesToUint8Array(data: Record<string, number>): Uint8Array {
 
 function decodeLegacyBase64ImageData(data: string): Uint8Array {
   const base64 = getBase64Payload(data.trim());
-  if (!base64) return new Uint8Array(0);
+  if (!base64) {
+    throw new TypeError('Legacy project image data is empty');
+  }
 
   try {
     return base64ToUint8Array(base64);
-  } catch {
-    return new Uint8Array(0);
+  } catch (error) {
+    throw new TypeError('Invalid legacy base64 project image data', { cause: error });
   }
 }
 
@@ -78,14 +83,25 @@ function getBase64Payload(data: string): string {
   if (!data.startsWith('data:')) return data;
 
   const commaIndex = data.indexOf(',');
-  if (commaIndex === -1) return '';
+  if (commaIndex === -1) {
+    throw new TypeError('Invalid legacy base64 data URL');
+  }
 
   const metadata = data.slice(0, commaIndex).toLowerCase();
-  return metadata.includes(';base64') ? data.slice(commaIndex + 1) : '';
+  if (!metadata.includes(';base64')) {
+    throw new TypeError('Unsupported legacy image data URL: expected base64');
+  }
+  return data.slice(commaIndex + 1);
 }
 
 function base64ToUint8Array(base64: string): Uint8Array {
-  const binary = atob(base64.replace(/\s/g, ''));
+  const compactBase64 = base64.replace(/\s/g, '');
+  if (!LEGACY_BASE64_PATTERN.test(compactBase64)) {
+    throw new TypeError('Invalid base64 payload');
+  }
+
+  const binary = atob(compactBase64);
+  if (binary.length === 0) throw new TypeError('Empty base64 payload');
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);

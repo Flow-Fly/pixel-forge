@@ -50,4 +50,6 @@ export type SelectionState =
       previewData: ImageData | null;  // Nearest-neighbor preview (null until first transform)
       shape: SelectionShape;
       mask?: Uint8Array;              // Original mask (for freeform)
+      targetLayerId: string | null;
+      targetFrameId: string | null;
     };

@@ -367,6 +367,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() private hasLibraryProject = false;
   @state() private projectSelectionRequired = false;
   @state() private isDeletingCurrentProject = false;
+  @state() private deleteCurrentProjectError: string | null = null;
   @state() private warningMessage: string | null = null;
   @state() private fileImportMessage: string | null = null;
 
@@ -600,11 +601,13 @@ export class PixelForgeApp extends BaseComponent {
     if (this.isDeletingCurrentProject) return;
 
     this.deleteCurrentProjectContext = getActiveProjectContext();
+    this.deleteCurrentProjectError = null;
     this.showDeleteCurrentDialog = true;
   };
 
   private dismissDeleteCurrentProject = () => {
     this.deleteCurrentProjectContext = null;
+    this.deleteCurrentProjectError = null;
     this.showDeleteCurrentDialog = false;
   };
 
@@ -649,6 +652,7 @@ export class PixelForgeApp extends BaseComponent {
     if (!context || this.isDeletingCurrentProject) return;
 
     this.isDeletingCurrentProject = true;
+    this.deleteCurrentProjectError = null;
 
     try {
       const result = await workspaceStore.deleteProject(context.project.id.value);
@@ -658,7 +662,7 @@ export class PixelForgeApp extends BaseComponent {
       }
     } catch (error) {
       log.error("Failed to delete project:", error);
-      this.showWarning("Could not delete project");
+      this.deleteCurrentProjectError = "Could not delete project. Your project is still available.";
     } finally {
       this.isDeletingCurrentProject = false;
     }
@@ -671,8 +675,7 @@ export class PixelForgeApp extends BaseComponent {
   }
 
   private handleBeforeUnload = (e: BeforeUnloadEvent) => {
-    // Check if there are unsaved changes (history has items)
-    const hasUnsavedChanges = historyStore.undoStack.value.length > 0;
+    const hasUnsavedChanges = autoSaveService.dirtyContexts.value.size > 0;
     if (hasUnsavedChanges) {
       // Modern browsers ignore custom messages, but the prompt will still show
       e.preventDefault();
@@ -1122,6 +1125,9 @@ export class PixelForgeApp extends BaseComponent {
       >
         <span slot="title">Delete Current Project</span>
         <p>Delete "${deleteProjectName}" from this browser?</p>
+        ${this.deleteCurrentProjectError
+          ? html`<p role="alert">${this.deleteCurrentProjectError}</p>`
+          : ""}
         <div slot="actions">
           <button
             type="button"

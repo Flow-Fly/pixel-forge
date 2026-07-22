@@ -41,6 +41,34 @@ describe('pf-dialog', () => {
     expect(slotText(dialog, 'title')).toContain('Test Dialog');
     expect(slotText(dialog)).toContain('Dialog content');
     expect(slotText(dialog, 'actions')).toContain('Apply');
+    const surface = dialog.shadowRoot?.querySelector('.dialog');
+    expect(surface?.getAttribute('role')).toBe('dialog');
+    expect(surface?.getAttribute('aria-modal')).toBe('true');
+    expect(surface?.getAttribute('aria-labelledby')).toBe('dialog-title');
+    expect(dialog.shadowRoot?.querySelector('.close-btn')?.getAttribute('aria-label')).toBe(
+      'Close dialog'
+    );
+  });
+
+  it('contains keyboard focus and restores it after closing', async () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'Open';
+    document.body.append(opener);
+    opener.focus();
+    const dialog = createDialog();
+    await settle(dialog);
+
+    const close = dialog.shadowRoot?.querySelector<HTMLButtonElement>('.close-btn');
+    const apply = dialog.querySelector<HTMLButtonElement>('[slot="actions"]');
+    expect(dialog.shadowRoot?.activeElement).toBe(close);
+
+    apply?.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(dialog.shadowRoot?.activeElement).toBe(close);
+
+    close?.click();
+    await settle(dialog);
+    expect(document.activeElement).toBe(opener);
   });
 
   it('marks the dialog as a vertical scroll surface', async () => {

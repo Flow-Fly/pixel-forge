@@ -31,11 +31,13 @@ class AutoSaveService {
 
   private contextState = new Map<ProjectContext, AutoSaveContextState>();
   private dirtyContextSet = new Set<ProjectContext>();
+  private blockedContexts = new WeakSet<ProjectContext>();
   private hasDocumentListeners = false;
 
   /** Start observing history changes. Idempotent. */
   start(context: ProjectContext = defaultProjectContext) {
     const state = this.getState(context);
+    this.blockedContexts.delete(context);
     if (state.dispose) return;
 
     let firstRun = true;
@@ -51,6 +53,9 @@ class AutoSaveService {
     });
 
     this.attachDocumentListeners();
+    if (state.isDirty && !state.saveTimeout) {
+      this.scheduleSave(context, state);
+    }
   }
 
   /** Stop observing and drop pending saves. */
@@ -71,22 +76,18 @@ class AutoSaveService {
   /** Mark the project dirty and (re)schedule a debounced save. */
   markDirty(context: ProjectContext = defaultProjectContext) {
     const state = this.getState(context);
-    if (state.suppressSaveCount > 0) return;
+    if (state.suppressSaveCount > 0 || this.blockedContexts.has(context)) return;
 
     state.changeRevision++;
     this.updateDirtyState(context, state);
 
-    this.clearSaveTimeout(state);
-    state.saveTimeout = setTimeout(() => {
-      state.saveTimeout = null;
-      void this.performSave(context);
-    }, AUTO_SAVE_DEBOUNCE_MS);
+    this.scheduleSave(context, state);
   }
 
   /** Save immediately if there are unsaved changes (blur/tab-hidden). */
   flushIfDirty = () => {
     for (const [context, state] of this.contextState) {
-      if (!state.isDirty) continue;
+      if (!state.isDirty || this.blockedContexts.has(context)) continue;
       this.clearSaveTimeout(state);
       void this.performSave(context);
     }
@@ -94,13 +95,22 @@ class AutoSaveService {
 
   /** Save the open project now, even if no edit debounce is pending. */
   async saveNow(context: ProjectContext = defaultProjectContext) {
+    this.assertSaveAllowed(context);
     const state = this.getState(context);
     this.clearSaveTimeout(state);
     await this.performSave(context, { force: true, rethrow: true });
   }
 
+  /** Save again when an edit lands while the previous write is in flight. */
+  async saveUntilClean(context: ProjectContext = defaultProjectContext) {
+    do {
+      await this.saveNow(context);
+    } while (this.isDirty(context));
+  }
+
   /** Pause observation, cancel scheduled work, and wait for a started write. */
   async pause(context: ProjectContext = defaultProjectContext): Promise<void> {
+    this.blockedContexts.add(context);
     const state = this.contextState.get(context);
     if (!state) return;
 
@@ -144,6 +154,7 @@ class AutoSaveService {
     context: ProjectContext,
     options: { force?: boolean; rethrow?: boolean } = {}
   ): Promise<void> {
+    this.assertSaveAllowed(context);
     const state = this.getState(context);
     const hadUnsavedChanges = state.isDirty;
     if (!state.isDirty && !options.force) return;
@@ -181,6 +192,7 @@ class AutoSaveService {
     try {
       const projectData = await context.project.saveProject();
       const thumbnail = await createThumbnailSafely(context);
+      this.assertSaveAllowed(context);
       await projectRepository.save(projectId, projectData, {
         thumbnail,
       });
@@ -257,6 +269,20 @@ class AutoSaveService {
     if (!state.saveTimeout) return;
     clearTimeout(state.saveTimeout);
     state.saveTimeout = null;
+  }
+
+  private scheduleSave(context: ProjectContext, state: AutoSaveContextState) {
+    this.clearSaveTimeout(state);
+    state.saveTimeout = setTimeout(() => {
+      state.saveTimeout = null;
+      void this.performSave(context);
+    }, AUTO_SAVE_DEBOUNCE_MS);
+  }
+
+  private assertSaveAllowed(context: ProjectContext) {
+    if (this.blockedContexts.has(context)) {
+      throw new Error('Auto-save is paused for this project.');
+    }
   }
 
   private setDirtyContext(context: ProjectContext, isDirty: boolean) {

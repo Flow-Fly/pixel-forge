@@ -14,6 +14,7 @@ import {
   type ProjectContext,
 } from '../../src/stores/project-context';
 import { TransformTool } from '../../src/tools/transform-tool';
+import { commitSelectionTransform } from '../../src/services/selection-transform-commit';
 
 const createdContexts: ProjectContext[] = [];
 
@@ -120,5 +121,35 @@ describe('TransformTool active project context', () => {
     expect(projectBHistory).not.toHaveBeenCalled();
     expect(projectB.animation.cels.value).toEqual(projectBState);
     expect(defaultProjectContext.animation.cels.value).toEqual(defaultState);
+  });
+
+  it('commits a selection transform to the layer and frame where it began', () => {
+    const context = createContext();
+    const originLayer = context.layers.layers.value[0];
+    const originFrameId = context.animation.currentFrameId.value;
+    const otherLayer = context.layers.addLayer('Other layer');
+    context.animation.addFrame(false);
+    const otherFrameId = context.animation.frames.value.at(-1)?.id;
+    if (!originLayer || !otherFrameId) throw new Error('Expected layers and frames');
+    const execute = vi.spyOn(context.history, 'execute').mockResolvedValue();
+    const getEditableCelCanvas = vi.spyOn(context.animation, 'getEditableCelCanvas');
+
+    context.selection.startTransform(
+      imageData(),
+      { x: 0, y: 0, width: 2, height: 2 },
+      'rectangle',
+      undefined,
+      originLayer.id,
+      originFrameId
+    );
+    context.selection.moveTransform(1, 0);
+    context.layers.setActiveLayer(otherLayer.id);
+    context.animation.goToFrame(otherFrameId);
+
+    commitSelectionTransform(context);
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(getEditableCelCanvas).toHaveBeenCalledWith(originLayer.id, originFrameId);
+    expect(getEditableCelCanvas).not.toHaveBeenCalledWith(otherLayer.id, otherFrameId);
   });
 });

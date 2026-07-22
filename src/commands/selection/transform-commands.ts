@@ -16,6 +16,8 @@ import { EditableCelCommand, type EditableCelCommandContext } from './editable-c
  */
 export class TransformSelectionCommand extends EditableCelCommand implements Command {
   name: string;
+  private readonly layerId: string;
+  private readonly frameId: string;
 
   // Original state (for undo)
   private originalImageData: ImageData;
@@ -50,6 +52,8 @@ export class TransformSelectionCommand extends EditableCelCommand implements Com
     context: EditableCelCommandContext = getActiveProjectContext()
   ) {
     super(layerId, frameId, context);
+    this.layerId = layerId;
+    this.frameId = frameId;
 
     // Generate descriptive name based on what changed
     const hasScale = scale.x !== 1 || scale.y !== 1;
@@ -117,7 +121,9 @@ export class TransformSelectionCommand extends EditableCelCommand implements Com
       this.originalImageData,
       this.originalBounds,
       this.originalShape,
-      this.originalMask
+      this.originalMask,
+      this.layerId,
+      this.frameId
     );
 
     // Re-apply the transforms for preview

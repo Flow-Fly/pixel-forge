@@ -1,4 +1,4 @@
-import { html, css, nothing } from "lit";
+import { html, css, nothing, type PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
@@ -27,6 +27,8 @@ import { scrollbarStyles } from "../../styles/scrollbar-styles";
  */
 @customElement("pf-dialog")
 export class PFDialog extends BaseComponent {
+  private previouslyFocused: HTMLElement | null = null;
+
   static styles = css`
     ${scrollbarStyles}
 
@@ -87,6 +89,11 @@ export class PFDialog extends BaseComponent {
 
     .close-btn:hover {
       background-color: var(--pf-color-bg-hover, #2a2a2a);
+    }
+
+    .close-btn:focus-visible {
+      outline: 1px solid var(--pf-color-accent);
+      outline-offset: 2px;
     }
 
     .content {
@@ -162,16 +169,36 @@ export class PFDialog extends BaseComponent {
   }
 
   disconnectedCallback() {
+    this.restoreFocus();
     super.disconnectedCallback();
     document.removeEventListener("keydown", this.handleKeyDown);
   }
 
   private handleKeyDown = (e: KeyboardEvent) => {
-    if (this.open && this.closeOnEscape && e.key === "Escape") {
+    if (!this.open) return;
+
+    if (this.closeOnEscape && e.key === "Escape") {
       e.preventDefault();
       this.close();
+      return;
+    }
+
+    if (e.key === "Tab") {
+      this.containFocus(e);
     }
   };
+
+  protected updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+    if (!changedProperties.has("open")) return;
+
+    if (this.open) {
+      this.previouslyFocused = document.activeElement as HTMLElement | null;
+      this.focusableElements()[0]?.focus();
+    } else {
+      this.restoreFocus();
+    }
+  }
 
   private handleBackdropClick = (e: MouseEvent) => {
     if (this.closeOnBackdrop && e.target === e.currentTarget) {
@@ -187,12 +214,50 @@ export class PFDialog extends BaseComponent {
   /** Close the dialog and dispatch pf-close event */
   close() {
     this.open = false;
+    this.restoreFocus();
     this.dispatchEvent(
       new CustomEvent("pf-close", {
         bubbles: true,
         composed: true,
       })
     );
+  }
+
+  private focusableElements(): HTMLElement[] {
+    const closeButton = this.shadowRoot?.querySelector<HTMLElement>(".close-btn");
+    const slottedElements = Array.from(
+      this.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    return closeButton ? [closeButton, ...slottedElements] : slottedElements;
+  }
+
+  private containFocus(event: KeyboardEvent) {
+    const focusable = this.focusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const activeElement = this.shadowRoot?.activeElement ?? document.activeElement;
+    const activeIndex = focusable.indexOf(activeElement as HTMLElement);
+    const isLeavingStart = event.shiftKey && activeIndex <= 0;
+    const isLeavingEnd = !event.shiftKey && activeIndex === focusable.length - 1;
+    if (!isLeavingStart && !isLeavingEnd) return;
+
+    event.preventDefault();
+    (isLeavingStart ? focusable.at(-1) : focusable[0])?.focus();
+  }
+
+  private restoreFocus() {
+    if (!this.previouslyFocused?.isConnected) {
+      this.previouslyFocused = null;
+      return;
+    }
+
+    this.previouslyFocused.focus();
+    this.previouslyFocused = null;
   }
 
   render() {
@@ -202,16 +267,24 @@ export class PFDialog extends BaseComponent {
       <div class="overlay" @click=${this.handleBackdropClick}>
         <div
           class="dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dialog-title"
           data-scrollbar="vertical"
           style="width: ${this.width}"
           @click=${this.handleDialogClick}
         >
           <div class="header">
-            <span class="title">
+            <span class="title" id="dialog-title">
               <slot name="title"></slot>
             </span>
             ${this.showCloseButton
-              ? html`<button class="close-btn" @click=${this.close}>✕</button>`
+              ? html`<button
+                  class="close-btn"
+                  type="button"
+                  aria-label="Close dialog"
+                  @click=${this.close}
+                >✕</button>`
               : nothing}
           </div>
           <div class="content">
