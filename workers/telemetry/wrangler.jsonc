@@ -19,7 +19,7 @@
   "routes": [
     {
       "pattern": "pixel-forge.app/api/telemetry",
-      "zone_name": "pixel-forge.app",
+      "zone_id": "7f0f45faf62c6bb62ba89617a79497fb",
     },
   ],
   "analytics_engine_datasets": [
