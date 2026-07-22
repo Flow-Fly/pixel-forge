@@ -1,6 +1,6 @@
-import { parseProductEvent, type ProductEvent } from './product-events';
+import { parseProductEvent, type ProductEvent } from '@pixel-forge/shared';
 
-export type { ProductEvent, ProductEventDimensions, ProductEventName } from './product-events';
+export type { ProductEvent, ProductEventDimensions, ProductEventName } from '@pixel-forge/shared';
 
 export interface TelemetrySink {
   record(event: ProductEvent): void | Promise<void>;

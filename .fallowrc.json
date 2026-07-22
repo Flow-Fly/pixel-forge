@@ -3,6 +3,7 @@
   "entry": [
     "src/main.ts",
     "src/services/telemetry.ts",
+    "workers/telemetry/src/index.ts",
     "shared/src/index.ts",
     "server/src/index.ts",
     "server/src/commands/database-compatibility.ts",

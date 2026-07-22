@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "npm run build && vitest run --root .. tests/shared/project-contract.test.ts && node tests/node-import.mjs",
+    "test": "npm run build && vitest run --root .. tests/shared/project-contract.test.ts tests/shared/product-events.test.ts && node tests/node-import.mjs",
     "test:node": "node tests/node-import.mjs",
     "typecheck": "tsc -p tsconfig.json"
   }

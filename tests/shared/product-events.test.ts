@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseProductEvent, type ProductEvent } from '../../src/services/product-events';
+import { parseProductEvent, type ProductEvent } from '../../shared/src/product-events';
 
 const approvedEvents: ProductEvent[] = [
   { name: 'editor_loaded', dimensions: { entryPoint: 'direct' } },

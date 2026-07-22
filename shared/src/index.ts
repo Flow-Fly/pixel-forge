@@ -1,4 +1,5 @@
 export * from './project.js';
+export * from './product-events.js';
 export {
   hasProjectImageData,
   normalizeProjectFileImageData,

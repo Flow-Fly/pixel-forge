@@ -5,7 +5,8 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "server"
+    "server",
+    "workers/telemetry"
   ],
   "scripts": {
     "dev": "npm run shared:build && vite",
@@ -43,7 +44,10 @@
     "server:storage:ready": "npm run storage:ready --workspace @pixel-forge/server",
     "server:storage:test": "npm run test:storage --workspace @pixel-forge/server",
     "server:test": "npm run test --workspace @pixel-forge/server",
-    "server:typecheck": "npm run typecheck --workspace @pixel-forge/server"
+    "server:typecheck": "npm run typecheck --workspace @pixel-forge/server",
+    "telemetry:dev": "npm run dev --workspace @pixel-forge/telemetry-worker",
+    "telemetry:test": "npm run test --workspace @pixel-forge/telemetry-worker",
+    "telemetry:typecheck": "npm run typecheck --workspace @pixel-forge/telemetry-worker"
   },
   "dependencies": {
     "@pixel-forge/shared": "0.1.0",
@@ -69,6 +73,7 @@
     "typescript-eslint": "^8.62.1",
     "vite": "^8.1.3",
     "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "wrangler": "^4.113.0"
   }
 }

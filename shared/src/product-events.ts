@@ -9,26 +9,14 @@ const SAVE_DESTINATIONS = ['local_library', 'download'] as const;
 const EXPORT_FORMATS = ['png', 'gif', 'webp', 'aseprite', 'pixel_forge'] as const;
 
 export type ProductEventDimensions = {
-  editor_loaded: {
-    readonly entryPoint: AllowedValue<typeof ENTRY_POINTS>;
-  };
-  project_created: {
-    readonly source: AllowedValue<typeof PROJECT_CREATION_SOURCES>;
-  };
-  project_opened: {
-    readonly source: AllowedValue<typeof PROJECT_OPEN_SOURCES>;
-  };
-  first_drawing_action: {
-    readonly tool: AllowedValue<typeof DRAWING_TOOLS>;
-  };
+  editor_loaded: { readonly entryPoint: AllowedValue<typeof ENTRY_POINTS> };
+  project_created: { readonly source: AllowedValue<typeof PROJECT_CREATION_SOURCES> };
+  project_opened: { readonly source: AllowedValue<typeof PROJECT_OPEN_SOURCES> };
+  first_drawing_action: { readonly tool: AllowedValue<typeof DRAWING_TOOLS> };
   second_frame_created: NoDimensions;
   playback_started: NoDimensions;
-  project_saved: {
-    readonly destination: AllowedValue<typeof SAVE_DESTINATIONS>;
-  };
-  export_completed: {
-    readonly format: AllowedValue<typeof EXPORT_FORMATS>;
-  };
+  project_saved: { readonly destination: AllowedValue<typeof SAVE_DESTINATIONS> };
+  export_completed: { readonly format: AllowedValue<typeof EXPORT_FORMATS> };
   tutorial_started: NoDimensions;
   tutorial_completed: NoDimensions;
   tutorial_skipped: NoDimensions;
@@ -137,7 +125,6 @@ function isAllowedValue<const Values extends readonly string[]>(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
