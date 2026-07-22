@@ -138,6 +138,35 @@ describe('AutoSaveService', () => {
     expect(projectRepository.save).toHaveBeenCalledTimes(1);
   });
 
+  it('pauses pending saves and observes new edits again after restart', async () => {
+    const context = createContext('paused-project', 'Paused project');
+    autoSaveService.start(context);
+    await context.history.execute(makeCommand());
+    await Promise.resolve();
+
+    await autoSaveService.pause(context);
+    await vi.advanceTimersByTimeAsync(2500);
+
+    expect(projectRepository.save).not.toHaveBeenCalled();
+    expect(autoSaveService.isDirty(context)).toBe(true);
+
+    autoSaveService.start(context);
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Edited after restart';
+      })
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(2500);
+
+    expect(projectRepository.save).toHaveBeenCalledWith(
+      'paused-project',
+      expect.objectContaining({ name: 'Edited after restart' }),
+      expect.any(Object)
+    );
+    expect(autoSaveService.isDirty(context)).toBe(false);
+  });
+
   it('saves after undo', async () => {
     await historyStore.execute(makeCommand());
     await vi.advanceTimersByTimeAsync(2500);

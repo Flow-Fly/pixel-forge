@@ -35,10 +35,6 @@ export type OpenProjectSettings = {
   context?: ProjectContext;
 };
 
-export type DeleteProjectSettings = {
-  context?: ProjectContext;
-};
-
 export class ProjectLibraryService {
   private readonly repository: ProjectRepository;
 
@@ -123,12 +119,8 @@ export class ProjectLibraryService {
     });
   }
 
-  async deleteProject(id: string, settings: DeleteProjectSettings = {}): Promise<void> {
-    const context = settings.context ?? defaultProjectContext;
-    if (id === context.project.id.value) {
-      await autoSaveService.clearPendingSave(context);
-    }
-
+  // fallow-ignore-next-line unused-class-member -- Called through workspace and import dependency interfaces.
+  async deleteProject(id: string): Promise<void> {
     await this.repository.delete(id);
   }
 

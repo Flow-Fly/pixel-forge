@@ -99,20 +99,23 @@ class AutoSaveService {
     await this.performSave(context, { force: true, rethrow: true });
   }
 
-  isDirty(context: ProjectContext = defaultProjectContext): boolean {
-    return this.dirtyContexts.value.has(context);
+  /** Pause observation, cancel scheduled work, and wait for a started write. */
+  async pause(context: ProjectContext = defaultProjectContext): Promise<void> {
+    const state = this.contextState.get(context);
+    if (!state) return;
+
+    state.dispose?.();
+    state.dispose = null;
+    this.clearSaveTimeout(state);
+    await state.saveQueue;
+
+    if (!this.hasStartedContexts()) {
+      this.detachDocumentListeners();
+    }
   }
 
-  /**
-   * Drop queued work and wait for a write that has already started.
-   * Deletion can then run after every older write that could recreate the record.
-   */
-  async clearPendingSave(context: ProjectContext = defaultProjectContext): Promise<void> {
-    const state = this.getState(context);
-    this.clearSaveTimeout(state);
-    state.persistedRevision = state.changeRevision;
-    this.updateDirtyState(context, state);
-    await state.saveQueue;
+  isDirty(context: ProjectContext = defaultProjectContext): boolean {
+    return this.dirtyContexts.value.has(context);
   }
 
   /** Run project load/reset work without treating reset signals as user edits. */

@@ -43,11 +43,11 @@ type WorkspaceLimitFailure = {
 
 type WorkspaceProjectLibrary = Pick<
   ProjectLibraryService,
-  "openProject" | "createProject" | "createProjectFromFile"
+  "openProject" | "createProject" | "createProjectFromFile" | "deleteProject"
 >;
 type WorkspaceAutoSave = Pick<
   typeof autoSaveService,
-  "saveNow" | "start" | "stop"
+  "pause" | "saveNow" | "start" | "stop"
 >;
 type WorkspaceStatePersistence = Pick<ProjectRepository, "setWorkspaceState">;
 
@@ -87,6 +87,11 @@ export type WorkspaceProjectResult =
       projectId: string;
     }
   | WorkspaceLimitFailure;
+
+export interface WorkspaceDeleteResult {
+  activeItem: WorkspaceItem;
+  installedReplacement: boolean;
+}
 
 interface WorkspaceStoreOptions {
   initialContext?: ProjectContext;
@@ -347,6 +352,46 @@ export class WorkspaceStore {
     return this.close(itemId);
   }
 
+  async deleteProject(projectId: string): Promise<WorkspaceDeleteResult> {
+    const item = this.getProjectItem(projectId);
+    if (!item) {
+      await this.projectLibrary.deleteProject(projectId);
+      return {
+        activeItem: this.activeItem,
+        installedReplacement: false,
+      };
+    }
+
+    await this.autoSave.pause(item.context);
+    const replacementContext = this.items.value.length === 1
+      ? createProjectContext()
+      : null;
+
+    try {
+      await this.projectLibrary.deleteProject(projectId);
+    } catch (error) {
+      replacementContext?.dispose();
+      this.autoSave.start(item.context);
+      throw error;
+    }
+
+    if (replacementContext) {
+      return {
+        activeItem: this.replaceLastDeletedItem(item, replacementContext),
+        installedReplacement: true,
+      };
+    }
+
+    const closeResult = this.close(item.id);
+    if (!closeResult.ok) {
+      throw new Error(closeResult.message);
+    }
+    return {
+      activeItem: closeResult.activeItem,
+      installedReplacement: false,
+    };
+  }
+
   async restoreWorkspace(state: WorkspaceState): Promise<boolean> {
     const restorePlan = this.createRestorePlan(state);
     if (restorePlan.loadProjectIds.length === 0) return false;
@@ -386,6 +431,25 @@ export class WorkspaceStore {
 
   private findItem(itemId: string): WorkspaceItem | undefined {
     return this.items.value.find((item) => item.id === itemId);
+  }
+
+  private replaceLastDeletedItem(
+    deletedItem: WorkspaceItem,
+    replacementContext: ProjectContext,
+  ): WorkspaceItem {
+    const replacementItem = {
+      id: createWorkspaceItemId(),
+      context: replacementContext,
+    };
+
+    this.items.value = [replacementItem];
+    this.activeItemId.value = replacementItem.id;
+    setActiveProjectContext(replacementContext);
+    this.autoSave.stop(deletedItem.context);
+    deletedItem.context.dispose();
+    this.autoSave.start(replacementContext);
+    this.persistWorkspaceState();
+    return replacementItem;
   }
 
   getProjectItem(projectId: string): WorkspaceItem | undefined {

@@ -19,6 +19,7 @@ const activeProjectContextMock = vi.hoisted(() => ({
 }));
 
 const workspaceStoreMock = vi.hoisted(() => ({
+  deleteProject: vi.fn(),
   openProject: vi.fn(),
   getProjectItem: vi.fn(),
 }));
@@ -192,6 +193,10 @@ describe('pf-project-browser', () => {
       ok: true,
       item: {},
       projectId: 'open-project',
+    });
+    workspaceStoreMock.deleteProject.mockResolvedValue({
+      activeItem: { context: activeProjectContextMock },
+      installedReplacement: false,
     });
     workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) =>
       projectId === 'open-project' ? { context: activeProjectContextMock } : undefined
@@ -460,7 +465,7 @@ describe('pf-project-browser', () => {
     buttonWithText(element.shadowRoot!, 'Delete')?.click();
     await element.updateComplete;
 
-    expect(projectLibraryMock.deleteProject).not.toHaveBeenCalled();
+    expect(workspaceStoreMock.deleteProject).not.toHaveBeenCalled();
     expect(
       element.shadowRoot?.querySelector('.delete-dialog')?.getAttribute('data-scrollbar')
     ).toBe('vertical');
@@ -468,12 +473,10 @@ describe('pf-project-browser', () => {
     confirmDeleteButton(element.shadowRoot!)?.click();
     await settle(element);
 
-    expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('open-project', {
-      context: activeProjectContextMock,
-    });
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('open-project');
   });
 
-  it('clears pending saves through the targeted inactive open context when deleting', async () => {
+  it('routes inactive open project deletion through the workspace lifecycle', async () => {
     const inactiveProjectContext = {
       project: {
         id: { value: 'second-project' },
@@ -492,12 +495,14 @@ describe('pf-project-browser', () => {
     confirmDeleteButton(element.shadowRoot!)?.click();
     await settle(element);
 
-    expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('second-project', {
-      context: inactiveProjectContext,
-    });
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('second-project');
   });
 
   it('emits current-project-deleted when the open project is deleted', async () => {
+    workspaceStoreMock.deleteProject.mockResolvedValue({
+      activeItem: { context: {} },
+      installedReplacement: true,
+    });
     const element = await createBrowser();
     let deletedCurrent = false;
     element.addEventListener('current-project-deleted', () => {

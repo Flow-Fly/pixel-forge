@@ -16,7 +16,7 @@ import { PROJECT_VERSION, type ProjectFile } from "../../src/types/project";
 
 type WorkspaceProjectLibrary = Pick<
   ProjectLibraryService,
-  "openProject" | "createProject" | "createProjectFromFile"
+  "openProject" | "createProject" | "createProjectFromFile" | "deleteProject"
 >;
 
 function makeProjectFile(name: string): ProjectFile {
@@ -108,6 +108,7 @@ function createProjectLibraryMock() {
       }
       return projectId;
     }),
+    deleteProject: vi.fn(async () => {}),
   };
 
   return projectLibrary;
@@ -116,6 +117,7 @@ function createProjectLibraryMock() {
 function createAutoSaveMock() {
   return {
     saveNow: vi.fn(async () => {}),
+    pause: vi.fn(async () => {}),
     start: vi.fn(),
     stop: vi.fn(),
   };
@@ -304,6 +306,113 @@ describe("WorkspaceStore", () => {
     expect(workspace.items.value).toHaveLength(1);
     expect(workspace.activeItem.context).toBe(context);
     expect(getActiveProjectContext()).toBe(context);
+    expect(dispose).not.toHaveBeenCalled();
+  });
+
+  it("deletes the active project and activates a remaining project", async () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    contextA.project.id.value = "project-a";
+    contextB.project.id.value = "project-b";
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+      projectLibrary,
+      autoSave,
+    });
+    workspace.addContext(contextB, { id: "project-b" });
+    const dispose = vi.spyOn(contextB, "dispose");
+
+    await workspace.deleteProject("project-b");
+
+    expect(autoSave.pause).toHaveBeenCalledWith(contextB);
+    expect(projectLibrary.deleteProject).toHaveBeenCalledWith("project-b");
+    expect(workspace.items.value.map((item) => item.id)).toEqual(["project-a"]);
+    expect(workspace.activeItem.context).toBe(contextA);
+    expect(getActiveProjectContext()).toBe(contextA);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("deletes an inactive project without changing the active project", async () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    contextA.project.id.value = "project-a";
+    contextB.project.id.value = "project-b";
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+      projectLibrary,
+      autoSave,
+    });
+    workspace.addContext(contextB, { id: "project-b", activate: false });
+    const dispose = vi.spyOn(contextB, "dispose");
+
+    await workspace.deleteProject("project-b");
+
+    expect(workspace.items.value.map((item) => item.id)).toEqual(["project-a"]);
+    expect(workspace.activeItem.context).toBe(contextA);
+    expect(getActiveProjectContext()).toBe(contextA);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("replaces the last deleted project with a fresh safe context", async () => {
+    const deletedContext = createTestContext("Only Project");
+    deletedContext.project.id.value = "only-project";
+    const projectLibrary = createProjectLibraryMock();
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext: deletedContext,
+      initialItemId: "only-project",
+      projectLibrary,
+      autoSave,
+    });
+    const dispose = vi.spyOn(deletedContext, "dispose");
+
+    await workspace.deleteProject("only-project");
+
+    const replacement = workspace.activeItem;
+    rememberContext(replacement.context);
+    expect(replacement.context).not.toBe(deletedContext);
+    expect(replacement.context.project.id.value).not.toBe("only-project");
+    expect(workspace.items.value).toHaveLength(1);
+    expect(getActiveProjectContext()).toBe(replacement.context);
+    expect(autoSave.start).toHaveBeenCalledWith(replacement.context);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("restores observation and keeps the workspace intact when deletion fails", async () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    contextA.project.id.value = "project-a";
+    contextB.project.id.value = "project-b";
+    const projectLibrary = createProjectLibraryMock();
+    vi.mocked(projectLibrary.deleteProject).mockRejectedValue(new Error("delete failed"));
+    const autoSave = createAutoSaveMock();
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+      projectLibrary,
+      autoSave,
+    });
+    workspace.addContext(contextB, { id: "project-b" });
+    const dispose = vi.spyOn(contextB, "dispose");
+
+    await expect(workspace.deleteProject("project-b")).rejects.toThrow(
+      "delete failed",
+    );
+
+    expect(autoSave.pause).toHaveBeenCalledWith(contextB);
+    expect(autoSave.start).toHaveBeenCalledWith(contextB);
+    expect(workspace.items.value.map((item) => item.id)).toEqual([
+      "project-a",
+      "project-b",
+    ]);
+    expect(workspace.activeItem.context).toBe(contextB);
+    expect(getActiveProjectContext()).toBe(contextB);
     expect(dispose).not.toHaveBeenCalled();
   });
 

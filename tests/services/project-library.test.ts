@@ -41,6 +41,7 @@ import {
   type ProjectContext,
 } from '../../src/stores/project-context';
 import { viewportStore } from '../../src/stores/viewport';
+import { WorkspaceStore } from '../../src/stores/workspace';
 import { PROJECT_VERSION } from '../../src/types/project';
 
 const repository = vi.mocked(projectRepository);
@@ -323,6 +324,12 @@ describe('ProjectLibraryService', () => {
     projects.set('open', makeProject('Open'));
     await openProjectInStore('open', makeProject('Open'));
     autoSaveService.start();
+    const workspace = new WorkspaceStore({
+      initialContext: defaultProjectContext,
+      initialItemId: 'open',
+      projectLibrary: service,
+      autoSave: autoSaveService,
+    });
 
     await historyStore.execute(
       makeCommand(() => {
@@ -331,7 +338,8 @@ describe('ProjectLibraryService', () => {
     );
     await Promise.resolve();
 
-    await service.deleteProject('open');
+    await workspace.deleteProject('open');
+    createdContexts.push(workspace.activeItem.context);
     await vi.advanceTimersByTimeAsync(2500);
 
     expect(projects.has('open')).toBe(false);
@@ -341,6 +349,12 @@ describe('ProjectLibraryService', () => {
     projects.set('open', makeProject('Open'));
     await openProjectInStore('open', makeProject('Open'));
     autoSaveService.start();
+    const workspace = new WorkspaceStore({
+      initialContext: defaultProjectContext,
+      initialItemId: 'open',
+      projectLibrary: service,
+      autoSave: autoSaveService,
+    });
 
     let finishWrite!: () => void;
     const writeGate = new Promise<void>((resolve) => {
@@ -359,13 +373,14 @@ describe('ProjectLibraryService', () => {
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(2000);
 
-    const deletion = service.deleteProject('open');
+    const deletion = workspace.deleteProject('open');
     await Promise.resolve();
 
     expect(repository.delete).not.toHaveBeenCalled();
 
     finishWrite();
     await deletion;
+    createdContexts.push(workspace.activeItem.context);
 
     expect(projects.has('open')).toBe(false);
     expect(repository.delete).toHaveBeenCalledWith('open');

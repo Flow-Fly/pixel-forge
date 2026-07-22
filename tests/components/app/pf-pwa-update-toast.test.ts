@@ -4,8 +4,16 @@ const autoSaveServiceMock = vi.hoisted(() => ({
   saveNow: vi.fn(),
 }));
 
+const workspaceStoreMock = vi.hoisted(() => ({
+  items: { value: [] as Array<{ context: ProjectContext }> },
+}));
+
 vi.mock('../../../src/services/auto-save', () => ({
   autoSaveService: autoSaveServiceMock,
+}));
+
+vi.mock('../../../src/stores/workspace', () => ({
+  workspaceStore: workspaceStoreMock,
 }));
 
 import '../../../src/components/app/pf-pwa-update-toast';
@@ -13,6 +21,7 @@ import type { PFPwaUpdateToast } from '../../../src/components/app/pf-pwa-update
 import { pwaStore } from '../../../src/stores/pwa';
 import {
   createProjectContext,
+  defaultProjectContext,
   restoreDefaultProjectContext,
   setActiveProjectContext,
   type ProjectContext,
@@ -38,6 +47,7 @@ describe('pf-pwa-update-toast', () => {
     document.body.replaceChildren();
     vi.clearAllMocks();
     autoSaveServiceMock.saveNow.mockResolvedValue(undefined);
+    workspaceStoreMock.items.value = [{ context: defaultProjectContext }];
     pwaStore.stop();
   });
 
@@ -93,11 +103,12 @@ describe('pf-pwa-update-toast', () => {
     );
   });
 
-  it('saves the project active when restart is requested', async () => {
+  it('saves every open project before restart, including inactive projects', async () => {
     const contextA = createProjectContext();
     const contextB = createProjectContext();
     createdContexts.push(contextA, contextB);
     setActiveProjectContext(contextB);
+    workspaceStoreMock.items.value = [{ context: contextA }, { context: contextB }];
     const update = vi.fn().mockResolvedValue(undefined);
     pwaStore.setUpdateHandler(update);
     pwaStore.showUpdate();
@@ -107,8 +118,37 @@ describe('pf-pwa-update-toast', () => {
     setActiveProjectContext(contextA);
     await flushUpdate(element);
 
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledTimes(2);
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextA);
     expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextB);
     expect(update).toHaveBeenCalledWith(true);
+  });
+
+  it('keeps the session open when an inactive project cannot be saved', async () => {
+    const activeContext = createProjectContext();
+    const inactiveContext = createProjectContext();
+    createdContexts.push(activeContext, inactiveContext);
+    setActiveProjectContext(activeContext);
+    workspaceStoreMock.items.value = [
+      { context: activeContext },
+      { context: inactiveContext },
+    ];
+    autoSaveServiceMock.saveNow.mockImplementation(async (context) => {
+      if (context === inactiveContext) throw new Error('storage full');
+    });
+    const update = vi.fn().mockResolvedValue(undefined);
+    pwaStore.setUpdateHandler(update);
+    pwaStore.showUpdate();
+    const element = await createToast();
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.restart')?.click();
+    await flushUpdate(element);
+
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(inactiveContext);
+    expect(update).not.toHaveBeenCalled();
+    expect(element.shadowRoot?.querySelector('.error')?.textContent).toContain(
+      'current session stayed open'
+    );
   });
 
   it('explains a save failure and does not restart', async () => {

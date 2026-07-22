@@ -24,6 +24,7 @@ const workspaceStoreMock = vi.hoisted(() => ({
   activeItemId: { value: '' },
   activate: vi.fn(),
   closeProject: vi.fn(),
+  deleteProject: vi.fn(),
   restoreWorkspace: vi.fn(),
 }));
 
@@ -101,6 +102,10 @@ describe('pixel-forge-app project dialogs', () => {
       closedItem: null,
       activeItem: null,
     });
+    workspaceStoreMock.deleteProject.mockResolvedValue({
+      activeItem: null,
+      installedReplacement: false,
+    });
     projectFileHandlingMock.importProjectFiles.mockResolvedValue({
       outcomes: [],
       unreadableFiles: [],
@@ -148,9 +153,6 @@ describe('pixel-forge-app project dialogs', () => {
     contextB.project.id.value = 'project-b';
     createdContexts.push(contextA, contextB);
     setActiveProjectContext(contextB);
-    const deleteProject = vi
-      .spyOn(projectLibrary, 'deleteProject')
-      .mockResolvedValue();
     const element = document.createElement('pixel-forge-app') as HTMLElement & {
       updateComplete: Promise<unknown>;
     };
@@ -163,12 +165,10 @@ describe('pixel-forge-app project dialogs', () => {
       ?.querySelector<HTMLButtonElement>('pf-dialog button.primary')
       ?.click();
     await vi.waitFor(() => {
-      expect(deleteProject).toHaveBeenCalled();
+      expect(workspaceStoreMock.deleteProject).toHaveBeenCalled();
     });
 
-    expect(deleteProject).toHaveBeenCalledWith('project-b', {
-      context: contextB,
-    });
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('project-b');
   });
 
   it('opens export with the project active when the action starts', async () => {

@@ -630,12 +630,10 @@ export class PFProjectBrowser extends BaseComponent {
     try {
       const activeContext = getActiveProjectContext();
       const deletedOpenProject = project.id === activeContext.project.id.value;
-      const projectContext =
-        workspaceStore.getProjectItem(project.id)?.context ?? activeContext;
-      await projectLibrary.deleteProject(project.id, { context: projectContext });
+      const result = await workspaceStore.deleteProject(project.id);
       await this.loadProjects();
 
-      if (deletedOpenProject) {
+      if (deletedOpenProject && result.installedReplacement) {
         this.dispatchEvent(
           new CustomEvent('current-project-deleted', { bubbles: true, composed: true })
         );

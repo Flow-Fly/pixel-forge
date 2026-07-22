@@ -647,8 +647,10 @@ export class PixelForgeApp extends BaseComponent {
     this.dismissDeleteCurrentProject();
 
     try {
-      await projectLibrary.deleteProject(context.project.id.value, { context });
-      this.handleCurrentProjectDeleted();
+      const result = await workspaceStore.deleteProject(context.project.id.value);
+      if (result.installedReplacement) {
+        this.handleCurrentProjectDeleted();
+      }
     } catch (error) {
       log.error("Failed to delete project:", error);
       this.showWarning("Could not delete project");
