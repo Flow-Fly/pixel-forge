@@ -1,11 +1,13 @@
 # Product observability boundary
 
-Status: approved foundation contract
+Status: production implementation approved; first deployment remains owner-gated
 
 This document defines how Pixel Forge decides whether a feature needs
-observability and what the client may record. The current implementation has
-no production event sink. It does not persist analytics state or send product
-events over the network.
+observability and what the client may record. Production builds deliver the
+approved events to the same-origin `/api/telemetry` route. Development and
+tests keep events in memory and make no production telemetry request. The
+first production Worker deployment remains an explicit owner action documented
+in [`product-observability-runbook.md`](./product-observability-runbook.md).
 
 ## Feature decision
 
@@ -76,37 +78,54 @@ substitute.
 
 ## Current collection and retention
 
-The production default is a no-op. It makes no network request, writes no
-cookie, and uses no `localStorage`, IndexedDB, or other client persistence.
-Its production retention is therefore zero.
+Production delivery is identifier-free and best-effort. Each event name is
+attempted at most once during a page lifecycle. The client revalidates the
+event, sends it with omitted credentials and a bounded timeout, and does not
+retry or queue it. It writes no cookie, `localStorage`, IndexedDB, user ID,
+session ID, or fingerprint. Delivery failures are discarded and cannot block
+editor behavior.
 
-Development inspection is explicit and local. Its bounded in-memory sink keeps
-only the latest 100 allowlisted events, exposes immutable snapshots for local
-inspection, and can be cleared by the developer. Pixel Forge does not persist
-the events, expose them globally, write them to the console, or pass them to
-Sentry. Reloading the application clears the inspection history.
+The Worker validates method, path, exact production origin, JSON content type,
+body size, global coarse rate limit, and the closed event schema. The Analytics
+Engine row uses `index1` for the event name, `blob1` for the optional dimension
+name, and `blob2` for its value. Cloudflare supplies the row timestamp. A
+privacy-invalid event may write only the fixed operational marker
+`telemetry_request_rejected` with the fixed reason `invalid_payload`; it cannot
+write submitted fields. Rate-limited and early boundary rejections write no
+row.
+
+Workers Analytics Engine retains rows for Cloudflare's fixed three-month
+period. Pixel Forge has no per-row deletion workflow or identity with which to
+find a person's row; rows expire automatically.
+
+Development inspection is local. The bounded in-memory sink keeps only the
+latest 100 allowlisted events. Developers can use
+`window.pixelForgeTelemetry.list()` and `.clear()`. Snapshots are immutable,
+reload clears them, and they are not logged, persisted, or passed to Sentry.
 
 Telemetry is best-effort. Rejected payloads and sink failures cannot block
 drawing, saving, exporting, or offline use.
 
-## Production-sink approval gate
+## Production enablement gate
 
-A production sink is a separate delivery slice and is not authorized by this
-foundation. Before enabling one, the owner must approve and verify:
+The implementation does not authorize its own first deployment. Before
+enabling collection, the owner must approve and verify:
 
 - the user-facing privacy notice and the applicable lawful-basis assessment;
-- a finite, purpose-bound retention period and deletion path;
+- the fixed three-month retention and automatic-expiry limitation;
 - the people and service identities allowed to read or administer the data;
 - processor and data-location documentation;
-- abuse controls, query limits, cost bounds, and failure visibility;
+- the global identifier-free rate limit, query limits, cost bounds, and failure
+  visibility;
 - the exact request metadata the provider receives even when it is not in the
   event payload;
 - whether an opt-out or consent control is required.
 
-The consent-banner decision must be reopened before introducing persistent
-identifiers, cookies or other terminal storage, fingerprinting,
-cross-device/account linkage, session replay, advertising, or non-exempt
-third-party analytics.
+The approved implementation uses no cookies or terminal storage and therefore
+does not add a consent banner. The consent decision must be reopened before
+introducing persistent identifiers, cookies or other terminal storage,
+fingerprinting, cross-device/account linkage, session replay, advertising, or
+non-exempt third-party analytics.
 
 This is a product and engineering constraint, not a legal compliance
 guarantee. Banner-free collection does not remove privacy-notice, data

@@ -22,7 +22,21 @@ export type ProductEventDimensions = {
   tutorial_skipped: NoDimensions;
 };
 
-export type ProductEventName = keyof ProductEventDimensions;
+export const PRODUCT_EVENT_NAMES = [
+  'editor_loaded',
+  'project_created',
+  'project_opened',
+  'first_drawing_action',
+  'second_frame_created',
+  'playback_started',
+  'project_saved',
+  'export_completed',
+  'tutorial_started',
+  'tutorial_completed',
+  'tutorial_skipped',
+] as const satisfies readonly (keyof ProductEventDimensions)[];
+
+export type ProductEventName = (typeof PRODUCT_EVENT_NAMES)[number];
 
 type ProductEventFor<Name extends ProductEventName> = Readonly<{
   name: Name;

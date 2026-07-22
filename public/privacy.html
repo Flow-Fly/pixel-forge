@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activation analytics privacy notice — Pixel Forge</title>
+    <meta
+      name="description"
+      content="How Pixel Forge uses limited, identifier-free activation analytics."
+    />
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      @font-face {
+        font-family: "Departure Mono";
+        src: url("/fonts/departure-mono-1.500.woff2") format("woff2");
+        font-display: swap;
+      }
+
+      :root {
+        color-scheme: dark;
+        font-family: "Departure Mono", ui-monospace, monospace;
+        color: #e1e7ed;
+        background: #090c11;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        padding: clamp(24px, 6vw, 72px) 20px;
+        background:
+          radial-gradient(circle at top, rgb(184 140 87 / 14%), transparent 38rem),
+          #090c11;
+        line-height: 1.7;
+      }
+
+      main {
+        width: min(760px, 100%);
+        margin: 0 auto;
+      }
+
+      a {
+        color: #d5b477;
+      }
+
+      a:focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: 4px;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.25;
+      }
+
+      h1 {
+        margin-block: 28px 36px;
+        font-size: clamp(2rem, 7vw, 4rem);
+      }
+
+      h2 {
+        margin-block: 36px 8px;
+        color: #d5b477;
+        font-size: 1rem;
+        text-transform: uppercase;
+      }
+
+      p,
+      li {
+        color: #b5bec9;
+      }
+
+      .summary {
+        padding: 18px;
+        border: 1px solid #3d4652;
+        background: rgb(20 25 33 / 82%);
+        color: #e1e7ed;
+      }
+
+      .updated {
+        color: #7f8996;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav aria-label="Main navigation"><a href="/">← Back to Pixel Forge</a></nav>
+      <h1>Activation analytics privacy notice</h1>
+      <p class="summary">
+        Pixel Forge uses a small set of coarse product milestones to understand whether the editor
+        helps people create and export pixel art. These events contain no account, device, project,
+        artwork, filename, palette, color, or persistent identifier.
+      </p>
+
+      <h2>What is collected</h2>
+      <p>
+        An event contains its approved milestone name and, where useful, one coarse category such as
+        project source, drawing-tool family, save destination, or export format. Pixel Forge does not
+        record pointer movements, interaction histories, free-form text, timestamps from the browser,
+        cookies, local-storage identifiers, IP addresses, user agents, or geography in the analytics
+        dataset.
+      </p>
+
+      <h2>Why it is collected</h2>
+      <p>
+        Aggregate counts help identify where the creative flow succeeds or stops. Because the events
+        have no user or session identifier, they cannot provide unique-user, returning-user, or cohort
+        conversion measurements.
+      </p>
+
+      <h2>Processor and transport</h2>
+      <p>
+        The browser sends events to a same-origin endpoint operated with Cloudflare Workers. As with
+        any web request, Cloudflare receives ordinary network metadata needed to deliver and protect
+        the request. Pixel Forge does not copy that metadata into Workers Analytics Engine. The
+        Analytics Engine row contains only the approved event fields and Cloudflare's server-side time.
+      </p>
+
+      <h2>Retention and access</h2>
+      <p>
+        Cloudflare Workers Analytics Engine retains rows for its fixed three-month period. Access is
+        restricted to the Pixel Forge owner through separate deployment and read-only analytics
+        credentials. There is no browser-side analytics history to delete because none is stored there.
+      </p>
+
+      <h2>Questions and requests</h2>
+      <p>
+        Contact <a href="mailto:privacy@pixel-forge.app">privacy@pixel-forge.app</a> for questions or
+        privacy requests. The identifier-free design may mean a particular analytics row cannot be
+        connected to, found for, or deleted on behalf of an individual.
+      </p>
+
+      <h2>Scope</h2>
+      <p>
+        This notice covers Pixel Forge activation analytics. It does not expand the application's
+        separate error-reporting service, and it is not a legal-compliance guarantee.
+      </p>
+
+      <p class="updated">Last updated: 22 July 2026</p>
+    </main>
+  </body>
+</html>
