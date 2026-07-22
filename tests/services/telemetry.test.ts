@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Sentry from '@sentry/browser';
 import {
   createDevelopmentTelemetrySink,
+  createHttpTelemetrySink,
+  createOncePerPageTelemetryClient,
   createTelemetryClient,
   type ProductEvent,
 } from '../../src/services/telemetry';
@@ -128,5 +130,76 @@ describe('client telemetry', () => {
 
     expect(() => telemetry.record(projectCreated)).not.toThrow();
     await Promise.resolve();
+  });
+
+  it('delivers the exact revalidated event to the same-origin endpoint', async () => {
+    const fetchRequest = vi.fn(async () => new Response(null, { status: 202 }));
+    const telemetry = createTelemetryClient(createHttpTelemetrySink({
+      fetch: fetchRequest,
+      timeoutMs: 500,
+    }));
+
+    telemetry.record(projectCreated);
+    await vi.waitFor(() => expect(fetchRequest).toHaveBeenCalledOnce());
+
+    expect(fetchRequest).toHaveBeenCalledWith('/api/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(projectCreated),
+      credentials: 'omit',
+      keepalive: true,
+      cache: 'no-store',
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('revalidates before HTTP dispatch', async () => {
+    const fetchRequest = vi.fn();
+    const sink = createHttpTelemetrySink({ fetch: fetchRequest });
+
+    await sink.record({
+      name: 'project_created',
+      dimensions: { source: 'blank', filename: 'private.pf' },
+    } as ProductEvent);
+
+    expect(fetchRequest).not.toHaveBeenCalled();
+  });
+
+  it('emits each milestone name at most once per page lifecycle', () => {
+    const record = vi.fn();
+    const telemetry = createOncePerPageTelemetryClient({ record });
+
+    telemetry.record(projectCreated);
+    telemetry.record({ name: 'project_created', dimensions: { source: 'import' } });
+    telemetry.record({ name: 'playback_started', dimensions: {} });
+
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(record).toHaveBeenNthCalledWith(1, projectCreated);
+    expect(record).toHaveBeenNthCalledWith(2, { name: 'playback_started', dimensions: {} });
+  });
+
+  it('does not let rejected events reserve a milestone name', () => {
+    const record = vi.fn();
+    const telemetry = createOncePerPageTelemetryClient({ record });
+
+    telemetry.record({
+      name: 'project_created',
+      dimensions: { source: 'blank', filename: 'private.pf' },
+    } as ProductEvent);
+    telemetry.record(projectCreated);
+
+    expect(record).toHaveBeenCalledOnce();
+    expect(record).toHaveBeenCalledWith(projectCreated);
+  });
+
+  it('exposes only the bounded local inspector in development', () => {
+    window.pixelForgeTelemetry?.clear();
+
+    expect(window.pixelForgeTelemetry?.list()).toEqual([]);
+    expect(window.pixelForgeTelemetry).toEqual({
+      list: expect.any(Function),
+      clear: expect.any(Function),
+    });
+    expect(Sentry.addBreadcrumb).not.toHaveBeenCalled();
   });
 });

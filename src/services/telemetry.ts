@@ -15,7 +15,19 @@ export interface DevelopmentTelemetrySink extends TelemetrySink {
   clear(): void;
 }
 
+export interface DevelopmentTelemetryInspector {
+  list(): readonly ProductEvent[];
+  clear(): void;
+}
+
+interface HttpTelemetrySinkOptions {
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+}
+
 const DEVELOPMENT_EVENT_LIMIT = 100;
+const TELEMETRY_ENDPOINT = '/api/telemetry';
+const TELEMETRY_TIMEOUT_MS = 2_000;
 
 const noOpSink: TelemetrySink = {
   record: () => undefined,
@@ -58,8 +70,66 @@ export function createDevelopmentTelemetrySink(): DevelopmentTelemetrySink {
   };
 }
 
-export const productTelemetry = createTelemetryClient();
+export function createHttpTelemetrySink(options: HttpTelemetrySinkOptions = {}): TelemetrySink {
+  const send = options.fetch ?? globalThis.fetch;
+  const timeoutMs = options.timeoutMs ?? TELEMETRY_TIMEOUT_MS;
+
+  return {
+    async record(event) {
+      const acceptedEvent = parseProductEvent(event);
+      if (!acceptedEvent) return;
+
+      await send(TELEMETRY_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(acceptedEvent),
+        credentials: 'omit',
+        keepalive: true,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    },
+  };
+}
+
+export function createOncePerPageTelemetryClient(sink: TelemetrySink): TelemetryClient {
+  const recordedNames = new Set<string>();
+  const telemetry = createTelemetryClient(sink);
+
+  return {
+    record(event) {
+      try {
+        const acceptedEvent = parseProductEvent(event);
+        if (!acceptedEvent || recordedNames.has(acceptedEvent.name)) return;
+
+        recordedNames.add(acceptedEvent.name);
+        telemetry.record(acceptedEvent);
+      } catch {
+        // Hostile values stay outside both the product path and the dedupe state.
+      }
+    },
+  };
+}
+
+const developmentTelemetrySink = createDevelopmentTelemetrySink();
+
+export const productTelemetry = createOncePerPageTelemetryClient(
+  import.meta.env.PROD ? createHttpTelemetrySink() : developmentTelemetrySink
+);
+
+if (import.meta.env.DEV) {
+  window.pixelForgeTelemetry = {
+    list: () => developmentTelemetrySink.events(),
+    clear: () => developmentTelemetrySink.clear(),
+  };
+}
 
 function ignoreTelemetryFailure(): void {
   // Rejections stay contained so telemetry remains outside the product path.
+}
+
+declare global {
+  interface Window {
+    pixelForgeTelemetry?: DevelopmentTelemetryInspector;
+  }
 }
