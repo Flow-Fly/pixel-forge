@@ -80,10 +80,11 @@ The production default is a no-op. It makes no network request, writes no
 cookie, and uses no `localStorage`, IndexedDB, or other client persistence.
 Its production retention is therefore zero.
 
-Development inspection is explicit and local. Its sink writes allowlisted
-events to the browser development console and does not persist them through
-Pixel Forge. Console history and preservation are controlled by the developer
-and browser, not by the application.
+Development inspection is explicit and local. Its bounded in-memory sink keeps
+only the latest 100 allowlisted events, exposes immutable snapshots for local
+inspection, and can be cleared by the developer. Pixel Forge does not persist
+the events, expose them globally, write them to the console, or pass them to
+Sentry. Reloading the application clears the inspection history.
 
 Telemetry is best-effort. Rejected payloads and sink failures cannot block
 drawing, saving, exporting, or offline use.
