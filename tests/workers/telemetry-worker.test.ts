@@ -35,6 +35,21 @@ function telemetryRequest(body: string, headers: HeadersInit = {}): Request {
 }
 
 describe('telemetry Worker', () => {
+  it('publishes the telemetry route through the fixed Pixel Forge zone', async () => {
+    const repositoryRoot = process.env.INIT_CWD ?? process.cwd();
+    const configPath = resolve(repositoryRoot, 'workers/telemetry/wrangler.jsonc');
+    const source = await readFile(configPath, 'utf8');
+    const config = JSON.parse(source.replace(/,\s*(?=[}\]])/g, ''));
+
+    expect(config.routes).toEqual([
+      {
+        pattern: 'pixel-forge.app/api/telemetry',
+        zone_id: '7f0f45faf62c6bb62ba89617a79497fb',
+      },
+    ]);
+    expect(source).not.toContain('zone_name');
+  });
+
   it('keeps persisted logs, invocation logs, and traces disabled', async () => {
     const repositoryRoot = process.env.INIT_CWD ?? process.cwd();
     const configPath = resolve(repositoryRoot, 'workers/telemetry/wrangler.jsonc');

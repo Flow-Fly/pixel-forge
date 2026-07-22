@@ -51,30 +51,23 @@ Complete all of these before the first deployment:
 4. Create a GitHub environment named `telemetry-production`. Add a required
    reviewer if the repository plan supports environment protection.
 5. Create a **Custom token** rather than using the broad **Edit Cloudflare
-   Workers** template. Grant exactly these three permission rows:
+   Workers** template. Grant exactly these two permission rows:
    - **Account → Workers Scripts → Write**;
-   - **Zone → Workers Routes → Write**;
-   - **Zone → Zone → Read**.
+   - **Zone → Workers Routes → Write**.
    Restrict **Account Resources** to the one account that owns Pixel Forge. For
    **Workers Routes → Write**, restrict **Zone Resources** to the single
-   `pixel-forge.app` zone. For **Zone → Read**, select **All zones from an
-   account** and choose only the Pixel Forge account. Do not select all
-   accounts or allow route writes on any other zone.
+   `pixel-forge.app` zone. Do not select all accounts or allow route writes on
+   any other zone.
 
-   Wrangler reads the committed `zone_name` in
-   `workers/telemetry/wrangler.jsonc`, calls Cloudflare's `GET /zones` endpoint
-   with the account ID to resolve it to a zone ID, and then publishes the
-   route. Cloudflare requires account-scoped visibility for this `zone_name`
-   lookup when an API token is used. **Zone → Zone → Read** remains read-only
-   and does not authorize DNS changes. Do not add Account Settings, User
-   Details, Memberships, KV, R2, Tail, Logs, DNS Read, DNS Write, or any other
-   permission. Cloudflare's template currently includes several unrelated
-   grants and is not acceptable unchanged. See Cloudflare's [Wrangler route
+   The committed route uses Pixel Forge's fixed, non-secret `zone_id`, so
+   Wrangler does not need permission to discover the zone from its name. Do
+   not add Zone Read, Account Settings, User Details, Memberships, KV, R2,
+   Tail, Logs, DNS Read, DNS Write, or any other permission. Cloudflare's
+   template currently includes several unrelated grants and is not acceptable
+   unchanged. See Cloudflare's [Wrangler route
    configuration](https://developers.cloudflare.com/workers/wrangler/configuration/#routes),
    [API token permission
    definitions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/),
-   [`GET /zones` permission
-   requirement](https://developers.cloudflare.com/api/resources/zones/methods/list/),
    and [Worker route publication
    permission](https://developers.cloudflare.com/api/resources/workers/subresources/routes/methods/create/).
 6. Store the account ID as `CLOUDFLARE_ACCOUNT_ID` and the deployment token as
@@ -235,6 +228,5 @@ afterward:
 - <https://developers.cloudflare.com/workers/wrangler/configuration/#observability>
 - <https://developers.cloudflare.com/workers/observability/logs/workers-logs/>
 - <https://developers.cloudflare.com/fundamentals/api/reference/permissions/>
-- <https://developers.cloudflare.com/api/resources/zones/methods/list/>
 - <https://developers.cloudflare.com/api/resources/workers/subresources/routes/methods/create/>
 - <https://developers.cloudflare.com/email-service/get-started/route-emails/>
