@@ -339,6 +339,7 @@ export class PFExportDialog extends BaseComponent {
 
   private async doExport() {
     const frameIds = this.getSelectedFrameIds();
+    const telemetryFormat = telemetryExportFormat(this.format);
     let pipeline: ViewEffectPipeline | null = null;
 
     try {
@@ -346,7 +347,7 @@ export class PFExportDialog extends BaseComponent {
       await this.runExport(frameIds, pipeline);
       productTelemetry.record({
         name: "export_completed",
-        dimensions: { format: telemetryExportFormat(this.format) },
+        dimensions: { format: telemetryFormat },
       });
       this.close();
     } catch (error) {
@@ -375,10 +376,10 @@ export class PFExportDialog extends BaseComponent {
   ): Promise<void> {
     switch (this.format) {
       case "png":
-        this.exportImages(frameIds, "png", pipeline);
+        await this.exportImages(frameIds, "png", pipeline);
         return;
       case "webp":
-        this.exportImages(frameIds, "webp", pipeline);
+        await this.exportImages(frameIds, "webp", pipeline);
         return;
       case "webp-animated":
         await this.exportAnimatedWebP(frameIds, pipeline);
@@ -427,12 +428,12 @@ export class PFExportDialog extends BaseComponent {
     return styledCanvas;
   }
 
-  private exportImages(
+  private async exportImages(
     frameIds: string[],
     format: "png" | "webp",
     pipeline: ViewEffectPipeline | null
-  ) {
-    frameIds.forEach((frameId, index) => {
+  ): Promise<void> {
+    const exports = frameIds.map((frameId, index) => {
       const canvas = this.renderExportFrame(frameId, pipeline);
       const suffix =
         frameIds.length > 1 ? `_${String(index).padStart(3, "0")}` : "";
@@ -440,10 +441,13 @@ export class PFExportDialog extends BaseComponent {
 
       if (format === "png") {
         FileService.exportToPNG(canvas, filename);
-      } else {
-        FileService.exportToWebP(canvas, filename);
+        return;
       }
+
+      return FileService.exportToWebP(canvas, filename);
     });
+
+    await Promise.all(exports);
   }
 
   private async exportAnimatedWebP(

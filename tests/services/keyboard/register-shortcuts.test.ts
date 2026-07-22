@@ -13,6 +13,7 @@ import {
 } from '../../../src/stores/project-context';
 import { selectionStore } from '../../../src/stores/selection';
 import { GUIDED_DRAWING_VERSION } from '../../../src/types/guided-drawing';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 const keyboardServiceMock = vi.hoisted(() => ({
   register: vi.fn(),
@@ -401,6 +402,32 @@ describe('registerShortcuts', () => {
       expect(defaultUndo).not.toHaveBeenCalled();
       expect(defaultProjectContext.selection.state.value.type).toBe('none');
     } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  // #412: Playback telemetry must cover the keyboard entry path.
+  it('records playback started when the keyboard shortcut starts playback', () => {
+    const context = createProjectContext();
+    const record = vi.spyOn(productTelemetry, 'record');
+    setActiveProjectContext(context);
+
+    try {
+      registerShortcuts();
+
+      shortcutActionByDescription('Enter', 'Play/Stop')?.();
+
+      expect(context.animation.isPlaying.value).toBe(true);
+      expect(record).toHaveBeenCalledWith({
+        name: 'playback_started',
+        dimensions: {},
+      });
+
+      shortcutActionByDescription('Enter', 'Play/Stop')?.();
+      expect(record).toHaveBeenCalledTimes(1);
+    } finally {
+      context.animation.stopPlayback();
       restoreDefaultProjectContext();
       context.dispose();
     }
