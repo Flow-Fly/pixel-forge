@@ -92,6 +92,15 @@ Every delivery slice contains a compact delivery brief:
 - relevant verification commands;
 - dependencies and unblock conditions.
 
+Every delivery brief also makes an observability decision: `none`,
+`product milestone`, `client failure`, or `operational boundary`. `none` is a
+valid choice when accompanied by a short justification. Any other choice must
+name the question or failure being observed, the trigger, the allowlisted
+fields, the observation location, failure behavior, access, retention, and
+privacy or consent implications. The product-event allowlist and production
+approval gate live in
+[`product-observability.md`](./product-observability.md).
+
 The director selects the next slice only after reconciling the current pull
 request, checks, review, parent checklist, and dependencies. It may merge an
 eligible, reviewed, green pull request into `develop`; it never merges
