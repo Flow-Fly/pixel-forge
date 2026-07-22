@@ -109,14 +109,25 @@ export class PFPwaUpdateToast extends BaseComponent {
   };
 
   private restart = () => {
-    const openContexts = workspaceStore.items.value.map((item) => item.context);
-    void pwaStore.restartWithUpdate(() => this.saveOpenProjectsUntilClean(openContexts));
+    void pwaStore.restartWithUpdate(() => this.saveOpenProjectsUntilClean());
   };
 
-  private async saveOpenProjectsUntilClean(openContexts: ProjectContext[]) {
-    do {
+  private async saveOpenProjectsUntilClean() {
+    while (true) {
+      const openContexts = this.getOpenContexts();
       await Promise.all(openContexts.map((context) => autoSaveService.saveUntilClean(context)));
-    } while (openContexts.some((context) => autoSaveService.isDirty(context)));
+
+      const currentContexts = this.getOpenContexts();
+      const membershipChanged = currentContexts.length !== openContexts.length
+        || currentContexts.some((context) => !openContexts.includes(context));
+      if (membershipChanged) continue;
+      if (currentContexts.some((context) => autoSaveService.isDirty(context))) continue;
+      return;
+    }
+  }
+
+  private getOpenContexts(): ProjectContext[] {
+    return workspaceStore.items.value.map((item) => item.context);
   }
 
   render() {

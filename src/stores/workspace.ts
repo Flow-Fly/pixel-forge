@@ -363,33 +363,20 @@ export class WorkspaceStore {
     }
 
     await this.autoSave.pause(item.context);
-    const replacementContext = this.items.value.length === 1
-      ? createProjectContext()
-      : null;
 
     try {
       await this.projectLibrary.deleteProject(projectId);
     } catch (error) {
-      replacementContext?.dispose();
-      this.autoSave.start(item.context);
+      this.resumeAutoSaveIfOpen(item);
       throw error;
     }
 
-    if (replacementContext) {
-      return {
-        activeItem: this.replaceLastDeletedItem(item, replacementContext),
-        installedReplacement: true,
-      };
+    try {
+      return this.commitProjectDeletion(item);
+    } catch (error) {
+      this.resumeAutoSaveIfOpen(item);
+      throw error;
     }
-
-    const closeResult = this.close(item.id);
-    if (!closeResult.ok) {
-      throw new Error(closeResult.message);
-    }
-    return {
-      activeItem: closeResult.activeItem,
-      installedReplacement: false,
-    };
   }
 
   async restoreWorkspace(state: WorkspaceState): Promise<boolean> {
@@ -433,16 +420,23 @@ export class WorkspaceStore {
     return this.items.value.find((item) => item.id === itemId);
   }
 
-  private replaceLastDeletedItem(
-    deletedItem: WorkspaceItem,
-    replacementContext: ProjectContext,
-  ): WorkspaceItem {
+  private replaceLastDeletedItem(deletedItem: WorkspaceItem): WorkspaceItem {
+    const replacementContext = createProjectContext();
     const replacementItem = {
       id: createWorkspaceItemId(),
       context: replacementContext,
     };
+    const deletedIndex = this.items.value.findIndex(
+      (item) => item.id === deletedItem.id && item.context === deletedItem.context,
+    );
+    if (deletedIndex === -1) {
+      replacementContext.dispose();
+      throw new Error("Deleted workspace item was not found.");
+    }
 
-    this.items.value = [replacementItem];
+    const nextItems = [...this.items.value];
+    nextItems[deletedIndex] = replacementItem;
+    this.items.value = nextItems;
     this.activeItemId.value = replacementItem.id;
     setActiveProjectContext(replacementContext);
     this.autoSave.stop(deletedItem.context);
@@ -450,6 +444,37 @@ export class WorkspaceStore {
     this.autoSave.start(replacementContext);
     this.persistWorkspaceState();
     return replacementItem;
+  }
+
+  private commitProjectDeletion(item: WorkspaceItem): WorkspaceDeleteResult {
+    if (this.findItem(item.id)?.context !== item.context) {
+      return {
+        activeItem: this.activeItem,
+        installedReplacement: false,
+      };
+    }
+
+    if (this.items.value.length === 1) {
+      return {
+        activeItem: this.replaceLastDeletedItem(item),
+        installedReplacement: true,
+      };
+    }
+
+    const closeResult = this.close(item.id);
+    if (!closeResult.ok) {
+      throw new Error(closeResult.message);
+    }
+    return {
+      activeItem: closeResult.activeItem,
+      installedReplacement: false,
+    };
+  }
+
+  private resumeAutoSaveIfOpen(item: WorkspaceItem) {
+    if (this.findItem(item.id)?.context === item.context) {
+      this.autoSave.start(item.context);
+    }
   }
 
   getProjectItem(projectId: string): WorkspaceItem | undefined {

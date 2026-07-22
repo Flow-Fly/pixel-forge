@@ -149,6 +149,43 @@ describe('pf-pwa-update-toast', () => {
     await vi.waitFor(() => expect(update).toHaveBeenCalledWith(true));
   });
 
+  it('saves a project opened and dirtied while the first save is in flight', async () => {
+    const contextA = createProjectContext();
+    const contextB = createProjectContext();
+    createdContexts.push(contextA, contextB);
+    workspaceStoreMock.items.value = [{ context: contextA }];
+    let finishFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      finishFirstSave = resolve;
+    });
+    let savedContextB = false;
+    autoSaveServiceMock.saveUntilClean.mockImplementation(async (context) => {
+      if (context === contextA && !savedContextB) {
+        await firstSave;
+      }
+      if (context === contextB) {
+        savedContextB = true;
+      }
+    });
+    autoSaveServiceMock.isDirty.mockImplementation(
+      (context) => context === contextB && !savedContextB
+    );
+    const update = vi.fn().mockResolvedValue(undefined);
+    pwaStore.setUpdateHandler(update);
+    pwaStore.showUpdate();
+    const element = await createToast();
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.restart')?.click();
+    await vi.waitFor(() => {
+      expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextA);
+    });
+    workspaceStoreMock.items.value = [{ context: contextA }, { context: contextB }];
+    finishFirstSave();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(true));
+    expect(autoSaveServiceMock.saveUntilClean).toHaveBeenCalledWith(contextB);
+  });
+
   it('keeps the session open when an inactive project cannot be saved', async () => {
     const activeContext = createProjectContext();
     const inactiveContext = createProjectContext();
