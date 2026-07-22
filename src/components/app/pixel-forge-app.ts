@@ -1001,6 +1001,43 @@ export class PixelForgeApp extends BaseComponent {
     return project.name.value;
   }
 
+  private renderDeleteCurrentProjectDialog(projectName: string) {
+    return html`
+      <pf-dialog
+        ?open=${this.showDeleteCurrentDialog}
+        .closeOnBackdrop=${!this.isDeletingCurrentProject}
+        .closeOnEscape=${!this.isDeletingCurrentProject}
+        .showCloseButton=${!this.isDeletingCurrentProject}
+        width="360px"
+        @pf-close=${this.dismissDeleteCurrentProject}
+      >
+        <span slot="title">Delete Current Project</span>
+        <p>Delete "${projectName}" from this browser?</p>
+        ${this.deleteCurrentProjectError
+          ? html`<p role="alert">${this.deleteCurrentProjectError}</p>`
+          : ""}
+        <div slot="actions">
+          <button
+            type="button"
+            class="secondary"
+            ?disabled=${this.isDeletingCurrentProject}
+            @click=${this.dismissDeleteCurrentProject}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="primary"
+            ?disabled=${this.isDeletingCurrentProject}
+            @click=${this.confirmDeleteCurrentProject}
+          >
+            ${this.isDeletingCurrentProject ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </pf-dialog>
+    `;
+  }
+
   render() {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
     const isTimelineCollapsed =
@@ -1115,38 +1152,7 @@ export class PixelForgeApp extends BaseComponent {
           `
         : ""}
 
-      <pf-dialog
-        ?open=${this.showDeleteCurrentDialog}
-        .closeOnBackdrop=${!this.isDeletingCurrentProject}
-        .closeOnEscape=${!this.isDeletingCurrentProject}
-        .showCloseButton=${!this.isDeletingCurrentProject}
-        width="360px"
-        @pf-close=${this.dismissDeleteCurrentProject}
-      >
-        <span slot="title">Delete Current Project</span>
-        <p>Delete "${deleteProjectName}" from this browser?</p>
-        ${this.deleteCurrentProjectError
-          ? html`<p role="alert">${this.deleteCurrentProjectError}</p>`
-          : ""}
-        <div slot="actions">
-          <button
-            type="button"
-            class="secondary"
-            ?disabled=${this.isDeletingCurrentProject}
-            @click=${this.dismissDeleteCurrentProject}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="primary"
-            ?disabled=${this.isDeletingCurrentProject}
-            @click=${this.confirmDeleteCurrentProject}
-          >
-            ${this.isDeletingCurrentProject ? "Deleting..." : "Delete"}
-          </button>
-        </div>
-      </pf-dialog>
+      ${this.renderDeleteCurrentProjectDialog(deleteProjectName)}
 
       <pf-keyboard-shortcuts-dialog
         ?open=${this.showKeyboardShortcutsDialog}
