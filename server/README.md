@@ -204,6 +204,20 @@ image-build and runtime-smoke evidence. The local command is documented and is
 the path to re-run after Docker Desktop is repaired; this slice does not repair
 the workstation installation.
 
+## Prepare a production deployment
+
+Production remains owner-gated and is not executable from the current server
+commands. The docs-only preparation set records the proposed topology,
+permissions, cost assumptions, evidence, and stop conditions:
+
+- [Scaleway backend deployment runbook](../docs/operations/scaleway-backend-deployment.md)
+- [Scaleway access and cost controls](../docs/operations/scaleway-backend-access-and-costs.md)
+- [Scaleway evidence and sign-off templates](../docs/operations/scaleway-backend-evidence.md)
+
+The current migration command deliberately accepts only a confirmed
+non-production target. Do not bypass that interlock; production-safe migration
+targeting belongs to a separate approved code slice.
+
 ## Stop or reset local services
 
 Stop the service while preserving its local volume:
