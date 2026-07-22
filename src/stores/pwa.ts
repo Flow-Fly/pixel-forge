@@ -105,7 +105,7 @@ export class PwaStore {
     }
 
     if (this.updateActivated) {
-      return this.reloadAfterSuccessfulSave();
+      return this.handleUpdateControlling();
     }
 
     try {

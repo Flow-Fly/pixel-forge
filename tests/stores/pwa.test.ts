@@ -102,6 +102,37 @@ describe('PwaStore update flow', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it('waits for the final save when control changes during the initial save', async () => {
+    let finishInitialSave!: () => void;
+    let finishFinalSave!: () => void;
+    const initialSave = new Promise<void>((resolve) => {
+      finishInitialSave = resolve;
+    });
+    const finalSave = new Promise<void>((resolve) => {
+      finishFinalSave = resolve;
+    });
+    const save = vi.fn()
+      .mockReturnValueOnce(initialSave)
+      .mockReturnValueOnce(finalSave);
+    const update = vi.fn().mockResolvedValue(undefined);
+    store.setUpdateHandler(update);
+    store.showUpdate();
+
+    const restart = store.restartWithUpdate(save);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const controlling = store.handleUpdateControlling();
+
+    finishInitialSave();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(reload).not.toHaveBeenCalled();
+
+    finishFinalSave();
+    await expect(controlling).resolves.toBe(true);
+    await expect(restart).resolves.toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
   it('keeps the updated session open and retryable when the final save fails', async () => {
     const save = vi.fn()
       .mockResolvedValueOnce(undefined)
