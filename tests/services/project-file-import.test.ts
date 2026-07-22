@@ -41,6 +41,7 @@ function project(name = 'Imported project'): ProjectFile {
 }
 
 function dependencies(opened = true) {
+  const telemetry = { record: vi.fn() };
   const projectLibrary = {
     importProjectFile: vi.fn(async () => 'imported-id'),
     deleteProject: vi.fn(async () => undefined),
@@ -61,7 +62,7 @@ function dependencies(opened = true) {
     ),
   };
 
-  return { projectLibrary, workspace };
+  return { projectLibrary, workspace, telemetry };
 }
 
 describe('ProjectFileImportService', () => {
@@ -80,6 +81,10 @@ describe('ProjectFileImportService', () => {
     expect(deps.workspace.openProject).toHaveBeenCalledWith('imported-id', {
       activate: true,
       saveActiveContext: true,
+    });
+    expect(deps.telemetry.record).toHaveBeenCalledWith({
+      name: 'project_created',
+      dimensions: { source: 'import' },
     });
   });
 
@@ -220,5 +225,6 @@ describe('ProjectFileImportService', () => {
     await expect(service.importFile(file)).rejects.toThrow('Could not hydrate project');
 
     expect(deps.projectLibrary.deleteProject).toHaveBeenCalledWith('imported-id');
+    expect(deps.telemetry.record).not.toHaveBeenCalled();
   });
 });

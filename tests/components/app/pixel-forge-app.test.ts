@@ -8,6 +8,7 @@ import {
 } from '../../../src/stores/project-context';
 import { autoSaveService } from '../../../src/services/auto-save';
 import { projectLibrary } from '../../../src/services/project-library';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 const projectRepositoryMock = vi.hoisted(() => ({
   getLastOpenedProjectId: vi.fn(),
@@ -233,6 +234,7 @@ describe('pixel-forge-app project dialogs', () => {
   });
 
   it('restores saved workspace state during startup', async () => {
+    const record = vi.spyOn(productTelemetry, 'record');
     await import('../../../src/components/app/pixel-forge-app');
     const workspaceState = {
       openProjectIds: ['project-a', 'project-b'],
@@ -255,6 +257,10 @@ describe('pixel-forge-app project dialogs', () => {
     expect(projectRepositoryMock.getLastOpenedProjectId).not.toHaveBeenCalled();
     expect(element.hasLibraryProject).toBe(true);
     expect(element.showProjectBrowser).toBe(false);
+    expect(record).toHaveBeenCalledWith({
+      name: 'project_opened',
+      dimensions: { source: 'session_restore' },
+    });
   });
 
   it('starts in the editor when no saved project can be restored', async () => {

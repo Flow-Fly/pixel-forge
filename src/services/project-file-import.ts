@@ -2,6 +2,7 @@ import type { ProjectFileInput } from '../types/project';
 import { projectLibrary, type ProjectLibraryService } from './project-library';
 import { workspaceStore, type WorkspaceStore } from '../stores/workspace';
 import { createProjectContext } from '../stores/project-context';
+import { productTelemetry, type TelemetryClient } from './telemetry';
 
 type ImportProjectLibrary = Pick<ProjectLibraryService, 'deleteProject' | 'importProjectFile'>;
 type ImportWorkspace = Pick<WorkspaceStore, 'openProject'>;
@@ -26,16 +27,19 @@ export type ProjectFileImportOutcome =
 export interface ProjectFileImportDependencies {
   projectLibrary: ImportProjectLibrary;
   workspace: ImportWorkspace;
+  telemetry?: TelemetryClient;
 }
 
 export class ProjectFileImportService {
   private readonly projectLibrary: ImportProjectLibrary;
   private readonly workspace: ImportWorkspace;
+  private readonly telemetry: TelemetryClient;
   private importQueue: Promise<void> = Promise.resolve();
 
   constructor(dependencies: ProjectFileImportDependencies) {
     this.projectLibrary = dependencies.projectLibrary;
     this.workspace = dependencies.workspace;
+    this.telemetry = dependencies.telemetry ?? productTelemetry;
   }
 
   async importFile(file: File): Promise<ProjectFileImportResult> {
@@ -53,11 +57,11 @@ export class ProjectFileImportService {
       throw error;
     }
 
-    if (openResult.ok) {
-      return { projectId, opened: true };
-    }
-
-    return { projectId, opened: false };
+    this.telemetry.record({
+      name: 'project_created',
+      dimensions: { source: 'import' },
+    });
+    return { projectId, opened: openResult.ok };
   }
 
   importFiles(files: Iterable<File>): Promise<ProjectFileImportOutcome[]> {

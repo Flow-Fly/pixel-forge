@@ -12,6 +12,7 @@ import {
   type ProjectContext,
 } from '../../../src/stores/project-context';
 import { settingsStore } from '../../../src/stores/settings';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 const createdContexts: ProjectContext[] = [];
 
@@ -41,6 +42,7 @@ describe('pf-export-dialog view-effect export', () => {
   });
 
   it('exports the project context that opened the dialog', async () => {
+    const record = vi.spyOn(productTelemetry, 'record');
     const contextB = createProjectContext();
     contextB.project.name.value = 'Tab B';
     createdContexts.push(contextB);
@@ -63,6 +65,10 @@ describe('pf-export-dialog view-effect export', () => {
     });
 
     expect(saveCompressed).toHaveBeenCalledWith(projectB, 'Tab B.pf');
+    expect(record).toHaveBeenCalledWith({
+      name: 'export_completed',
+      dimensions: { format: 'pixel_forge' },
+    });
   });
 
   it('keeps the opt-in control hidden without an active view effect', async () => {

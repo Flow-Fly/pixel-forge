@@ -34,6 +34,7 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 import { projectRepository } from '../../src/services/persistence/indexed-db';
 import { autoSaveService } from '../../src/services/auto-save';
 import { createProjectThumbnail } from '../../src/services/project-thumbnail';
+import { productTelemetry } from '../../src/services/telemetry';
 import { historyStore, type Command } from '../../src/stores/history';
 import {
   createProjectContext,
@@ -105,6 +106,7 @@ describe('AutoSaveService', () => {
   });
 
   it('saves (debounced) after a command is executed', async () => {
+    const record = vi.spyOn(productTelemetry, 'record');
     await historyStore.execute(makeCommand());
     // Let the effect microtask observe the version bump
     await Promise.resolve();
@@ -118,6 +120,10 @@ describe('AutoSaveService', () => {
       thumbnail: new Uint8Array([9, 9]),
     });
     expect(createProjectThumbnail).toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith({
+      name: 'project_saved',
+      dimensions: { destination: 'local_library' },
+    });
     expect(autoSaveService.isDirty()).toBe(false);
   });
 

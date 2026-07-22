@@ -8,6 +8,7 @@ import {
   clampProjectDimension,
 } from '../../services/project-defaults';
 import { workspaceStore } from '../../stores/workspace';
+import { productTelemetry } from '../../services/telemetry';
 import '../ui/pf-dialog';
 
 @customElement('pf-new-project-dialog')
@@ -203,6 +204,11 @@ export class PFNewProjectDialog extends BaseComponent {
     if (!result.ok) {
       throw new Error(result.message);
     }
+
+    productTelemetry.record({
+      name: 'project_created',
+      dimensions: { source: 'blank' },
+    });
 
     this.close();
 

@@ -58,6 +58,7 @@ import {
 } from "../../stores/sidebar-width";
 import { log } from "../../utils/log";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
+import { productTelemetry } from "../../services/telemetry";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
 const SIDEBAR_KEYBOARD_STEP = 16;
@@ -378,6 +379,7 @@ export class PixelForgeApp extends BaseComponent {
   private previousBodyUserSelect = "";
   private warningTimer: number | null = null;
   private fileImportTimer: number | null = null;
+  private editorLoadedTimer: number | null = null;
   private fileDropHandlingStarted = false;
   private deleteCurrentProjectContext: ProjectContext | null = null;
   private exportProjectContext: ProjectContext | null = null;
@@ -447,6 +449,13 @@ export class PixelForgeApp extends BaseComponent {
       if (!this.isConnected) return;
       pwaFileHandling.registerLaunchConsumer();
       this.startProjectFileDropHandling();
+      this.editorLoadedTimer = window.setTimeout(() => {
+        productTelemetry.record({
+          name: "editor_loaded",
+          dimensions: { entryPoint: "direct" },
+        });
+        this.editorLoadedTimer = null;
+      });
     });
   }
 
@@ -671,6 +680,10 @@ export class PixelForgeApp extends BaseComponent {
         workspaceState &&
         (await workspaceStore.restoreWorkspace(workspaceState))
       ) {
+        productTelemetry.record({
+          name: "project_opened",
+          dimensions: { source: "session_restore" },
+        });
         this.hasLibraryProject = true;
         this.projectSelectionRequired = false;
         this.showProjectBrowser = false;
@@ -691,6 +704,10 @@ export class PixelForgeApp extends BaseComponent {
           activeProjectId: projectId,
         }))
       ) {
+        productTelemetry.record({
+          name: "project_opened",
+          dimensions: { source: "session_restore" },
+        });
         historyStore.clear();
         this.hasLibraryProject = true;
         this.projectSelectionRequired = false;
@@ -710,6 +727,10 @@ export class PixelForgeApp extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.editorLoadedTimer !== null) {
+      clearTimeout(this.editorLoadedTimer);
+      this.editorLoadedTimer = null;
+    }
     this.stopSidebarResize(false);
     window.removeEventListener("resize", this.handleWindowResize);
     document.removeEventListener("mousemove", this.handleTimelineResizeMove);

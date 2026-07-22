@@ -18,6 +18,7 @@ import {
   renderViewEffectToCanvas,
 } from "../../services/view-effects";
 import { log } from "../../utils/log";
+import { productTelemetry, type ProductEventDimensions } from "../../services/telemetry";
 // Dynamic imports for export services - loaded on demand to reduce initial bundle
 // import { exportSpritesheet } from "../../services/spritesheet-export";
 // import { exportAnimatedWebP } from "../../services/webp-animation";
@@ -343,6 +344,10 @@ export class PFExportDialog extends BaseComponent {
     try {
       pipeline = this.createExportPipeline();
       await this.runExport(frameIds, pipeline);
+      productTelemetry.record({
+        name: "export_completed",
+        dimensions: { format: telemetryExportFormat(this.format) },
+      });
       this.close();
     } catch (error) {
       log.error("Failed to export view-effect copy:", error);
@@ -765,6 +770,23 @@ export class PFExportDialog extends BaseComponent {
         </div>
       </pf-dialog>
     `;
+  }
+}
+
+function telemetryExportFormat(
+  format: ExportFormat
+): ProductEventDimensions["export_completed"]["format"] {
+  switch (format) {
+    case "png":
+    case "spritesheet":
+      return "png";
+    case "webp":
+    case "webp-animated":
+      return "webp";
+    case "aseprite":
+      return "aseprite";
+    case "pixelforge":
+      return "pixel_forge";
   }
 }
 
