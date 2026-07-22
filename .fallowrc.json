@@ -2,6 +2,7 @@
   "$schema": "https://docs.fallow.tools/schema/fallowrc.json",
   "entry": [
     "src/main.ts",
+    "src/services/telemetry.ts",
     "shared/src/index.ts",
     "server/src/index.ts",
     "server/src/commands/database-compatibility.ts",
