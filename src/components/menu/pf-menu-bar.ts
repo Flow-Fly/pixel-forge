@@ -668,7 +668,9 @@ export class PFMenuBar extends BaseComponent {
   }
 
   private async commitNameEdit(e: Event) {
-    const context = this.editingProjectContext ?? getActiveProjectContext();
+    const context = this.editingProjectContext;
+    if (!context) return;
+
     const input = e.target as HTMLInputElement;
     const newName = input.value.trim() || "Untitled";
     this.editingProjectContext = null;
@@ -680,6 +682,7 @@ export class PFMenuBar extends BaseComponent {
   render() {
     const context = getActiveProjectContext();
     const projectName = context.project.name.value;
+    const editingProjectName = this.editingProjectContext?.project.name.value ?? "";
     const guidedProject = context.guidedDrawing.active;
     const activeCrtPreset = this.getActiveCrtPreset();
     const timelineVisible = !panelStore.isCollapsed("timeline");
@@ -696,7 +699,7 @@ export class PFMenuBar extends BaseComponent {
               <input
                 class="project-name-input"
                 type="text"
-                .value=${projectName}
+                .value=${editingProjectName}
                 @blur=${this.commitNameEdit}
                 @keydown=${this.handleNameKeydown}
               />

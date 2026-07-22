@@ -665,7 +665,6 @@ export class PFProjectBrowser extends BaseComponent {
       }
     } catch (error) {
       const message = this.errorText(error, 'Failed to delete project.');
-      this.errorMessage = message;
       this.deleteErrorMessage = message;
     } finally {
       this.isDeletingProject = false;

@@ -546,6 +546,10 @@ describe('pf-project-browser', () => {
     const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
     requestNativeCancel(deleteDialog);
     await settle(element);
+    expect(
+      element.shadowRoot?.querySelector('.browser-dialog [role="alert"]')
+    ).toBeNull();
+
     projectAction(element.shadowRoot!, 'Second Project', 'Delete')?.click();
     await settle(element);
 
