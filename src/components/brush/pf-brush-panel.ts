@@ -1,6 +1,7 @@
 import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
+import { checkboxStyles } from "../../styles/editor-control-styles";
 import { brushStore } from "../../stores/brush";
 import type { Brush, BrushImageData } from "../../types/brush";
 import {
@@ -13,7 +14,7 @@ import "../ui/pf-button";
 
 @customElement("pf-brush-panel")
 export class PFBrushPanel extends BaseComponent {
-  static styles = css`
+  static styles = [css`
     :host {
       display: flex;
       flex-direction: column;
@@ -106,10 +107,7 @@ export class PFBrushPanel extends BaseComponent {
       cursor: pointer;
     }
 
-    .brush-options input[type="checkbox"] {
-      cursor: pointer;
-    }
-  `;
+  `, checkboxStyles];
 
   @state() private editingBrush: Brush | null = null;
   @state() private showCreateOverlay: boolean = false;

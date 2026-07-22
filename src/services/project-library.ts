@@ -12,7 +12,12 @@ import {
 } from './project-defaults';
 import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { DB32_COLORS, PALETTE_BY_ID } from '../stores/palette/types';
-import { PROJECT_VERSION, type ProjectFile } from '../types/project';
+import {
+  PROJECT_VERSION,
+  decodeProjectFile,
+  type ProjectFile,
+  type ProjectFileInput,
+} from '../types/project';
 
 export type CreateProjectOptions = {
   name?: string;
@@ -27,10 +32,6 @@ export type CreateProjectSettings = {
 
 export type OpenProjectSettings = {
   saveCurrent?: boolean;
-  context?: ProjectContext;
-};
-
-export type DeleteProjectSettings = {
   context?: ProjectContext;
 };
 
@@ -85,6 +86,18 @@ export class ProjectLibraryService {
     return id;
   }
 
+  /** Persist an imported project under a fresh identity without opening it. */
+  async importProjectFile(project: ProjectFileInput): Promise<string> {
+    const id = uuidv4();
+    const canonicalProject = decodeProjectFile(structuredClone(project));
+
+    await this.repository.save(id, {
+      ...canonicalProject,
+      version: PROJECT_VERSION,
+    });
+    return id;
+  }
+
   async duplicateProject(id: string): Promise<string> {
     const project = await this.getProjectOrThrow(id);
     const sourceMeta = await this.findProjectMeta(id);
@@ -106,12 +119,8 @@ export class ProjectLibraryService {
     });
   }
 
-  async deleteProject(id: string, settings: DeleteProjectSettings = {}): Promise<void> {
-    const context = settings.context ?? defaultProjectContext;
-    if (id === context.project.id.value) {
-      autoSaveService.clearPendingSave(context);
-    }
-
+  // fallow-ignore-next-line unused-class-member -- Called through workspace and import dependency interfaces.
+  async deleteProject(id: string): Promise<void> {
     await this.repository.delete(id);
   }
 

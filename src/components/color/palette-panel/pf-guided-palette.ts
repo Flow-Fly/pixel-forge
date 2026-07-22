@@ -239,6 +239,28 @@ export class PFGuidedPalette extends BaseComponent {
       white-space: nowrap;
     }
 
+    .shortcut-hint {
+      justify-self: start;
+      padding-inline: 3px;
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: 2px;
+      background: var(--pf-color-bg-input);
+      color: var(--pf-color-text-secondary);
+      font-family: inherit;
+      font-size: 8px;
+      font-weight: 600;
+      line-height: 11px;
+      white-space: nowrap;
+    }
+
+    @media (forced-colors: active) {
+      .shortcut-hint {
+        border-color: ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+      }
+    }
+
     .artist-section {
       display: grid;
       gap: 7px;
@@ -317,12 +339,13 @@ export class PFGuidedPalette extends BaseComponent {
           const guideNumber = index + 1;
           const remaining = progress.remainingByNumber[guideNumber] ?? 0;
           const selected = color.toLowerCase() === primaryColor;
+          const shortcutLabel = guideNumber <= 9 ? `, number key ${guideNumber}` : '';
           return html`
             <button
               class="guide-color"
               type="button"
               aria-pressed=${String(selected)}
-              aria-label="Guide color ${guideNumber}, ${color}, ${remaining} cells remaining"
+              aria-label="Guide color ${guideNumber}, ${color}, ${remaining} cells remaining${shortcutLabel}"
               @click=${() => this.selectColor(color)}
             >
               <span class="chip-wrap" aria-hidden="true">
@@ -332,6 +355,9 @@ export class PFGuidedPalette extends BaseComponent {
               <span class="color-copy" aria-hidden="true">
                 <span class="hex">${color}</span>
                 <span class="remaining">${remaining} left</span>
+                ${guideNumber <= 9
+                  ? html`<kbd class="shortcut-hint">Key ${guideNumber}</kbd>`
+                  : ''}
               </span>
             </button>
           `;

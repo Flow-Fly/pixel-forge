@@ -43,11 +43,11 @@ type WorkspaceLimitFailure = {
 
 type WorkspaceProjectLibrary = Pick<
   ProjectLibraryService,
-  "openProject" | "createProject" | "createProjectFromFile"
+  "openProject" | "createProject" | "createProjectFromFile" | "deleteProject"
 >;
 type WorkspaceAutoSave = Pick<
   typeof autoSaveService,
-  "saveNow" | "start" | "stop"
+  "pause" | "saveNow" | "start" | "stop"
 >;
 type WorkspaceStatePersistence = Pick<ProjectRepository, "setWorkspaceState">;
 
@@ -88,6 +88,11 @@ export type WorkspaceProjectResult =
     }
   | WorkspaceLimitFailure;
 
+export interface WorkspaceDeleteResult {
+  activeItem: WorkspaceItem;
+  installedReplacement: boolean;
+}
+
 interface WorkspaceStoreOptions {
   initialContext?: ProjectContext;
   initialItemId?: string;
@@ -117,6 +122,7 @@ export class WorkspaceStore {
   private readonly projectLibrary: WorkspaceProjectLibrary;
   private readonly autoSave: WorkspaceAutoSave;
   private readonly workspaceState: WorkspaceStatePersistence;
+  private readonly projectMutations = new Map<string, Promise<void>>();
   private isRestoringWorkspace = false;
 
   constructor(options: WorkspaceStoreOptions = {}) {
@@ -164,6 +170,15 @@ export class WorkspaceStore {
   async openProject(
     projectId: string,
     options: WorkspaceProjectOptions = {},
+  ): Promise<WorkspaceProjectResult> {
+    return this.runProjectMutation(projectId, () =>
+      this.openProjectWithoutMutationGate(projectId, options),
+    );
+  }
+
+  private async openProjectWithoutMutationGate(
+    projectId: string,
+    options: WorkspaceProjectOptions,
   ): Promise<WorkspaceProjectResult> {
     const existingItem = this.getProjectItem(projectId);
     if (existingItem) {
@@ -347,6 +362,54 @@ export class WorkspaceStore {
     return this.close(itemId);
   }
 
+  async deleteProject(projectId: string): Promise<WorkspaceDeleteResult> {
+    return this.runProjectMutation(projectId, () =>
+      this.deleteProjectWithoutMutationGate(projectId),
+    );
+  }
+
+  private async deleteProjectWithoutMutationGate(
+    projectId: string,
+  ): Promise<WorkspaceDeleteResult> {
+    const item = this.getProjectItem(projectId);
+    if (!item) {
+      await this.projectLibrary.deleteProject(projectId);
+      return {
+        activeItem: this.activeItem,
+        installedReplacement: false,
+      };
+    }
+
+    await this.autoSave.pause(item.context);
+
+    try {
+      await this.projectLibrary.deleteProject(projectId);
+      return this.commitProjectDeletion(item);
+    } catch (error) {
+      this.resumeAutoSaveIfOpen(item);
+      throw error;
+    }
+  }
+
+  private runProjectMutation<Result>(
+    projectId: string,
+    mutate: () => Promise<Result>,
+  ): Promise<Result> {
+    const previousMutation = this.projectMutations.get(projectId) ?? Promise.resolve();
+    const mutation = previousMutation.catch(() => {}).then(mutate);
+    const settledMutation = mutation.then(
+      () => {},
+      () => {},
+    );
+    this.projectMutations.set(projectId, settledMutation);
+    void settledMutation.then(() => {
+      if (this.projectMutations.get(projectId) === settledMutation) {
+        this.projectMutations.delete(projectId);
+      }
+    });
+    return mutation;
+  }
+
   async restoreWorkspace(state: WorkspaceState): Promise<boolean> {
     const restorePlan = this.createRestorePlan(state);
     if (restorePlan.loadProjectIds.length === 0) return false;
@@ -386,6 +449,62 @@ export class WorkspaceStore {
 
   private findItem(itemId: string): WorkspaceItem | undefined {
     return this.items.value.find((item) => item.id === itemId);
+  }
+
+  private replaceLastDeletedItem(deletedItem: WorkspaceItem): WorkspaceItem {
+    const deletedIndex = this.items.value.findIndex(
+      (item) => item.id === deletedItem.id && item.context === deletedItem.context,
+    );
+    if (deletedIndex === -1) {
+      throw new Error("Deleted workspace item was not found.");
+    }
+
+    const replacementContext = createProjectContext();
+    const replacementItem = {
+      id: createWorkspaceItemId(),
+      context: replacementContext,
+    };
+    const nextItems = [...this.items.value];
+    nextItems[deletedIndex] = replacementItem;
+    this.items.value = nextItems;
+    this.activeItemId.value = replacementItem.id;
+    setActiveProjectContext(replacementContext);
+    this.autoSave.stop(deletedItem.context);
+    deletedItem.context.dispose();
+    this.autoSave.start(replacementContext);
+    this.persistWorkspaceState();
+    return replacementItem;
+  }
+
+  private commitProjectDeletion(item: WorkspaceItem): WorkspaceDeleteResult {
+    if (this.findItem(item.id)?.context !== item.context) {
+      return {
+        activeItem: this.activeItem,
+        installedReplacement: false,
+      };
+    }
+
+    if (this.items.value.length === 1) {
+      return {
+        activeItem: this.replaceLastDeletedItem(item),
+        installedReplacement: true,
+      };
+    }
+
+    const closeResult = this.close(item.id);
+    if (!closeResult.ok) {
+      throw new Error(closeResult.message);
+    }
+    return {
+      activeItem: closeResult.activeItem,
+      installedReplacement: false,
+    };
+  }
+
+  private resumeAutoSaveIfOpen(item: WorkspaceItem) {
+    if (this.findItem(item.id)?.context === item.context) {
+      this.autoSave.start(item.context);
+    }
   }
 
   getProjectItem(projectId: string): WorkspaceItem | undefined {
@@ -428,7 +547,10 @@ export class WorkspaceStore {
       id: projectId,
       activate: options.activate,
     });
-    if (!result.ok) return result;
+    if (!result.ok) {
+      context.dispose();
+      return result;
+    }
 
     this.autoSave.start(context);
     return { ok: true, item: result.item, projectId };

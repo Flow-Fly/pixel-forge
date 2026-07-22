@@ -1,0 +1,20 @@
+{
+  "name": "@pixel-forge/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "npm run build && vitest run --root .. tests/shared/project-contract.test.ts tests/shared/product-events.test.ts && node tests/node-import.mjs",
+    "test:node": "node tests/node-import.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

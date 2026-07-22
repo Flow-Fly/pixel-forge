@@ -19,10 +19,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
           cache: npm
 
       - run: npm ci
+
+      - name: Shared workspace checks
+        run: npm run shared:check
+
+      - name: Server workspace checks
+        run: npm run server:check
+
+      - name: Telemetry worker checks
+        run: npm run telemetry:typecheck && npm run telemetry:test && npm run telemetry:dry-run
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -40,5 +49,18 @@ jobs:
         uses: fallow-rs/fallow@v2
         with:
           command: audit
+          version: 3.2.0
           artifacts-dir: .fallow/ci
           no-cache: true
+
+  server-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PIXEL_FORGE_IMAGE_REVISION: ${{ github.sha }}
+      PIXEL_FORGE_SMOKE_PROJECT_NAME: pixel-forge-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and smoke the linux/amd64 server image
+        run: npm run server:container:smoke

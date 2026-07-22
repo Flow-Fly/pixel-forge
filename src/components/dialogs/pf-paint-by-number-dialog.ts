@@ -1,6 +1,7 @@
 import { css, html } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
+import { checkboxStyles } from '../../styles/editor-control-styles';
 import {
   generateNumberedGuide,
   type NumberedGuide,
@@ -27,7 +28,7 @@ const GUIDE_PRESETS = [
 
 @customElement('pf-paint-by-number-dialog')
 export class PFPaintByNumberDialog extends BaseComponent {
-  static styles = css`
+  static styles = [css`
     :host {
       color: var(--pf-color-text-main);
     }
@@ -247,7 +248,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
         grid-template-columns: 1fr 1fr;
       }
     }
-  `;
+  `, checkboxStyles];
 
   @property({ type: Boolean, reflect: true }) open = false;
   @state() private sourceFile: File | null = null;

@@ -3,7 +3,7 @@ import type { Rect } from '../types/geometry';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
 import { writeIndexRegion } from '../utils/buffer-region';
 
-type DrawingCommandContext = Pick<ProjectContext, 'animation' | 'dirtyRect' | 'layers'>;
+type DrawingCommandContext = Pick<ProjectContext, 'animation' | 'dirtyRect'>;
 
 /**
  * Memory-efficient drawing command that stores only the dirty region.
@@ -43,6 +43,9 @@ export class OptimizedDrawingCommand implements Command {
   }
   get drawLayerId(): string {
     return this.layerId;
+  }
+  get drawFrameId(): string {
+    return this.frameId;
   }
 
   constructor(
@@ -85,50 +88,29 @@ export class OptimizedDrawingCommand implements Command {
   }
 
   execute(): void {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer?.canvas) return;
-
-    const ctx = layer.canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Create ImageData from stored array
-    const imageData = new ImageData(
-      new Uint8ClampedArray(this.newData), // Clone to create valid ImageData
-      this.bounds.width,
-      this.bounds.height
-    );
-    ctx.putImageData(imageData, this.bounds.x, this.bounds.y);
-
-    // Restore index buffer data if present
-    if (this.newIndexData) {
-      this.restoreIndexBufferRegion(this.newIndexData);
-    }
-
-    // Mark dirty for re-render
-    this.context.dirtyRect.markDirty(this.bounds);
+    this.applyData(this.newData, this.newIndexData);
   }
 
   undo(): void {
-    const layer = this.context.layers.layers.value.find((l) => l.id === this.layerId);
-    if (!layer?.canvas) return;
+    this.applyData(this.previousData, this.previousIndexData);
+  }
 
-    const ctx = layer.canvas.getContext('2d');
+  private applyData(pixelData: Uint8ClampedArray, indexData: Uint8Array | null): void {
+    const canvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
-    // Create ImageData from stored array
     const imageData = new ImageData(
-      new Uint8ClampedArray(this.previousData), // Clone to create valid ImageData
+      new Uint8ClampedArray(pixelData),
       this.bounds.width,
       this.bounds.height
     );
     ctx.putImageData(imageData, this.bounds.x, this.bounds.y);
 
-    // Restore index buffer data if present
-    if (this.previousIndexData) {
-      this.restoreIndexBufferRegion(this.previousIndexData);
+    if (indexData) {
+      this.restoreIndexBufferRegion(indexData);
     }
 
-    // Mark dirty for re-render
     this.context.dirtyRect.markDirty(this.bounds);
   }
 

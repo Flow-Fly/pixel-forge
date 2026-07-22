@@ -19,6 +19,7 @@ const activeProjectContextMock = vi.hoisted(() => ({
 }));
 
 const workspaceStoreMock = vi.hoisted(() => ({
+  deleteProject: vi.fn(),
   openProject: vi.fn(),
   getProjectItem: vi.fn(),
 }));
@@ -41,6 +42,7 @@ vi.mock('../../../src/stores/workspace', () => ({
 
 import '../../../src/components/app/pf-project-browser';
 import type { PFProjectBrowser } from '../../../src/components/app/pf-project-browser';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 let originalShowModal: HTMLDialogElement['showModal'] | undefined;
 let originalClose: HTMLDialogElement['close'] | undefined;
@@ -192,6 +194,10 @@ describe('pf-project-browser', () => {
       item: {},
       projectId: 'open-project',
     });
+    workspaceStoreMock.deleteProject.mockResolvedValue({
+      activeItem: { context: activeProjectContextMock },
+      installedReplacement: false,
+    });
     workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) =>
       projectId === 'open-project' ? { context: activeProjectContextMock } : undefined
     );
@@ -210,6 +216,10 @@ describe('pf-project-browser', () => {
     const dialog = projectDialog(element.shadowRoot!);
     expect(dialog?.open).toBe(true);
     expect(dialog?.getAttribute('closedby')).toBe('none');
+    expect(dialog?.getAttribute('data-scrollbar')).toBe('both');
+    expect(element.shadowRoot?.querySelector('.project-list')?.getAttribute('data-scrollbar')).toBe(
+      'vertical'
+    );
     expect(element.shadowRoot?.textContent).toContain('Project Library');
     expect(element.shadowRoot?.textContent).toContain('Open Project');
     expect(element.shadowRoot?.textContent).toContain('Second Project');
@@ -322,6 +332,7 @@ describe('pf-project-browser', () => {
   });
 
   it('opens a project and emits project-opened', async () => {
+    const record = vi.spyOn(productTelemetry, 'record');
     const element = await createBrowser();
     let opened = false;
     element.addEventListener('project-opened', () => {
@@ -335,6 +346,10 @@ describe('pf-project-browser', () => {
       saveActiveContext: false,
     });
     expect(opened).toBe(true);
+    expect(record).toHaveBeenCalledWith({
+      name: 'project_opened',
+      dimensions: { source: 'library' },
+    });
   });
 
   it('renames the active open project through its context', async () => {
@@ -422,6 +437,27 @@ describe('pf-project-browser', () => {
     expect(projectLibraryMock.listProjects).toHaveBeenCalledTimes(2);
   });
 
+  it('saves a targeted inactive open project before duplicating it', async () => {
+    const inactiveProjectContext = {
+      project: {
+        id: { value: 'second-project' },
+        name: { value: 'Second Project' },
+      },
+    };
+    workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) => {
+      if (projectId === 'open-project') return { context: activeProjectContextMock };
+      if (projectId === 'second-project') return { context: inactiveProjectContext };
+      return undefined;
+    });
+    const element = await createBrowser();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Duplicate')?.click();
+    await settle(element);
+
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(inactiveProjectContext);
+    expect(projectLibraryMock.duplicateProject).toHaveBeenCalledWith('second-project');
+  });
+
   it('confirms deletion before deleting a project', async () => {
     activeProjectContextMock.project.id.value = 'different-project';
     const element = await createBrowser();
@@ -429,17 +465,125 @@ describe('pf-project-browser', () => {
     buttonWithText(element.shadowRoot!, 'Delete')?.click();
     await element.updateComplete;
 
-    expect(projectLibraryMock.deleteProject).not.toHaveBeenCalled();
+    expect(workspaceStoreMock.deleteProject).not.toHaveBeenCalled();
+    expect(
+      element.shadowRoot?.querySelector('.delete-dialog')?.getAttribute('data-scrollbar')
+    ).toBe('vertical');
 
     confirmDeleteButton(element.shadowRoot!)?.click();
     await settle(element);
 
-    expect(projectLibraryMock.deleteProject).toHaveBeenCalledWith('open-project', {
-      context: activeProjectContextMock,
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('open-project');
+  });
+
+  it('guards project deletion while the request is pending', async () => {
+    let finishDelete!: () => void;
+    workspaceStoreMock.deleteProject.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDelete = () =>
+            resolve({
+              activeItem: { context: activeProjectContextMock },
+              installedReplacement: false,
+            });
+        })
+    );
+    const element = await createBrowser();
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await element.updateComplete;
+    const deleteButton = confirmDeleteButton(element.shadowRoot!);
+    deleteButton?.click();
+    deleteButton?.click();
+    await element.updateComplete;
+
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledOnce();
+    expect(deleteDialog?.open).toBe(true);
+    expect(deleteDialog?.getAttribute('closedby')).toBe('none');
+    expect(confirmDeleteButton(element.shadowRoot!)?.disabled).toBe(true);
+    expect(confirmDeleteButton(element.shadowRoot!)?.textContent).toContain('Deleting...');
+
+    requestNativeCancel(deleteDialog);
+    clickNativeBackdrop(deleteDialog);
+    expect(deleteDialog?.open).toBe(true);
+
+    finishDelete();
+    await settle(element);
+
+    expect(deleteDialog?.open).toBe(false);
+  });
+
+  it('keeps a delete failure visible and available to retry', async () => {
+    workspaceStoreMock.deleteProject.mockRejectedValueOnce(new Error('storage failed'));
+    const element = await createBrowser();
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await element.updateComplete;
+    confirmDeleteButton(element.shadowRoot!)?.click();
+    await settle(element);
+
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    expect(deleteDialog?.open).toBe(true);
+    expect(deleteDialog?.querySelector('[role="alert"]')?.textContent).toContain(
+      'storage failed'
+    );
+    expect(confirmDeleteButton(element.shadowRoot!)?.disabled).toBe(false);
+  });
+
+  it('clears a stale delete failure before opening a new confirmation', async () => {
+    workspaceStoreMock.deleteProject.mockRejectedValueOnce(new Error('first delete failed'));
+    const element = await createBrowser();
+
+    buttonWithText(element.shadowRoot!, 'Delete')?.click();
+    await element.updateComplete;
+    confirmDeleteButton(element.shadowRoot!)?.click();
+    await settle(element);
+    expect(element.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'first delete failed'
+    );
+
+    const deleteDialog = element.shadowRoot!.querySelector<HTMLDialogElement>('.delete-dialog');
+    requestNativeCancel(deleteDialog);
+    await settle(element);
+    expect(
+      element.shadowRoot?.querySelector('.browser-dialog [role="alert"]')
+    ).toBeNull();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Delete')?.click();
+    await settle(element);
+
+    expect(element.shadowRoot?.querySelector('[role="alert"]')).toBeNull();
+    expect(deleteDialog?.open).toBe(true);
+  });
+
+  it('routes inactive open project deletion through the workspace lifecycle', async () => {
+    const inactiveProjectContext = {
+      project: {
+        id: { value: 'second-project' },
+        name: { value: 'Second Project' },
+      },
+    };
+    workspaceStoreMock.getProjectItem.mockImplementation((projectId: string) => {
+      if (projectId === 'open-project') return { context: activeProjectContextMock };
+      if (projectId === 'second-project') return { context: inactiveProjectContext };
+      return undefined;
     });
+    const element = await createBrowser();
+
+    projectAction(element.shadowRoot!, 'Second Project', 'Delete')?.click();
+    await element.updateComplete;
+    confirmDeleteButton(element.shadowRoot!)?.click();
+    await settle(element);
+
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('second-project');
   });
 
   it('emits current-project-deleted when the open project is deleted', async () => {
+    workspaceStoreMock.deleteProject.mockResolvedValue({
+      activeItem: { context: {} },
+      installedReplacement: true,
+    });
     const element = await createBrowser();
     let deletedCurrent = false;
     element.addEventListener('current-project-deleted', () => {

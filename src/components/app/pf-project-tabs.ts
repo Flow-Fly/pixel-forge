@@ -2,6 +2,7 @@ import { html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 import {
   WORKSPACE_OPEN_ITEM_LIMIT,
   workspaceItemLimitMessage,
@@ -12,8 +13,11 @@ import {
 @customElement('pf-project-tabs')
 export class PFProjectTabs extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: block;
+      container-type: inline-size;
       border-bottom: 1px solid var(--pf-color-border);
       background: linear-gradient(180deg, rgba(17, 21, 28, 0.96), rgba(10, 13, 18, 0.92));
       box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
@@ -29,6 +33,7 @@ export class PFProjectTabs extends BaseComponent {
 
     .tab-list {
       display: flex;
+      flex: 1 1 auto;
       align-items: end;
       gap: 4px;
       min-width: 0;
@@ -36,11 +41,11 @@ export class PFProjectTabs extends BaseComponent {
       padding: 0;
       list-style: none;
       overflow-x: auto;
-      scrollbar-width: thin;
     }
 
     .tab-item {
       display: flex;
+      flex: 0 0 auto;
       align-items: stretch;
       min-width: 0;
       border: 1px solid var(--pf-color-border);
@@ -105,6 +110,7 @@ export class PFProjectTabs extends BaseComponent {
     }
 
     .close-button,
+    .active-close-button,
     .add-button {
       display: grid;
       place-items: center;
@@ -115,11 +121,13 @@ export class PFProjectTabs extends BaseComponent {
     }
 
     .close-button:hover:not(:disabled),
+    .active-close-button:hover,
     .add-button:hover {
       background: rgba(255, 255, 255, 0.06);
       color: var(--pf-color-text-main);
     }
 
+    .active-close-button,
     .add-button {
       align-self: stretch;
       height: 34px;
@@ -130,26 +138,92 @@ export class PFProjectTabs extends BaseComponent {
       background: rgba(10, 13, 18, 0.62);
     }
 
+    .active-close-button {
+      display: none;
+    }
+
+    @container (max-width: 1024px) {
+      .tab-item.active .close-button {
+        display: none;
+      }
+
+      .active-close-button {
+        display: grid;
+      }
+    }
+
     .error {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       padding: 5px 10px 7px;
       color: #f0aaa2;
       font-size: 12px;
     }
+
+    .error button {
+      padding: 2px 6px;
+      border: 1px solid currentColor;
+      border-radius: var(--pf-radius-sm);
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
   `;
 
   @state() private errorMessage = '';
+  private feedbackTimer: number | null = null;
+
+  disconnectedCallback() {
+    this.dismissFeedback();
+    super.disconnectedCallback();
+  }
+
+  private showFeedback(message: string) {
+    this.dismissFeedback();
+    this.errorMessage = message;
+    this.feedbackTimer = window.setTimeout(() => {
+      this.errorMessage = '';
+      this.feedbackTimer = null;
+    }, 6000);
+  }
+
+  private dismissFeedback = () => {
+    if (this.feedbackTimer !== null) {
+      clearTimeout(this.feedbackTimer);
+      this.feedbackTimer = null;
+    }
+    this.errorMessage = '';
+  };
 
   private activateItem(itemId: string) {
     const result = workspaceStore.activate(itemId);
-    this.errorMessage = result.ok ? '' : result.message;
+    if (result.ok) {
+      this.dismissFeedback();
+    } else {
+      this.showFeedback(result.message);
+    }
   }
 
   private async closeItem(itemId: string) {
     try {
       const result = await workspaceStore.closeProject(itemId);
-      this.errorMessage = result.ok ? '' : result.message;
+      if (result.ok) {
+        this.dismissFeedback();
+      } else {
+        this.showFeedback(result.message);
+      }
     } catch {
-      this.errorMessage = 'Could not close project.';
+      this.showFeedback('Could not close project.');
     }
   }
 
@@ -168,11 +242,11 @@ export class PFProjectTabs extends BaseComponent {
 
   private openProjectBrowser() {
     if (workspaceStore.items.value.length >= WORKSPACE_OPEN_ITEM_LIMIT) {
-      this.errorMessage = workspaceItemLimitMessage();
+      this.showFeedback(workspaceItemLimitMessage());
       return;
     }
 
-    this.errorMessage = '';
+    this.dismissFeedback();
     this.dispatchEvent(new CustomEvent('show-project-browser', { bubbles: true, composed: true }));
   }
 
@@ -187,12 +261,14 @@ export class PFProjectTabs extends BaseComponent {
   render() {
     const items = workspaceStore.items.value;
     const activeItemId = workspaceStore.activeItemId.value;
+    const activeItem = items.find((item) => item.id === activeItemId);
+    const activeCloseLabel = activeItem ? `Close ${this.projectName(activeItem)}` : '';
     const canClose = items.length > 1;
     const canOpenAnotherProject = items.length < WORKSPACE_OPEN_ITEM_LIMIT;
 
     return html`
       <nav class="tabs" aria-label="Open projects">
-        <ul class="tab-list">
+        <ul class="tab-list" data-scrollbar="horizontal">
           ${items.map((item) => {
             const isActive = item.id === activeItemId;
             const isDirty = autoSaveService.isDirty(item.context);
@@ -226,6 +302,21 @@ export class PFProjectTabs extends BaseComponent {
             `;
           })}
         </ul>
+        ${
+          canClose && activeItem
+            ? html`
+                <button
+                  class="active-close-button"
+                  type="button"
+                  aria-label=${activeCloseLabel}
+                  title=${activeCloseLabel}
+                  @click=${() => this.closeItem(activeItem.id)}
+                >
+                  x
+                </button>
+              `
+            : ''
+        }
         <button
           class="add-button"
           type="button"
@@ -236,7 +327,17 @@ export class PFProjectTabs extends BaseComponent {
           +
         </button>
       </nav>
-      ${this.errorMessage ? html`<div class="error">${this.errorMessage}</div>` : ''}
+      <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"
+        >${this.errorMessage}</span
+      >
+      ${this.errorMessage
+        ? html`
+            <div class="error">
+              <span aria-hidden="true">${this.errorMessage}</span>
+              <button type="button" @click=${this.dismissFeedback}>Dismiss</button>
+            </div>
+          `
+        : ''}
     `;
   }
 }

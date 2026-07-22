@@ -26,6 +26,7 @@ import {
   getDefaultFont,
 } from '../../utils/pixel-fonts';
 import { TextTool } from '../../tools/text-tool';
+import { productTelemetry, type ProductEventDimensions } from '../../services/telemetry';
 
 /** Tools that paint pixels on the active layer (vs. select/navigate). */
 const DRAWING_TOOLS = [
@@ -47,6 +48,23 @@ const SELECTION_TOOL_SET = new Set<ToolType>([
 ]);
 const VIEWPORT_TOOL_SET = new Set<ToolType>(['hand', 'zoom']);
 const LAYER_WARNING_TOOL_SET = new Set<ToolType>([...DRAWING_TOOLS, 'text']);
+
+function telemetryDrawingTool(
+  tool: ToolType
+): ProductEventDimensions['first_drawing_action']['tool'] {
+  switch (tool) {
+    case 'pencil':
+    case 'eraser':
+    case 'fill':
+      return tool;
+    case 'line':
+    case 'rectangle':
+    case 'ellipse':
+      return 'shape';
+    default:
+      return 'other';
+  }
+}
 
 type EditableLayer = Layer & { canvas: HTMLCanvasElement };
 
@@ -117,6 +135,7 @@ export class PFDrawingCanvas extends BaseComponent {
   // can undo/redo palette indices along with the pixels
   private previousIndexSnapshot: Uint8Array | null = null;
   private strokeFrameId: string = '';
+  private strokeTool: ToolType | null = null;
   private readonly referenceBitmapCache = new ReferenceBitmapCache();
   private readonly referenceViewportRenderer = new ReferenceViewportRenderer({
     cache: this.referenceBitmapCache,
@@ -209,8 +228,8 @@ export class PFDrawingCanvas extends BaseComponent {
     if (!activeLayer?.canvas) return null;
 
     return new CommitFloatCommand(
-      activeLayer.canvas,
       activeLayer.id,
+      context.animation.currentFrameId.value,
       state.imageData,
       state.originalBounds,
       state.currentOffset,
@@ -618,6 +637,7 @@ export class PFDrawingCanvas extends BaseComponent {
     const modifiers = this.getModifiers(e);
 
     this.strokeContext = context;
+    this.strokeTool = currentTool;
     this.captureStrokeSnapshot(target, currentTool, context);
     context.dirtyRect.resetStroke();
     this.toolController.onDown(target.context, context, point, modifiers);
@@ -750,7 +770,13 @@ export class PFDrawingCanvas extends BaseComponent {
     if (!strokeChange) return;
 
     const command = this.createStrokeCommand(target.layerId, bounds, strokeChange, context);
-    context.history.execute(command);
+    const tool = this.strokeTool ?? toolStore.activeTool.value;
+    void context.history.execute(command).then(() => {
+      productTelemetry.record({
+        name: 'first_drawing_action',
+        dimensions: { tool: telemetryDrawingTool(tool) },
+      });
+    });
     this.invalidateOnionSkinCel(target.layerId, context);
   }
 
@@ -835,6 +861,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.previousImageData = null;
     this.previousIndexSnapshot = null;
     this.strokeContext = null;
+    this.strokeTool = null;
   }
 
   private handleMouseMove(e: MouseEvent) {
