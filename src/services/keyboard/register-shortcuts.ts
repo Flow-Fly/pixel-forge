@@ -28,6 +28,7 @@ import { applyClipboardPaletteAppendPlan } from '../clipboard-palette-append';
 import { createClipboardIndexPasteRegionPlan } from '../clipboard-index-paste-region';
 import { normalizeHex } from '../../stores/palette/color-utils';
 import { isPaintableLayer } from '../../utils/layer-capabilities';
+import { togglePlayback } from '../playback-action';
 
 type ShortcutAction = () => void;
 
@@ -745,7 +746,7 @@ const animationShortcuts: ShortcutGroup = [
   {
     key: 'Enter',
     modifiers: [],
-    action: () => getActiveProjectContext().animation.togglePlayback(),
+    action: () => togglePlayback(getActiveProjectContext().animation),
     description: 'Play/Stop',
   },
   {

@@ -6,6 +6,7 @@ import { projectLibrary } from '../../services/project-library';
 import type { ProjectMeta } from '../../services/persistence/project-repository';
 import { getActiveProjectContext } from '../../stores/project-context';
 import { workspaceStore } from '../../stores/workspace';
+import { productTelemetry } from '../../services/telemetry';
 import { scrollbarStyles } from '../../styles/scrollbar-styles';
 
 @customElement('pf-project-browser')
@@ -559,6 +560,10 @@ export class PFProjectBrowser extends BaseComponent {
         this.errorMessage = result.message;
         return;
       }
+      productTelemetry.record({
+        name: 'project_opened',
+        dimensions: { source: 'library' },
+      });
       this.dispatchEvent(new CustomEvent('project-opened', { bubbles: true, composed: true }));
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Failed to open project.');

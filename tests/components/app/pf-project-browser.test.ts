@@ -41,6 +41,7 @@ vi.mock('../../../src/stores/workspace', () => ({
 
 import '../../../src/components/app/pf-project-browser';
 import type { PFProjectBrowser } from '../../../src/components/app/pf-project-browser';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 let originalShowModal: HTMLDialogElement['showModal'] | undefined;
 let originalClose: HTMLDialogElement['close'] | undefined;
@@ -326,6 +327,7 @@ describe('pf-project-browser', () => {
   });
 
   it('opens a project and emits project-opened', async () => {
+    const record = vi.spyOn(productTelemetry, 'record');
     const element = await createBrowser();
     let opened = false;
     element.addEventListener('project-opened', () => {
@@ -339,6 +341,10 @@ describe('pf-project-browser', () => {
       saveActiveContext: false,
     });
     expect(opened).toBe(true);
+    expect(record).toHaveBeenCalledWith({
+      name: 'project_opened',
+      dimensions: { source: 'library' },
+    });
   });
 
   it('renames the active open project through its context', async () => {

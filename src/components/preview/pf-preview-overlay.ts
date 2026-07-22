@@ -16,6 +16,7 @@ import {
 } from '../../services/view-effects';
 import type { Cel } from '../../types/animation';
 import type { Layer } from '../../types/layer';
+import { togglePlayback } from '../../services/playback-action';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -571,8 +572,7 @@ export class PFPreviewOverlay extends BaseComponent {
   }
 
   private togglePlay() {
-    // Delegate to store's playback engine
-    this.context.animation.togglePlayback();
+    togglePlayback(this.context.animation);
   }
 
   private toggleCrtEffect() {

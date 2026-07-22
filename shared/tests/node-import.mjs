@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { PROJECT_VERSION, decodeProjectFile } from '@pixel-forge/shared';
+import { PROJECT_VERSION, decodeProjectFile, parseProductEvent } from '@pixel-forge/shared';
 
 const project = decodeProjectFile({
   version: PROJECT_VERSION,
@@ -28,3 +28,7 @@ const project = decodeProjectFile({
 
 assert.equal(project.version, '4.1.0');
 assert.deepEqual(project.layers[0].data, Uint8Array.from([1]));
+assert.deepEqual(
+  parseProductEvent({ name: 'playback_started', dimensions: {} }),
+  { name: 'playback_started', dimensions: {} }
+);

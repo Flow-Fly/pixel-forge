@@ -1,6 +1,7 @@
 import { type Command } from './index';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
 import { type Cel, type Frame } from '../types/animation';
+import { productTelemetry, type TelemetryClient } from '../services/telemetry';
 
 type AnimationCommandContext = Pick<ProjectContext, 'animation'>;
 
@@ -11,15 +12,18 @@ export class AddFrameCommand implements Command {
   private duplicate: boolean;
   private sourceFrameId?: string;
   private readonly context: AnimationCommandContext;
+  private readonly telemetry: TelemetryClient;
 
   constructor(
     duplicate: boolean = true,
     sourceFrameId?: string,
-    context: AnimationCommandContext = getActiveProjectContext()
+    context: AnimationCommandContext = getActiveProjectContext(),
+    telemetry: TelemetryClient = productTelemetry,
   ) {
     this.duplicate = duplicate;
     this.sourceFrameId = sourceFrameId;
     this.context = context;
+    this.telemetry = telemetry;
   }
 
   execute() {
@@ -31,6 +35,9 @@ export class AddFrameCommand implements Command {
     const frames = this.context.animation.frames.value;
     if (frames.length > countBefore) {
       this.frameId = frames[frames.length - 1].id;
+      if (countBefore === 1 && frames.length === 2) {
+        this.telemetry.record({ name: 'second_frame_created', dimensions: {} });
+      }
     }
   }
 

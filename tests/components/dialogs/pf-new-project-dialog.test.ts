@@ -10,6 +10,7 @@ vi.mock('../../../src/stores/workspace', () => ({
 
 import '../../../src/components/dialogs/pf-new-project-dialog';
 import type { PFNewProjectDialog } from '../../../src/components/dialogs/pf-new-project-dialog';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 async function settle(element: PFNewProjectDialog) {
   await Promise.resolve();
@@ -37,6 +38,7 @@ describe('pf-new-project-dialog', () => {
   });
 
   it('creates projects through the workspace store', async () => {
+    const record = vi.spyOn(productTelemetry, 'record');
     const element = await createDialog();
     element.saveCurrentBeforeCreate = true;
     await settle(element);
@@ -55,5 +57,9 @@ describe('pf-new-project-dialog', () => {
     );
     expect(createdProjectId).toBe('created-project');
     expect(element.open).toBe(false);
+    expect(record).toHaveBeenCalledWith({
+      name: 'project_created',
+      dimensions: { source: 'blank' },
+    });
   });
 });

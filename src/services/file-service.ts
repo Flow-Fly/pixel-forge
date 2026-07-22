@@ -31,27 +31,40 @@ export class FileService {
     a.click();
   }
 
-  static exportToWebP(canvas: HTMLCanvasElement, filename: string, quality = 1) {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename.endsWith('.webp') ? filename : `${filename}.webp`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    }, 'image/webp', quality);
+  static exportToWebP(
+    canvas: HTMLCanvasElement,
+    filename: string,
+    quality = 1
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error('Failed to create WebP blob'));
+          return;
+        }
+
+        try {
+          const downloadName = filename.endsWith('.webp') ? filename : `${filename}.webp`;
+          FileService.downloadBlob(blob, downloadName);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, 'image/webp', quality);
+    });
   }
 
   // ===== Utility =====
 
   static downloadBlob(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 }

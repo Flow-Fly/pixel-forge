@@ -4,6 +4,7 @@ import { projectRepository } from './persistence/indexed-db';
 import { createProjectThumbnail } from './project-thumbnail';
 import { log } from '../utils/log';
 import { compositeFrame } from '../utils/canvas-utils';
+import { productTelemetry } from './telemetry';
 
 const AUTO_SAVE_DEBOUNCE_MS = 2000;
 
@@ -141,6 +142,7 @@ class AutoSaveService {
     options: { force?: boolean; rethrow?: boolean } = {}
   ): Promise<void> {
     const state = this.getState(context);
+    const hadUnsavedChanges = state.isDirty;
     if (!state.isDirty && !options.force) return;
 
     if (options.force) {
@@ -153,7 +155,10 @@ class AutoSaveService {
     const projectId = context.project.id.value;
     const requestedRevision = state.changeRevision;
     const save = state.saveQueue.then(() =>
-      this.writeProject(context, state, projectId, requestedRevision, options)
+      this.writeProject(context, state, projectId, requestedRevision, {
+        ...options,
+        recordMilestone: hadUnsavedChanges,
+      })
     );
 
     // A failed save must not prevent the next queued request from running.
@@ -166,7 +171,7 @@ class AutoSaveService {
     state: AutoSaveContextState,
     projectId: string,
     requestedRevision: number,
-    options: { force?: boolean; rethrow?: boolean }
+    options: { force?: boolean; rethrow?: boolean; recordMilestone: boolean }
   ): Promise<void> {
     if (requestedRevision <= state.persistedRevision) return;
 
@@ -181,6 +186,12 @@ class AutoSaveService {
       }
       state.persistedRevision = Math.max(state.persistedRevision, requestedRevision);
       this.updateDirtyState(context, state);
+      if (options.recordMilestone) {
+        productTelemetry.record({
+          name: 'project_saved',
+          dimensions: { destination: 'local_library' },
+        });
+      }
     } catch (error) {
       this.updateDirtyState(context, state);
       log.error('Auto-save failed:', error);

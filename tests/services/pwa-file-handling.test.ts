@@ -24,7 +24,8 @@ describe('PwaFileHandlingService', () => {
 
   it('registers once and delivers multiple launched files in order', async () => {
     const importer = { importFiles: vi.fn(async () => []) };
-    const service = new PwaFileHandlingService(importer);
+    const telemetry = { record: vi.fn() };
+    const service = new PwaFileHandlingService(importer, telemetry);
     const setConsumer = vi.fn();
     const launchQueue = { setConsumer } as LaunchQueue;
     const first = new File(['first'], 'first.pf');
@@ -40,6 +41,10 @@ describe('PwaFileHandlingService', () => {
       expect(importer.importFiles).toHaveBeenCalledWith([first, second]);
     });
     expect(setConsumer).toHaveBeenCalledOnce();
+    expect(telemetry.record).toHaveBeenCalledWith({
+      name: 'editor_loaded',
+      dimensions: { entryPoint: 'file_handler' },
+    });
   });
 
   it('continues when the operating system cannot expose one handle', async () => {
