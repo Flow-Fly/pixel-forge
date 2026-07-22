@@ -6,16 +6,29 @@ this workflow through retired protocol skills or the generic `$ship` router.
 
 ## Read first
 
-Before changing the repository, read:
+Before issue- or pull-request-driven delivery work, read:
 
 - the live delivery slice, every linked task issue and parent chain, and the
   linked pull request;
 - `docs/operations/codex-agent-workflow.md`;
 - `.agentic-loop.yml`;
-- the source files and active documentation that own the requested behavior.
+
+Before any change, read the source files and active documentation that own the
+requested behavior. For direct maintenance without a linked GitHub item, do
+not invent issue, branch, or pull-request state.
 
 When a handoff disagrees with live GitHub state, stop without editing and
 report the mismatch.
+
+## Repository boundaries
+
+- `src/` is the local-first browser editor.
+- `shared/` contains portable project contracts used by browser and server.
+- `server/` contains the Node and Hono backend, database, and object-storage
+  boundaries.
+
+Each area has a nested `AGENTS.md` with the small set of rules that applies only
+to that runtime. Keep cross-cutting workflow and review rules in this root file.
 
 ## Delivery workflow
 
@@ -71,6 +84,21 @@ screen-reader-friendly, and visibly focused.
 Tests should prove public behavior with the smallest convincing set: a
 representative happy path, materially different high-impact invariants or
 failures, and a regression test for each confirmed bug.
+
+## Code Review Rules
+
+### User work safety
+
+- Flag any path that can silently discard, overwrite, or make an existing
+  project inaccessible. The safe path is to preserve both copies, keep a
+  recoverable backup, or require an explicit user-confirmed destructive
+  action.
+
+### Persisted and external contracts
+
+- Flag changes to persisted project data, public file formats, sync payloads,
+  or externally visible identifiers that lack a compatibility path. Preserve
+  the existing contract or add an explicit versioned migration.
 
 Before handoff, run the relevant focused checks plus:
 
