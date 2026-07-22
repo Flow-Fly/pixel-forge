@@ -93,7 +93,7 @@ export function createHttpTelemetrySink(options: HttpTelemetrySinkOptions = {}):
 }
 
 export function createOncePerPageTelemetryClient(sink: TelemetrySink): TelemetryClient {
-  const recordedNames = new Set<string>();
+  const recordedNames = new Set<ProductEvent['name']>();
   const telemetry = createTelemetryClient(sink);
 
   return {

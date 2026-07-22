@@ -31,7 +31,7 @@ export async function handleTelemetryRequest(request: Request, env: Env): Promis
 
   const event = parseJsonProductEvent(body.text);
   if (!event) {
-    writeRejectedRequest(env.PRODUCT_EVENTS, 'invalid_payload');
+    writeInvalidPayloadRejection(env.PRODUCT_EVENTS);
     return response(400, 'Invalid event');
   }
 
@@ -101,11 +101,11 @@ function writeProductEvent(dataset: AnalyticsEngineDataset, event: ProductEvent)
   });
 }
 
-function writeRejectedRequest(dataset: AnalyticsEngineDataset, reason: string): void {
+function writeInvalidPayloadRejection(dataset: AnalyticsEngineDataset): void {
   try {
     dataset.writeDataPoint({
       indexes: ['telemetry_request_rejected'],
-      blobs: [reason],
+      blobs: ['invalid_payload'],
     });
   } catch {
     // Rejection evidence must not turn a bounded client error into a Worker failure.
