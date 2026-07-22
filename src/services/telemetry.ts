@@ -24,10 +24,10 @@ const noOpSink: TelemetrySink = {
 export function createTelemetryClient(sink: TelemetrySink = noOpSink): TelemetryClient {
   return {
     record(event) {
-      const acceptedEvent = parseProductEvent(event);
-      if (!acceptedEvent) return;
-
       try {
+        const acceptedEvent = parseProductEvent(event);
+        if (!acceptedEvent) return;
+
         const pending = sink.record(acceptedEvent);
         if (pending) void pending.catch(ignoreTelemetryFailure);
       } catch {

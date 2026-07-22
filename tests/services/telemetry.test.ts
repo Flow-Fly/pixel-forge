@@ -96,6 +96,19 @@ describe('client telemetry', () => {
     expect(record).not.toHaveBeenCalled();
   });
 
+  it('contains validation failures from hostile runtime objects', () => {
+    const record = vi.fn();
+    const telemetry = createTelemetryClient({ record });
+    const hostileEvent = new Proxy(projectCreated, {
+      ownKeys: () => {
+        throw new Error('blocked property access');
+      },
+    });
+
+    expect(() => telemetry.record(hostileEvent)).not.toThrow();
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it('does not throw into product actions when a sink throws', () => {
     const telemetry = createTelemetryClient({
       record: () => {
