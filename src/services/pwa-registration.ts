@@ -8,6 +8,7 @@ export function registerPwa() {
   const updateServiceWorker = registerSW({
     immediate: true,
     onNeedRefresh: () => pwaStore.showUpdate(),
+    onNeedReload: () => void pwaStore.handleUpdateControlling(),
     onRegisterError: (error) => log.error('PWA registration failed:', error),
   });
   pwaStore.setUpdateHandler(updateServiceWorker);

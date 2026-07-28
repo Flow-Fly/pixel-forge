@@ -39,18 +39,26 @@ write, and full-access capabilities. Prefer the narrow sets below over
 | --- | --- | --- | --- |
 | Owner | Approvals and exceptional recovery | Human account with strong authentication; temporarily delegates narrowly scoped policies | Routine CI or runtime use |
 | Read-only auditor | Inventory, cost, and evidence checks | `ContainersReadOnly`, `ContainerRegistryReadOnly`, `ServerlessSQLDatabaseReadOnly` or `RelationalDatabasesReadOnly` for provider metadata, `ObjectStorageBucketsRead`, `ObservabilityReadOnly`, and IAM metadata read-only when required | All mutation and secret-version access |
-| Deployment application | Push an approved digest and update the approved container | `ContainerRegistryFullAccess` and `ContainersFullAccess`, project-scoped; add `PrivateNetworksReadOnly` only for the Managed PostgreSQL topology | Database data, migration credentials, runtime object access, website-bucket deployment |
+| Deployment application | Push an approved digest and update the approved container | `ContainerRegistryFullAccess` and `ContainersFullAccess`, project-scoped only within a dedicated or otherwise narrowly bounded deployment project; add `PrivateNetworksReadOnly` only for the Managed PostgreSQL topology | Database data, migration credentials, runtime object access, website-bucket deployment |
 | Provisioning application | One approved resource-creation session | Temporary product-specific full access only for resources named in that approval; bucket-policy access only while installing the reviewed policy | Persistent runtime or ordinary deployment use; revoke after the session |
 | Migration application/database role | One approved migration | Database DDL on the selected Pixel Forge database only; for Serverless SQL, evaluate `ServerlessSQLDatabaseReadWrite` rather than full resource administration | Resource creation/deletion, container deployment, object storage, unrelated databases |
 | Runtime application/database role | Serve API requests | `ServerlessSQLDatabaseDataReadWrite` when that IAM path is used, plus a native PostgreSQL DML-only role on the application schema; object `Get`, `Put`, and `Delete`, plus only the bucket-level access required by readiness, restricted to the private project bucket/prefix | DDL, provider administration, bucket creation/deletion/policy changes, registry, deployment, website bucket |
 | DNS operator | Add or roll back the one approved `api` record | Cloudflare token scoped to DNS edit for the `pixel-forge.app` zone | Other zones, account settings, unrelated records |
 
+`ContainerRegistryFullAccess` and `ContainersFullAccess` reach every matching
+resource in their project. Do not grant them in a shared deployment project.
+Treat them as safe only when the deployment targets are isolated in a
+dedicated project or the project boundary contains no unrelated resources.
+
 Scaleway project-level Object Storage sets can be broader than the one bucket
-the runtime needs. Install and review a bucket policy that names the runtime
-application, allows only the required actions and prefix, requires TLS, and
-explicitly protects the website bucket. The current adapter uses `HeadBucket`,
-`GetObject`, `PutObject`, and `DeleteObject`; verify an allowed operation on the
-private project bucket and a denied operation against `pixel-forge.app`.
+the runtime needs. Install and review a private project-bucket policy that
+names the runtime application, allows only the required actions and prefix,
+and requires TLS. Protect the `pixel-forge.app` website bucket independently
+with its own bucket policy or a separate project or credential boundary; the
+private-bucket policy cannot protect another bucket. The current adapter uses
+`HeadBucket`, `GetObject`, `PutObject`, and `DeleteObject`. Verify an allowed
+operation on the private project bucket, then separately verify that the
+runtime credential cannot write a new object to the website bucket.
 
 Do not invent a narrower permission name if the live console does not offer
 it. Stop and ask the owner whether to use a reviewed resource policy, a

@@ -189,9 +189,13 @@ echo scw registry namespace create \
 
 Create the private project bucket and its bucket policy only from an approved,
 reviewed policy artifact. The policy must grant the runtime principal only the
-object operations used by the server and must explicitly prevent access to the
-public website bucket. Verify both an allowed project-object operation and a
-denied website-bucket operation before deployment.
+object operations used by the server, only within that private bucket. Protect
+the public website bucket independently with its own policy or a separate
+project or credential boundary; the private-bucket policy cannot protect
+another bucket. Verify an allowed private project-bucket operation. Separately,
+verify that the runtime credential is denied when it tries to write a new
+object to the website bucket, and confirm that no verification object was
+created.
 
 If Managed PostgreSQL is selected, create its Private Network in this stage and
 attach the database and future container to that one network. Serverless

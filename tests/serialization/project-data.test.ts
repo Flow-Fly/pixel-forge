@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  hasProjectImageData,
   normalizeProjectFileImageData,
   normalizeProjectImageData,
 } from '../../src/serialization/project-data';
@@ -25,15 +24,32 @@ describe('project image data normalization', () => {
     expect(Array.from(bytes)).toEqual([1, 2, 3, 4]);
   });
 
+  it('accepts an exact case-insensitive base64 metadata token', () => {
+    const bytes = normalizeProjectImageData(
+      'data:image/png;charset=utf-8;BASE64,AQIDBA=='
+    );
+
+    expect(Array.from(bytes)).toEqual([1, 2, 3, 4]);
+  });
+
   it('decodes legacy plain Base64 strings to bytes', () => {
     const bytes = normalizeProjectImageData('BQYH');
 
     expect(Array.from(bytes)).toEqual([5, 6, 7]);
   });
 
-  it('treats empty or invalid legacy strings as empty data', () => {
-    expect(hasProjectImageData(normalizeProjectImageData(''))).toBe(false);
-    expect(hasProjectImageData(normalizeProjectImageData('not base64'))).toBe(false);
+  it.each([
+    ['', 'empty'],
+    ['not base64', 'base64'],
+    ['data:image/png,not-base64', 'base64'],
+    ['data:base64,AQIDBA==', 'base64'],
+    ['data:image/png;base64url,AQIDBA==', 'base64'],
+    ['data:image/png;notbase64,AQIDBA==', 'base64'],
+    ['data:image/png;encoding=base64,AQIDBA==', 'base64'],
+    ['data:image/png;base64=true,AQIDBA==', 'base64'],
+    ['data:image/png;base64,%%%%', 'base64'],
+  ])('rejects malformed or unsupported legacy image data %j', (value, message) => {
+    expect(() => normalizeProjectImageData(value)).toThrow(message);
   });
 
   it('normalizes every layer and cel before hydration', () => {

@@ -24,6 +24,7 @@ const workspaceStoreMock = vi.hoisted(() => ({
   activeItemId: { value: '' },
   activate: vi.fn(),
   closeProject: vi.fn(),
+  deleteProject: vi.fn(),
   restoreWorkspace: vi.fn(),
 }));
 
@@ -101,6 +102,10 @@ describe('pixel-forge-app project dialogs', () => {
       closedItem: null,
       activeItem: null,
     });
+    workspaceStoreMock.deleteProject.mockResolvedValue({
+      activeItem: null,
+      installedReplacement: false,
+    });
     projectFileHandlingMock.importProjectFiles.mockResolvedValue({
       outcomes: [],
       unreadableFiles: [],
@@ -148,9 +153,6 @@ describe('pixel-forge-app project dialogs', () => {
     contextB.project.id.value = 'project-b';
     createdContexts.push(contextA, contextB);
     setActiveProjectContext(contextB);
-    const deleteProject = vi
-      .spyOn(projectLibrary, 'deleteProject')
-      .mockResolvedValue();
     const element = document.createElement('pixel-forge-app') as HTMLElement & {
       updateComplete: Promise<unknown>;
     };
@@ -163,12 +165,101 @@ describe('pixel-forge-app project dialogs', () => {
       ?.querySelector<HTMLButtonElement>('pf-dialog button.primary')
       ?.click();
     await vi.waitFor(() => {
-      expect(deleteProject).toHaveBeenCalled();
+      expect(workspaceStoreMock.deleteProject).toHaveBeenCalled();
     });
 
-    expect(deleteProject).toHaveBeenCalledWith('project-b', {
-      context: contextB,
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledWith('project-b');
+  });
+
+  it('guards current-project deletion while the request is pending', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const context = createProjectContext();
+    context.project.id.value = 'project-to-delete';
+    createdContexts.push(context);
+    setActiveProjectContext(context);
+    let finishDelete!: () => void;
+    workspaceStoreMock.deleteProject.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDelete = () =>
+            resolve({
+              activeItem: null,
+              installedReplacement: true,
+            });
+        })
+    );
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('delete-current-project'));
+    await element.updateComplete;
+    const deleteButton = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'pf-dialog button.primary'
+    );
+
+    deleteButton?.click();
+    deleteButton?.click();
+    await element.updateComplete;
+
+    const pendingDialog = element.shadowRoot?.querySelector<HTMLElement & {
+      closeOnBackdrop: boolean;
+      closeOnEscape: boolean;
+      showCloseButton: boolean;
+    }>('pf-dialog');
+    const pendingDeleteButton = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'pf-dialog button.primary'
+    );
+    expect(workspaceStoreMock.deleteProject).toHaveBeenCalledOnce();
+    expect(pendingDeleteButton?.disabled).toBe(true);
+    expect(pendingDeleteButton?.textContent).toContain('Deleting...');
+    expect(pendingDialog?.closeOnBackdrop).toBe(false);
+    expect(pendingDialog?.closeOnEscape).toBe(false);
+    expect(pendingDialog?.showCloseButton).toBe(false);
+
+    finishDelete();
+    await vi.waitFor(() => {
+      expect(pendingDialog?.open).toBe(false);
     });
+  });
+
+  it('keeps a failed current-project deletion inline and announced', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const context = createProjectContext();
+    context.project.id.value = 'project-delete-failure';
+    createdContexts.push(context);
+    setActiveProjectContext(context);
+    workspaceStoreMock.deleteProject.mockRejectedValueOnce(new Error('delete failed'));
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(new CustomEvent('delete-current-project'));
+    await element.updateComplete;
+    element.shadowRoot?.querySelector<HTMLButtonElement>('pf-dialog button.primary')?.click();
+
+    await vi.waitFor(() => {
+      const alert = element.shadowRoot?.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain('Could not delete project');
+    });
+    expect(element.shadowRoot?.querySelector<HTMLElement>('pf-dialog')?.open).toBe(true);
+  });
+
+  it('warns before unload when any autosaved project is dirty', async () => {
+    await import('../../../src/components/app/pixel-forge-app');
+    const inactiveContext = createProjectContext();
+    createdContexts.push(inactiveContext);
+    autoSaveService.start(inactiveContext);
+    autoSaveService.markDirty(inactiveContext);
+    const element = document.createElement('pixel-forge-app') as HTMLElement;
+    document.body.append(element);
+    const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it('opens export with the project active when the action starts', async () => {
@@ -307,7 +398,7 @@ describe('pixel-forge-app project dialogs', () => {
     });
   });
 
-  it('imports supported dropped files without intercepting unrelated files', async () => {
+  it('imports supported dropped files and prevents unsupported drops from navigating away', async () => {
     await import('../../../src/components/app/pixel-forge-app');
     const element = document.createElement('pixel-forge-app') as HTMLElement;
     document.body.append(element);
@@ -330,7 +421,7 @@ describe('pixel-forge-app project dialogs', () => {
     const unsupportedDrop = fileTransferEvent('drop', [notes]);
     window.dispatchEvent(unsupportedDrop);
 
-    expect(unsupportedDrop.defaultPrevented).toBe(false);
+    expect(unsupportedDrop.defaultPrevented).toBe(true);
     expect(projectFileHandlingMock.importProjectFiles).not.toHaveBeenCalled();
   });
 

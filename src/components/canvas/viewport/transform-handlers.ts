@@ -29,7 +29,9 @@ function ensureTransformState(context: TransformContext): void {
         height: state.originalBounds.height,
       },
       state.shape,
-      state.mask
+      state.mask,
+      layers.activeLayerId.value,
+      context.animation.currentFrameId.value
     );
   } else if (state.type === 'selected') {
     // For selected state, we need to cut to floating first, then transform
@@ -59,7 +61,9 @@ function ensureTransformState(context: TransformContext): void {
         floatingState.imageData,
         floatingState.originalBounds,
         floatingState.shape,
-        floatingState.mask
+        floatingState.mask,
+        activeLayerId,
+        context.animation.currentFrameId.value
       );
     }
   }
