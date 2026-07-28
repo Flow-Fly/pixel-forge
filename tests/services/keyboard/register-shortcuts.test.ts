@@ -2,13 +2,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { MOD_PRIMARY } from '../../../src/utils/platform';
 import { toolRegistry } from '../../../src/tools/tool-registry';
+import { globalShortcutCategories } from '../../../src/services/keyboard/shortcut-definitions';
 import { clipboardStore } from '../../../src/stores/clipboard';
+import { toolStore } from '../../../src/stores/tools';
 import {
   createProjectContext,
+  defaultProjectContext,
   restoreDefaultProjectContext,
   setActiveProjectContext,
 } from '../../../src/stores/project-context';
 import { selectionStore } from '../../../src/stores/selection';
+import { GUIDED_DRAWING_VERSION } from '../../../src/types/guided-drawing';
+import { productTelemetry } from '../../../src/services/telemetry';
 
 const keyboardServiceMock = vi.hoisted(() => ({
   register: vi.fn(),
@@ -34,7 +39,12 @@ type RegisterCall = [
   modifiers: string[],
   action: () => void,
   description: string,
-  options?: { quick?: boolean; releaseAction?: () => void },
+  options?: {
+    quick?: boolean;
+    releaseAction?: () => void;
+    physicalCode?: string;
+    when?: () => boolean;
+  },
 ];
 
 function comboFromCall([key, modifiers]: RegisterCall): string {
@@ -287,7 +297,7 @@ describe('registerShortcuts', () => {
     const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
     const descriptionsByCombo = new Map(calls.map((call) => [comboFromCall(call), call[3]]));
 
-    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(80);
+    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(82);
     expect(descriptionsByCombo.get('Alt')).toBe('Quick eyedropper');
     expect(descriptionsByCombo.get('0')).toBe('Fit to window');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+0`)).toBe('Opacity 100%');
@@ -306,6 +316,18 @@ describe('registerShortcuts', () => {
       .filter((call) => comboFromCall(call) === 'Enter')
       .map((call) => call[3]);
     expect(enterDescriptions).toEqual(['Play/Stop', 'Commit selection']);
+  });
+
+  it('leaves unmodified Tab available for native focus navigation', () => {
+    registerShortcuts();
+
+    const registeredCombos = (keyboardServiceMock.register.mock.calls as RegisterCall[]).map(
+      comboFromCall
+    );
+    const displayedShortcuts = globalShortcutCategories.flatMap((category) => category.shortcuts);
+
+    expect(registeredCombos).not.toContain('Tab');
+    expect(displayedShortcuts).not.toContainEqual({ key: 'tab', action: 'Toggle timeline' });
   });
 
   it('dispatches the project browser event for the open project shortcut', () => {
@@ -338,6 +360,227 @@ describe('registerShortcuts', () => {
 
     expect(workspaceStoreMock.activateNext).toHaveBeenCalledTimes(2);
     expect(workspaceStoreMock.activatePrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes project-scoped view, color, guide, history, and selection shortcuts to the active context', async () => {
+    const context = createProjectContext();
+    setActiveProjectContext(context);
+    context.project.width.value = 17;
+    context.project.height.value = 9;
+
+    const activeReset = vi.spyOn(context.viewport, 'resetView');
+    const defaultReset = vi.spyOn(defaultProjectContext.viewport, 'resetView');
+    const activeSwap = vi.spyOn(context.colors, 'swapColors');
+    const defaultSwap = vi.spyOn(defaultProjectContext.colors, 'swapColors');
+    const activeGuides = vi.spyOn(context.guides, 'toggleVisibility');
+    const defaultGuides = vi.spyOn(defaultProjectContext.guides, 'toggleVisibility');
+    const activeUndo = vi.spyOn(context.history, 'undo');
+    const defaultUndo = vi.spyOn(defaultProjectContext.history, 'undo');
+
+    try {
+      registerShortcuts();
+
+      shortcutAction('0')?.();
+      shortcutAction('x')?.();
+      shortcutActionByDescription('shift+g', 'Toggle guides')?.();
+      shortcutAction(`${MOD_PRIMARY}+z`)?.();
+      shortcutAction(`${MOD_PRIMARY}+a`)?.();
+      await Promise.resolve();
+
+      expect(activeReset).toHaveBeenCalledOnce();
+      expect(activeSwap).toHaveBeenCalledOnce();
+      expect(activeGuides).toHaveBeenCalledOnce();
+      expect(activeUndo).toHaveBeenCalledOnce();
+      expect(context.selection.state.value).toMatchObject({
+        type: 'selected',
+        bounds: { x: 0, y: 0, width: 17, height: 9 },
+      });
+
+      expect(defaultReset).not.toHaveBeenCalled();
+      expect(defaultSwap).not.toHaveBeenCalled();
+      expect(defaultGuides).not.toHaveBeenCalled();
+      expect(defaultUndo).not.toHaveBeenCalled();
+      expect(defaultProjectContext.selection.state.value.type).toBe('none');
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  // #412: Playback telemetry must cover the keyboard entry path.
+  it('records playback started when the keyboard shortcut starts playback', () => {
+    const context = createProjectContext();
+    const record = vi.spyOn(productTelemetry, 'record');
+    setActiveProjectContext(context);
+
+    try {
+      registerShortcuts();
+
+      shortcutActionByDescription('Enter', 'Play/Stop')?.();
+
+      expect(context.animation.isPlaying.value).toBe(true);
+      expect(record).toHaveBeenCalledWith({
+        name: 'playback_started',
+        dimensions: {},
+      });
+
+      shortcutActionByDescription('Enter', 'Play/Stop')?.();
+      expect(record).toHaveBeenCalledTimes(1);
+    } finally {
+      context.animation.stopPlayback();
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  it('routes physical digit shortcuts through the current guided project', () => {
+    const guidedContext = createProjectContext();
+    const normalContext = createProjectContext();
+    const guideColors = Array.from({ length: 9 }, (_, index) => `#${String(index + 1).repeat(6)}`);
+    guidedContext.palette.mainColors.value = guideColors;
+    guidedContext.palette.rebuildColorMap();
+    guidedContext.guidedDrawing.start({
+      version: GUIDED_DRAWING_VERSION,
+      width: 9,
+      height: 1,
+      target: Uint8Array.from({ length: 9 }, (_, index) => index + 1),
+      guideColorCount: 9,
+      settings: {
+        longSide: 9,
+        paletteSource: 'generated',
+        maxColors: 9,
+        mapping: 'color',
+        simplifyIsolatedPixels: false,
+      },
+      createdAt: 1,
+    });
+    const normalZoom = vi.spyOn(normalContext.viewport, 'zoomToLevel');
+
+    try {
+      registerShortcuts();
+
+      setActiveProjectContext(guidedContext);
+      for (let guideNumber = 1; guideNumber <= 9; guideNumber++) {
+        const call = (keyboardServiceMock.register.mock.calls as RegisterCall[]).find(
+          ([key, modifiers]) => key === String(guideNumber) && modifiers.length === 0
+        );
+        expect(call?.[4]?.physicalCode).toBe(`Digit${guideNumber}`);
+        call?.[2]();
+        expect(guidedContext.colors.primaryColor.value).toBe(guideColors[guideNumber - 1]);
+      }
+
+      setActiveProjectContext(normalContext);
+      shortcutAction('1')?.();
+      expect(normalZoom).toHaveBeenCalledWith(1);
+      const digitSeven = (keyboardServiceMock.register.mock.calls as RegisterCall[]).find(
+        ([key, modifiers]) => key === '7' && modifiers.length === 0,
+      );
+      expect(digitSeven?.[4]?.when?.()).toBe(false);
+    } finally {
+      restoreDefaultProjectContext();
+      guidedContext.dispose();
+      normalContext.dispose();
+    }
+  });
+
+  it('leaves a missing guided color unchanged', () => {
+    const context = createProjectContext();
+    context.palette.mainColors.value = ['#111111'];
+    context.palette.rebuildColorMap();
+    context.colors.setPrimaryColor('#abcdef');
+    context.guidedDrawing.start({
+      version: GUIDED_DRAWING_VERSION,
+      width: 1,
+      height: 1,
+      target: Uint8Array.from([1]),
+      guideColorCount: 1,
+      settings: {
+        longSide: 1,
+        paletteSource: 'generated',
+        maxColors: 1,
+        mapping: 'color',
+        simplifyIsolatedPixels: false,
+      },
+      createdAt: 1,
+    });
+    setActiveProjectContext(context);
+
+    try {
+      registerShortcuts();
+      const digitNine = (keyboardServiceMock.register.mock.calls as RegisterCall[]).find(
+        ([key, modifiers]) => key === '9' && modifiers.length === 0,
+      );
+      expect(digitNine?.[4]?.when?.()).toBe(false);
+      digitNine?.[2]();
+
+      expect(context.colors.primaryColor.value).toBe('#abcdef');
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  it('records selection edits in the active context history', () => {
+    const context = createProjectContext();
+    const canvas = makeEditableCanvas(4, 4);
+    installActiveIndexedCanvasLayer(context, 4, 4, new Uint8Array(16), canvas.canvas);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    setActiveProjectContext(context);
+    toolStore.setActiveTool('pencil');
+
+    const activeExecute = vi.spyOn(context.history, 'execute').mockResolvedValue();
+    const defaultExecute = vi.spyOn(defaultProjectContext.history, 'execute').mockResolvedValue();
+
+    try {
+      registerShortcuts();
+      shortcutAction('f')?.();
+
+      expect(activeExecute).toHaveBeenCalledOnce();
+      expect(defaultExecute).not.toHaveBeenCalled();
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
+  });
+
+  it('keeps selection, frame, and layer shortcut actions inside the active context', () => {
+    const context = createProjectContext();
+    const canvas = makeEditableCanvas(4, 4);
+    installActiveIndexedCanvasLayer(context, 4, 4, new Uint8Array(16), canvas.canvas);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    setActiveProjectContext(context);
+    toolStore.setActiveTool('pencil');
+
+    const activeExecute = vi.spyOn(context.history, 'execute').mockResolvedValue();
+    const defaultExecute = vi.spyOn(defaultProjectContext.history, 'execute').mockResolvedValue();
+
+    try {
+      registerShortcuts();
+
+      shortcutAction('f')?.();
+      shortcutAction('Delete')?.();
+      shortcutAction('alt+n')?.();
+      shortcutAction(`${MOD_PRIMARY}+g`)?.();
+
+      expect(activeExecute.mock.calls.map(([command]) => command.name)).toEqual([
+        'Fill Selection',
+        'Delete Selection',
+        'Add Frame',
+        'Group Layers',
+      ]);
+      expect(defaultExecute).not.toHaveBeenCalled();
+
+      context.selection.clear();
+      const activeNextFrame = vi.spyOn(context.animation, 'nextFrame');
+      const defaultNextFrame = vi.spyOn(defaultProjectContext.animation, 'nextFrame');
+      shortcutAction('ArrowRight')?.();
+
+      expect(activeNextFrame).toHaveBeenCalledOnce();
+      expect(defaultNextFrame).not.toHaveBeenCalled();
+    } finally {
+      restoreDefaultProjectContext();
+      context.dispose();
+    }
   });
 
   it('copies indexed selection metadata from the active project context', () => {

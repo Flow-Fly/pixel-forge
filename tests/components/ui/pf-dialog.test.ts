@@ -41,6 +41,78 @@ describe('pf-dialog', () => {
     expect(slotText(dialog, 'title')).toContain('Test Dialog');
     expect(slotText(dialog)).toContain('Dialog content');
     expect(slotText(dialog, 'actions')).toContain('Apply');
+    const surface = dialog.shadowRoot?.querySelector('.dialog');
+    expect(surface?.getAttribute('role')).toBe('dialog');
+    expect(surface?.getAttribute('aria-modal')).toBe('true');
+    expect(surface?.getAttribute('aria-labelledby')).toBe('dialog-title');
+    expect(dialog.shadowRoot?.querySelector('.close-btn')?.getAttribute('aria-label')).toBe(
+      'Close dialog'
+    );
+  });
+
+  it('contains keyboard focus and restores it after closing', async () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'Open';
+    document.body.append(opener);
+    opener.focus();
+    const dialog = createDialog();
+    await settle(dialog);
+
+    const close = dialog.shadowRoot?.querySelector<HTMLButtonElement>('.close-btn');
+    const apply = dialog.querySelector<HTMLButtonElement>('[slot="actions"]');
+    expect(dialog.shadowRoot?.activeElement).toBe(close);
+
+    apply?.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(dialog.shadowRoot?.activeElement).toBe(close);
+
+    close?.click();
+    await settle(dialog);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('restores focus to an opener inside nested shadow roots', async () => {
+    const outer = document.createElement('div');
+    const outerRoot = outer.attachShadow({ mode: 'open' });
+    const inner = document.createElement('span');
+    const innerRoot = inner.attachShadow({ mode: 'open' });
+    const opener = document.createElement('button');
+    opener.textContent = 'Open nested dialog';
+    innerRoot.append(opener);
+    outerRoot.append(inner);
+    document.body.append(outer);
+    opener.focus();
+
+    const dialog = createDialog();
+    await settle(dialog);
+    dialog.close();
+    await settle(dialog);
+
+    expect(outerRoot.activeElement).toBe(inner);
+    expect(innerRoot.activeElement).toBe(opener);
+  });
+
+  it('keeps focus on the dialog surface when pending controls disappear', async () => {
+    const dialog = createDialog();
+    await settle(dialog);
+    dialog.querySelector<HTMLButtonElement>('[slot="actions"]')?.focus();
+
+    dialog.showCloseButton = false;
+    dialog.querySelector('[slot="actions"]')?.remove();
+    await settle(dialog);
+
+    const surface = dialog.shadowRoot?.querySelector<HTMLElement>('.dialog');
+    expect(surface?.tabIndex).toBe(-1);
+    expect(dialog.shadowRoot?.activeElement).toBe(surface);
+  });
+
+  it('marks the dialog as a vertical scroll surface', async () => {
+    const dialog = createDialog();
+    await settle(dialog);
+
+    expect(dialog.shadowRoot?.querySelector('.dialog')?.getAttribute('data-scrollbar')).toBe(
+      'vertical'
+    );
   });
 
   it('emits pf-close from the header close button', async () => {

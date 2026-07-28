@@ -10,9 +10,13 @@ import {
   maskPixelsOutsideSelection,
   pasteImageDataWithAlpha,
 } from './pixels';
+import {
+  EditableCelCommand,
+  SelectionRegionCommand,
+  type EditableCelCommandContext,
+} from './editable-cel-command';
 
-type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
-type IndexedSelectionCommandContext = Pick<ProjectContext, 'animation' | 'palette' | 'selection'>;
+type IndexedSelectionCommandContext = EditableCelCommandContext & Pick<ProjectContext, 'palette'>;
 
 export interface IndexedFloatPaletteState {
   colors: string[];
@@ -60,7 +64,7 @@ function getPasteShape(shape: SelectionShape): SelectionShape {
 }
 
 function restoreFloatingSelection(
-  context: SelectionCommandContext,
+  context: EditableCelCommandContext,
   imageData: ImageData,
   bounds: Rect,
   shape: SelectionShape,
@@ -84,7 +88,7 @@ function restoreFloatingSelection(
 function restoreCommittedFloat(
   canvas: HTMLCanvasElement,
   overwrittenImageData: ImageData,
-  context: SelectionCommandContext,
+  context: EditableCelCommandContext,
   floatingImageData: ImageData,
   destinationBounds: Rect,
   shape: SelectionShape,
@@ -101,17 +105,8 @@ function restoreCommittedFloat(
  * Execute: cuts pixels from layer, stores in floating state
  * Undo: restores pixels to layer, returns to selected state
  */
-export class CutToFloatCommand implements Command {
-  id: string;
+export class CutToFloatCommand extends SelectionRegionCommand implements Command {
   name = 'Move Selection';
-  timestamp: number;
-
-  private canvas: HTMLCanvasElement;
-  private shape: SelectionShape;
-
-  // Original selection bounds (for clearing and undo)
-  private originalBounds: Rect;
-  private originalMask?: Uint8Array;
 
   // Full captured image data (for undo - restores the full original area)
   private fullImageData: ImageData;
@@ -120,26 +115,19 @@ export class CutToFloatCommand implements Command {
   private trimmedImageData: ImageData;
   private trimmedBounds: Rect;
   private trimmedMask?: Uint8Array;
-  private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
-    _layerId: string,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     mask?: Uint8Array,
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.canvas = canvas;
-    this.context = context;
-    this.originalBounds = { ...bounds };
-    this.shape = shape;
-    this.originalMask = mask;
+    super(layerId, frameId, bounds, shape, mask, context);
 
     // Capture the pixels we're about to cut
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.fullImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
 
     // Create a working copy for masking and trimming
@@ -173,7 +161,7 @@ export class CutToFloatCommand implements Command {
 
   execute() {
     const ctx = this.canvas.getContext('2d')!;
-    clearCanvasSelection(ctx, this.originalBounds, this.shape, this.originalMask);
+    clearCanvasSelection(ctx, this.bounds, this.shape, this.mask);
 
     // Set selection store to floating state with TRIMMED pixels
     this.context.selection.setFloating(
@@ -188,10 +176,10 @@ export class CutToFloatCommand implements Command {
     const ctx = this.canvas.getContext('2d')!;
 
     // Restore the full original pixels
-    ctx.putImageData(this.fullImageData, this.originalBounds.x, this.originalBounds.y);
+    ctx.putImageData(this.fullImageData, this.bounds.x, this.bounds.y);
 
     // Return to selected state with original bounds
-    this.context.selection.setSelected(this.originalBounds, this.shape, this.originalMask);
+    this.context.selection.setSelected(this.bounds, this.shape, this.mask);
   }
 }
 
@@ -200,33 +188,25 @@ export class CutToFloatCommand implements Command {
  * Execute: pastes floating pixels at destination, clears selection
  * Undo: removes pasted pixels, restores floating state at destination
  */
-export class CommitFloatCommand implements Command {
-  id: string;
+export class CommitFloatCommand extends EditableCelCommand implements Command {
   name = 'Commit Selection';
-  timestamp: number;
-
-  private canvas: HTMLCanvasElement;
   private floatingImageData: ImageData;
   private destinationBounds: Rect;
   private overwrittenImageData: ImageData;
   private shape: SelectionShape;
   private mask?: Uint8Array;
-  private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
-    _layerId: string,
+    layerId: string,
+    frameId: string,
     floatingImageData: ImageData,
     originalBounds: Rect,
     offset: { x: number; y: number },
     shape: SelectionShape,
     mask?: Uint8Array,
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.canvas = canvas;
-    this.context = context;
+    super(layerId, frameId, context);
     this.floatingImageData = floatingImageData;
     this.shape = shape;
     this.mask = mask;
@@ -234,7 +214,7 @@ export class CommitFloatCommand implements Command {
     this.destinationBounds = getDestinationBounds(originalBounds, offset);
 
     // Capture what's currently at the destination (for undo)
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.overwrittenImageData = ctx.getImageData(
       this.destinationBounds.x,
       this.destinationBounds.y,
@@ -279,13 +259,12 @@ export class CommitFloatCommand implements Command {
  * pasted index-buffer region, pastes pixels, and clears the floating selection.
  * Undo restores the previous palette, index-buffer region, pixels, and float.
  */
-export class CommitIndexedFloatCommand implements Command {
-  id: string;
+export class CommitIndexedFloatCommand
+  extends EditableCelCommand<IndexedSelectionCommandContext>
+  implements Command {
   name = 'Commit Selection';
-  timestamp: number;
   memorySize: number;
 
-  private canvas: HTMLCanvasElement;
   private floatingImageData: ImageData;
   private destinationBounds: Rect;
   private overwrittenImageData: ImageData;
@@ -298,10 +277,8 @@ export class CommitIndexedFloatCommand implements Command {
   private paletteAfterCommit: IndexedFloatPaletteState;
   private indexedPaste?: FloatingIndexedPaste;
   private mask?: Uint8Array;
-  private readonly context: IndexedSelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
     floatingImageData: ImageData,
     originalBounds: Rect,
     offset: { x: number; y: number },
@@ -309,10 +286,7 @@ export class CommitIndexedFloatCommand implements Command {
     options: CommitIndexedFloatCommandOptions,
     context: IndexedSelectionCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.canvas = canvas;
-    this.context = context;
+    super(options.layerId, options.frameId, context);
     this.floatingImageData = floatingImageData;
     this.destinationBounds = getDestinationBounds(originalBounds, offset);
     this.shape = shape;
@@ -333,7 +307,7 @@ export class CommitIndexedFloatCommand implements Command {
       : undefined;
     this.mask = options.mask;
 
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.overwrittenImageData = ctx.getImageData(
       this.destinationBounds.x,
       this.destinationBounds.y,

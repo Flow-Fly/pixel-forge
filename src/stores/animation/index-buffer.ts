@@ -142,15 +142,25 @@ export function rebuildAllCelCanvases(cels: Map<string, Cel>, palette: string[])
  */
 export function rebuildAllIndexBuffers(
   cels: Map<string, Cel>,
-  palette: PaletteColorSource
+  palette: PaletteColorSource,
+  addMissingColors = false
 ): Map<string, Cel> {
   const newCels = new Map(cels);
+  const rebuiltBuffers = new Map<HTMLCanvasElement, Uint8Array>();
 
   for (const [key, cel] of newCels) {
     if (!cel.canvas) continue;
     if (cel.textCelData) continue;
 
-    const newIndexBuffer = buildIndexBufferFromCanvas(cel.canvas, palette, false);
+    let newIndexBuffer = rebuiltBuffers.get(cel.canvas);
+    if (!newIndexBuffer) {
+      newIndexBuffer = buildIndexBufferFromCanvas(
+        cel.canvas,
+        palette,
+        addMissingColors
+      );
+      rebuiltBuffers.set(cel.canvas, newIndexBuffer);
+    }
     newCels.set(key, { ...cel, indexBuffer: newIndexBuffer });
   }
 

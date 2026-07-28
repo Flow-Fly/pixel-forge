@@ -1,4 +1,7 @@
 import type { TextCelData } from './text';
+import type { CelLinkType } from '@pixel-forge/shared';
+
+export { type CelLinkType, type FrameTag } from '@pixel-forge/shared';
 
 export interface Frame {
   id: string;
@@ -13,19 +16,6 @@ export interface AnimationTag {
   color: string;
 }
 
-/**
- * Frame tag that spans a range of frames.
- * Used for grouping frames and looping within sections.
- */
-export interface FrameTag {
-  id: string;
-  name: string;
-  color: string;
-  startFrameIndex: number;
-  endFrameIndex: number;
-  collapsed: boolean;
-}
-
 export interface OnionSkinSettings {
   enabled: boolean;
   prevFrames: number;
@@ -34,23 +24,15 @@ export interface OnionSkinSettings {
   tint: boolean;
 }
 
-/**
- * Link type for cels:
- * - 'soft': Auto-created when duplicating frames. Breaks on edit (copy-on-write).
- * - 'hard': Explicitly created by user. Stays linked on edit (affects all).
- */
-export type CelLinkType = 'soft' | 'hard';
-
 export interface Cel {
   id: string;
   layerId: string;
   frameId: string;
   canvas: HTMLCanvasElement;
   indexBuffer?: Uint8Array; // v3.0+: palette indices (1 byte per pixel, index 0 = transparent)
-  linkedCelId?: string;    // Group identifier for linked cels (share same canvas)
-  linkType?: CelLinkType;  // Type of link: 'soft' (auto-break) or 'hard' (user explicit)
-  opacity?: number;        // Cel-level opacity (0-100, default 100)
+  linkedCelId?: string; // Group identifier for linked cels (share same canvas)
+  linkType?: CelLinkType; // Type of link: 'soft' (auto-break) or 'hard' (user explicit)
+  opacity?: number; // Cel-level opacity (0-100, default 100)
   // Text cel specific (only present for text layers)
   textCelData?: TextCelData;
 }
-

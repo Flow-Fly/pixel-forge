@@ -1,6 +1,7 @@
-import { html, css, nothing } from "lit";
+import { html, css, nothing, type PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
 /**
  * Reusable dialog/modal component with backdrop, close behaviors, and slot-based content.
@@ -26,7 +27,11 @@ import { BaseComponent } from "../../core/base-component";
  */
 @customElement("pf-dialog")
 export class PFDialog extends BaseComponent {
+  private previouslyFocused: HTMLElement | null = null;
+
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: none;
     }
@@ -51,7 +56,7 @@ export class PFDialog extends BaseComponent {
       border: 1px solid var(--pf-color-border, #333);
       border-radius: var(--pf-radius-md);
       padding: 16px;
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
       max-height: 90vh;
       overflow-y: auto;
     }
@@ -84,6 +89,11 @@ export class PFDialog extends BaseComponent {
 
     .close-btn:hover {
       background-color: var(--pf-color-bg-hover, #2a2a2a);
+    }
+
+    .close-btn:focus-visible {
+      outline: 1px solid var(--pf-color-accent);
+      outline-offset: 2px;
     }
 
     .content {
@@ -159,16 +169,41 @@ export class PFDialog extends BaseComponent {
   }
 
   disconnectedCallback() {
+    this.restoreFocus();
     super.disconnectedCallback();
     document.removeEventListener("keydown", this.handleKeyDown);
   }
 
+  protected willUpdate(changedProperties: PropertyValues<this>) {
+    if (changedProperties.has("open") && this.open) {
+      this.previouslyFocused = this.deepestActiveElement(document);
+    }
+  }
+
   private handleKeyDown = (e: KeyboardEvent) => {
-    if (this.open && this.closeOnEscape && e.key === "Escape") {
+    if (!this.open) return;
+
+    if (this.closeOnEscape && e.key === "Escape") {
       e.preventDefault();
       this.close();
+      return;
+    }
+
+    if (e.key === "Tab") {
+      this.containFocus(e);
     }
   };
+
+  protected updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+    if (!changedProperties.has("open")) return;
+
+    if (this.open) {
+      this.focusDialog();
+    } else {
+      this.restoreFocus();
+    }
+  }
 
   private handleBackdropClick = (e: MouseEvent) => {
     if (this.closeOnBackdrop && e.target === e.currentTarget) {
@@ -184,12 +219,81 @@ export class PFDialog extends BaseComponent {
   /** Close the dialog and dispatch pf-close event */
   close() {
     this.open = false;
+    this.restoreFocus();
     this.dispatchEvent(
       new CustomEvent("pf-close", {
         bubbles: true,
         composed: true,
       })
     );
+  }
+
+  private focusableElements(): HTMLElement[] {
+    const closeButton = this.shadowRoot?.querySelector<HTMLElement>(".close-btn");
+    const slottedElements = Array.from(
+      this.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    return closeButton ? [closeButton, ...slottedElements] : slottedElements;
+  }
+
+  private containFocus(event: KeyboardEvent) {
+    const focusable = this.focusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      this.dialogSurface()?.focus();
+      return;
+    }
+
+    const activeElement = this.shadowRoot?.activeElement ?? document.activeElement;
+    const activeIndex = focusable.indexOf(activeElement as HTMLElement);
+    const isLeavingStart = event.shiftKey && activeIndex <= 0;
+    const isLeavingEnd = !event.shiftKey && activeIndex === focusable.length - 1;
+    if (!isLeavingStart && !isLeavingEnd) return;
+
+    event.preventDefault();
+    (isLeavingStart ? focusable.at(-1) : focusable[0])?.focus();
+  }
+
+  private focusDialog() {
+    (this.focusableElements()[0] ?? this.dialogSurface())?.focus();
+  }
+
+  private ensureDialogFocus = () => {
+    queueMicrotask(() => {
+      if (!this.open) return;
+
+      const activeElement = this.deepestActiveElement(document);
+      const focusIsInside = activeElement
+        ? this.contains(activeElement) || Boolean(this.shadowRoot?.contains(activeElement))
+        : false;
+      if (focusIsInside && this.focusableElements().length > 0) return;
+
+      this.dialogSurface()?.focus();
+    });
+  };
+
+  private dialogSurface() {
+    return this.shadowRoot?.querySelector<HTMLElement>(".dialog");
+  }
+
+  private deepestActiveElement(root: Document | ShadowRoot): HTMLElement | null {
+    let activeElement = root.activeElement;
+    while (activeElement?.shadowRoot?.activeElement) {
+      activeElement = activeElement.shadowRoot.activeElement;
+    }
+    return activeElement instanceof HTMLElement ? activeElement : null;
+  }
+
+  private restoreFocus() {
+    if (!this.previouslyFocused?.isConnected) {
+      this.previouslyFocused = null;
+      return;
+    }
+
+    this.previouslyFocused.focus();
+    this.previouslyFocused = null;
   }
 
   render() {
@@ -199,22 +303,32 @@ export class PFDialog extends BaseComponent {
       <div class="overlay" @click=${this.handleBackdropClick}>
         <div
           class="dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dialog-title"
+          tabindex="-1"
+          data-scrollbar="vertical"
           style="width: ${this.width}"
           @click=${this.handleDialogClick}
         >
           <div class="header">
-            <span class="title">
-              <slot name="title"></slot>
+            <span class="title" id="dialog-title">
+              <slot name="title" @slotchange=${this.ensureDialogFocus}></slot>
             </span>
             ${this.showCloseButton
-              ? html`<button class="close-btn" @click=${this.close}>✕</button>`
+              ? html`<button
+                  class="close-btn"
+                  type="button"
+                  aria-label="Close dialog"
+                  @click=${this.close}
+                >✕</button>`
               : nothing}
           </div>
           <div class="content">
-            <slot></slot>
+            <slot @slotchange=${this.ensureDialogFocus}></slot>
           </div>
           <div class="actions">
-            <slot name="actions"></slot>
+            <slot name="actions" @slotchange=${this.ensureDialogFocus}></slot>
           </div>
         </div>
       </div>

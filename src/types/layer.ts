@@ -1,9 +1,8 @@
 import type { TextLayerData } from './text';
 import type { ReferenceLayerData } from './reference';
+import type { BlendMode, LayerType } from '@pixel-forge/shared';
 
-export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
-
-export type LayerType = 'image' | 'group' | 'text' | 'reference';
+export { type BlendMode, type LayerType } from '@pixel-forge/shared';
 
 export interface Layer {
   id: string;

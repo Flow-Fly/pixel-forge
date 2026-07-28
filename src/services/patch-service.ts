@@ -1,7 +1,9 @@
 import type { Command } from '../stores/history';
 import type { Rect } from '../types/geometry';
 import { isDrawableCommand, type DrawableCommand } from '../commands/index';
-import { layerStore } from '../stores/layers';
+import type { ProjectContext } from '../stores/project-context';
+
+type PatchContext = Pick<ProjectContext, 'animation'>;
 
 /**
  * Check if two pixel values are equal (RGBA comparison).
@@ -109,6 +111,9 @@ export function computeSafePixels(
 
   for (const cmd of subsequentCommands) {
     if (!isDrawableCommand(cmd)) continue;
+    if (cmd.drawLayerId !== targetCmd.drawLayerId || cmd.drawFrameId !== targetCmd.drawFrameId) {
+      continue;
+    }
 
     const subBounds = cmd.drawBounds;
 
@@ -149,27 +154,28 @@ export function computeSafePixels(
 }
 
 /**
- * Apply a selective patch, restoring only safe pixels.
+ * Prepare a selective patch without mutating the canvas.
  *
+ * @param context - Project context that owns the target cel
  * @param layerId - The layer to patch
+ * @param frameId - The frame to patch
  * @param targetCmd - The command being patched out
  * @param safePixels - Set of global pixel indices that are safe to restore
  * @param canvasWidth - Width of the canvas
  * @returns Data needed for a PatchCommand, or null if no pixels could be restored
  */
-export function applyPatch(
+export function createPatchData(
+  context: PatchContext,
   layerId: string,
+  frameId: string,
   targetCmd: DrawableCommand,
   safePixels: Set<number>,
   canvasWidth: number
 ): { bounds: Rect; beforeData: Uint8ClampedArray; afterData: Uint8ClampedArray } | null {
   if (safePixels.size === 0) return null;
 
-  // Get the layer canvas
-  const layer = layerStore.layers.value.find(l => l.id === layerId);
-  if (!layer?.canvas) return null;
-
-  const ctx = layer.canvas.getContext('2d');
+  const canvas = context.animation.getCelCanvas(frameId, layerId);
+  const ctx = canvas?.getContext('2d');
   if (!ctx) return null;
 
   const targetBounds = targetCmd.drawBounds;
@@ -229,14 +235,6 @@ export function applyPatch(
     afterData[patchOffset + 2] = targetPrevData[targetOffset + 2];
     afterData[patchOffset + 3] = targetPrevData[targetOffset + 3];
   }
-
-  // Apply the patch to the canvas
-  const afterImageData = new ImageData(
-    new Uint8ClampedArray(afterData),
-    patchBounds.width,
-    patchBounds.height
-  );
-  ctx.putImageData(afterImageData, patchBounds.x, patchBounds.y);
 
   return {
     bounds: patchBounds,

@@ -14,7 +14,9 @@ import {
   type ProjectContext,
 } from '../../src/stores/project-context';
 import { FillTool } from '../../src/tools/fill-tool';
+import { analyzeGuidedDrawingProgress } from '../../src/services/paint-by-number/guided-progress';
 import type { Cel } from '../../src/types/animation';
+import { GUIDED_DRAWING_VERSION } from '../../src/types/guided-drawing';
 import type { Layer } from '../../src/types/layer';
 
 type Rgba = [number, number, number, number];
@@ -160,5 +162,44 @@ describe('FillTool active project context', () => {
     expect(projectADirty).toHaveBeenCalled();
     expect(projectBDirty).not.toHaveBeenCalled();
     expect(defaultDirty).not.toHaveBeenCalled();
+  });
+
+  it('fills only the connected numbered region in a guided project', () => {
+    const project = createContext();
+    const canvas = new FakeCanvasContext(3, 1);
+    const indexBuffer = new Uint8Array(3);
+    installDrawingState(project, canvas.canvas, 'guided-layer', indexBuffer);
+    project.guidedDrawing.start({
+      version: GUIDED_DRAWING_VERSION,
+      width: 3,
+      height: 1,
+      target: Uint8Array.from([1, 1, 2]),
+      settings: {
+        longSide: 3,
+        paletteSource: 'generated',
+        maxColors: 2,
+        mapping: 'color',
+        simplifyIsolatedPixels: false,
+      },
+      createdAt: 1,
+    });
+    project.colors.setPrimaryColor('#123456');
+
+    const tool = new FillTool();
+    tool.setContext(canvas as unknown as CanvasRenderingContext2D);
+    tool.setProjectContext(project);
+    tool.onDown(0, 0);
+
+    const paletteIndex = project.palette.getColorIndex('#123456');
+    expect([...indexBuffer]).toEqual([paletteIndex, paletteIndex, 0]);
+    expect(canvas.getPixel(0, 0)).toEqual([18, 52, 86, 255]);
+    expect(canvas.getPixel(1, 0)).toEqual([18, 52, 86, 255]);
+    expect(canvas.getPixel(2, 0)).toEqual([0, 0, 0, 0]);
+
+    const pixels = canvas.getImageData(0, 0, 3, 1).data;
+    expect(analyzeGuidedDrawingProgress(
+      project.guidedDrawing.session.value!.target,
+      pixels,
+    ).covered).toBe(2);
   });
 });

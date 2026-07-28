@@ -1,10 +1,6 @@
 import { keyboardService } from './shortcuts';
 import { toolStore, type ToolType } from '../../stores/tools';
-import { historyStore } from '../../stores/history';
 import { brushStore } from '../../stores/brush';
-import { selectionStore } from '../../stores/selection';
-import { layerStore } from '../../stores/layers';
-import { projectStore } from '../../stores/project';
 import {
   DeleteSelectionCommand,
   CommitFloatCommand,
@@ -12,12 +8,7 @@ import {
   CutToFloatCommand,
   FillSelectionCommand,
 } from '../../commands/selection-commands';
-import { colorStore } from '../../stores/colors';
-import { animationStore } from '../../stores/animation';
-import { viewportStore } from '../../stores/viewport';
-import { panelStore } from '../../stores/panels';
 import { shapeSettings } from '../../stores/tool-settings';
-import { guidesStore } from '../../stores/guides';
 import { workspaceStore } from '../../stores/workspace';
 import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import { AddFrameCommand } from '../../commands/animation-commands';
@@ -37,6 +28,7 @@ import { applyClipboardPaletteAppendPlan } from '../clipboard-palette-append';
 import { createClipboardIndexPasteRegionPlan } from '../clipboard-index-paste-region';
 import { normalizeHex } from '../../stores/palette/color-utils';
 import { isPaintableLayer } from '../../utils/layer-capabilities';
+import { togglePlayback } from '../playback-action';
 
 type ShortcutAction = () => void;
 
@@ -48,6 +40,8 @@ interface ShortcutRegistration {
   options?: {
     quick?: boolean;
     releaseAction?: ShortcutAction;
+    physicalCode?: string;
+    when?: () => boolean;
   };
 }
 
@@ -87,16 +81,6 @@ function parseShortcutKey(shortcutKey: string): Pick<ShortcutRegistration, 'key'
 
 function dispatchAppEvent(name: string) {
   window.dispatchEvent(new CustomEvent(name));
-}
-
-function activeLayer(): Layer | undefined {
-  const activeLayerId = layerStore.activeLayerId.value;
-  return layerStore.layers.value.find((layer) => layer.id === activeLayerId);
-}
-
-function activeLayerWithCanvas(): Layer | undefined {
-  const layer = activeLayer();
-  return isPaintableLayer(layer) ? layer : undefined;
 }
 
 function activeLayerInContext(context: ProjectContext): Layer | undefined {
@@ -154,7 +138,6 @@ function commitFloatingSelectionInContext(
 
     context.history.execute(
       new CommitIndexedFloatCommand(
-        layer.canvas,
         state.imageData,
         state.originalBounds,
         state.currentOffset,
@@ -176,53 +159,66 @@ function commitFloatingSelectionInContext(
 
   context.history.execute(
     new CommitFloatCommand(
-      layer.canvas,
       layer.id,
+      context.animation.currentFrameId.value,
       state.imageData,
       state.originalBounds,
       state.currentOffset,
       state.shape,
-      state.mask
+      state.mask,
+      context
     )
   );
 }
 
-function commitFloatingSelection(state: Extract<SelectionState, { type: 'floating' }>) {
-  commitFloatingSelectionInContext(getActiveProjectContext(), state);
-}
-
-function moveSelectionByArrow(dx: number, dy: number) {
-  const state = selectionStore.state.value;
+function moveSelectionByArrow(
+  dx: number,
+  dy: number,
+  context: ProjectContext = getActiveProjectContext()
+) {
+  const state = context.selection.state.value;
 
   if (state.type === 'selected') {
-    const layer = activeLayerWithCanvas();
+    const layer = activeLayerWithCanvasInContext(context);
     if (!layer?.canvas) return;
 
-    historyStore.execute(
-      new CutToFloatCommand(layer.canvas, layer.id, state.bounds, state.shape, freeformMask(state))
+    context.history.execute(
+      new CutToFloatCommand(
+        layer.id,
+        context.animation.currentFrameId.value,
+        state.bounds,
+        state.shape,
+        freeformMask(state),
+        context
+      )
     );
 
-    selectionStore.moveFloat(dx, dy);
+    context.selection.moveFloat(dx, dy);
     return;
   }
 
   if (state.type === 'floating') {
-    selectionStore.moveFloat(dx, dy);
+    context.selection.moveFloat(dx, dy);
     return;
   }
 
   if (state.type === 'transforming') {
-    selectionStore.moveTransform(dx, dy);
+    context.selection.moveTransform(dx, dy);
   }
 }
 
-function moveSelectionOrFrame(dx: number, dy: number, frameAction?: ShortcutAction) {
-  if (selectionStore.isActive) {
-    moveSelectionByArrow(dx, dy);
+function moveSelectionOrFrame(
+  dx: number,
+  dy: number,
+  frameAction?: (context: ProjectContext) => void
+) {
+  const context = getActiveProjectContext();
+  if (context.selection.isActive) {
+    moveSelectionByArrow(dx, dy, context);
     return;
   }
 
-  frameAction?.();
+  frameAction?.(context);
 }
 
 function toggleFillOrFillSelection() {
@@ -231,19 +227,22 @@ function toggleFillOrFillSelection() {
     return;
   }
 
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
   if (state.type !== 'selected') return;
 
-  const layer = activeLayerWithCanvas();
+  const layer = activeLayerWithCanvasInContext(context);
   if (!layer?.canvas) return;
 
-  historyStore.execute(
+  context.history.execute(
     new FillSelectionCommand(
-      layer.canvas,
+      layer.id,
+      context.animation.currentFrameId.value,
       state.bounds,
       state.shape,
-      colorStore.primaryColor.value,
-      freeformMask(state)
+      context.colors.primaryColor.value,
+      freeformMask(state),
+      context
     )
   );
 }
@@ -257,72 +256,93 @@ function commitSelectionShortcut() {
 }
 
 function cancelSelection() {
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
   if (state.type === 'floating') {
-    historyStore.undo();
+    context.history.undo();
     return;
   }
 
   if (state.type === 'selected' || state.type === 'selecting') {
-    selectionStore.clear();
+    context.selection.clear();
   }
 }
 
+function deleteSelectedPixels(
+  context: ProjectContext,
+  state: Extract<SelectionState, { type: 'selected' }>
+): void {
+  const layer = activeLayerWithCanvasInContext(context);
+  if (!layer?.canvas) return;
+
+  context.history.execute(
+    new DeleteSelectionCommand(
+      layer.id,
+      context.animation.currentFrameId.value,
+      state.bounds,
+      state.shape,
+      freeformMask(state),
+      context
+    )
+  );
+}
+
 function deleteSelection() {
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
 
   if (state.type === 'selected') {
-    const layer = activeLayerWithCanvas();
-    if (!layer?.canvas) return;
-
-    historyStore.execute(
-      new DeleteSelectionCommand(layer.canvas, state.bounds, state.shape, freeformMask(state))
-    );
+    deleteSelectedPixels(context, state);
     return;
   }
 
   if (state.type === 'floating' || state.type === 'transforming') {
-    selectionStore.clear();
+    context.selection.clear();
   }
 }
 
 function deselect() {
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
   if (state.type === 'floating') {
-    commitFloatingSelection(state);
+    commitFloatingSelectionInContext(context, state);
     return;
   }
 
-  selectionStore.clear();
+  context.selection.clear();
 }
 
 function selectAll() {
-  selectionStore.state.value = {
+  const context = getActiveProjectContext();
+  context.selection.state.value = {
     type: 'selected',
     shape: 'rectangle',
     bounds: {
       x: 0,
       y: 0,
-      width: projectStore.width.value,
-      height: projectStore.height.value,
+      width: context.project.width.value,
+      height: context.project.height.value,
     },
   };
 }
 
 function selectCelBounds() {
-  const activeLayerId = layerStore.activeLayerId.value;
+  const context = getActiveProjectContext();
+  const activeLayerId = context.layers.activeLayerId.value;
   if (!activeLayerId) return;
 
-  const canvas = animationStore.getCelCanvas(animationStore.currentFrameId.value, activeLayerId);
+  const canvas = context.animation.getCelCanvas(
+    context.animation.currentFrameId.value,
+    activeLayerId
+  );
   if (!canvas) return;
 
-  if (!selectionStore.selectLayerContent(canvas)) {
-    selectionStore.clear();
+  if (!context.selection.selectLayerContent(canvas)) {
+    context.selection.clear();
   }
 }
 
-function copySelection() {
-  const context = getActiveProjectContext();
+function copySelection(context: ProjectContext = getActiveProjectContext()) {
   const state = context.selection.state.value;
   if (state.type !== 'selected') return;
 
@@ -369,17 +389,12 @@ function copySelection() {
 }
 
 function cutSelection() {
-  const state = selectionStore.state.value;
+  const context = getActiveProjectContext();
+  const state = context.selection.state.value;
   if (state.type !== 'selected') return;
 
-  copySelection();
-
-  const layer = activeLayerWithCanvas();
-  if (!layer?.canvas) return;
-
-  historyStore.execute(
-    new DeleteSelectionCommand(layer.canvas, state.bounds, state.shape, freeformMask(state))
-  );
+  copySelection(context);
+  deleteSelectedPixels(context, state);
 }
 
 function colorsMatchAtIndex(
@@ -470,45 +485,51 @@ function pasteSelection() {
 }
 
 function invertSelection() {
-  if (selectionStore.state.value.type !== 'selected') return;
+  const context = getActiveProjectContext();
+  if (context.selection.state.value.type !== 'selected') return;
 
-  selectionStore.invertSelection(projectStore.width.value, projectStore.height.value);
+  context.selection.invertSelection(context.project.width.value, context.project.height.value);
 }
 
 async function captureBrush() {
-  if (!canCaptureBrush()) {
+  const context = getActiveProjectContext();
+  if (!canCaptureBrush(context)) {
     log.debug('No selection to capture as brush');
     return;
   }
 
-  await captureBrushAndAdd();
+  await captureBrushAndAdd(undefined, context);
 }
 
 function groupLayers() {
-  const activeLayerId = layerStore.activeLayerId.value;
-  const layer = activeLayer();
+  const context = getActiveProjectContext();
+  const activeLayerId = context.layers.activeLayerId.value;
+  const layer = activeLayerInContext(context);
   if (!activeLayerId || !layer) return;
 
   if (layer.type === 'group') return;
 
-  historyStore.execute(new GroupLayersCommand([activeLayerId]));
+  context.history.execute(new GroupLayersCommand([activeLayerId], context));
 }
 
 function ungroupLayers() {
-  const activeLayerId = layerStore.activeLayerId.value;
-  const layer = activeLayer();
+  const context = getActiveProjectContext();
+  const activeLayerId = context.layers.activeLayerId.value;
+  const layer = activeLayerInContext(context);
   if (!activeLayerId || !layer) return;
 
   if (layer.type === 'group') {
-    historyStore.execute(new UngroupLayersCommand(activeLayerId));
+    context.history.execute(new UngroupLayersCommand(activeLayerId, context));
     return;
   }
 
   if (!layer.parentId) return;
 
-  const parentGroup = layerStore.layers.value.find((candidate) => candidate.id === layer.parentId);
+  const parentGroup = context.layers.layers.value.find(
+    (candidate) => candidate.id === layer.parentId
+  );
   if (parentGroup?.type === 'group') {
-    historyStore.execute(new UngroupLayersCommand(parentGroup.id));
+    context.history.execute(new UngroupLayersCommand(parentGroup.id, context));
   }
 }
 
@@ -557,23 +578,68 @@ const colorShortcuts: ShortcutGroup = [
   {
     key: 'x',
     modifiers: [],
-    action: () => colorStore.swapColors(),
+    action: () => getActiveProjectContext().colors.swapColors(),
     description: 'Swap colors',
   },
 ];
+
+function selectGuideColorOrZoom(level: number) {
+  const context = getActiveProjectContext();
+  const session = context.guidedDrawing.session.value;
+
+  if (!session) {
+    if (isZoomLevel(level)) context.viewport.zoomToLevel(level);
+    return;
+  }
+
+  const guideColorCount = session.guideColorCount ?? highestGuideNumber(session.target);
+  if (level > guideColorCount) return;
+
+  const color = context.palette.mainColors.value[level - 1];
+  if (!color) return;
+
+  context.colors.setPrimaryColor(color);
+  context.colors.updateLightnessVariations(color);
+}
+
+function isGuideColorOrZoomAvailable(level: number): boolean {
+  const context = getActiveProjectContext();
+  const session = context.guidedDrawing.session.value;
+  if (!session) return isZoomLevel(level);
+
+  const guideColorCount = session.guideColorCount ?? highestGuideNumber(session.target);
+  return level <= guideColorCount && Boolean(context.palette.mainColors.value[level - 1]);
+}
+
+function isZoomLevel(level: number): level is 1 | 2 | 3 | 4 | 5 | 6 {
+  return level >= 1 && level <= 6;
+}
+
+function highestGuideNumber(target: Uint8Array): number {
+  let highest = 0;
+  for (const guideNumber of target) highest = Math.max(highest, guideNumber);
+  return highest;
+}
 
 const viewShortcuts: ShortcutGroup = [
   {
     key: '0',
     modifiers: [],
-    action: () => viewportStore.resetView(),
+    action: () => getActiveProjectContext().viewport.resetView(),
     description: 'Fit to window',
   },
-  ...([1, 2, 3, 4, 5, 6] as const).map((level) => ({
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((level) => ({
     key: String(level),
     modifiers: [],
-    action: () => viewportStore.zoomToLevel(level),
-    description: `Zoom ${[100, 200, 400, 800, 1600, 3200][level - 1]}%`,
+    action: () => selectGuideColorOrZoom(level),
+    description:
+      level <= 6
+        ? `Zoom ${[100, 200, 400, 800, 1600, 3200][level - 1]}% / Guide color ${level}`
+        : `Guide color ${level}`,
+    options: {
+      physicalCode: `Digit${level}`,
+      when: () => isGuideColorOrZoomAvailable(level),
+    },
   })),
 ];
 
@@ -609,15 +675,9 @@ const brushSizeAndPanelShortcuts: ShortcutGroup = [
     description: 'Increase brush size',
   },
   {
-    key: 'Tab',
-    modifiers: [],
-    action: () => panelStore.togglePanel('timeline'),
-    description: 'Toggle timeline',
-  },
-  {
     key: 'g',
     modifiers: ['shift'],
-    action: () => guidesStore.toggleVisibility(),
+    action: () => getActiveProjectContext().guides.toggleVisibility(),
     description: 'Toggle guides',
   },
 ];
@@ -626,13 +686,13 @@ const animationShortcuts: ShortcutGroup = [
   {
     key: 'ArrowLeft',
     modifiers: [],
-    action: () => moveSelectionOrFrame(-1, 0, () => animationStore.prevFrame()),
+    action: () => moveSelectionOrFrame(-1, 0, (context) => context.animation.prevFrame()),
     description: 'Move selection left / Previous frame',
   },
   {
     key: 'ArrowRight',
     modifiers: [],
-    action: () => moveSelectionOrFrame(1, 0, () => animationStore.nextFrame()),
+    action: () => moveSelectionOrFrame(1, 0, (context) => context.animation.nextFrame()),
     description: 'Move selection right / Next frame',
   },
   {
@@ -674,25 +734,28 @@ const animationShortcuts: ShortcutGroup = [
   {
     key: 'Home',
     modifiers: [],
-    action: () => animationStore.goToFirstFrame(),
+    action: () => getActiveProjectContext().animation.goToFirstFrame(),
     description: 'First frame',
   },
   {
     key: 'End',
     modifiers: [],
-    action: () => animationStore.goToLastFrame(),
+    action: () => getActiveProjectContext().animation.goToLastFrame(),
     description: 'Last frame',
   },
   {
     key: 'Enter',
     modifiers: [],
-    action: () => animationStore.togglePlayback(),
+    action: () => togglePlayback(getActiveProjectContext().animation),
     description: 'Play/Stop',
   },
   {
     key: 'n',
     modifiers: ['alt'],
-    action: () => historyStore.execute(new AddFrameCommand(true)),
+    action: () => {
+      const context = getActiveProjectContext();
+      context.history.execute(new AddFrameCommand(true, undefined, context));
+    },
     description: 'New frame',
   },
 ];
@@ -707,19 +770,19 @@ const fillAndEditShortcuts: ShortcutGroup = [
   {
     key: 'z',
     modifiers: [MOD_PRIMARY],
-    action: () => historyStore.undo(),
+    action: () => getActiveProjectContext().history.undo(),
     description: 'Undo',
   },
   {
     key: 'z',
     modifiers: [MOD_PRIMARY, 'shift'],
-    action: () => historyStore.redo(),
+    action: () => getActiveProjectContext().history.redo(),
     description: 'Redo',
   },
   {
     key: 'y',
     modifiers: ['ctrl'],
-    action: () => historyStore.redo(),
+    action: () => getActiveProjectContext().history.redo(),
     description: 'Redo',
   },
 ];
@@ -764,7 +827,7 @@ const selectionShortcuts: ShortcutGroup = [
   {
     key: 'd',
     modifiers: [MOD_PRIMARY, 'shift'],
-    action: () => selectionStore.reselect(),
+    action: () => getActiveProjectContext().selection.reselect(),
     description: 'Reselect',
   },
   {

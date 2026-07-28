@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext } from '../../stores/project-context';
 import { AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
+import { togglePlayback } from '../../services/playback-action';
 
 const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
 
@@ -83,7 +84,7 @@ export class PFPlaybackControls extends BaseComponent {
   }
 
   togglePlay() {
-    this.context.animation.togglePlayback();
+    togglePlayback(this.context.animation);
   }
 
   addFrame() {

@@ -69,6 +69,7 @@ describe('createGuidedProjectFile', () => {
 
 describe('createGuidedProject', () => {
   it('delegates a separate activated project to the workspace', async () => {
+    const record = vi.fn();
     const createProjectFromFile = vi.fn(async () => ({
       ok: true as const,
       item: {} as never,
@@ -79,6 +80,7 @@ describe('createGuidedProject', () => {
       { guide: guide(), settings, createdAt: 123 },
       {},
       { createProjectFromFile },
+      { record },
     );
 
     expect(result.projectId).toBe('guided-id');
@@ -86,5 +88,9 @@ describe('createGuidedProject', () => {
       expect.objectContaining({ guidedDrawing: expect.any(Object) }),
       { activate: true, saveActiveContext: true },
     );
+    expect(record).toHaveBeenCalledWith({
+      name: 'project_created',
+      dimensions: { source: 'guided_drawing' },
+    });
   });
 });

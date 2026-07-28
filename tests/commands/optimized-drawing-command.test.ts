@@ -254,4 +254,58 @@ describe('OptimizedDrawingCommand', () => {
     expect(sourceBuffer[bounds.y * W + bounds.x]).toBe(0);
     expect(otherBuffer[bounds.y * W + bounds.x]).toBe(3);
   });
+
+  it('executes and undoes against the frame captured at creation time', () => {
+    const context = createProjectContext();
+    createdContexts.push(context);
+    const layer = context.layers.layers.value[0];
+    const firstFrameId = context.animation.currentFrameId.value;
+    const first = makeFakeCanvas();
+
+    context.layers.updateLayer(layer.id, { canvas: first.canvas });
+    context.animation.cels.value = new Map([
+      [
+        context.animation.getCelKey(layer.id, firstFrameId),
+        {
+          id: 'first-cel',
+          layerId: layer.id,
+          frameId: firstFrameId,
+          canvas: first.canvas,
+        },
+      ],
+    ]);
+
+    const command = new OptimizedDrawingCommand(
+      layer.id,
+      bounds,
+      new Uint8ClampedArray(bounds.width * bounds.height * 4),
+      new Uint8ClampedArray(bounds.width * bounds.height * 4).fill(255),
+      'Captured frame',
+      undefined,
+      context
+    );
+
+    const second = makeFakeCanvas();
+    const secondFrameId = 'second-frame';
+    context.animation.cels.value = new Map([
+      ...context.animation.cels.value,
+      [
+        context.animation.getCelKey(layer.id, secondFrameId),
+        {
+          id: 'second-cel',
+          layerId: layer.id,
+          frameId: secondFrameId,
+          canvas: second.canvas,
+        },
+      ],
+    ]);
+    context.animation.currentFrameId.value = secondFrameId;
+    context.layers.updateLayer(layer.id, { canvas: second.canvas });
+
+    command.execute();
+    command.undo();
+
+    expect(first.putCalls).toHaveLength(2);
+    expect(second.putCalls).toHaveLength(0);
+  });
 });

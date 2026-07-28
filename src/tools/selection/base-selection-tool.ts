@@ -178,8 +178,8 @@ export abstract class BaseSelectionTool extends BaseTool {
     if (!selected) return;
 
     const command = new CutToFloatCommand(
-      selected.canvas,
       selected.layer.id,
+      this.projectContext.animation.currentFrameId.value,
       selected.bounds,
       selected.shape,
       selected.mask,
@@ -199,7 +199,7 @@ export abstract class BaseSelectionTool extends BaseTool {
   }
 
   protected commitIfFloating(): boolean {
-    const { history, layers, selection } = this.projectContext;
+    const { animation, history, layers, selection } = this.projectContext;
     const state = selection.state.value;
     if (state.type !== 'floating') return false;
 
@@ -208,8 +208,8 @@ export abstract class BaseSelectionTool extends BaseTool {
     if (!isPaintableLayer(layer)) return false;
 
     const command = new CommitFloatCommand(
-      layer.canvas,
       layer.id,
+      animation.currentFrameId.value,
       state.imageData,
       state.originalBounds,
       state.currentOffset,

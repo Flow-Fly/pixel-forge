@@ -14,11 +14,13 @@ export interface DrawableCommand extends Command {
   drawPreviousData: Uint8ClampedArray;
   drawNewData: Uint8ClampedArray;
   drawLayerId: string;
+  drawFrameId: string;
 }
 
 /**
  * Type guard to check if a command has drawable pixel data.
  */
 export function isDrawableCommand(cmd: Command): cmd is DrawableCommand {
-  return 'drawBounds' in cmd && 'drawPreviousData' in cmd && 'drawNewData' in cmd && 'drawLayerId' in cmd;
+  return 'drawBounds' in cmd && 'drawPreviousData' in cmd && 'drawNewData' in cmd &&
+    'drawLayerId' in cmd && 'drawFrameId' in cmd;
 }

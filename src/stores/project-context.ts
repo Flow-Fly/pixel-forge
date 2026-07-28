@@ -63,8 +63,14 @@ function createProjectContextStores(
   const guidedDrawing = createGuidedDrawingStore();
   const historyHighlight = createHistoryHighlightStore();
   const selection = createSelectionStore();
-  const palette = createPaletteStore({ layers, refs });
-  const animation = createAnimationStore({ layers, palette, refs });
+  const paletteEvents = new EventTarget();
+  const palette = createPaletteStore({ events: paletteEvents, layers, refs });
+  const animation = createAnimationStore({
+    layers,
+    palette,
+    paletteEvents,
+    refs,
+  });
   const colors = createColorStore(options.colorPalette ?? palette);
   const history = createHistoryStore({ palette });
   const project = createProjectStore({

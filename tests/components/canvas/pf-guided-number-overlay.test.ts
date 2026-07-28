@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   collectVisibleGuidedNumberCells,
   collectVisibleGuidedTargetCells,
+  getGuidedNumberLabelStyle,
   type PFGuidedNumberOverlay,
 } from '../../../src/components/canvas/pf-guided-number-overlay';
 import '../../../src/components/canvas/pf-canvas-viewport';
@@ -55,6 +56,18 @@ describe('guided number overlay', () => {
       viewportWidth: 16,
       viewportHeight: 16,
     })).toEqual([]);
+  });
+
+  it('keeps number labels restrained at the readable zoom threshold', () => {
+    const singleDigit = getGuidedNumberLabelStyle(16, 1);
+    const doubleDigit = getGuidedNumberLabelStyle(16, 2);
+
+    expect(singleDigit.fontWeight).toBe(500);
+    expect(singleDigit.fontSize).toBeLessThan(9);
+    expect(doubleDigit.fontSize).toBeLessThan(singleDigit.fontSize);
+    expect(singleDigit.fillStyle).toContain('0.62');
+    expect(singleDigit.strokeStyle).toContain('0.46');
+    expect(singleDigit.lineWidth).toBe(1);
   });
 
   it('plans a target preview at any zoom without reading painted pixels', () => {

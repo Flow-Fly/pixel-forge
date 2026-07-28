@@ -35,6 +35,7 @@ type AddColorOptions = {
 type PaletteLayerStore = ReturnType<typeof createLayerStore>;
 
 export interface PaletteStoreDependencies {
+  events: EventTarget;
   layers: PaletteLayerStore;
   refs: StoreRefs;
 }
@@ -75,6 +76,7 @@ class PaletteStore {
 
   private colorToIndex = new Map<string, number>();
   private cachedPaletteName: string | null = null;
+  private readonly events: EventTarget;
   private readonly layers: PaletteLayerStore;
   private readonly refs: StoreRefs;
 
@@ -97,6 +99,7 @@ class PaletteStore {
   // ==========================================
 
   constructor(dependencies: PaletteStoreDependencies) {
+    this.events = dependencies.events;
     this.layers = dependencies.layers;
     this.refs = dependencies.refs;
     this.loadFromStorage();
@@ -211,7 +214,7 @@ class PaletteStore {
     });
     if (!normalized) return;
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-color-changed', {
         detail: { index, color: normalized },
       })
@@ -241,7 +244,7 @@ class PaletteStore {
   removeColor(index: number) {
     if (this.removeColorAtArrayIndex(index)) {
 
-      window.dispatchEvent(
+      this.events.dispatchEvent(
         new CustomEvent('palette-color-removed', {
           detail: { removedIndex: index + 1 },
         })
@@ -252,7 +255,7 @@ class PaletteStore {
   removeColorByIndex(index: number) {
     if (!this.removeColorAtArrayIndex(index - 1)) return;
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-color-removed', {
         detail: { removedIndex: index },
       })
@@ -272,7 +275,7 @@ class PaletteStore {
     this.rebuildColorMap();
     this.saveToStorage();
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-color-inserted', {
         detail: { insertedIndex: index },
       })
@@ -292,7 +295,7 @@ class PaletteStore {
     this.rebuildColorMap();
     this.saveToStorage();
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-colors-reordered', {
         detail: { fromIndex: fromIndex + 1, toIndex: toIndex + 1 },
       })
@@ -323,7 +326,7 @@ class PaletteStore {
     this.rebuildColorMap();
     this.saveToStorage();
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-replaced', {
         detail: { oldMainColors },
       })
@@ -346,7 +349,7 @@ class PaletteStore {
     this.rebuildColorMap();
     this.saveToStorage();
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-replaced', {
         detail: { oldMainColors },
       })
@@ -362,7 +365,7 @@ class PaletteStore {
     this.rebuildColorMap();
     this.saveToStorage();
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-replaced', {
         detail: { skipRemap: true },
       })
@@ -382,7 +385,7 @@ class PaletteStore {
 
     this.rebuildColorMap();
 
-    window.dispatchEvent(
+    this.events.dispatchEvent(
       new CustomEvent('palette-replaced', {
         detail: { skipRemap: true },
       })
@@ -449,7 +452,7 @@ class PaletteStore {
       this.saveToStorage();
 
       // Dispatch event to remap index buffers by color
-      window.dispatchEvent(
+      this.events.dispatchEvent(
         new CustomEvent('palette-replaced', {
           detail: { oldMainColors },
         })

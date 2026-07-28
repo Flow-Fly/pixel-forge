@@ -50,8 +50,13 @@ describe('guided palette', () => {
       'Guide color 1, #111111, 0 cells remaining',
     );
     expect(buttons[1].getAttribute('aria-label')).toContain(
-      'Guide color 2, #eeeeee, 1 cells remaining',
+      'Guide color 2, #eeeeee, 1 cells remaining, number key 2',
     );
+    expect(
+      [...element.shadowRoot!.querySelectorAll<HTMLElement>('.shortcut-hint')].map(
+        (hint) => hint.textContent?.trim(),
+      ),
+    ).toEqual(['Key 1', 'Key 2']);
     expect(element.shadowRoot?.textContent).toContain('1 of 2 cells covered');
     expect(element.shadowRoot?.textContent).toContain('1 remaining · 50%');
     expect(element.shadowRoot?.textContent).toContain(
@@ -75,6 +80,31 @@ describe('guided palette', () => {
     await element.updateComplete;
     expect(context.colors.primaryColor.value).toBe('#eeeeee');
     expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
+
+    context.dispose();
+  });
+
+  it('limits number-key hints to guide colors 1 through 9', async () => {
+    const context = createGuidedContext(10);
+    setActiveProjectContext(context);
+    const element = document.createElement('pf-guided-palette') as PFGuidedPalette;
+    document.body.append(element);
+    await element.updateComplete;
+
+    const buttons = [...element.shadowRoot!.querySelectorAll<HTMLButtonElement>('.guide-color')];
+    const hints = [...element.shadowRoot!.querySelectorAll<HTMLElement>('.shortcut-hint')];
+
+    expect(buttons).toHaveLength(10);
+    expect(hints.map((hint) => hint.textContent?.trim())).toEqual(
+      Array.from({ length: 9 }, (_, index) => `Key ${index + 1}`),
+    );
+    expect(buttons[8].getAttribute('aria-label')).toContain('number key 9');
+    expect(buttons[9].getAttribute('aria-label')).not.toContain('number key');
+
+    buttons[9].click();
+    await element.updateComplete;
+    expect(context.colors.primaryColor.value).toBe('#aaaaaa');
+    expect(buttons[9].getAttribute('aria-pressed')).toBe('true');
 
     context.dispose();
   });
@@ -183,32 +213,34 @@ function getPaintingPixels(context: ReturnType<typeof createProjectContext>) {
   return [...(layer?.canvas?.getContext('2d')?.getImageData(0, 0, 2, 1).data ?? [])];
 }
 
-function createGuidedContext() {
+function createGuidedContext(guideColorCount = 2) {
   const context = createProjectContext();
   const layer = context.layers.layers.value.find((item) => item.type === 'image');
-  const pixels = new Uint8ClampedArray([
-    12, 12, 12, 255,
-    0, 0, 0, 0,
-  ]);
+  const pixels = new Uint8ClampedArray(guideColorCount * 4);
+  pixels.set([12, 12, 12, 255]);
   const canvas = {
-    width: 2,
+    width: guideColorCount,
     height: 1,
     getContext: () => ({ getImageData: () => ({ data: pixels }) }),
   } as unknown as HTMLCanvasElement;
   if (layer) context.layers.updateLayer(layer.id, { canvas });
 
-  context.palette.mainColors.value = ['#111111', '#eeeeee'];
+  context.palette.mainColors.value = Array.from(
+    { length: guideColorCount },
+    (_, index) => `#${(index + 1).toString(16).repeat(6)}`,
+  );
+  if (guideColorCount === 2) context.palette.mainColors.value[1] = '#eeeeee';
   context.palette.rebuildColorMap();
   context.guidedDrawing.start({
     version: GUIDED_DRAWING_VERSION,
-    width: 2,
+    width: guideColorCount,
     height: 1,
-    target: Uint8Array.from([1, 2]),
-    guideColorCount: 2,
+    target: Uint8Array.from({ length: guideColorCount }, (_, index) => index + 1),
+    guideColorCount,
     settings: {
-      longSide: 2,
+      longSide: guideColorCount,
       paletteSource: 'generated',
-      maxColors: 2,
+      maxColors: guideColorCount,
       mapping: 'color',
       simplifyIsolatedPixels: false,
     },

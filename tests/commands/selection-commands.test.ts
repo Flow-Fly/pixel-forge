@@ -34,6 +34,8 @@ import {
 import { trimTransparentPixels } from '../../src/commands/selection/image-data';
 import { maskPixelsOutsideSelection } from '../../src/commands/selection/pixels';
 import { selectionStore } from '../../src/stores/selection';
+import { EMPTY_CEL_LINK_ID } from '../../src/stores/animation';
+import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
 import { type Rect } from '../../src/types/geometry';
 
 class FakeImageData {
@@ -158,6 +160,15 @@ function makeCanvas(width: number, height: number) {
   };
 }
 
+function commandContext(canvas: HTMLCanvasElement): ProjectContext {
+  return {
+    animation: {
+      getEditableCelCanvas: () => canvas,
+    },
+    selection: selectionStore,
+  } as unknown as ProjectContext;
+}
+
 describe('selection image helpers', () => {
   it('trims transparent image data and carries the matching mask region', () => {
     const imageData = new ImageData(4, 3);
@@ -197,12 +208,71 @@ describe('selection image helpers', () => {
 });
 
 describe('selection commands', () => {
+  const contexts: ProjectContext[] = [];
+
   beforeEach(() => {
     selectionStore.clear();
   });
 
   afterEach(() => {
     selectionStore.clear();
+    vi.restoreAllMocks();
+    for (const context of contexts.splice(0)) {
+      context.dispose();
+    }
+  });
+
+  it('fills one blank frame without changing another blank frame', () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const layer = context.layers.layers.value[0];
+    const firstFrameId = context.animation.currentFrameId.value;
+    context.animation.addFrame(false);
+    const secondFrameId = context.animation.currentFrameId.value;
+    const shared = makeCanvas(3, 2);
+    const firstKey = context.animation.getCelKey(layer.id, firstFrameId);
+    const secondKey = context.animation.getCelKey(layer.id, secondFrameId);
+    const cels = new Map(context.animation.cels.value);
+
+    cels.set(firstKey, {
+      ...cels.get(firstKey)!,
+      canvas: shared.canvas,
+      linkedCelId: EMPTY_CEL_LINK_ID,
+      linkType: 'soft',
+    });
+    cels.set(secondKey, {
+      ...cels.get(secondKey)!,
+      canvas: shared.canvas,
+      linkedCelId: EMPTY_CEL_LINK_ID,
+      linkType: 'soft',
+    });
+    context.animation.cels.value = cels;
+    context.animation.goToFrame(firstFrameId);
+
+    const editable = makeCanvas(3, 2);
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+      if (tagName === 'canvas') return editable.canvas;
+      return createElement(tagName, options);
+    });
+
+    const bounds: Rect = { x: 0, y: 0, width: 3, height: 2 };
+    context.selection.setSelected(bounds, 'rectangle');
+    const command = new FillSelectionCommand(
+      layer.id,
+      firstFrameId,
+      bounds,
+      'rectangle',
+      '#336699',
+      undefined,
+      context
+    );
+
+    command.execute();
+
+    expect(readPixel(editable.getImageData(), 0, 0)).toEqual([51, 102, 153, 255]);
+    expect(readPixel(shared.getImageData(), 0, 0)).toEqual([0, 0, 0, 0]);
+    expect(context.animation.cels.value.get(secondKey)?.canvas).toBe(shared.canvas);
   });
 
   it('fills only freeform-mask pixels and restores them on undo', () => {
@@ -212,7 +282,15 @@ describe('selection commands', () => {
     setCanvasPixel(1, 0, [9, 9, 9, 255]);
 
     selectionStore.setSelected(bounds, 'freeform', mask);
-    const command = new FillSelectionCommand(canvas, bounds, 'freeform', '#336699', mask);
+    const command = new FillSelectionCommand(
+      'layer-1',
+      'frame-1',
+      bounds,
+      'freeform',
+      '#336699',
+      mask,
+      commandContext(canvas)
+    );
 
     command.execute();
     let imageData = getImageData();
@@ -242,7 +320,14 @@ describe('selection commands', () => {
     }
 
     selectionStore.setSelected(bounds, 'ellipse');
-    const command = new DeleteSelectionCommand(canvas, bounds, 'ellipse');
+    const command = new DeleteSelectionCommand(
+      'layer-1',
+      'frame-1',
+      bounds,
+      'ellipse',
+      undefined,
+      commandContext(canvas)
+    );
 
     command.execute();
     let imageData = getImageData();
@@ -264,7 +349,14 @@ describe('selection commands', () => {
     const mask = Uint8Array.from([0, 255, 0, 0, 0, 255]);
     setCanvasPixel(3, 2, [90, 80, 70, 255]);
 
-    const command = new CutToFloatCommand(canvas, 'layer-1', bounds, 'freeform', mask);
+    const command = new CutToFloatCommand(
+      'layer-1',
+      'frame-1',
+      bounds,
+      'freeform',
+      mask,
+      commandContext(canvas)
+    );
 
     command.execute();
 

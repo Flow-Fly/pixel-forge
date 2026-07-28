@@ -35,7 +35,6 @@ export {
 
 export {
   handleWheel,
-  handleGlobalWheel,
 } from './wheel-handlers';
 
 export {

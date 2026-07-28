@@ -1,7 +1,8 @@
-import { selectionStore } from "../stores/selection";
-import { layerStore } from "../stores/layers";
-import { animationStore } from "../stores/animation";
 import { brushStore } from "../stores/brush";
+import {
+  getActiveProjectContext,
+  type ProjectContext,
+} from "../stores/project-context";
 import type { Brush, BrushImageData } from "../types/brush";
 import { BRUSH_SIZE_LIMITS } from "../types/brush";
 import { log } from "../utils/log";
@@ -10,20 +11,24 @@ import { isReferenceLayer } from "../utils/layer-capabilities";
 /**
  * Check if a brush can be captured from the current selection
  */
-export function canCaptureBrush(): boolean {
-  const state = selectionStore.state.value;
+type BrushCaptureContext = Pick<ProjectContext, "animation" | "layers" | "selection">;
+
+export function canCaptureBrush(
+  context: BrushCaptureContext = getActiveProjectContext()
+): boolean {
+  const state = context.selection.state.value;
   return state.type === "selected" || state.type === "floating";
 }
 
 /**
  * Get the current selection bounds and content info
  */
-function getSelectionInfo(): {
+function getSelectionInfo(context: BrushCaptureContext): {
   bounds: { x: number; y: number; width: number; height: number };
   mask?: Uint8Array;
   imageData?: ImageData;
 } | null {
-  const state = selectionStore.state.value;
+  const state = context.selection.state.value;
 
   if (state.type === "selected") {
     return {
@@ -57,8 +62,11 @@ function getSelectionInfo(): {
  * @param name Optional name for the brush (defaults to dimensions)
  * @returns The captured brush or null if capture failed
  */
-function captureBrushFromSelection(name?: string): Brush | null {
-  const info = getSelectionInfo();
+function captureBrushFromSelection(
+  name: string | undefined,
+  context: BrushCaptureContext
+): Brush | null {
+  const info = getSelectionInfo(context);
   if (!info) {
     log.warn("No selection to capture brush from");
     return null;
@@ -68,7 +76,7 @@ function captureBrushFromSelection(name?: string): Brush | null {
 
   if (!isValidBrushSize(bounds)) return null;
 
-  const pixelData = readSelectionPixels(info);
+  const pixelData = readSelectionPixels(info, context);
   if (!pixelData) return null;
 
   // Apply mask if freeform selection
@@ -131,26 +139,29 @@ function isValidBrushSize(bounds: { width: number; height: number }): boolean {
   return true;
 }
 
-function readSelectionPixels(info: NonNullable<ReturnType<typeof getSelectionInfo>>): ImageData | null {
+function readSelectionPixels(
+  info: NonNullable<ReturnType<typeof getSelectionInfo>>,
+  context: BrushCaptureContext
+): ImageData | null {
   if (info.imageData) {
     return info.imageData;
   }
 
-  const activeLayerId = layerStore.activeLayerId.value;
-  const currentFrame = animationStore.currentFrameId.value;
+  const activeLayerId = context.layers.activeLayerId.value;
+  const currentFrame = context.animation.currentFrameId.value;
 
   if (!activeLayerId) {
     log.warn("No active layer");
     return null;
   }
 
-  const activeLayer = layerStore.layers.value.find((layer) => layer.id === activeLayerId);
+  const activeLayer = context.layers.layers.value.find((layer) => layer.id === activeLayerId);
   if (isReferenceLayer(activeLayer)) {
     log.warn("Reference layers cannot be captured as brushes");
     return null;
   }
 
-  const canvas = animationStore.getCelCanvas(currentFrame, activeLayerId);
+  const canvas = context.animation.getCelCanvas(currentFrame, activeLayerId);
   if (!canvas) {
     log.warn("No canvas available to capture brush from");
     return null;
@@ -199,8 +210,11 @@ function hasVisiblePixels(imageData: ImageData): boolean {
  * Capture brush from selection and add to brush store
  * Returns the captured brush or null if capture failed
  */
-export async function captureBrushAndAdd(name?: string): Promise<Brush | null> {
-  const brush = captureBrushFromSelection(name);
+export async function captureBrushAndAdd(
+  name?: string,
+  context: BrushCaptureContext = getActiveProjectContext()
+): Promise<Brush | null> {
+  const brush = captureBrushFromSelection(name, context);
   if (!brush) return null;
 
   await brushStore.addCustomBrush(brush);

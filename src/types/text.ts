@@ -16,29 +16,7 @@ export interface PixelFont {
   chars: Record<string, number[][]>;
 }
 
-/**
- * Text-specific metadata stored at layer level.
- * Style properties that apply to all cels in this text layer.
- */
-export interface TextLayerData {
-  /** Font identifier (e.g., "pixel-5x7") */
-  font: string;
-  /** Text color as hex string */
-  color: string;
-}
-
-/**
- * Text content stored per-cel.
- * Allows different text/position per frame for animation.
- */
-export interface TextCelData {
-  /** The text string to render */
-  content: string;
-  /** X position on canvas (in pixels) */
-  x: number;
-  /** Y position on canvas (in pixels) */
-  y: number;
-}
+export { type TextCelData, type TextLayerData } from '@pixel-forge/shared';
 
 /**
  * Text editing state for the text tool.

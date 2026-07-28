@@ -1,0 +1,44 @@
+name: Deploy telemetry Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Privacy alias and notice are verified; deploy to production
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telemetry-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirm_production }}
+    runs-on: ubuntu-latest
+    environment: telemetry-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run shared:check
+      - run: npm run telemetry:typecheck
+      - run: npm run telemetry:test
+
+      - name: Deploy exact telemetry configuration
+        run: >-
+          npx wrangler deploy --strict
+          --config workers/telemetry/wrangler.jsonc
+          --message "GitHub ${GITHUB_SHA}"
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

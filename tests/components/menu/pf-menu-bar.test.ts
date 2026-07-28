@@ -30,6 +30,7 @@ const autoSaveServiceMock = vi.hoisted(() => ({
 }));
 
 const importReferenceImageFileMock = vi.hoisted(() => vi.fn(async () => null));
+const importProjectFilesMock = vi.hoisted(() => vi.fn(async () => null));
 
 vi.mock("../../../src/stores/history", () => ({
   historyStore: historyStoreMock,
@@ -61,6 +62,10 @@ vi.mock("../../../src/services/reference-import-action", () => ({
   importReferenceImageFile: importReferenceImageFileMock,
 }));
 
+vi.mock("../../../src/services/project-file-handling", () => ({
+  importProjectFiles: importProjectFilesMock,
+}));
+
 vi.mock("../../../src/commands/layer-commands", () => ({
   FlipLayerCommand: class FlipLayerCommand {},
   RotateLayerCommand: class RotateLayerCommand {},
@@ -70,6 +75,11 @@ import "../../../src/components/menu/pf-menu-bar";
 import type { PFMenuBar } from "../../../src/components/menu/pf-menu-bar";
 import { CRT_PRESETS } from "../../../src/services/view-effects";
 import { settingsStore } from "../../../src/stores/settings";
+import {
+  pwaStore,
+  type BeforeInstallPromptEvent,
+} from "../../../src/stores/pwa";
+import { panelStore } from "../../../src/stores/panels";
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -184,19 +194,42 @@ describe("pf-menu-bar popovers", () => {
   beforeEach(() => {
     setViewport(800, 600);
     localStorage.clear();
+    panelStore.reset();
     settingsStore.setActiveViewEffect(null);
     projectStoreMock.name.value = "Untitled";
     vi.clearAllMocks();
+    pwaStore.stop();
+    pwaStore.start();
   });
 
   afterEach(() => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    pwaStore.stop();
     restoreDefaultProjectContext();
     for (const context of createdContexts.splice(0)) {
       context.dispose();
     }
+  });
+
+  it("marks every menu popover as a vertical scroll surface", async () => {
+    const element = await createMenuBar();
+    const popovers = element.shadowRoot?.querySelectorAll<HTMLElement>("[popover]") ?? [];
+
+    expect(popovers).toHaveLength(4);
+    expect([...popovers].every((popover) => popover.dataset.scrollbar === "vertical")).toBe(true);
+  });
+
+  it("keeps button-backed menu actions native and explicitly typed", async () => {
+    const element = await createMenuBar();
+    const itemButtons =
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>("button.menu-item") ?? [];
+
+    expect(itemButtons.length).toBeGreaterThan(0);
+    expect([...itemButtons].every((item) => item.type === "button")).toBe(true);
+    expect(menuItem(menu(element, "file")!, "New Guided Drawing")?.tagName).toBe("BUTTON");
+    expect(menuItem(menu(element, "file")!, "New Project")?.tagName).toBe("DIV");
   });
 
   it("opens File from a click", async () => {
@@ -286,6 +319,33 @@ describe("pf-menu-bar popovers", () => {
     expect(fileMenu?.hasAttribute("data-open")).toBe(false);
   });
 
+  it("shows and persists timeline visibility from the View menu", async () => {
+    const element = await createMenuBar();
+    const viewButton = button(element, "view");
+    const viewMenu = menu(element, "view")!;
+    const timelineItem = menuItem(viewMenu, "Timeline");
+
+    expect(timelineItem).toBeInstanceOf(HTMLButtonElement);
+    expect(timelineItem?.getAttribute("aria-pressed")).toBe("true");
+
+    viewButton?.click();
+    timelineItem?.click();
+    await element.updateComplete;
+
+    expect(panelStore.isCollapsed("timeline")).toBe(true);
+    expect(timelineItem?.getAttribute("aria-pressed")).toBe("false");
+    expect(JSON.parse(localStorage.getItem("pf-panel-states") ?? "{}")).toMatchObject({
+      timeline: { collapsed: true },
+    });
+
+    viewButton?.click();
+    timelineItem?.click();
+    await element.updateComplete;
+
+    expect(panelStore.isCollapsed("timeline")).toBe(false);
+    expect(timelineItem?.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("selects a live CRT profile from the Image menu", async () => {
     const element = await createMenuBar();
     const imageButton = button(element, "image");
@@ -332,6 +392,59 @@ describe("pf-menu-bar popovers", () => {
 
     expect(browserRequested).toBe(true);
     expect(fileButton?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("renames the project where name editing started", async () => {
+    const contextA = createContext("Context A");
+    const contextB = createContext("Context B");
+    setActiveProjectContext(contextA);
+    const element = await createMenuBar();
+
+    element.shadowRoot
+      ?.querySelector<HTMLElement>(".project-name-display")
+      ?.click();
+    await element.updateComplete;
+
+    setActiveProjectContext(contextB);
+    await element.updateComplete;
+    const input = element.shadowRoot?.querySelector<HTMLInputElement>(
+      ".project-name-input"
+    );
+    expect(input).toBeTruthy();
+    expect(input!.value).toBe("Context A");
+    input!.value += " Revised";
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    await vi.waitFor(() => {
+      expect(autoSaveServiceMock.saveNow).toHaveBeenCalled();
+    });
+
+    expect(contextA.project.name.value).toBe("Context A Revised");
+    expect(contextB.project.name.value).toBe("Context B");
+    expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextA);
+  });
+
+  it("only shows the install action while the browser offers installation", async () => {
+    const element = await createMenuBar();
+    const fileMenu = menu(element, "file")!;
+
+    expect(menuItem(fileMenu, "Install Pixel Forge")).toBeUndefined();
+
+    const installEvent = new Event("beforeinstallprompt", {
+      cancelable: true,
+    }) as BeforeInstallPromptEvent;
+    const prompt = vi.fn().mockResolvedValue(undefined);
+    Object.assign(installEvent, {
+      prompt,
+      userChoice: Promise.resolve({ outcome: "accepted", platform: "web" }),
+    });
+    window.dispatchEvent(installEvent);
+    await element.updateComplete;
+
+    menuItem(fileMenu, "Install Pixel Forge")?.click();
+    await element.updateComplete;
+
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(menuItem(fileMenu, "Install Pixel Forge")).toBeUndefined();
   });
 
   it("opens guided drawing setup from the File menu", async () => {
@@ -393,6 +506,21 @@ describe("pf-menu-bar popovers", () => {
     expect(input.accept).toBe("image/png,image/jpeg,image/webp");
     expect(importReferenceImageFileMock).toHaveBeenCalledTimes(1);
     expect(importReferenceImageFileMock).toHaveBeenCalledWith(contextA, file);
+  });
+
+  it("delegates multiple project files from the File menu to the shared importer", async () => {
+    const first = new File(["first"], "first.pf");
+    const second = new File(["second"], "second.aseprite");
+    const { input } = useReferenceImageInput([first, second]);
+    const element = await createMenuBar();
+
+    await element.openFile();
+    await flushImport();
+
+    expect(input.accept).toBe(".pf,.json,.ase,.aseprite");
+    expect(input.multiple).toBe(true);
+    expect(importProjectFilesMock).toHaveBeenCalledWith([first, second]);
+    expect(projectStoreMock.loadProject).not.toHaveBeenCalled();
   });
 
   it("does nothing when the File menu reference image picker is canceled", async () => {

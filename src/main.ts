@@ -8,6 +8,7 @@ import { brushStore } from './stores/brush';
 import './stores/settings'; // Initialize settings (applies saved accent color)
 import { workspaceStore } from './stores/workspace';
 import { autoSaveService } from './services/auto-save';
+import { registerPwa } from './services/pwa-registration';
 
 // Defer keyboard shortcuts registration after initial render for faster startup.
 const deferShortcuts = () => {
@@ -28,3 +29,7 @@ workspaceStore.activate(workspaceStore.activeItemId.value);
 
 // Persist the project on history changes / window blur
 autoSaveService.start();
+
+// Register after the editor has started. Updates remain waiting until the user
+// explicitly chooses to restart.
+registerPwa();

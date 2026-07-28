@@ -1,0 +1,16 @@
+{
+  "name": "@pixel-forge/telemetry-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.jsonc",
+    "deploy": "wrangler deploy --strict --config wrangler.jsonc",
+    "test": "npm run types && vitest run --root ../.. tests/workers/telemetry-worker.test.ts",
+    "typecheck": "npm run types && tsc -p tsconfig.json",
+    "types": "wrangler types --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "@pixel-forge/shared": "0.1.0"
+  }
+}

@@ -6,10 +6,14 @@ import { projectLibrary } from '../../services/project-library';
 import type { ProjectMeta } from '../../services/persistence/project-repository';
 import { getActiveProjectContext } from '../../stores/project-context';
 import { workspaceStore } from '../../stores/workspace';
+import { productTelemetry } from '../../services/telemetry';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 
 @customElement('pf-project-browser')
 export class PFProjectBrowser extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: block;
       color: var(--pf-color-text-main);
@@ -25,7 +29,7 @@ export class PFProjectBrowser extends BaseComponent {
       background: rgba(13, 16, 21, 0.96);
       border: 1px solid var(--pf-color-border);
       border-radius: var(--pf-radius-md);
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
     }
 
     dialog::backdrop {
@@ -297,9 +301,11 @@ export class PFProjectBrowser extends BaseComponent {
   @state() private projects: ProjectMeta[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
+  @state() private deleteErrorMessage = '';
   @state() private renamingProjectId: string | null = null;
   @state() private renameValue = '';
   @state() private deleteTarget: ProjectMeta | null = null;
+  @state() private isDeletingProject = false;
   @query('.browser-dialog') private browserDialog?: HTMLDialogElement;
   @query('.delete-dialog') private deleteDialog?: HTMLDialogElement;
   private thumbnailUrls = new Map<string, string>();
@@ -331,6 +337,7 @@ export class PFProjectBrowser extends BaseComponent {
       <dialog
         aria-labelledby="project-browser-title"
         class="browser-dialog"
+        data-scrollbar="both"
         closedby=${canDismissBrowser ? 'any' : 'none'}
         @cancel=${this.handleBrowserDialogCancel}
         @click=${this.handleBrowserBackdropClick}
@@ -372,7 +379,7 @@ export class PFProjectBrowser extends BaseComponent {
             ? html`<div class="error" role="alert">${this.errorMessage}</div>`
             : nothing}
 
-          <div class="project-list">
+          <div class="project-list" data-scrollbar="vertical">
             ${this.isLoading
               ? html`<div class="loading">Loading projects...</div>`
               : this.renderProjectGrid()}
@@ -456,7 +463,7 @@ export class PFProjectBrowser extends BaseComponent {
         <div class="card-actions">
           <button type="button" @click=${() => this.startRename(project)}>Rename</button>
           <button type="button" @click=${() => this.duplicateProject(project.id)}>Duplicate</button>
-          <button class="danger" type="button" @click=${() => (this.deleteTarget = project)}>
+          <button class="danger" type="button" @click=${() => this.startDelete(project)}>
             Delete
           </button>
         </div>
@@ -471,7 +478,9 @@ export class PFProjectBrowser extends BaseComponent {
       <dialog
         aria-labelledby="delete-project-title"
         class="delete-dialog"
-        closedby="any"
+        data-scrollbar="vertical"
+        closedby=${this.isDeletingProject ? 'none' : 'any'}
+        @cancel=${this.handleDeleteDialogCancel}
         @click=${this.handleDeleteBackdropClick}
         @close=${this.handleDeleteDialogClose}
       >
@@ -483,12 +492,25 @@ export class PFProjectBrowser extends BaseComponent {
               <p>
                 Delete "${project.name}" from this browser?
               </p>
+              ${this.deleteErrorMessage
+                ? html`<div class="error" role="alert">${this.deleteErrorMessage}</div>`
+                : nothing}
               <div class="dialog-actions">
-                <button type="button" class="secondary" @click=${this.cancelDelete}>
+                <button
+                  type="button"
+                  class="secondary"
+                  ?disabled=${this.isDeletingProject}
+                  @click=${this.cancelDelete}
+                >
                   Cancel
                 </button>
-                <button type="button" class="primary danger" @click=${this.confirmDelete}>
-                  Delete
+                <button
+                  type="button"
+                  class="primary danger"
+                  ?disabled=${this.isDeletingProject}
+                  @click=${this.confirmDelete}
+                >
+                  ${this.isDeletingProject ? 'Deleting...' : 'Delete'}
                 </button>
               </div>
             `
@@ -500,6 +522,7 @@ export class PFProjectBrowser extends BaseComponent {
   private async loadProjects() {
     this.isLoading = true;
     this.errorMessage = '';
+    this.deleteErrorMessage = '';
 
     try {
       const projects = await projectLibrary.listProjects();
@@ -554,6 +577,10 @@ export class PFProjectBrowser extends BaseComponent {
         this.errorMessage = result.message;
         return;
       }
+      productTelemetry.record({
+        name: 'project_opened',
+        dimensions: { source: 'library' },
+      });
       this.dispatchEvent(new CustomEvent('project-opened', { bubbles: true, composed: true }));
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Failed to open project.');
@@ -595,13 +622,19 @@ export class PFProjectBrowser extends BaseComponent {
     this.renameValue = '';
   };
 
+  private startDelete(project: ProjectMeta) {
+    this.errorMessage = '';
+    this.deleteErrorMessage = '';
+    this.deleteTarget = project;
+  }
+
   private async duplicateProject(id: string) {
     this.errorMessage = '';
 
     try {
-      const activeContext = getActiveProjectContext();
-      if (id === activeContext.project.id.value) {
-        await autoSaveService.saveNow(activeContext);
+      const openItem = workspaceStore.getProjectItem(id);
+      if (openItem) {
+        await autoSaveService.saveNow(openItem.context);
       }
       await projectLibrary.duplicateProject(id);
       await this.loadProjects();
@@ -612,24 +645,29 @@ export class PFProjectBrowser extends BaseComponent {
 
   private confirmDelete = async () => {
     const project = this.deleteTarget;
-    if (!project) return;
+    if (!project || this.isDeletingProject) return;
 
     this.errorMessage = '';
-    this.deleteTarget = null;
+    this.deleteErrorMessage = '';
+    this.isDeletingProject = true;
 
     try {
       const activeContext = getActiveProjectContext();
       const deletedOpenProject = project.id === activeContext.project.id.value;
-      await projectLibrary.deleteProject(project.id, { context: activeContext });
+      const result = await workspaceStore.deleteProject(project.id);
       await this.loadProjects();
+      this.deleteTarget = null;
 
-      if (deletedOpenProject) {
+      if (deletedOpenProject && result.installedReplacement) {
         this.dispatchEvent(
           new CustomEvent('current-project-deleted', { bubbles: true, composed: true })
         );
       }
     } catch (error) {
-      this.errorMessage = this.errorText(error, 'Failed to delete project.');
+      const message = this.errorText(error, 'Failed to delete project.');
+      this.deleteErrorMessage = message;
+    } finally {
+      this.isDeletingProject = false;
     }
   };
 
@@ -730,11 +768,18 @@ export class PFProjectBrowser extends BaseComponent {
   };
 
   private cancelDelete = () => {
+    if (this.isDeletingProject) return;
     this.closeNativeDialog(this.deleteDialog);
   };
 
+  private handleDeleteDialogCancel = (event: Event) => {
+    if (this.isDeletingProject) {
+      event.preventDefault();
+    }
+  };
+
   private handleDeleteBackdropClick = (event: MouseEvent) => {
-    if (event.target !== event.currentTarget) return;
+    if (this.isDeletingProject || event.target !== event.currentTarget) return;
 
     const dialog = event.currentTarget as HTMLDialogElement;
     if (!this.clickIsInsideDialog(dialog, event)) {
@@ -743,8 +788,9 @@ export class PFProjectBrowser extends BaseComponent {
   };
 
   private handleDeleteDialogClose = () => {
-    if (!this.isDisconnecting) {
+    if (!this.isDisconnecting && !this.isDeletingProject) {
       this.deleteTarget = null;
+      this.deleteErrorMessage = '';
     }
   };
 

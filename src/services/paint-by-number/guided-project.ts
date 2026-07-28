@@ -7,6 +7,7 @@ import {
 } from '../../types/guided-drawing';
 import { PROJECT_VERSION, type ProjectFile } from '../../types/project';
 import type { NumberedGuide } from './guide-generator';
+import { productTelemetry, type TelemetryClient } from '../telemetry';
 
 export interface GuidedProjectInput {
   guide: NumberedGuide;
@@ -83,11 +84,19 @@ export async function createGuidedProject(
   input: GuidedProjectInput,
   options: WorkspaceProjectOptions = {},
   workspace: GuidedProjectWorkspace = workspaceStore,
+  telemetry: TelemetryClient = productTelemetry,
 ) {
-  return workspace.createProjectFromFile(createGuidedProjectFile(input), {
+  const result = await workspace.createProjectFromFile(createGuidedProjectFile(input), {
     activate: options.activate ?? true,
     saveActiveContext: options.saveActiveContext ?? true,
   });
+  if (result.ok) {
+    telemetry.record({
+      name: 'project_created',
+      dimensions: { source: 'guided_drawing' },
+    });
+  }
+  return result;
 }
 
 function validateGuide(guide: NumberedGuide): void {

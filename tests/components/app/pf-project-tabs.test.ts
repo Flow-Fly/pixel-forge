@@ -100,6 +100,14 @@ describe('pf-project-tabs', () => {
     expect(inactiveButton?.getAttribute('aria-current')).toBe('false');
   });
 
+  it('marks the tab strip as a horizontal scroll surface', async () => {
+    const element = await createTabs();
+
+    expect(element.shadowRoot?.querySelector('.tab-list')?.getAttribute('data-scrollbar')).toBe(
+      'horizontal'
+    );
+  });
+
   it('marks dirty projects in the tab label', async () => {
     autoSaveServiceMock.dirtyContexts.add(projectB.context);
 
@@ -124,6 +132,23 @@ describe('pf-project-tabs', () => {
     await settle(element);
 
     expect(workspaceStoreMock.closeProject).toHaveBeenCalledWith('project-a');
+  });
+
+  it('keeps a compact close action bound to the active project', async () => {
+    workspaceStoreMock.items.value = Array.from({ length: 8 }, (_, index) =>
+      createWorkspaceItem(`project-${index + 1}`, `Long Project Name ${index + 1}`)
+    );
+    workspaceStoreMock.activeItemId.value = 'project-8';
+    const element = await createTabs();
+
+    const compactCloseButton =
+      element.shadowRoot?.querySelector<HTMLButtonElement>('.active-close-button');
+    expect(compactCloseButton?.getAttribute('aria-label')).toBe('Close Long Project Name 8');
+
+    compactCloseButton?.click();
+    await settle(element);
+
+    expect(workspaceStoreMock.closeProject).toHaveBeenCalledWith('project-8');
   });
 
   it('closes a tab through the same path on middle click', async () => {
@@ -172,5 +197,26 @@ describe('pf-project-tabs', () => {
     expect(element.shadowRoot?.textContent).toContain(
       'The workspace can keep up to 8 projects open at once.'
     );
+  });
+
+  it('clears tab-cap feedback after six seconds', async () => {
+    vi.useFakeTimers();
+    workspaceStoreMock.items.value = Array.from({ length: 8 }, (_, index) =>
+      createWorkspaceItem(`project-${index + 1}`, `Project ${index + 1}`)
+    );
+    const element = await createTabs();
+
+    buttonWithLabel(element.shadowRoot!, 'Open project')?.click();
+    await settle(element);
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toContain(
+      'The workspace can keep up to 8 projects open at once.'
+    );
+
+    await vi.advanceTimersByTimeAsync(6000);
+    await settle(element);
+
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toBe('');
+    expect(element.shadowRoot?.querySelector('.error')).toBeNull();
+    vi.useRealTimers();
   });
 });

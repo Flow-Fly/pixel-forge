@@ -38,6 +38,23 @@ describe('guided project resume', () => {
       frameId,
       Uint8Array.from([1, 0]),
     );
+    const editingCel = editingContext.animation.cels.value.get(
+      editingContext.animation.getCelKey(layerId, frameId),
+    );
+    if (!editingCel) throw new Error('Expected the guided painting cel');
+    // happy-dom does not retain canvas pixels, so expose the pixels produced
+    // from the index buffer before exercising the save boundary.
+    Object.defineProperty(editingCel.canvas, 'getContext', {
+      configurable: true,
+      value: () => ({
+        getImageData: () => ({
+          data: Uint8ClampedArray.from([
+            17, 17, 17, 255,
+            0, 0, 0, 0,
+          ]),
+        }),
+      }),
+    });
     const saved = await editingContext.project.saveProject();
 
     const resumedContext = createProjectContext();

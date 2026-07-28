@@ -141,6 +141,24 @@ describe('pf-paint-by-number-dialog', () => {
     expect(element.open).toBe(false);
   });
 
+  it('keeps the simplify option as a native labeled checkbox', async () => {
+    const element = await createDialog();
+    const input = element.shadowRoot?.querySelector<HTMLInputElement>(
+      '#guided-simplify',
+    );
+    const label = input?.closest('label');
+
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(input?.type).toBe('checkbox');
+    expect(input?.checked).toBe(true);
+    expect(label?.textContent).toContain('Simplify isolated single pixels');
+
+    input?.click();
+    await settle(element);
+
+    expect(input?.checked).toBe(false);
+  });
+
   it('ignores a stale image decode after a newer file is selected', async () => {
     const element = await createDialog();
     const firstImage = { ...sourceImage, width: 10 } as ImageData;

@@ -1,21 +1,25 @@
 import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
-import { getActiveProjectContext } from "../../stores/project-context";
+import {
+  getActiveProjectContext,
+  type ProjectContext,
+} from "../../stores/project-context";
 import {
   FlipLayerCommand,
   RotateLayerCommand,
 } from "../../commands/layer-commands";
-// Dynamic imports for file handling - loaded on demand to reduce initial bundle
-// import { importAseFile } from "../../services/aseprite-service";
-// import pako from "pako";
-import { type ProjectFileInput } from "../../types/project";
 import { autoSaveService } from "../../services/auto-save";
+import { importProjectFiles } from "../../services/project-file-handling";
 import { openReferenceImagePicker } from "../../services/reference-image-picker";
 import { formatShortcut } from "../../utils/platform";
 import { menuShortcuts } from "../../services/keyboard/shortcut-definitions";
 import { log } from "../../utils/log";
 import { settingsStore } from "../../stores/settings";
+import { pwaStore } from "../../stores/pwa";
+import { panelStore } from "../../stores/panels";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
+import { menuItemStyles } from "../../styles/editor-control-styles";
 import {
   CRT_EFFECT_ID,
   CRT_PRESETS,
@@ -38,8 +42,12 @@ export class PFMenuBar extends BaseComponent {
   @state() private shortcutsVisible = false;
   @state() private isEditingName = false;
   @state() private activeMenu: MenuId | null = null;
+  private editingProjectContext: ProjectContext | null = null;
 
   static styles = css`
+    ${scrollbarStyles}
+    ${menuItemStyles}
+
     :host {
       display: flex;
       height: 100%;
@@ -202,7 +210,7 @@ export class PFMenuBar extends BaseComponent {
       background-color: rgba(13, 16, 21, 0.98);
       border: 1px solid var(--pf-color-border);
       border-radius: var(--pf-radius-sm);
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
       color: var(--pf-color-text-main);
       min-width: 186px;
       margin: 0; /* Important for anchor positioning */
@@ -219,29 +227,15 @@ export class PFMenuBar extends BaseComponent {
       background-color: transparent;
     }
 
-    .menu-item {
-      padding: 7px 12px;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-      font-size: var(--pf-font-size-sm);
-      color: var(--pf-color-text-secondary);
-      text-transform: none;
-    }
-
-    button.menu-item {
-      align-items: center;
-      background: none;
-      border: 0;
-      font: inherit;
-      text-align: left;
-      width: 100%;
-    }
-
-    .menu-item:hover:not(:disabled) {
+    .menu-item:hover:not(:disabled),
+    .menu-item:focus-visible {
       background-color: var(--pf-color-primary-transparent);
       color: var(--pf-color-text-main);
+    }
+
+    .menu-item:focus-visible {
+      outline: 1px solid var(--pf-color-accent);
+      outline-offset: -2px;
     }
 
     button.menu-item:disabled {
@@ -530,43 +524,22 @@ export class PFMenuBar extends BaseComponent {
   }
 
   /**
-   * Unified open handler that supports:
-   * - .pf (compressed PixelForge project)
-   * - .json (uncompressed PixelForge project)
-   * - .ase, .aseprite (Aseprite files)
+   * Open one or more supported project files through the shared import path.
    */
   async openFile() {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".pf,.json,.ase,.aseprite";
+    input.multiple = true;
 
     input.onchange = async (e: Event) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      const ext = file.name.split(".").pop()?.toLowerCase();
+      const files = Array.from((e.target as HTMLInputElement).files ?? []);
+      if (files.length === 0) return;
 
       try {
-        if (ext === "ase" || ext === "aseprite") {
-          // Aseprite format - lazy load parser
-          const buffer = await file.arrayBuffer();
-          const { importAseFile } = await import("../../services/aseprite-service");
-          await importAseFile(buffer);
-        } else if (ext === "pf") {
-          // Compressed PixelForge format - lazy load pako
-          const buffer = await file.arrayBuffer();
-          const pako = await import("pako");
-          const decompressed = pako.default.inflate(new Uint8Array(buffer), { to: "string" });
-          const project = JSON.parse(decompressed) as ProjectFileInput;
-          await getActiveProjectContext().project.loadProject(project);
-        } else {
-          // JSON format (uncompressed)
-          const text = await file.text();
-          const project = JSON.parse(text) as ProjectFileInput;
-          await getActiveProjectContext().project.loadProject(project);
-        }
+        await importProjectFiles(files);
       } catch (error) {
-        log.error("Failed to open file:", error);
+        log.error("Failed to import project files:", error);
       }
     };
 
@@ -626,6 +599,10 @@ export class PFMenuBar extends BaseComponent {
     );
   }
 
+  installPixelForge() {
+    void pwaStore.promptInstall();
+  }
+
   duplicateCurrentProject() {
     this.dispatchEvent(
       new CustomEvent("duplicate-current-project", {
@@ -664,7 +641,12 @@ export class PFMenuBar extends BaseComponent {
     window.dispatchEvent(new CustomEvent("show-accent-color-dialog"));
   }
 
+  toggleTimeline() {
+    panelStore.togglePanel("timeline");
+  }
+
   private startEditingName() {
+    this.editingProjectContext = getActiveProjectContext();
     this.isEditingName = true;
     // Focus the input after render
     this.updateComplete.then(() => {
@@ -680,23 +662,30 @@ export class PFMenuBar extends BaseComponent {
     if (e.key === "Enter") {
       this.commitNameEdit(e);
     } else if (e.key === "Escape") {
+      this.editingProjectContext = null;
       this.isEditingName = false;
     }
   }
 
   private async commitNameEdit(e: Event) {
+    const context = this.editingProjectContext;
+    if (!context) return;
+
     const input = e.target as HTMLInputElement;
     const newName = input.value.trim() || "Untitled";
-    getActiveProjectContext().project.name.value = newName;
+    this.editingProjectContext = null;
+    context.project.name.value = newName;
     this.isEditingName = false;
-    await autoSaveService.saveNow();
+    await autoSaveService.saveNow(context);
   }
 
   render() {
     const context = getActiveProjectContext();
     const projectName = context.project.name.value;
+    const editingProjectName = this.editingProjectContext?.project.name.value ?? "";
     const guidedProject = context.guidedDrawing.active;
     const activeCrtPreset = this.getActiveCrtPreset();
+    const timelineVisible = !panelStore.isCollapsed("timeline");
 
     return html`
       <div class="brand" aria-label="Pixel Forge">
@@ -710,7 +699,7 @@ export class PFMenuBar extends BaseComponent {
               <input
                 class="project-name-input"
                 type="text"
-                .value=${projectName}
+                .value=${editingProjectName}
                 @blur=${this.commitNameEdit}
                 @keydown=${this.handleNameKeydown}
               />
@@ -742,6 +731,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-file"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "file")}
@@ -769,9 +759,9 @@ export class PFMenuBar extends BaseComponent {
             Delete Current...
           </div>
           <div class="divider"></div>
-          <div class="menu-item" @click=${this.openFile}>
+          <button class="menu-item" type="button" @click=${this.openFile}>
             Import File...
-          </div>
+          </button>
           <button
             class="menu-item"
             type="button"
@@ -788,6 +778,18 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>
           </div>
+          ${pwaStore.installAvailable.value
+            ? html`
+                <div class="divider"></div>
+                <button
+                  class="menu-item"
+                  type="button"
+                  @click=${this.installPixelForge}
+                >
+                  Install Pixel Forge
+                </button>
+              `
+            : ""}
         </div>
 
         <button
@@ -803,6 +805,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-edit"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "edit")}
@@ -833,6 +836,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-view"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "view")}
@@ -849,6 +853,16 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${() => context.viewport.resetView()}>
             Fit to Viewport <span class="shortcut">0</span>
           </div>
+          <button
+            class="menu-item"
+            type="button"
+            aria-pressed=${String(timelineVisible)}
+            @click=${this.toggleTimeline}
+          >
+            <span>Timeline</span>
+            <span class="effect-marker" aria-hidden="true">${timelineVisible ? "✓" : ""}</span>
+          </button>
+          <div class="divider"></div>
           <div class="menu-item" @click=${() => context.grid.togglePixelGrid()}>
             ${context.grid.pixelGridEnabled.value ? "✓ " : "   "}Pixel Grid
             <span class="shortcut">${formatShortcut("mod+g")}</span>
@@ -888,6 +902,7 @@ export class PFMenuBar extends BaseComponent {
         </button>
         <div
           id="menu-image"
+          data-scrollbar="vertical"
           popover="manual"
           @click=${this.handleMenuPanelClick}
           @toggle=${(event: Event) => this.handlePopoverToggle(event, "image")}

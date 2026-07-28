@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectFile } from '../../src/types/project';
+import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 
 const repositoryMock = vi.hoisted(() => ({
   list: vi.fn(),
@@ -41,6 +41,7 @@ import {
   type ProjectContext,
 } from '../../src/stores/project-context';
 import { viewportStore } from '../../src/stores/viewport';
+import { WorkspaceStore } from '../../src/stores/workspace';
 import { PROJECT_VERSION } from '../../src/types/project';
 
 const repository = vi.mocked(projectRepository);
@@ -241,6 +242,47 @@ describe('ProjectLibraryService', () => {
     expect(projects.get(id)?.guidedDrawing).toEqual(project.guidedDrawing);
   });
 
+  it('normalizes and stores an imported project without opening it', async () => {
+    const legacyProject = makeProject('Imported project');
+    const input = {
+      ...legacyProject,
+      version: '3.2.0',
+      palette: ['#000000'],
+      ephemeralPalette: ['#ffffff'],
+      layers: legacyProject.layers.map((layer) => ({
+        ...layer,
+        data: { 0: 1, 1: 2 },
+      })),
+    } as ProjectFileInput;
+
+    const id = await service.importProjectFile(input);
+
+    expect(projectStore.id.value).toBe('current');
+    expect(projectStore.name.value).toBe('Current');
+    expect(projects.get(id)).toMatchObject({
+      version: PROJECT_VERSION,
+      name: 'Imported project',
+      palette: ['#000000', '#ffffff'],
+    });
+    expect(projects.get(id)?.layers[0].data).toEqual(Uint8Array.from([1, 2]));
+    expect(projects.get(id)).not.toHaveProperty('ephemeralPalette');
+    expect(repository.setLastOpenedProjectId).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed project data before creating a library record', async () => {
+    const invalidProject = {
+      ...makeProject('Malformed project'),
+      animation: undefined,
+    } as unknown as ProjectFileInput;
+
+    await expect(service.importProjectFile(invalidProject)).rejects.toThrow(
+      'animation state is missing'
+    );
+
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(projects.size).toBe(0);
+  });
+
   it('saves edits to the open project before loading another project', async () => {
     projects.set('a', makeProject('Project A'));
     projects.set('b', makeProject('Project B'));
@@ -282,6 +324,12 @@ describe('ProjectLibraryService', () => {
     projects.set('open', makeProject('Open'));
     await openProjectInStore('open', makeProject('Open'));
     autoSaveService.start();
+    const workspace = new WorkspaceStore({
+      initialContext: defaultProjectContext,
+      initialItemId: 'open',
+      projectLibrary: service,
+      autoSave: autoSaveService,
+    });
 
     await historyStore.execute(
       makeCommand(() => {
@@ -290,10 +338,52 @@ describe('ProjectLibraryService', () => {
     );
     await Promise.resolve();
 
-    await service.deleteProject('open');
+    await workspace.deleteProject('open');
+    createdContexts.push(workspace.activeItem.context);
     await vi.advanceTimersByTimeAsync(2500);
 
     expect(projects.has('open')).toBe(false);
+  });
+
+  it('waits for an in-flight auto-save before deleting the project', async () => {
+    projects.set('open', makeProject('Open'));
+    await openProjectInStore('open', makeProject('Open'));
+    autoSaveService.start();
+    const workspace = new WorkspaceStore({
+      initialContext: defaultProjectContext,
+      initialItemId: 'open',
+      projectLibrary: service,
+      autoSave: autoSaveService,
+    });
+
+    let finishWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    repository.save.mockImplementationOnce(async (id: string, project: ProjectFile) => {
+      await writeGate;
+      projects.set(id, cloneProject(project));
+    });
+
+    await historyStore.execute(
+      makeCommand(() => {
+        projectStore.name.value = 'Saving project';
+      })
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const deletion = workspace.deleteProject('open');
+    await Promise.resolve();
+
+    expect(repository.delete).not.toHaveBeenCalled();
+
+    finishWrite();
+    await deletion;
+    createdContexts.push(workspace.activeItem.context);
+
+    expect(projects.has('open')).toBe(false);
+    expect(repository.delete).toHaveBeenCalledWith('open');
   });
 
   it('does not let an old auto-save timer write the previous project under the new id', async () => {

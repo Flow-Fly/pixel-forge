@@ -101,7 +101,6 @@ const viewShortcuts: ShortcutCategory = {
     { key: "6", action: "Zoom 3200%" },
     { key: "+", action: "Zoom in" },
     { key: "-", action: "Zoom out" },
-    { key: "tab", action: "Toggle timeline" },
     { key: "shift+g", action: "Toggle guides" },
     { key: "?", action: "Keyboard shortcuts" },
   ],

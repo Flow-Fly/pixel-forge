@@ -1,0 +1,40 @@
+{
+  "name": "@pixel-forge/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "db:compat": "npm run build && node dist/commands/database-compatibility.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "npm run build && node dist/commands/database-migrate.js",
+    "db:ready": "npm run build && node dist/commands/database-readiness.js",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src tests drizzle.config.ts vitest.config.ts vitest.database.config.ts vitest.storage.config.ts",
+    "start": "node dist/index.js",
+    "storage:compat": "npm run build && node dist/commands/storage-compatibility.js",
+    "storage:ready": "npm run build && node dist/commands/storage-readiness.js",
+    "test": "npm run build && vitest run --config vitest.config.ts",
+    "test:database": "npm run build && vitest run --config vitest.database.config.ts",
+    "test:storage": "npm run build && vitest run --config vitest.storage.config.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1092.0",
+    "@hono/node-server": "^2.0.11",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.31",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

@@ -1,18 +1,23 @@
 import { signal } from '../../core/signal';
+import { shouldPreserveNativeKeyboardBehavior } from './native-keyboard-behavior';
 
 type ShortcutAction = () => void;
+type ShortcutCondition = () => boolean;
 
 interface Shortcut {
   key: string;
+  physicalCode?: string;
   modifiers: string[];
   action: ShortcutAction;
   description: string;
+  when?: ShortcutCondition;
   quick?: boolean;           // If true, tool is temporary while key held
   releaseAction?: ShortcutAction; // Called on key release (for quick tools)
 }
 
 class KeyboardService {
   private shortcuts: Map<string, Shortcut> = new Map();
+  private physicalShortcuts: Map<string, Shortcut> = new Map();
   private activeQuickKeys: Set<string> = new Set(); // Track held quick-tool keys
 
   // Signal to track if shortcuts are enabled (e.g. disable when typing in input)
@@ -28,55 +33,48 @@ class KeyboardService {
     modifiers: string[],
     action: ShortcutAction,
     description: string,
-    options?: { quick?: boolean; releaseAction?: ShortcutAction }
+    options?: {
+      quick?: boolean;
+      releaseAction?: ShortcutAction;
+      physicalCode?: string;
+      when?: ShortcutCondition;
+    }
   ) {
     const id = this.getShortcutId(key, modifiers);
-    this.shortcuts.set(id, {
+    const previousShortcut = this.shortcuts.get(id);
+    if (previousShortcut?.physicalCode) {
+      this.physicalShortcuts.delete(
+        this.getShortcutId(previousShortcut.physicalCode, previousShortcut.modifiers)
+      );
+    }
+
+    const shortcut = {
       key,
+      physicalCode: options?.physicalCode,
       modifiers,
       action,
       description,
+      when: options?.when,
       quick: options?.quick,
       releaseAction: options?.releaseAction,
-    });
+    };
+    this.shortcuts.set(id, shortcut);
+    if (shortcut.physicalCode) {
+      this.physicalShortcuts.set(this.getShortcutId(shortcut.physicalCode, modifiers), shortcut);
+    }
   }
 
   unregister(key: string, modifiers: string[]) {
     const id = this.getShortcutId(key, modifiers);
+    const shortcut = this.shortcuts.get(id);
+    if (shortcut?.physicalCode) {
+      this.physicalShortcuts.delete(this.getShortcutId(shortcut.physicalCode, modifiers));
+    }
     this.shortcuts.delete(id);
   }
 
   private getShortcutId(key: string, modifiers: string[]): string {
     return [...modifiers.sort(), key.toLowerCase()].join('+');
-  }
-
-  /**
-   * Check if the event originated from an input element, including inside Shadow DOM.
-   */
-  private isTypingInInput(e: KeyboardEvent): boolean {
-    // Fast path: check direct target first (covers most cases)
-    const target = e.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-      return true;
-    }
-    if (target instanceof HTMLElement && target.isContentEditable) {
-      return true;
-    }
-
-    // Shadow DOM: check first few elements of composed path
-    // Inputs are always near the start, no need to traverse entire path
-    const path = e.composedPath();
-    const checkDepth = Math.min(path.length, 5);
-    for (let i = 0; i < checkDepth; i++) {
-      const el = path[i];
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        return true;
-      }
-      if (el instanceof HTMLElement && el.isContentEditable) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
@@ -102,37 +100,47 @@ class KeyboardService {
     return e.key;
   }
 
-  private handleKeyDown(e: KeyboardEvent) {
-    if (!this.enabled.get()) return;
-
-    // Ignore if typing in an input (including inside Shadow DOM)
-    if (this.isTypingInInput(e)) {
-      return;
-    }
-
+  private getShortcutForEvent(e: KeyboardEvent): { id: string; shortcut: Shortcut } | null {
     const modifiers: string[] = [];
     if (e.ctrlKey) modifiers.push('ctrl');
     if (e.metaKey) modifiers.push('meta');
     if (e.shiftKey) modifiers.push('shift');
     if (e.altKey) modifiers.push('alt');
 
-    const key = this.getLogicalKey(e);
-    const id = this.getShortcutId(key, modifiers);
-
-    const shortcut = this.shortcuts.get(id);
-    if (shortcut) {
-      e.preventDefault();
-
-      // For quick tools, track that this key is held and only fire once
-      if (shortcut.quick) {
-        if (this.activeQuickKeys.has(id)) {
-          return; // Already activated, don't repeat
-        }
-        this.activeQuickKeys.add(id);
-      }
-
-      shortcut.action();
+    const physicalShortcut = this.physicalShortcuts.get(this.getShortcutId(e.code, modifiers));
+    if (physicalShortcut && this.isShortcutAvailable(physicalShortcut)) {
+      return {
+        id: this.getShortcutId(physicalShortcut.key, modifiers),
+        shortcut: physicalShortcut,
+      };
     }
+
+    const id = this.getShortcutId(this.getLogicalKey(e), modifiers);
+    const shortcut = this.shortcuts.get(id);
+    return shortcut && this.isShortcutAvailable(shortcut) ? { id, shortcut } : null;
+  }
+
+  private isShortcutAvailable(shortcut: Shortcut): boolean {
+    return shortcut.when?.() ?? true;
+  }
+
+  private handleKeyDown(e: KeyboardEvent) {
+    if (!this.enabled.get()) return;
+
+    if (shouldPreserveNativeKeyboardBehavior(e)) return;
+
+    const match = this.getShortcutForEvent(e);
+    if (!match) return;
+
+    e.preventDefault();
+
+    // For quick tools, track that this key is held and only fire once
+    if (match.shortcut.quick) {
+      if (this.activeQuickKeys.has(match.id)) return;
+      this.activeQuickKeys.add(match.id);
+    }
+
+    match.shortcut.action();
   }
 
   private handleKeyUp(e: KeyboardEvent) {

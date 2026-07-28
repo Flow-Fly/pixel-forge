@@ -2,11 +2,18 @@
   "$schema": "https://docs.fallow.tools/schema/fallowrc.json",
   "entry": [
     "src/main.ts",
+    "src/services/telemetry.ts",
+    "workers/telemetry/src/index.ts",
+    "shared/src/index.ts",
+    "server/src/index.ts",
+    "server/src/commands/database-compatibility.ts",
+    "server/src/commands/database-migrate.ts",
+    "server/src/commands/database-readiness.ts",
+    "server/src/commands/storage-compatibility.ts",
+    "server/src/commands/storage-readiness.ts",
     "index.html"
   ],
-  "dynamicallyLoaded": [
-    "src/tools/**"
-  ],
+  "dynamicallyLoaded": ["src/tools/**"],
   "usedClassMembers": [
     "styles",
     "render",

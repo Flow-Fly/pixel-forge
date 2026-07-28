@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { DuplicateLayerCommand } from '../../src/commands/layer-commands';
+import { DuplicateLayerCommand, FlipLayerCommand } from '../../src/commands/layer-commands';
 import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
 import type { Cel } from '../../src/types/animation';
 import type { ReferenceLayerData } from '../../src/types/reference';
@@ -133,5 +133,26 @@ describe('layer commands', () => {
 
     expect(layerIds(context)).not.toContain(duplicate!.id);
     expect(context.animation.cels.value.has(duplicateKey)).toBe(false);
+  });
+
+  it('keeps a layer transform on the frame captured by the command', () => {
+    const context = createContext();
+    const layer = context.layers.layers.value[0];
+    const firstFrameId = context.animation.currentFrameId.value;
+    context.animation.addFrame(false);
+    const secondFrameId = context.animation.currentFrameId.value;
+    const firstKey = context.animation.getCelKey(layer.id, firstFrameId);
+    const secondKey = context.animation.getCelKey(layer.id, secondFrameId);
+    const sharedCanvas = context.animation.cels.value.get(firstKey)?.canvas;
+
+    context.animation.goToFrame(firstFrameId);
+    const command = new FlipLayerCommand(layer.id, 'horizontal', context);
+    context.animation.goToFrame(secondFrameId);
+
+    command.execute();
+    command.undo();
+
+    expect(context.animation.cels.value.get(firstKey)?.canvas).not.toBe(sharedCanvas);
+    expect(context.animation.cels.value.get(secondKey)?.canvas).toBe(sharedCanvas);
   });
 });

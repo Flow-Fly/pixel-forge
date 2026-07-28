@@ -1,6 +1,7 @@
 import { html } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
+import { shouldPreserveNativeKeyboardBehavior } from '../../services/keyboard/native-keyboard-behavior';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import './pf-selection-overlay';
 import './pf-marching-ants-overlay';
@@ -31,7 +32,6 @@ import {
   handleMouseLeave,
   handleContextMenu,
   handleWheel as wheelHandleWheel,
-  handleGlobalWheel,
   handleRotationStart,
   handleResizeStart,
   handleRotationEnd,
@@ -70,7 +70,7 @@ export class PFCanvasViewport extends BaseComponent {
     window.addEventListener('blur', this.onWindowBlur);
     window.addEventListener('commit-transform', this.onCommitTransform);
     window.addEventListener('mousedown', this.onGlobalMouseDown);
-    window.addEventListener('wheel', this.onGlobalWheel, { passive: false });
+    this.addEventListener('wheel', this.onWheel, { passive: false });
 
     // Update container dimensions for zoomToFit
     this.updateContainerDimensions(this.context);
@@ -96,7 +96,7 @@ export class PFCanvasViewport extends BaseComponent {
     window.removeEventListener('blur', this.onWindowBlur);
     window.removeEventListener('commit-transform', this.onCommitTransform);
     window.removeEventListener('mousedown', this.onGlobalMouseDown);
-    window.removeEventListener('wheel', this.onGlobalWheel);
+    this.removeEventListener('wheel', this.onWheel);
 
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -176,7 +176,6 @@ export class PFCanvasViewport extends BaseComponent {
         @mousedown=${this.onMouseDown}
         @mousemove=${this.onMouseMove}
         @mouseleave=${this.onMouseLeave}
-        @wheel=${this.onWheel}
         @contextmenu=${this.onContextMenu}
       >
         <slot></slot>
@@ -233,10 +232,11 @@ export class PFCanvasViewport extends BaseComponent {
   private readonly wheelCallbacks = {
     requestUpdate: () => this.requestUpdate(),
     getBoundingClientRect: () => this.getBoundingClientRect(),
-    contains: (node: Node) => this.contains(node),
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
+    if (shouldPreserveNativeKeyboardBehavior(e)) return;
+
     handleKeyDown(e, this.keyboardState, this.keyboardCallbacks, this.context);
   };
 
@@ -307,10 +307,6 @@ export class PFCanvasViewport extends BaseComponent {
 
   private onWheel = (e: WheelEvent) => {
     wheelHandleWheel(e, this.keyboardState, this.wheelCallbacks, this.context);
-  };
-
-  private onGlobalWheel = (e: WheelEvent) => {
-    handleGlobalWheel(e, this.wheelCallbacks, this.context);
   };
 
   private onRotationStart = (e: Event) => {

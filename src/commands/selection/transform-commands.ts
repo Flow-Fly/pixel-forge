@@ -1,10 +1,9 @@
 import { type Command } from '../../stores/history';
-import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
+import { getActiveProjectContext } from '../../stores/project-context';
 import { type Rect } from '../../types/geometry';
 import { type SelectionShape } from '../../types/selection';
 import { flipSelectedPixels, pasteImageDataWithAlpha } from './pixels';
-
-type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
+import { EditableCelCommand, type EditableCelCommandContext } from './editable-cel-command';
 
 /**
  * Command for applying a transform (scale and/or rotation) to a selection.
@@ -15,12 +14,10 @@ type SelectionCommandContext = Pick<ProjectContext, 'selection'>;
  * selection store. The transform calculation happens before the command
  * is created (to support async web worker processing).
  */
-export class TransformSelectionCommand implements Command {
-  id: string;
+export class TransformSelectionCommand extends EditableCelCommand implements Command {
   name: string;
-  timestamp: number;
-
-  private canvas: HTMLCanvasElement;
+  private readonly layerId: string;
+  private readonly frameId: string;
 
   // Original state (for undo)
   private originalImageData: ImageData;
@@ -39,10 +36,10 @@ export class TransformSelectionCommand implements Command {
 
   // For proper undo/redo: what was at the destination before pasting
   private overwrittenAtDestination: ImageData;
-  private readonly context: SelectionCommandContext;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     originalImageData: ImageData,
     originalBounds: Rect,
     transformedImageData: ImageData,
@@ -52,12 +49,11 @@ export class TransformSelectionCommand implements Command {
     shape: SelectionShape,
     originalMask?: Uint8Array,
     offset: { x: number; y: number } = { x: 0, y: 0 },
-    context: SelectionCommandContext = getActiveProjectContext()
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
-    this.canvas = canvas;
-    this.context = context;
+    super(layerId, frameId, context);
+    this.layerId = layerId;
+    this.frameId = frameId;
 
     // Generate descriptive name based on what changed
     const hasScale = scale.x !== 1 || scale.y !== 1;
@@ -93,7 +89,7 @@ export class TransformSelectionCommand implements Command {
     this.actualDestY = Math.round(originalCenterY - transformedImageData.height / 2);
 
     // Capture what's at the actual destination before we paste
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.overwrittenAtDestination = ctx.getImageData(
       this.actualDestX,
       this.actualDestY,
@@ -125,7 +121,9 @@ export class TransformSelectionCommand implements Command {
       this.originalImageData,
       this.originalBounds,
       this.originalShape,
-      this.originalMask
+      this.originalMask,
+      this.layerId,
+      this.frameId
     );
 
     // Re-apply the transforms for preview
@@ -142,12 +140,8 @@ export class TransformSelectionCommand implements Command {
  * Command for flipping selected pixels horizontally or vertically.
  * Works on "selected" state only - flips pixels in-place on the canvas.
  */
-export class FlipSelectionCommand implements Command {
-  id: string;
+export class FlipSelectionCommand extends EditableCelCommand implements Command {
   name: string;
-  timestamp: number;
-
-  private canvas: HTMLCanvasElement;
   private bounds: Rect;
   private shape: SelectionShape;
   private mask?: Uint8Array;
@@ -157,23 +151,23 @@ export class FlipSelectionCommand implements Command {
   private originalImageData: ImageData;
 
   constructor(
-    canvas: HTMLCanvasElement,
+    layerId: string,
+    frameId: string,
     bounds: Rect,
     shape: SelectionShape,
     direction: 'horizontal' | 'vertical',
-    mask?: Uint8Array
+    mask?: Uint8Array,
+    context: EditableCelCommandContext = getActiveProjectContext()
   ) {
-    this.id = crypto.randomUUID();
-    this.timestamp = Date.now();
+    super(layerId, frameId, context);
     this.name = `Flip Selection ${direction === 'horizontal' ? 'Horizontal' : 'Vertical'}`;
-    this.canvas = canvas;
     this.bounds = { ...bounds };
     this.shape = shape;
     this.direction = direction;
     this.mask = mask;
 
     // Capture original pixels
-    const ctx = canvas.getContext('2d')!;
+    const ctx = this.canvas.getContext('2d')!;
     this.originalImageData = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
   }
 

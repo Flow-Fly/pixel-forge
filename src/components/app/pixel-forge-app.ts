@@ -26,9 +26,11 @@ import "../ui/pf-undo-history";
 import "../ui/pf-panel";
 import "../layers/pf-layers-panel";
 import "./pf-project-tabs";
+import "./pf-pwa-update-toast";
 import {
   activeProjectContext,
   getActiveProjectContext,
+  type ProjectContext,
 } from "../../stores/project-context";
 import { workspaceStore } from "../../stores/workspace";
 import { viewportStore } from "../../stores/viewport";
@@ -36,18 +38,39 @@ import { historyStore } from "../../stores/history";
 import { projectRepository } from "../../services/persistence/indexed-db";
 import { autoSaveService } from "../../services/auto-save";
 import { projectLibrary } from "../../services/project-library";
+import { pwaFileHandling } from "../../services/pwa-file-handling";
+import {
+  PROJECT_FILE_IMPORT_REPORT_EVENT,
+  describeProjectFileImport,
+  importProjectFiles,
+  supportedProjectFiles,
+  type ProjectFileImportReport,
+} from "../../services/project-file-handling";
 import type { ToolType as _ToolType } from "../../stores/tools";
 import { panelStore } from "../../stores/panels";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  clampSidebarWidth,
+  getSidebarWidthBounds,
+  persistSidebarWidth,
+  readSidebarWidth,
+  resetSidebarWidth,
+} from "../../stores/sidebar-width";
 import { log } from "../../utils/log";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
+import { productTelemetry } from "../../services/telemetry";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
+const SIDEBAR_KEYBOARD_STEP = 16;
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: grid;
-      grid-template-columns: 56px 1fr 288px; /* Toolbar, Workspace, Panels */
+      grid-template-columns: 56px minmax(0, 1fr) var(--pf-sidebar-width, 288px);
       grid-template-rows: 52px 36px 1fr 28px; /* Menu, ContextBar, Main, Status */
       width: 100vw;
       height: 100vh;
@@ -173,11 +196,56 @@ export class PixelForgeApp extends BaseComponent {
       flex-direction: column;
       overflow-y: auto;
       overflow-x: hidden;
-      box-shadow: -1px 0 0 rgba(255, 255, 255, 0.025) inset;
+      --pf-scrollbar-surface-shadow: -1px 0 0 rgba(255, 255, 255, 0.025) inset;
     }
 
     .panels > * {
       flex-shrink: 0;
+    }
+
+    .sidebar-resize-handle {
+      grid-column: 3;
+      grid-row: 3;
+      align-self: stretch;
+      justify-self: start;
+      width: 11px;
+      z-index: 2;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      cursor: ew-resize;
+      touch-action: none;
+      transform: translateX(-50%);
+    }
+
+    .sidebar-resize-handle::before {
+      content: "";
+      position: absolute;
+      inset-block: 0;
+      left: 50%;
+      width: 2px;
+      background: var(--pf-color-border-strong);
+      opacity: 0.5;
+      transform: translateX(-50%);
+      transition:
+        background-color 0.15s,
+        opacity 0.15s;
+    }
+
+    .sidebar-resize-handle:hover::before,
+    .sidebar-resize-handle:focus-visible::before,
+    .sidebar-resize-handle.resizing::before {
+      background: var(--pf-color-accent);
+      opacity: 1;
+    }
+
+    .sidebar-resize-handle:focus-visible {
+      outline: 1px solid var(--pf-color-accent);
+      outline-offset: -2px;
+    }
+
+    .sidebar-resize-handle[hidden] {
+      display: none;
     }
 
     .status-bar {
@@ -231,6 +299,57 @@ export class PixelForgeApp extends BaseComponent {
         transform: translate(-50%, -50%) translateY(-10px);
       }
     }
+
+    .file-import-status {
+      position: fixed;
+      left: 50%;
+      bottom: 42px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      max-width: min(560px, calc(100vw - 32px));
+      padding: 9px 10px 9px 14px;
+      background: rgba(13, 16, 21, 0.97);
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-md);
+      box-shadow: var(--pf-shadow-lg);
+      color: var(--pf-color-text-main);
+      font-size: 12px;
+      line-height: 1.4;
+      z-index: 10000;
+    }
+
+    .file-import-status button {
+      flex: none;
+      min-height: 28px;
+      padding: 4px 8px;
+      border: 1px solid var(--pf-color-border);
+      border-radius: var(--pf-radius-sm);
+      background: transparent;
+      color: var(--pf-color-text-secondary);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .file-import-status button:hover,
+    .file-import-status button:focus-visible {
+      border-color: var(--pf-color-accent);
+      color: var(--pf-color-text-main);
+      outline: none;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
   `;
 
   @state() showResizeDialog = false;
@@ -243,16 +362,35 @@ export class PixelForgeApp extends BaseComponent {
   @state() cursorPosition = { x: 0, y: 0 };
   @state() timelineHeight = 200;
   @state() private isResizingTimeline = false;
+  @state() private sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+  @state() private isResizingSidebar = false;
   @state() private hasLibraryProject = false;
   @state() private projectSelectionRequired = false;
+  @state() private isDeletingCurrentProject = false;
+  @state() private deleteCurrentProjectError: string | null = null;
   @state() private warningMessage: string | null = null;
+  @state() private fileImportMessage: string | null = null;
 
   private resizeStartY = 0;
   private resizeStartHeight = 0;
+  private sidebarResizeStartX = 0;
+  private sidebarResizeStartWidth = DEFAULT_SIDEBAR_WIDTH;
+  private sidebarResizePointerId: number | null = null;
+  private sidebarResizeHandle: HTMLElement | null = null;
+  private previousBodyCursor = "";
+  private previousBodyUserSelect = "";
   private warningTimer: number | null = null;
+  private fileImportTimer: number | null = null;
+  private editorLoadedTimer: number | null = null;
+  private fileDropHandlingStarted = false;
+  private deleteCurrentProjectContext: ProjectContext | null = null;
+  private exportProjectContext: ProjectContext | null = null;
 
   connectedCallback() {
     super.connectedCallback();
+    this.applySidebarWidth(readSidebarWidth(window.innerWidth));
+    window.addEventListener("resize", this.handleWindowResize);
+
     // Load saved timeline height
     const savedHeight = localStorage.getItem("pf-timeline-height");
     if (savedHeight) {
@@ -303,9 +441,24 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+    window.addEventListener(
+      PROJECT_FILE_IMPORT_REPORT_EVENT,
+      this.handleProjectFileImportReport as EventListener
+    );
 
     // Load saved project from IndexedDB after listeners are ready.
-    this.loadSavedProject();
+    void this.loadSavedProject().finally(() => {
+      if (!this.isConnected) return;
+      pwaFileHandling.registerLaunchConsumer();
+      this.startProjectFileDropHandling();
+      this.editorLoadedTimer = window.setTimeout(() => {
+        productTelemetry.record({
+          name: "editor_loaded",
+          dimensions: { entryPoint: "direct" },
+        });
+        this.editorLoadedTimer = null;
+      });
+    });
   }
 
   private handleShowWarningToast = (e: CustomEvent<{ message: string }>) => {
@@ -321,6 +474,61 @@ export class PixelForgeApp extends BaseComponent {
       this.warningMessage = null;
       this.warningTimer = null;
     }, 2000);
+  };
+
+  private handleProjectFileImportReport = (
+    event: CustomEvent<ProjectFileImportReport>
+  ) => {
+    const message = describeProjectFileImport(event.detail);
+    if (!message) return;
+
+    if (event.detail.outcomes.some((outcome) => outcome.ok)) {
+      this.hasLibraryProject = true;
+      this.projectSelectionRequired = false;
+      this.showProjectBrowser = false;
+    }
+
+    this.dismissFileImportMessage();
+    this.fileImportMessage = message;
+    this.fileImportTimer = window.setTimeout(() => {
+      this.fileImportMessage = null;
+      this.fileImportTimer = null;
+    }, 6000);
+  };
+
+  private dismissFileImportMessage = () => {
+    if (this.fileImportTimer !== null) {
+      clearTimeout(this.fileImportTimer);
+      this.fileImportTimer = null;
+    }
+    this.fileImportMessage = null;
+  };
+
+  private startProjectFileDropHandling() {
+    if (this.fileDropHandlingStarted) return;
+
+    window.addEventListener("dragover", this.handleProjectFileDragOver);
+    window.addEventListener("drop", this.handleProjectFileDrop);
+    this.fileDropHandlingStarted = true;
+  }
+
+  private handleProjectFileDragOver = (event: DragEvent) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  };
+
+  private handleProjectFileDrop = (event: DragEvent) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+
+    event.preventDefault();
+    const files = supportedProjectFiles(getDataTransferFiles(event.dataTransfer));
+    if (files.length === 0) return;
+
+    void importProjectFiles(files).catch((error) => {
+      log.error("Failed to import dropped project files:", error);
+    });
   };
 
   private handleProjectLoaded = async () => {
@@ -380,11 +588,10 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleDuplicateCurrentProject = async () => {
+    const context = getActiveProjectContext();
     try {
-      await autoSaveService.saveNow();
-      await projectLibrary.duplicateProject(
-        getActiveProjectContext().project.id.value
-      );
+      await autoSaveService.saveNow(context);
+      await projectLibrary.duplicateProject(context.project.id.value);
       this.showWarning("Project duplicated");
     } catch (error) {
       log.error("Failed to duplicate project:", error);
@@ -393,11 +600,27 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleDeleteCurrentProject = () => {
+    if (this.isDeletingCurrentProject) return;
+
+    this.deleteCurrentProjectContext = getActiveProjectContext();
+    this.deleteCurrentProjectError = null;
     this.showDeleteCurrentDialog = true;
   };
 
+  private dismissDeleteCurrentProject = () => {
+    this.deleteCurrentProjectContext = null;
+    this.deleteCurrentProjectError = null;
+    this.showDeleteCurrentDialog = false;
+  };
+
   private handleShowExportDialog = () => {
+    this.exportProjectContext = getActiveProjectContext();
     this.showExportDialog = true;
+  };
+
+  private handleExportDialogClose = () => {
+    this.exportProjectContext = null;
+    this.showExportDialog = false;
   };
 
   private handleProjectBrowserClose = () => {
@@ -427,16 +650,23 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private confirmDeleteCurrentProject = async () => {
-    this.showDeleteCurrentDialog = false;
+    const context = this.deleteCurrentProjectContext;
+    if (!context || this.isDeletingCurrentProject) return;
+
+    this.isDeletingCurrentProject = true;
+    this.deleteCurrentProjectError = null;
 
     try {
-      await projectLibrary.deleteProject(
-        getActiveProjectContext().project.id.value
-      );
-      this.handleCurrentProjectDeleted();
+      const result = await workspaceStore.deleteProject(context.project.id.value);
+      this.dismissDeleteCurrentProject();
+      if (result.installedReplacement) {
+        this.handleCurrentProjectDeleted();
+      }
     } catch (error) {
       log.error("Failed to delete project:", error);
-      this.showWarning("Could not delete project");
+      this.deleteCurrentProjectError = "Could not delete project. Your project is still available.";
+    } finally {
+      this.isDeletingCurrentProject = false;
     }
   };
 
@@ -447,8 +677,7 @@ export class PixelForgeApp extends BaseComponent {
   }
 
   private handleBeforeUnload = (e: BeforeUnloadEvent) => {
-    // Check if there are unsaved changes (history has items)
-    const hasUnsavedChanges = historyStore.undoStack.value.length > 0;
+    const hasUnsavedChanges = autoSaveService.dirtyContexts.value.size > 0;
     if (hasUnsavedChanges) {
       // Modern browsers ignore custom messages, but the prompt will still show
       e.preventDefault();
@@ -465,6 +694,10 @@ export class PixelForgeApp extends BaseComponent {
         workspaceState &&
         (await workspaceStore.restoreWorkspace(workspaceState))
       ) {
+        productTelemetry.record({
+          name: "project_opened",
+          dimensions: { source: "session_restore" },
+        });
         this.hasLibraryProject = true;
         this.projectSelectionRequired = false;
         this.showProjectBrowser = false;
@@ -485,6 +718,10 @@ export class PixelForgeApp extends BaseComponent {
           activeProjectId: projectId,
         }))
       ) {
+        productTelemetry.record({
+          name: "project_opened",
+          dimensions: { source: "session_restore" },
+        });
         historyStore.clear();
         this.hasLibraryProject = true;
         this.projectSelectionRequired = false;
@@ -504,6 +741,12 @@ export class PixelForgeApp extends BaseComponent {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.editorLoadedTimer !== null) {
+      clearTimeout(this.editorLoadedTimer);
+      this.editorLoadedTimer = null;
+    }
+    this.stopSidebarResize(false);
+    window.removeEventListener("resize", this.handleWindowResize);
     document.removeEventListener("mousemove", this.handleTimelineResizeMove);
     document.removeEventListener("mouseup", this.handleTimelineResizeEnd);
     window.removeEventListener("project-loaded", this.handleProjectLoaded);
@@ -548,6 +791,14 @@ export class PixelForgeApp extends BaseComponent {
       "show-warning-toast",
       this.handleShowWarningToast as EventListener
     );
+    window.removeEventListener(
+      PROJECT_FILE_IMPORT_REPORT_EVENT,
+      this.handleProjectFileImportReport as EventListener
+    );
+    window.removeEventListener("dragover", this.handleProjectFileDragOver);
+    window.removeEventListener("drop", this.handleProjectFileDrop);
+    this.fileDropHandlingStarted = false;
+    this.dismissFileImportMessage();
   }
 
   private handleCanvasCursor = (e: CustomEvent<{ x: number; y: number }>) => {
@@ -589,17 +840,218 @@ export class PixelForgeApp extends BaseComponent {
     localStorage.setItem("pf-timeline-height", String(this.timelineHeight));
   };
 
+  private get sidebarWidthBounds() {
+    return getSidebarWidthBounds(window.innerWidth);
+  }
+
+  private applySidebarWidth(width: number) {
+    this.sidebarWidth = clampSidebarWidth(width, window.innerWidth);
+    this.style.setProperty("--pf-sidebar-width", `${this.sidebarWidth}px`);
+  }
+
+  private handleWindowResize = () => {
+    this.stopSidebarResize(false);
+    this.applySidebarWidth(readSidebarWidth(window.innerWidth));
+    this.requestUpdate();
+  };
+
+  private handleSidebarResizeStart = (event: PointerEvent) => {
+    const { min, max } = this.sidebarWidthBounds;
+    if (this.isResizingSidebar || event.button !== 0 || min === max) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.isResizingSidebar = true;
+    this.sidebarResizeStartX = event.clientX;
+    this.sidebarResizeStartWidth = this.sidebarWidth;
+    this.sidebarResizePointerId = event.pointerId;
+    this.sidebarResizeHandle = event.currentTarget as HTMLElement;
+    this.previousBodyCursor = document.body.style.cursor;
+    this.previousBodyUserSelect = document.body.style.userSelect;
+
+    try {
+      this.sidebarResizeHandle.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Document listeners remain the fallback when capture is unavailable.
+    }
+    document.addEventListener("pointermove", this.handleSidebarResizeMove);
+    document.addEventListener("pointerup", this.handleSidebarResizeEnd);
+    document.addEventListener("pointercancel", this.handleSidebarResizeEnd);
+    window.addEventListener("blur", this.handleSidebarResizeBlur);
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  private handleSidebarResizeMove = (event: PointerEvent) => {
+    if (
+      !this.isResizingSidebar ||
+      event.pointerId !== this.sidebarResizePointerId
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    const dragDistance = this.sidebarResizeStartX - event.clientX;
+    this.applySidebarWidth(this.sidebarResizeStartWidth + dragDistance);
+  };
+
+  private handleSidebarResizeEnd = (event: PointerEvent) => {
+    if (event.pointerId !== this.sidebarResizePointerId) return;
+    this.stopSidebarResize(true);
+  };
+
+  private handleSidebarResizeBlur = () => {
+    this.stopSidebarResize(true);
+  };
+
+  private stopSidebarResize(persist: boolean) {
+    const wasResizing = this.isResizingSidebar;
+    const pointerId = this.sidebarResizePointerId;
+    const resizeHandle = this.sidebarResizeHandle;
+    if (wasResizing && persist) {
+      this.applySidebarWidth(
+        persistSidebarWidth(this.sidebarWidth, window.innerWidth)
+      );
+    }
+
+    this.isResizingSidebar = false;
+    this.sidebarResizePointerId = null;
+    this.sidebarResizeHandle = null;
+    document.removeEventListener("pointermove", this.handleSidebarResizeMove);
+    document.removeEventListener("pointerup", this.handleSidebarResizeEnd);
+    document.removeEventListener("pointercancel", this.handleSidebarResizeEnd);
+    window.removeEventListener("blur", this.handleSidebarResizeBlur);
+    if (
+      pointerId !== null &&
+      resizeHandle?.hasPointerCapture?.(pointerId)
+    ) {
+      resizeHandle.releasePointerCapture(pointerId);
+    }
+    if (wasResizing) {
+      document.body.style.cursor = this.previousBodyCursor;
+      document.body.style.userSelect = this.previousBodyUserSelect;
+    }
+  }
+
+  private handleSidebarResizeKeydown = (event: KeyboardEvent) => {
+    const { min, max } = this.sidebarWidthBounds;
+    if (min === max) return;
+
+    let requestedWidth: number;
+    if (event.key === "ArrowLeft") {
+      requestedWidth = this.sidebarWidth + SIDEBAR_KEYBOARD_STEP;
+    } else if (event.key === "ArrowRight") {
+      requestedWidth = this.sidebarWidth - SIDEBAR_KEYBOARD_STEP;
+    } else if (event.key === "Home") {
+      this.applySidebarWidth(resetSidebarWidth(window.innerWidth));
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.applySidebarWidth(
+      persistSidebarWidth(requestedWidth, window.innerWidth)
+    );
+  };
+
+  private renderSidebarResizeHandle() {
+    const bounds = this.sidebarWidthBounds;
+    const canResize = bounds.min < bounds.max;
+
+    return html`
+      <div
+        class="sidebar-resize-handle ${this.isResizingSidebar ? "resizing" : ""}"
+        role="separator"
+        aria-label="Resize workspace panels"
+        aria-orientation="vertical"
+        aria-valuemin=${bounds.min}
+        aria-valuemax=${bounds.max}
+        aria-valuenow=${this.sidebarWidth}
+        aria-valuetext="${this.sidebarWidth} pixels"
+        title="Resize panels. Use arrow keys; Home resets."
+        tabindex=${canResize ? 0 : -1}
+        ?hidden=${!canResize}
+        @pointerdown=${this.handleSidebarResizeStart}
+        @lostpointercapture=${this.handleSidebarResizeEnd}
+        @keydown=${this.handleSidebarResizeKeydown}
+      ></div>
+    `;
+  }
+
+  private renderFileImportStatus() {
+    return html`
+      <span class="visually-hidden" role="status" aria-live="polite"
+        >${this.fileImportMessage ?? ""}</span
+      >
+      ${this.fileImportMessage
+        ? html`
+            <div class="file-import-status">
+              <span aria-hidden="true">${this.fileImportMessage}</span>
+              <button type="button" @click=${this.dismissFileImportMessage}>Dismiss</button>
+            </div>
+          `
+        : ""}
+    `;
+  }
+
+  private getDeleteProjectName(activeProject: ProjectContext["project"]) {
+    const project = this.deleteCurrentProjectContext?.project ?? activeProject;
+    return project.name.value;
+  }
+
+  private renderDeleteCurrentProjectDialog(projectName: string) {
+    return html`
+      <pf-dialog
+        ?open=${this.showDeleteCurrentDialog}
+        .closeOnBackdrop=${!this.isDeletingCurrentProject}
+        .closeOnEscape=${!this.isDeletingCurrentProject}
+        .showCloseButton=${!this.isDeletingCurrentProject}
+        width="360px"
+        @pf-close=${this.dismissDeleteCurrentProject}
+      >
+        <span slot="title">Delete Current Project</span>
+        <p>Delete "${projectName}" from this browser?</p>
+        ${this.deleteCurrentProjectError
+          ? html`<p role="alert">${this.deleteCurrentProjectError}</p>`
+          : ""}
+        <div slot="actions">
+          <button
+            type="button"
+            class="secondary"
+            ?disabled=${this.isDeletingCurrentProject}
+            @click=${this.dismissDeleteCurrentProject}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="primary"
+            ?disabled=${this.isDeletingCurrentProject}
+            @click=${this.confirmDeleteCurrentProject}
+          >
+            ${this.isDeletingCurrentProject ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </pf-dialog>
+    `;
+  }
+
   render() {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
     const isTimelineCollapsed =
       panelStore.panelStates.value.timeline?.collapsed ?? false;
     const activeProject = activeProjectContext.value.project;
+    const deleteProjectName = this.getDeleteProjectName(activeProject);
 
     return html`
       <header class="menu-bar">
         <pf-menu-bar
           @resize-canvas=${() => (this.showResizeDialog = true)}
-          @show-export-dialog=${() => (this.showExportDialog = true)}
+          @show-export-dialog=${this.handleShowExportDialog}
           @show-new-project-dialog=${this.handleShowNewProjectDialog}
           @show-paint-by-number-dialog=${this.handleShowPaintByNumberDialog}
           @show-project-browser=${() => (this.showProjectBrowser = true)}
@@ -645,7 +1097,9 @@ export class PixelForgeApp extends BaseComponent {
           : ""}
       </main>
 
-      <aside class="panels">
+      ${this.renderSidebarResizeHandle()}
+
+      <aside class="panels" data-scrollbar="vertical">
         ${isTimelineCollapsed
           ? html`
               <pf-panel header="Layers" collapsible panel-id="layers" bordered>
@@ -670,7 +1124,8 @@ export class PixelForgeApp extends BaseComponent {
 
       <pf-export-dialog
         ?open=${this.showExportDialog}
-        @close=${() => (this.showExportDialog = false)}
+        .context=${this.exportProjectContext}
+        @close=${this.handleExportDialogClose}
       ></pf-export-dialog>
 
       <pf-new-project-dialog
@@ -699,30 +1154,7 @@ export class PixelForgeApp extends BaseComponent {
           `
         : ""}
 
-      <pf-dialog
-        ?open=${this.showDeleteCurrentDialog}
-        width="360px"
-        @pf-close=${() => (this.showDeleteCurrentDialog = false)}
-      >
-        <span slot="title">Delete Current Project</span>
-        <p>Delete "${activeProject.name.value}" from this browser?</p>
-        <div slot="actions">
-          <button
-            type="button"
-            class="secondary"
-            @click=${() => (this.showDeleteCurrentDialog = false)}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="primary"
-            @click=${this.confirmDeleteCurrentProject}
-          >
-            Delete
-          </button>
-        </div>
-      </pf-dialog>
+      ${this.renderDeleteCurrentProjectDialog(deleteProjectName)}
 
       <pf-keyboard-shortcuts-dialog
         ?open=${this.showKeyboardShortcutsDialog}
@@ -741,6 +1173,27 @@ export class PixelForgeApp extends BaseComponent {
       ${this.warningMessage
         ? html`<div class="warning-toast">${this.warningMessage}</div>`
         : ""}
+      ${this.renderFileImportStatus()}
+      <pf-pwa-update-toast></pf-pwa-update-toast>
     `;
   }
+}
+
+function getDataTransferFiles(dataTransfer: DataTransfer | null): File[] {
+  if (!dataTransfer) return [];
+
+  const files = Array.from(dataTransfer.files);
+  if (files.length > 0) return files;
+
+  return Array.from(dataTransfer.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+}
+
+function hasDraggedFiles(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  if (dataTransfer.files.length > 0) return true;
+  if (Array.from(dataTransfer.items).some((item) => item.kind === "file")) return true;
+  return Array.from(dataTransfer.types).includes("Files");
 }

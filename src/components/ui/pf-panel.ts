@@ -2,6 +2,7 @@ import { html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { panelStore, type PanelId } from "../../stores/panels";
+import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
 /**
  * Reusable panel component with optional collapsible behavior.
@@ -21,6 +22,8 @@ import { panelStore, type PanelId } from "../../stores/panels";
 @customElement("pf-panel")
 export class PFPanel extends BaseComponent {
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: flex;
       flex-direction: column;
@@ -168,7 +171,7 @@ export class PFPanel extends BaseComponent {
         </div>
       </div>
 
-      <div class="content">
+      <div class="content" data-scrollbar="vertical">
         <div class="content-inner">
           <slot></slot>
         </div>

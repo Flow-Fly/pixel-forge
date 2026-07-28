@@ -2,6 +2,7 @@ import { html, css, nothing } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { log } from '../../utils/log';
+import { scrollbarStyles } from '../../styles/scrollbar-styles';
 
 export interface ContextMenuItem {
   type: 'item' | 'divider' | 'slider' | 'input' | 'color-picker';
@@ -52,6 +53,8 @@ export class PFContextMenu extends BaseComponent {
   private isInteractingWithSlider = false;
 
   static styles = css`
+    ${scrollbarStyles}
+
     :host {
       display: block;
     }
@@ -62,7 +65,7 @@ export class PFContextMenu extends BaseComponent {
       border: 1px solid var(--pf-color-border, #444);
       background-color: rgba(13, 16, 21, 0.98);
       border-radius: var(--pf-radius-sm);
-      box-shadow: var(--pf-shadow-lg);
+      --pf-scrollbar-surface-shadow: var(--pf-shadow-lg);
       min-width: 160px;
       max-width: 280px;
       overflow-y: auto;
@@ -698,6 +701,7 @@ export class PFContextMenu extends BaseComponent {
     return html`
       <div
         class="menu"
+        data-scrollbar="vertical"
         popover="manual"
         @toggle="${this.handlePopoverToggle}"
       >
