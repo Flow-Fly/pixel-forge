@@ -66,10 +66,11 @@ function serializedBytesToUint8Array(data: Record<string, number>): Uint8Array {
 }
 
 function decodeLegacyBase64ImageData(data: string): Uint8Array {
-  const base64 = getBase64Payload(data.trim());
-  if (!base64) {
-    throw new TypeError('Legacy project image data is empty');
-  }
+  const trimmedData = data.trim();
+  if (!trimmedData) return new Uint8Array(0);
+
+  const base64 = getBase64Payload(trimmedData);
+  if (!base64) return new Uint8Array(0);
 
   try {
     return base64ToUint8Array(base64);
