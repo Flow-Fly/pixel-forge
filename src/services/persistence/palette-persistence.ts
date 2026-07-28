@@ -41,12 +41,14 @@ class PalettePersistenceService {
   /**
    * Save a new palette or update existing
    */
-  async savePalette(palette: StoredCustomPalette): Promise<void> {
+  async savePalette(palette: StoredCustomPalette): Promise<boolean> {
     try {
       const db = await this.dbPromise;
       await db.put("palettes", palette);
+      return true;
     } catch (error) {
       log.error("Failed to save palette to IndexedDB:", error);
+      return false;
     }
   }
 

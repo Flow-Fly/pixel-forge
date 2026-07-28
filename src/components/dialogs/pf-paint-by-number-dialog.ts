@@ -526,6 +526,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
             required
             autocomplete="off"
             .value=${this.paletteName}
+            ?disabled=${this.isSavingPalette}
             @input=${this.handlePaletteNameInput}
           >
         </label>
@@ -539,6 +540,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
                   type="color"
                   .value=${color}
                   aria-label="Color ${index + 1}"
+                  ?disabled=${this.isSavingPalette}
                   @input=${(event: Event) => this.updatePaletteColor(index, event)}
                 >
                 <button
@@ -898,28 +900,28 @@ export class PFPaintByNumberDialog extends BaseComponent {
     this.isSavingPalette = true;
     this.paletteError = '';
     this.paletteMessage = 'Saving palette…';
+    let savedPalette: CustomPalette;
     try {
-      const id = await saveAsNewPalette(name, this.paletteColors);
-      const palettes = await loadCustomPalettes();
-      const savedPalette = palettes.find((palette) => palette.id === id);
-      if (!savedPalette) {
-        throw new Error('Saved palette could not be verified.');
-      }
-
-      this.customPalettes = palettes;
-      this.isCreatingPalette = false;
-      this.paletteName = '';
-      this.paletteColors = [];
-      this.paletteMessage = 'Palette saved and selected.';
-      this.selectPalette(`custom:${id}`);
-      await this.updateComplete;
-      this.paletteSelect?.focus();
+      savedPalette = await saveAsNewPalette(name, this.paletteColors);
     } catch {
       this.paletteMessage = '';
       this.paletteError = 'Palette could not be saved. Try again.';
-    } finally {
       this.isSavingPalette = false;
+      return;
     }
+
+    this.customPalettes = [
+      savedPalette,
+      ...this.customPalettes.filter((palette) => palette.id !== savedPalette.id),
+    ];
+    this.isCreatingPalette = false;
+    this.paletteName = '';
+    this.paletteColors = [];
+    this.paletteMessage = 'Palette saved and selected.';
+    this.selectPalette(`custom:${savedPalette.id}`);
+    this.isSavingPalette = false;
+    await this.updateComplete;
+    this.paletteSelect?.focus();
   };
 
   private describeGuide(guide: NumberedGuide): string {

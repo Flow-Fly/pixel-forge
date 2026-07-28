@@ -123,7 +123,9 @@ describe('pf-paint-by-number-dialog', () => {
       projectId: 'guided-project',
     });
     loadCustomPalettesMock.mockResolvedValue([]);
-    saveAsNewPaletteMock.mockResolvedValue('new-palette');
+    saveAsNewPaletteMock.mockImplementation(async (name: string, colors: string[]) => (
+      customPalette('new-palette', name, [...colors])
+    ));
   });
 
   afterEach(() => {
@@ -250,9 +252,8 @@ describe('pf-paint-by-number-dialog', () => {
 
   it('creates, edits, reorders, removes, saves, and selects a custom palette inline', async () => {
     const created = customPalette('new-palette', 'Forest', ['#0000ff', '#00ff00']);
-    loadCustomPalettesMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([created]);
+    loadCustomPalettesMock.mockResolvedValueOnce([]);
+    saveAsNewPaletteMock.mockResolvedValueOnce(created);
     const element = await createDialog();
     chooseFile(element, new File(['pixels'], 'forest.png', { type: 'image/png' }));
     await Promise.resolve();
@@ -313,6 +314,7 @@ describe('pf-paint-by-number-dialog', () => {
     await vi.runAllTimersAsync();
 
     expect(saveAsNewPaletteMock).toHaveBeenCalledWith('Forest', ['#0000ff', '#00ff00']);
+    expect(loadCustomPalettesMock).toHaveBeenCalledTimes(1);
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
     )?.value).toBe('custom:new-palette');
@@ -353,13 +355,12 @@ describe('pf-paint-by-number-dialog', () => {
     expect(element.shadowRoot?.textContent).toContain('Palette creation cancelled.');
   });
 
-  it('shows a recoverable persistence error without losing source or setup state', async () => {
-    loadCustomPalettesMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        customPalette('new-palette', 'Retry palette', ['#000000']),
-      ]);
+  it('shows a recoverable save error without losing source or setup state', async () => {
+    const saved = customPalette('new-palette', 'Retry palette', ['#000000']);
+    loadCustomPalettesMock.mockResolvedValueOnce([]);
+    saveAsNewPaletteMock
+      .mockRejectedValueOnce(new Error('IndexedDB write failed'))
+      .mockResolvedValueOnce(saved);
     const element = await createDialog();
     chooseFile(element, new File(['pixels'], 'source.png', { type: 'image/png' }));
     await Promise.resolve();
@@ -391,6 +392,7 @@ describe('pf-paint-by-number-dialog', () => {
     await vi.runAllTimersAsync();
 
     expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(2);
+    expect(loadCustomPalettesMock).toHaveBeenCalledTimes(1);
     expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
@@ -423,15 +425,16 @@ describe('pf-paint-by-number-dialog', () => {
   });
 
   it('blocks duplicate palette saves while persistence is pending', async () => {
-    let resolveSave: ((id: string) => void) | undefined;
+    const pendingPalette = customPalette(
+      'new-palette',
+      'Pending palette',
+      ['#000000'],
+    );
+    let resolveSave: ((palette: CustomPalette) => void) | undefined;
     saveAsNewPaletteMock.mockImplementationOnce(() => new Promise((resolve) => {
       resolveSave = resolve;
     }));
-    loadCustomPalettesMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        customPalette('new-palette', 'Pending palette', ['#000000']),
-      ]);
+    loadCustomPalettesMock.mockResolvedValueOnce([]);
     const element = await createDialog();
     await selectPalette(element, 'create');
     const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
@@ -442,6 +445,9 @@ describe('pf-paint-by-number-dialog', () => {
     const save = element.shadowRoot?.querySelector<HTMLButtonElement>(
       'button[form="palette-creation-form"]',
     );
+    const color = element.shadowRoot?.querySelector<HTMLInputElement>(
+      'input[aria-label="Color 1"]',
+    );
 
     save?.click();
     save?.click();
@@ -450,6 +456,8 @@ describe('pf-paint-by-number-dialog', () => {
     expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(1);
     expect(save?.disabled).toBe(true);
     expect(save?.textContent).toContain('Saving…');
+    expect(name?.disabled).toBe(true);
+    expect(color?.disabled).toBe(true);
 
     save?.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Escape',
@@ -461,8 +469,9 @@ describe('pf-paint-by-number-dialog', () => {
     expect(element.shadowRoot?.querySelector('#palette-creation-form')).toBeTruthy();
     expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(1);
 
-    resolveSave?.('new-palette');
+    resolveSave?.(pendingPalette);
     await settle(element);
+    expect(loadCustomPalettesMock).toHaveBeenCalledTimes(1);
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
     )?.value).toBe('custom:new-palette');

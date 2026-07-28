@@ -90,7 +90,7 @@ export async function loadCustomPalettes(): Promise<CustomPalette[]> {
 export async function saveAsNewPalette(
   name: string,
   colors: string[]
-): Promise<string> {
+): Promise<CustomPalette> {
   const id = crypto.randomUUID();
   const now = Date.now();
   const palette: CustomPalette = {
@@ -101,8 +101,11 @@ export async function saveAsNewPalette(
     updatedAt: now,
   };
 
-  await palettePersistence.savePalette(palette);
-  return id;
+  const saved = await palettePersistence.savePalette(palette);
+  if (!saved) {
+    throw new Error('Palette could not be saved.');
+  }
+  return palette;
 }
 
 /**
