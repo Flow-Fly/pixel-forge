@@ -15,6 +15,7 @@ import {
   loadCustomPalettesOrThrow,
   saveAsNewPalette,
 } from '../../stores/palette/persistence';
+import { MAX_PALETTE_SIZE } from '../../stores/palette/types';
 import type { CustomPalette } from '../../types/palette';
 import type {
   GuidedColorMapping,
@@ -116,6 +117,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
     input:focus-visible,
     select:focus-visible,
     button:focus-visible,
+    .palette-status:focus-visible,
     summary:focus-visible {
       outline: 2px solid var(--pf-color-accent);
       outline-offset: 2px;
@@ -320,6 +322,8 @@ export class PFPaintByNumberDialog extends BaseComponent {
   @query('#guide-preview') private guideCanvas?: HTMLCanvasElement;
   @query('#guided-palette-source') private paletteSelect?: HTMLSelectElement;
   @query('#guided-palette-name') private paletteNameInput?: HTMLInputElement;
+  @query('#guided-palette-creation-status')
+  private paletteCreationStatus?: HTMLParagraphElement;
 
   private previewTimer: number | null = null;
   private requestVersion = 0;
@@ -572,16 +576,19 @@ export class PFPaintByNumberDialog extends BaseComponent {
             <button
               class="secondary"
               type="button"
-              ?disabled=${this.isSavingPalette}
+              ?disabled=${this.isSavingPalette
+                || this.paletteColors.length >= MAX_PALETTE_SIZE}
               @click=${this.addPaletteColor}
             >Add color</button>
           </div>
         </fieldset>
 
         <p
+          id="guided-palette-creation-status"
           class="status palette-status"
           role=${this.paletteError ? 'alert' : 'status'}
           aria-live="polite"
+          tabindex="-1"
           data-error=${String(Boolean(this.paletteError))}
         >
           ${this.paletteError || this.paletteMessage}
@@ -881,13 +888,18 @@ export class PFPaintByNumberDialog extends BaseComponent {
   }
 
   private addPaletteColor = () => {
+    if (this.paletteColors.length >= MAX_PALETTE_SIZE) return;
     this.paletteColors = [...this.paletteColors, DEFAULT_NEW_COLOR];
     this.paletteError = '';
+    this.paletteMessage = this.paletteColors.length === MAX_PALETTE_SIZE
+      ? `Palette limit reached: ${MAX_PALETTE_SIZE} colors maximum.`
+      : '';
   };
 
   private removePaletteColor(index: number) {
     this.paletteColors = this.paletteColors.filter((_, colorIndex) => colorIndex !== index);
     this.paletteError = '';
+    this.paletteMessage = '';
   }
 
   private movePaletteColor(fromIndex: number, toIndex: number) {
@@ -909,6 +921,13 @@ export class PFPaintByNumberDialog extends BaseComponent {
     }
     if (this.paletteColors.length === 0) {
       this.paletteError = 'Add at least one color.';
+      return;
+    }
+    if (this.paletteColors.length > MAX_PALETTE_SIZE) {
+      const extraColors = this.paletteColors.length - MAX_PALETTE_SIZE;
+      this.paletteError = `Palettes can contain at most ${MAX_PALETTE_SIZE} colors. Remove ${extraColors} ${extraColors === 1 ? 'color' : 'colors'} before saving.`;
+      await this.updateComplete;
+      this.paletteCreationStatus?.focus();
       return;
     }
 

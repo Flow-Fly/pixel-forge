@@ -35,6 +35,7 @@ import type { PFPaintByNumberDialog } from '../../../src/components/dialogs/pf-p
 import { PRESET_PALETTES } from '../../../src/data/preset-palettes';
 import { MAX_GUIDE_COLORS } from '../../../src/services/paint-by-number/guide-generator';
 import * as projectContext from '../../../src/stores/project-context';
+import { MAX_PALETTE_SIZE } from '../../../src/stores/palette/types';
 import type { CustomPalette } from '../../../src/types/palette';
 
 const sourceImage = {
@@ -377,6 +378,62 @@ describe('pf-paint-by-number-dialog', () => {
       mapping: 'color',
       simplifyIsolatedPixels: true,
     });
+  });
+
+  it('disables adding colors when a new palette reaches the persisted limit', async () => {
+    const element = await createDialog();
+    await selectPalette(element, 'create');
+    const paletteState = element as unknown as { paletteColors: string[] };
+    paletteState.paletteColors = Array.from(
+      { length: MAX_PALETTE_SIZE - 1 },
+      () => '#000000',
+    );
+    await settle(element);
+
+    const addColor = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '.palette-create-actions button',
+    );
+    addColor?.click();
+    await settle(element);
+
+    expect(paletteState.paletteColors).toHaveLength(MAX_PALETTE_SIZE);
+    expect(addColor?.disabled).toBe(true);
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toContain(
+      '256 colors maximum',
+    );
+
+    addColor?.click();
+    expect(paletteState.paletteColors).toHaveLength(MAX_PALETTE_SIZE);
+  });
+
+  it('rejects an oversized palette before persistence and focuses the error', async () => {
+    const element = await createDialog();
+    await selectPalette(element, 'create');
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    if (name) {
+      name.value = 'Too many colors';
+      name.dispatchEvent(new Event('input'));
+    }
+    const paletteState = element as unknown as { paletteColors: string[] };
+    paletteState.paletteColors = Array.from(
+      { length: MAX_PALETTE_SIZE + 1 },
+      () => '#000000',
+    );
+    await settle(element);
+
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
+      ?.click();
+    await settle(element);
+
+    const error = element.shadowRoot?.querySelector<HTMLElement>(
+      '#guided-palette-creation-status',
+    );
+    expect(saveAsNewPaletteMock).not.toHaveBeenCalled();
+    expect(error?.getAttribute('role')).toBe('alert');
+    expect(error?.textContent).toContain('at most 256 colors');
+    expect(error?.textContent).toContain('Remove 1 color');
+    expect(element.shadowRoot?.activeElement).toBe(error);
   });
 
   it('cancels inline creation with Escape and restores the previous selection and focus', async () => {
