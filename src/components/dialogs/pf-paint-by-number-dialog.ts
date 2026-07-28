@@ -346,9 +346,9 @@ export class PFPaintByNumberDialog extends BaseComponent {
     return html`
       <pf-dialog
         ?open=${this.open}
-        .closeOnBackdrop=${!this.isSavingPalette}
+        .closeOnBackdrop=${!this.isCreatingPalette && !this.isSavingPalette}
         .closeOnEscape=${!this.isCreatingPalette}
-        .showCloseButton=${!this.isSavingPalette}
+        .showCloseButton=${!this.isCreatingPalette && !this.isSavingPalette}
         width="min(760px, calc(100vw - 32px))"
         @keydown=${this.handlePaletteCreationKeydown}
         @pf-close=${this.close}

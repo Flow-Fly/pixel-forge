@@ -37,6 +37,7 @@ import { MAX_GUIDE_COLORS } from '../../../src/services/paint-by-number/guide-ge
 import * as projectContext from '../../../src/stores/project-context';
 import { MAX_PALETTE_SIZE } from '../../../src/stores/palette/types';
 import type { CustomPalette } from '../../../src/types/palette';
+import type { PFDialog } from '../../../src/components/ui/pf-dialog';
 
 const sourceImage = {
   width: 4,
@@ -459,6 +460,27 @@ describe('pf-paint-by-number-dialog', () => {
     expect(element.shadowRoot?.activeElement).toBe(select);
     expect(generateNumberedGuideMock).toHaveBeenCalledTimes(callsBeforeCreation);
     expect(element.shadowRoot?.textContent).toContain('Palette creation cancelled.');
+  });
+
+  it('keeps Guided creation open until its explicit cancel action is used', async () => {
+    const element = await createDialog();
+    await selectPalette(element, 'create');
+    const shell = element.shadowRoot?.querySelector<PFDialog>('pf-dialog');
+    await shell?.updateComplete;
+
+    expect(shell?.closeOnBackdrop).toBe(false);
+    expect(shell?.closeOnEscape).toBe(false);
+    expect(shell?.showCloseButton).toBe(false);
+    expect(shell?.shadowRoot?.querySelector('.close-btn')).toBeNull();
+
+    shell?.shadowRoot
+      ?.querySelector<HTMLElement>('.overlay')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle(element);
+
+    expect(element.open).toBe(true);
+    expect(element.shadowRoot?.querySelector('#palette-creation-form')).toBeTruthy();
+    expect(element.shadowRoot?.textContent).toContain('Cancel palette');
   });
 
   it('shows a recoverable save error without losing source or setup state', async () => {
