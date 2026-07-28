@@ -106,6 +106,24 @@ describe('shared ProjectFile contract', () => {
     expect(decoded.frames[0].cels[0].data).toEqual(Uint8Array.from([7, 8, 9]));
   });
 
+  // Regression: #425
+  it.each([
+    ['plain strings', '', ' \n\t'],
+    ['exact-base64 data URLs', 'data:image/png;base64,', 'data:image/png;charset=utf-8;BASE64,'],
+  ])('opens legacy projects with empty %s', (_name, layerData, celData) => {
+    const serialized = serializedProject();
+    const layers = serialized.layers as Array<Record<string, unknown>>;
+    const frames = serialized.frames as Array<Record<string, unknown>>;
+    const cels = frames[0].cels as Array<Record<string, unknown>>;
+    layers[0].data = layerData;
+    cels[0].data = celData;
+
+    const decoded = decodeProjectFile(serialized);
+
+    expect(decoded.layers[0].data).toEqual(new Uint8Array(0));
+    expect(decoded.frames[0].cels[0].data).toEqual(new Uint8Array(0));
+  });
+
   it.each([
     ['leading-zero', { '01': 1 }],
     ['sparse', { 0: 1, 2: 3 }],

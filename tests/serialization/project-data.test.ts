@@ -39,7 +39,14 @@ describe('project image data normalization', () => {
   });
 
   it.each([
-    ['', 'empty'],
+    ['empty plain data', ''],
+    ['whitespace-only plain data', ' \n\t'],
+    ['empty exact-base64 data URL', 'data:image/png;base64,'],
+  ])('normalizes %s to empty bytes', (_name, value) => {
+    expect(normalizeProjectImageData(value)).toEqual(new Uint8Array(0));
+  });
+
+  it.each([
     ['not base64', 'base64'],
     ['data:image/png,not-base64', 'base64'],
     ['data:base64,AQIDBA==', 'base64'],
