@@ -4,6 +4,8 @@ const decodeImageFileMock = vi.hoisted(() => vi.fn());
 const sampleImageToGridMock = vi.hoisted(() => vi.fn());
 const generateNumberedGuideMock = vi.hoisted(() => vi.fn());
 const createGuidedProjectMock = vi.hoisted(() => vi.fn());
+const loadCustomPalettesMock = vi.hoisted(() => vi.fn());
+const saveAsNewPaletteMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/services/paint-by-number/image-file', () => ({
   decodeImageFile: decodeImageFileMock,
@@ -21,8 +23,16 @@ vi.mock('../../../src/services/paint-by-number/guided-project', () => ({
   createGuidedProject: createGuidedProjectMock,
 }));
 
+vi.mock('../../../src/stores/palette/persistence', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/stores/palette/persistence')>()),
+  loadCustomPalettes: loadCustomPalettesMock,
+  saveAsNewPalette: saveAsNewPaletteMock,
+}));
+
 import '../../../src/components/dialogs/pf-paint-by-number-dialog';
 import type { PFPaintByNumberDialog } from '../../../src/components/dialogs/pf-paint-by-number-dialog';
+import { PRESET_PALETTES } from '../../../src/data/preset-palettes';
+import type { CustomPalette } from '../../../src/types/palette';
 
 const sourceImage = {
   width: 4,
@@ -77,6 +87,26 @@ function chooseFile(element: PFPaintByNumberDialog, file: File) {
   input?.dispatchEvent(new Event('change'));
 }
 
+async function selectPalette(element: PFPaintByNumberDialog, value: string) {
+  const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+    '#guided-palette-source',
+  );
+  if (!select) throw new Error('Palette select is unavailable');
+  select.value = value;
+  select.dispatchEvent(new Event('change'));
+  await settle(element);
+}
+
+function customPalette(id: string, name: string, colors: string[]): CustomPalette {
+  return {
+    id,
+    name,
+    colors,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
 describe('pf-paint-by-number-dialog', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -91,6 +121,8 @@ describe('pf-paint-by-number-dialog', () => {
       item: {},
       projectId: 'guided-project',
     });
+    loadCustomPalettesMock.mockResolvedValue([]);
+    saveAsNewPaletteMock.mockResolvedValue('new-palette');
   });
 
   afterEach(() => {
@@ -157,6 +189,193 @@ describe('pf-paint-by-number-dialog', () => {
     await settle(element);
 
     expect(input?.checked).toBe(false);
+  });
+
+  it('selects preset and saved palettes without reading an active project palette', async () => {
+    const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
+    loadCustomPalettesMock.mockResolvedValue([saved]);
+    const element = await createDialog();
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+
+    expect(select?.options[0].textContent).toBe('Generate from image');
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toEqual(
+      expect.arrayContaining(['DB32', 'PICO-8', 'Night colors', 'Create palette…']),
+    );
+
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    const preset = PRESET_PALETTES.find((palette) => palette.id === 'gameboy')!;
+    await selectPalette(element, 'preset:gameboy');
+    await vi.runAllTimersAsync();
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: preset.colors,
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+    expect(generateNumberedGuideMock.mock.lastCall?.[1].palette).not.toBe(preset.colors);
+
+    await selectPalette(element, 'custom:night');
+    await vi.runAllTimersAsync();
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: ['#101020', '#f0f0ff'],
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+    expect(generateNumberedGuideMock.mock.lastCall?.[1].palette).not.toBe(saved.colors);
+  });
+
+  it('creates, edits, reorders, removes, saves, and selects a custom palette inline', async () => {
+    const created = customPalette('new-palette', 'Forest', ['#0000ff', '#00ff00']);
+    loadCustomPalettesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([created]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'forest.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    const longSide = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-long-side');
+    if (longSide) {
+      longSide.value = '32';
+      longSide.dispatchEvent(new Event('change'));
+    }
+    await selectPalette(element, 'create');
+
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    expect(element.shadowRoot?.activeElement).toBe(name);
+    if (name) {
+      name.value = 'Forest';
+      name.dispatchEvent(new Event('input'));
+    }
+
+    const firstColor = element.shadowRoot?.querySelector<HTMLInputElement>(
+      'input[aria-label="Color 1"]',
+    );
+    if (firstColor) {
+      firstColor.value = '#ff0000';
+      firstColor.dispatchEvent(new Event('input'));
+    }
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.palette-create-actions button')?.click();
+    await settle(element);
+    const secondColor = element.shadowRoot?.querySelector<HTMLInputElement>(
+      'input[aria-label="Color 2"]',
+    );
+    if (secondColor) {
+      secondColor.value = '#00ff00';
+      secondColor.dispatchEvent(new Event('input'));
+    }
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.palette-create-actions button')?.click();
+    await settle(element);
+    const thirdColor = element.shadowRoot?.querySelector<HTMLInputElement>(
+      'input[aria-label="Color 3"]',
+    );
+    if (thirdColor) {
+      thirdColor.value = '#0000ff';
+      thirdColor.dispatchEvent(new Event('input'));
+    }
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[aria-label="Move color 3 up"]')
+      ?.click();
+    await settle(element);
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[aria-label="Remove color 1"]')
+      ?.click();
+    await settle(element);
+
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
+      ?.click();
+    await settle(element);
+    await vi.runAllTimersAsync();
+
+    expect(saveAsNewPaletteMock).toHaveBeenCalledWith('Forest', ['#0000ff', '#00ff00']);
+    expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    )?.value).toBe('custom:new-palette');
+    expect(element.shadowRoot?.querySelector<HTMLInputElement>(
+      '#guided-long-side',
+    )?.value).toBe('32');
+    expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: ['#0000ff', '#00ff00'],
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+  });
+
+  it('cancels inline creation with Escape and restores the previous selection and focus', async () => {
+    const element = await createDialog();
+    await selectPalette(element, 'preset:pico8');
+    const callsBeforeCreation = generateNumberedGuideMock.mock.calls.length;
+    await selectPalette(element, 'create');
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+
+    name?.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      composed: true,
+    }));
+    await settle(element);
+
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    expect(element.open).toBe(true);
+    expect(select?.value).toBe('preset:pico8');
+    expect(element.shadowRoot?.activeElement).toBe(select);
+    expect(generateNumberedGuideMock).toHaveBeenCalledTimes(callsBeforeCreation);
+    expect(element.shadowRoot?.textContent).toContain('Palette creation cancelled.');
+  });
+
+  it('shows a recoverable persistence error without losing source or setup state', async () => {
+    loadCustomPalettesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        customPalette('new-palette', 'Retry palette', ['#000000']),
+      ]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'source.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+    await selectPalette(element, 'create');
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    if (name) {
+      name.value = 'Retry palette';
+      name.dispatchEvent(new Event('input'));
+    }
+
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
+      ?.click();
+    await settle(element);
+
+    expect(element.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'Palette could not be saved',
+    );
+    expect(element.shadowRoot?.querySelector<HTMLInputElement>(
+      '#guided-palette-name',
+    )?.value).toBe('Retry palette');
+    expect(element.shadowRoot?.querySelector('#palette-creation-form')).toBeTruthy();
+
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
+      ?.click();
+    await settle(element);
+    await vi.runAllTimersAsync();
+
+    expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(2);
+    expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
+    expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    )?.value).toBe('custom:new-palette');
   });
 
   it('ignores a stale image decode after a newer file is selected', async () => {
