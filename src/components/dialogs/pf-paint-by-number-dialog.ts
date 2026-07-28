@@ -847,6 +847,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
     if (!this.isCreatingPalette || event.key !== 'Escape') return;
     event.preventDefault();
     event.stopPropagation();
+    if (this.isSavingPalette) return;
     this.cancelPaletteCreation();
   };
 

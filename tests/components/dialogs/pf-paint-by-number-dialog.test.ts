@@ -451,6 +451,16 @@ describe('pf-paint-by-number-dialog', () => {
     expect(save?.disabled).toBe(true);
     expect(save?.textContent).toContain('Saving…');
 
+    save?.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      composed: true,
+    }));
+    await settle(element);
+
+    expect(element.shadowRoot?.querySelector('#palette-creation-form')).toBeTruthy();
+    expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(1);
+
     resolveSave?.('new-palette');
     await settle(element);
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
