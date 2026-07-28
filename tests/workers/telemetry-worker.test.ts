@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { handleTelemetryRequest } from '../../workers/telemetry/src/index';
+import type { ProductEvent } from '../../shared/src/product-events';
+import { handleTelemetryRequest, writeProductEvent } from '../../workers/telemetry/src/index';
 
 function createEnvironment(options: { rateLimitSuccess?: boolean } = {}) {
   const writeDataPoint = vi.fn();
@@ -67,6 +68,54 @@ describe('telemetry Worker', () => {
         enabled: false,
         persist: false,
       },
+    });
+  });
+
+  it('keeps empty dimension placeholders for events without dimensions', () => {
+    const { env, writeDataPoint } = createEnvironment();
+    const event: ProductEvent = {
+      name: 'playback_started',
+      dimensions: {},
+    };
+
+    writeProductEvent(env.PRODUCT_EVENTS, event);
+
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      indexes: ['playback_started'],
+      blobs: ['', ''],
+    });
+  });
+
+  it('writes one dimension pair in order', () => {
+    const { env, writeDataPoint } = createEnvironment();
+    const event: ProductEvent = {
+      name: 'project_created',
+      dimensions: { source: 'guided_drawing' },
+    };
+
+    writeProductEvent(env.PRODUCT_EVENTS, event);
+
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      indexes: ['project_created'],
+      blobs: ['source', 'guided_drawing'],
+    });
+  });
+
+  it('writes every dimension pair in order', () => {
+    const { env, writeDataPoint } = createEnvironment();
+    const event = {
+      name: 'project_created',
+      dimensions: {
+        source: 'guided_drawing',
+        destination: 'local_library',
+      },
+    } as const;
+
+    writeProductEvent(env.PRODUCT_EVENTS, event);
+
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      indexes: ['project_created'],
+      blobs: ['source', 'guided_drawing', 'destination', 'local_library'],
     });
   });
 

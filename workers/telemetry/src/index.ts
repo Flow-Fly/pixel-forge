@@ -93,11 +93,13 @@ function parseJsonProductEvent(body: string): ProductEvent | undefined {
   }
 }
 
-function writeProductEvent(dataset: AnalyticsEngineDataset, event: ProductEvent): void {
-  const [dimensionName, dimensionValue] = Object.entries(event.dimensions)[0] ?? ['', ''];
+export function writeProductEvent(dataset: AnalyticsEngineDataset, event: ProductEvent): void {
+  const dimensionBlobs = Object.entries(event.dimensions).flatMap(
+    ([dimensionName, dimensionValue]) => [dimensionName, dimensionValue]
+  );
   dataset.writeDataPoint({
     indexes: [event.name],
-    blobs: [dimensionName, dimensionValue],
+    blobs: dimensionBlobs.length > 0 ? dimensionBlobs : ['', ''],
   });
 }
 
