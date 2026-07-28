@@ -4,7 +4,7 @@ const decodeImageFileMock = vi.hoisted(() => vi.fn());
 const sampleImageToGridMock = vi.hoisted(() => vi.fn());
 const generateNumberedGuideMock = vi.hoisted(() => vi.fn());
 const createGuidedProjectMock = vi.hoisted(() => vi.fn());
-const loadCustomPalettesMock = vi.hoisted(() => vi.fn());
+const loadCustomPalettesOrThrowMock = vi.hoisted(() => vi.fn());
 const saveAsNewPaletteMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/services/paint-by-number/image-file', () => ({
@@ -17,6 +17,7 @@ vi.mock('../../../src/services/paint-by-number/image-sampling', () => ({
 
 vi.mock('../../../src/services/paint-by-number/guide-generator', () => ({
   generateNumberedGuide: generateNumberedGuideMock,
+  MAX_GUIDE_COLORS: 255,
 }));
 
 vi.mock('../../../src/services/paint-by-number/guided-project', () => ({
@@ -25,13 +26,14 @@ vi.mock('../../../src/services/paint-by-number/guided-project', () => ({
 
 vi.mock('../../../src/stores/palette/persistence', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/stores/palette/persistence')>()),
-  loadCustomPalettes: loadCustomPalettesMock,
+  loadCustomPalettesOrThrow: loadCustomPalettesOrThrowMock,
   saveAsNewPalette: saveAsNewPaletteMock,
 }));
 
 import '../../../src/components/dialogs/pf-paint-by-number-dialog';
 import type { PFPaintByNumberDialog } from '../../../src/components/dialogs/pf-paint-by-number-dialog';
 import { PRESET_PALETTES } from '../../../src/data/preset-palettes';
+import { MAX_GUIDE_COLORS } from '../../../src/services/paint-by-number/guide-generator';
 import * as projectContext from '../../../src/stores/project-context';
 import type { CustomPalette } from '../../../src/types/palette';
 
@@ -122,7 +124,7 @@ describe('pf-paint-by-number-dialog', () => {
       item: {},
       projectId: 'guided-project',
     });
-    loadCustomPalettesMock.mockResolvedValue([]);
+    loadCustomPalettesOrThrowMock.mockResolvedValue([]);
     saveAsNewPaletteMock.mockImplementation(async (name: string, colors: string[]) => (
       customPalette('new-palette', name, [...colors])
     ));
@@ -197,7 +199,7 @@ describe('pf-paint-by-number-dialog', () => {
   it('selects preset and saved palettes without reading an active project palette', async () => {
     const activeProjectPaletteSpy = vi.spyOn(projectContext, 'getActiveProjectContext');
     const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
-    loadCustomPalettesMock.mockResolvedValue([saved]);
+    loadCustomPalettesOrThrowMock.mockResolvedValue([saved]);
     const element = await createDialog();
     const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
@@ -232,6 +234,9 @@ describe('pf-paint-by-number-dialog', () => {
       simplifyIsolatedPixels: true,
     });
     expect(generateNumberedGuideMock.mock.lastCall?.[1].palette).not.toBe(saved.colors);
+    expect(element.shadowRoot?.querySelector('#guided-palette-status')?.textContent).not.toContain(
+      'omits',
+    );
 
     element.shadowRoot?.querySelector<HTMLButtonElement>('button.primary')?.click();
     await settle(element);
@@ -250,9 +255,53 @@ describe('pf-paint-by-number-dialog', () => {
     expect(activeProjectPaletteSpy).not.toHaveBeenCalled();
   });
 
+  it('uses the first 255 colors from an oversized selected palette', async () => {
+    const colors = Array.from(
+      { length: MAX_GUIDE_COLORS + 1 },
+      (_, index) => `#${index.toString(16).padStart(6, '0')}`,
+    );
+    const saved = customPalette('oversized', 'Oversized', colors);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([saved]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    await selectPalette(element, 'custom:oversized');
+    await vi.runAllTimersAsync();
+
+    const adaptedColors = colors.slice(0, MAX_GUIDE_COLORS);
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: adaptedColors,
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+    const status = element.shadowRoot?.querySelector('#guided-palette-status');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.textContent).toContain('uses the first 255 colors');
+    expect(status?.textContent).toContain('omits 1 additional color');
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('button.primary')?.click();
+    await settle(element);
+
+    expect(createGuidedProjectMock).toHaveBeenCalledWith({
+      guide,
+      settings: {
+        longSide: 24,
+        paletteSource: 'restricted',
+        maxColors: undefined,
+        restrictedPalette: adaptedColors,
+        mapping: 'color',
+        simplifyIsolatedPixels: true,
+      },
+      sourceName: 'portrait.png',
+    });
+  });
+
   it('creates, edits, reorders, removes, saves, and selects a custom palette inline', async () => {
     const created = customPalette('new-palette', 'Forest', ['#0000ff', '#00ff00']);
-    loadCustomPalettesMock.mockResolvedValueOnce([]);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([]);
     saveAsNewPaletteMock.mockResolvedValueOnce(created);
     const element = await createDialog();
     chooseFile(element, new File(['pixels'], 'forest.png', { type: 'image/png' }));
@@ -314,7 +363,7 @@ describe('pf-paint-by-number-dialog', () => {
     await vi.runAllTimersAsync();
 
     expect(saveAsNewPaletteMock).toHaveBeenCalledWith('Forest', ['#0000ff', '#00ff00']);
-    expect(loadCustomPalettesMock).toHaveBeenCalledTimes(1);
+    expect(loadCustomPalettesOrThrowMock).toHaveBeenCalledTimes(1);
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
     )?.value).toBe('custom:new-palette');
@@ -357,7 +406,7 @@ describe('pf-paint-by-number-dialog', () => {
 
   it('shows a recoverable save error without losing source or setup state', async () => {
     const saved = customPalette('new-palette', 'Retry palette', ['#000000']);
-    loadCustomPalettesMock.mockResolvedValueOnce([]);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([]);
     saveAsNewPaletteMock
       .mockRejectedValueOnce(new Error('IndexedDB write failed'))
       .mockResolvedValueOnce(saved);
@@ -392,7 +441,7 @@ describe('pf-paint-by-number-dialog', () => {
     await vi.runAllTimersAsync();
 
     expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(2);
-    expect(loadCustomPalettesMock).toHaveBeenCalledTimes(1);
+    expect(loadCustomPalettesOrThrowMock).toHaveBeenCalledTimes(1);
     expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
@@ -401,7 +450,7 @@ describe('pf-paint-by-number-dialog', () => {
 
   it('announces palette loading failures while keeping preset choices available', async () => {
     let rejectLoad: ((reason: Error) => void) | undefined;
-    loadCustomPalettesMock.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+    loadCustomPalettesOrThrowMock.mockImplementationOnce(() => new Promise((_resolve, reject) => {
       rejectLoad = reject;
     }));
     const element = await createDialog();
@@ -424,6 +473,31 @@ describe('pf-paint-by-number-dialog', () => {
     );
   });
 
+  it('retains a selected custom palette when a later palette reload fails', async () => {
+    const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
+    loadCustomPalettesOrThrowMock
+      .mockResolvedValueOnce([saved])
+      .mockRejectedValueOnce(new Error('IndexedDB unavailable'));
+    const element = await createDialog();
+    await selectPalette(element, 'custom:night');
+
+    element.open = false;
+    await settle(element);
+    element.open = true;
+    await settle(element);
+
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    expect(select?.value).toBe('custom:night');
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toContain(
+      'Night colors',
+    );
+    expect(element.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'Saved palettes could not be loaded',
+    );
+  });
+
   it('blocks duplicate palette saves while persistence is pending', async () => {
     const pendingPalette = customPalette(
       'new-palette',
@@ -434,7 +508,7 @@ describe('pf-paint-by-number-dialog', () => {
     saveAsNewPaletteMock.mockImplementationOnce(() => new Promise((resolve) => {
       resolveSave = resolve;
     }));
-    loadCustomPalettesMock.mockResolvedValueOnce([]);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([]);
     const element = await createDialog();
     await selectPalette(element, 'create');
     const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
@@ -471,7 +545,7 @@ describe('pf-paint-by-number-dialog', () => {
 
     resolveSave?.(pendingPalette);
     await settle(element);
-    expect(loadCustomPalettesMock).toHaveBeenCalledTimes(1);
+    expect(loadCustomPalettesOrThrowMock).toHaveBeenCalledTimes(1);
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
     )?.value).toBe('custom:new-palette');

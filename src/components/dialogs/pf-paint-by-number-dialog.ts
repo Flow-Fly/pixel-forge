@@ -5,13 +5,14 @@ import { PRESET_PALETTES } from '../../data/preset-palettes';
 import { checkboxStyles } from '../../styles/editor-control-styles';
 import {
   generateNumberedGuide,
+  MAX_GUIDE_COLORS,
   type NumberedGuide,
 } from '../../services/paint-by-number/guide-generator';
 import { createGuidedProject } from '../../services/paint-by-number/guided-project';
 import { decodeImageFile } from '../../services/paint-by-number/image-file';
 import { sampleImageToGrid } from '../../services/paint-by-number/image-sampling';
 import {
-  loadCustomPalettes,
+  loadCustomPalettesOrThrow,
   saveAsNewPalette,
 } from '../../stores/palette/persistence';
 import type { CustomPalette } from '../../types/palette';
@@ -764,28 +765,35 @@ export class PFPaintByNumberDialog extends BaseComponent {
     this.paletteMessage = 'Loading saved palettes…';
 
     try {
-      const palettes = await loadCustomPalettes();
+      const palettes = await loadCustomPalettesOrThrow();
       if (version !== this.paletteLoadVersion) return;
-
-      this.customPalettes = palettes;
-      this.paletteMessage = palettes.length > 0
-        ? `${palettes.length} saved ${palettes.length === 1 ? 'palette' : 'palettes'} available.`
-        : 'No saved palettes yet.';
-
-      if (
-        this.selectedPalette.startsWith('custom:')
-        && !palettes.some((palette) => `custom:${palette.id}` === this.selectedPalette)
-      ) {
-        this.selectPalette(GENERATED_PALETTE_VALUE);
-      }
+      this.applyLoadedPaletteChoices(palettes);
     } catch {
       if (version !== this.paletteLoadVersion) return;
-      this.customPalettes = [];
       this.paletteMessage = '';
       this.paletteError = 'Saved palettes could not be loaded. Preset palettes are still available.';
     } finally {
       if (version === this.paletteLoadVersion) this.isLoadingPalettes = false;
     }
+  }
+
+  private applyLoadedPaletteChoices(palettes: CustomPalette[]) {
+    this.customPalettes = palettes;
+    if (
+      this.selectedPalette.startsWith('custom:')
+      && !palettes.some((palette) => `custom:${palette.id}` === this.selectedPalette)
+    ) {
+      this.selectPalette(GENERATED_PALETTE_VALUE);
+    }
+
+    const selectedPalette = this.findPalette(this.selectedPalette);
+    if (selectedPalette) {
+      this.paletteMessage = this.describePaletteAdaptation(selectedPalette.colors.length);
+      return;
+    }
+    this.paletteMessage = palettes.length > 0
+      ? `${palettes.length} saved ${palettes.length === 1 ? 'palette' : 'palettes'} available.`
+      : 'No saved palettes yet.';
   }
 
   private selectPalette(value: string) {
@@ -806,9 +814,16 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
     this.selectedPalette = value;
     this.paletteSource = 'restricted';
-    this.restrictedPalette = [...palette.colors];
+    this.restrictedPalette = palette.colors.slice(0, MAX_GUIDE_COLORS);
     this.paletteError = '';
+    this.paletteMessage = this.describePaletteAdaptation(palette.colors.length);
     this.schedulePreview();
+  }
+
+  private describePaletteAdaptation(colorCount: number): string {
+    const omittedColors = colorCount - MAX_GUIDE_COLORS;
+    if (omittedColors <= 0) return '';
+    return `Guided Drawing uses the first ${MAX_GUIDE_COLORS} colors and omits ${omittedColors} additional ${omittedColors === 1 ? 'color' : 'colors'}.`;
   }
 
   private findPalette(value: string): { colors: string[] } | undefined {

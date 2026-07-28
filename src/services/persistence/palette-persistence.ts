@@ -29,13 +29,20 @@ class PalettePersistenceService {
    */
   async getAllPalettes(): Promise<StoredCustomPalette[]> {
     try {
-      const db = await this.dbPromise;
-      const palettes = await db.getAllFromIndex("palettes", "by-updated");
-      return palettes.reverse(); // Most recent first
+      return await this.getAllPalettesOrThrow();
     } catch (error) {
       log.error("Failed to load palettes from IndexedDB:", error);
       return [];
     }
+  }
+
+  /**
+   * Get all custom palettes and expose storage failures to the caller.
+   */
+  async getAllPalettesOrThrow(): Promise<StoredCustomPalette[]> {
+    const db = await this.dbPromise;
+    const palettes = await db.getAllFromIndex("palettes", "by-updated");
+    return palettes.reverse(); // Most recent first
   }
 
   /**

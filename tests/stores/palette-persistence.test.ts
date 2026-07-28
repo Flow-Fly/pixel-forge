@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const savePalette = vi.hoisted(() => vi.fn());
+const getAllPalettesOrThrow = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/services/persistence/palette-persistence', () => ({
   palettePersistence: {
+    getAllPalettesOrThrow,
     savePalette,
   },
 }));
 
-import { saveAsNewPalette } from '../../src/stores/palette/persistence';
+import {
+  loadCustomPalettesOrThrow,
+  saveAsNewPalette,
+} from '../../src/stores/palette/persistence';
 
 describe('palette persistence helpers', () => {
   beforeEach(() => {
@@ -38,5 +43,12 @@ describe('palette persistence helpers', () => {
     await expect(saveAsNewPalette('Forest', ['#112233'])).rejects.toThrow(
       'Palette could not be saved.',
     );
+  });
+
+  it('preserves storage failures for failure-aware callers', async () => {
+    const error = new Error('IndexedDB unavailable');
+    getAllPalettesOrThrow.mockRejectedValueOnce(error);
+
+    await expect(loadCustomPalettesOrThrow()).rejects.toBe(error);
   });
 });

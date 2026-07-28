@@ -85,6 +85,13 @@ export async function loadCustomPalettes(): Promise<CustomPalette[]> {
 }
 
 /**
+ * Load all custom palettes while preserving storage errors for failure-aware UI.
+ */
+export async function loadCustomPalettesOrThrow(): Promise<CustomPalette[]> {
+  return palettePersistence.getAllPalettesOrThrow();
+}
+
+/**
  * Save current palette as a new custom palette.
  */
 export async function saveAsNewPalette(
