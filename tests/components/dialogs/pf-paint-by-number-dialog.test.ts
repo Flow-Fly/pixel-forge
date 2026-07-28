@@ -32,6 +32,7 @@ vi.mock('../../../src/stores/palette/persistence', async (importOriginal) => ({
 import '../../../src/components/dialogs/pf-paint-by-number-dialog';
 import type { PFPaintByNumberDialog } from '../../../src/components/dialogs/pf-paint-by-number-dialog';
 import { PRESET_PALETTES } from '../../../src/data/preset-palettes';
+import * as projectContext from '../../../src/stores/project-context';
 import type { CustomPalette } from '../../../src/types/palette';
 
 const sourceImage = {
@@ -192,6 +193,7 @@ describe('pf-paint-by-number-dialog', () => {
   });
 
   it('selects preset and saved palettes without reading an active project palette', async () => {
+    const activeProjectPaletteSpy = vi.spyOn(projectContext, 'getActiveProjectContext');
     const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
     loadCustomPalettesMock.mockResolvedValue([saved]);
     const element = await createDialog();
@@ -228,6 +230,22 @@ describe('pf-paint-by-number-dialog', () => {
       simplifyIsolatedPixels: true,
     });
     expect(generateNumberedGuideMock.mock.lastCall?.[1].palette).not.toBe(saved.colors);
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('button.primary')?.click();
+    await settle(element);
+    expect(createGuidedProjectMock).toHaveBeenCalledWith({
+      guide,
+      settings: {
+        longSide: 24,
+        paletteSource: 'restricted',
+        maxColors: undefined,
+        restrictedPalette: ['#101020', '#f0f0ff'],
+        mapping: 'color',
+        simplifyIsolatedPixels: true,
+      },
+      sourceName: 'portrait.png',
+    });
+    expect(activeProjectPaletteSpy).not.toHaveBeenCalled();
   });
 
   it('creates, edits, reorders, removes, saves, and selects a custom palette inline', async () => {
@@ -315,9 +333,10 @@ describe('pf-paint-by-number-dialog', () => {
     await selectPalette(element, 'preset:pico8');
     const callsBeforeCreation = generateNumberedGuideMock.mock.calls.length;
     await selectPalette(element, 'create');
-    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    const cancel = Array.from(element.shadowRoot?.querySelectorAll('button') ?? [])
+      .find((button) => button.textContent?.trim() === 'Cancel palette');
 
-    name?.dispatchEvent(new KeyboardEvent('keydown', {
+    cancel?.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Escape',
       bubbles: true,
       composed: true,
@@ -373,6 +392,67 @@ describe('pf-paint-by-number-dialog', () => {
 
     expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(2);
     expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
+    expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    )?.value).toBe('custom:new-palette');
+  });
+
+  it('announces palette loading failures while keeping preset choices available', async () => {
+    let rejectLoad: ((reason: Error) => void) | undefined;
+    loadCustomPalettesMock.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectLoad = reject;
+    }));
+    const element = await createDialog();
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+
+    expect(select?.disabled).toBe(true);
+    expect(element.shadowRoot?.textContent).toContain('Loading saved palettes…');
+
+    rejectLoad?.(new Error('IndexedDB unavailable'));
+    await settle(element);
+
+    expect(select?.disabled).toBe(false);
+    expect(element.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'Saved palettes could not be loaded',
+    );
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toContain(
+      'PICO-8',
+    );
+  });
+
+  it('blocks duplicate palette saves while persistence is pending', async () => {
+    let resolveSave: ((id: string) => void) | undefined;
+    saveAsNewPaletteMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSave = resolve;
+    }));
+    loadCustomPalettesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        customPalette('new-palette', 'Pending palette', ['#000000']),
+      ]);
+    const element = await createDialog();
+    await selectPalette(element, 'create');
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    if (name) {
+      name.value = 'Pending palette';
+      name.dispatchEvent(new Event('input'));
+    }
+    const save = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[form="palette-creation-form"]',
+    );
+
+    save?.click();
+    save?.click();
+    await settle(element);
+
+    expect(saveAsNewPaletteMock).toHaveBeenCalledTimes(1);
+    expect(save?.disabled).toBe(true);
+    expect(save?.textContent).toContain('Saving…');
+
+    resolveSave?.('new-palette');
+    await settle(element);
     expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
       '#guided-palette-source',
     )?.value).toBe('custom:new-palette');

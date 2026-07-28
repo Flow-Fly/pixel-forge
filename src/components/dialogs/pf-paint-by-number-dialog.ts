@@ -69,11 +69,6 @@ export class PFPaintByNumberDialog extends BaseComponent {
       gap: 6px;
     }
 
-    .palette-creation {
-      display: grid;
-      gap: 16px;
-    }
-
     .palette-colors {
       display: grid;
       gap: 8px;
@@ -346,8 +341,11 @@ export class PFPaintByNumberDialog extends BaseComponent {
     return html`
       <pf-dialog
         ?open=${this.open}
+        .closeOnBackdrop=${!this.isSavingPalette}
         .closeOnEscape=${!this.isCreatingPalette}
+        .showCloseButton=${!this.isSavingPalette}
         width="min(760px, calc(100vw - 32px))"
+        @keydown=${this.handlePaletteCreationKeydown}
         @pf-close=${this.close}
       >
         <span slot="title">Guided drawing</span>
@@ -513,10 +511,8 @@ export class PFPaintByNumberDialog extends BaseComponent {
     return html`
       <form
         id="palette-creation-form"
-        class="palette-creation"
         aria-busy=${String(this.isSavingPalette)}
         @submit=${this.saveCreatedPalette}
-        @keydown=${this.handlePaletteCreationKeydown}
       >
         <p class="hint">
           Create a reusable palette without leaving Guided Drawing. Your image and guide settings
@@ -848,7 +844,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
   };
 
   private handlePaletteCreationKeydown = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape') return;
+    if (!this.isCreatingPalette || event.key !== 'Escape') return;
     event.preventDefault();
     event.stopPropagation();
     this.cancelPaletteCreation();
