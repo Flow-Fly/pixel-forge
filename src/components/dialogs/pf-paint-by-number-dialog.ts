@@ -725,12 +725,12 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
     try {
       const sampled = sampleImageToGrid(this.sourceImage, { longSide: this.longSide });
-      const restrictedPalette = this.getRestrictedPalette();
+      const settings = this.currentSettings();
       const guide = generateNumberedGuide(sampled, {
-        maxColors: restrictedPalette ? undefined : this.maxColors,
-        palette: restrictedPalette,
-        mapping: this.mapping,
-        simplifyIsolatedPixels: this.simplifyIsolatedPixels,
+        maxColors: settings.maxColors,
+        palette: settings.restrictedPalette,
+        mapping: settings.mapping,
+        simplifyIsolatedPixels: settings.simplifyIsolatedPixels,
       });
       if (guide.palette.length === 0) {
         throw new Error('The image has no visible paintable pixels.');
