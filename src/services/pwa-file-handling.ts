@@ -54,7 +54,7 @@ export class PwaFileHandlingService {
         files.push(await handle.getFile());
       } catch (error) {
         unreadableFiles.push(handle.name);
-        log.warn(`Could not read ${handle.name} from the operating system:`, error);
+        log.warn('Could not read a launched file from the operating system:', error);
       }
     }
 

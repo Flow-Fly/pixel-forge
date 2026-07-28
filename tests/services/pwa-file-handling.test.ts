@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PwaFileHandlingService } from '../../src/services/pwa-file-handling';
+import { log } from '../../src/utils/log';
 
 function fileHandle(file: File): FileSystemFileHandle {
   return {
@@ -59,12 +60,18 @@ describe('PwaFileHandlingService', () => {
       }),
     } as unknown as FileSystemFileHandle;
 
+    const warning = vi.spyOn(log, 'warn').mockImplementation(() => {});
     const result = await service.importLaunch({
       files: [unreadable, fileHandle(readable)],
     });
 
     expect(result.unreadableFiles).toEqual(['private.ase']);
     expect(importer.importFiles).toHaveBeenCalledWith([readable]);
+    expect(warning).toHaveBeenCalledWith(
+      'Could not read a launched file from the operating system:',
+      expect.any(DOMException)
+    );
+    expect(warning.mock.calls.flat().join(' ')).not.toContain('private.ase');
   });
 
   it('serializes repeated launches before reading their handles', async () => {

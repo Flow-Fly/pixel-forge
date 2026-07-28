@@ -2,8 +2,9 @@ import { css, html, nothing } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { autoSaveService } from '../../services/auto-save';
-import { getActiveProjectContext } from '../../stores/project-context';
 import { pwaStore } from '../../stores/pwa';
+import { workspaceStore } from '../../stores/workspace';
+import type { ProjectContext } from '../../stores/project-context';
 
 @customElement('pf-pwa-update-toast')
 export class PFPwaUpdateToast extends BaseComponent {
@@ -108,9 +109,26 @@ export class PFPwaUpdateToast extends BaseComponent {
   };
 
   private restart = () => {
-    const context = getActiveProjectContext();
-    void pwaStore.restartWithUpdate(() => autoSaveService.saveNow(context));
+    void pwaStore.restartWithUpdate(() => this.saveOpenProjectsUntilClean());
   };
+
+  private async saveOpenProjectsUntilClean() {
+    while (true) {
+      const openContexts = this.getOpenContexts();
+      await Promise.all(openContexts.map((context) => autoSaveService.saveUntilClean(context)));
+
+      const currentContexts = this.getOpenContexts();
+      const membershipChanged = currentContexts.length !== openContexts.length
+        || currentContexts.some((context) => !openContexts.includes(context));
+      if (membershipChanged) continue;
+      if (currentContexts.some((context) => autoSaveService.isDirty(context))) continue;
+      return;
+    }
+  }
+
+  private getOpenContexts(): ProjectContext[] {
+    return workspaceStore.items.value.map((item) => item.context);
+  }
 
   render() {
     if (!pwaStore.updateAvailable.value) return nothing;

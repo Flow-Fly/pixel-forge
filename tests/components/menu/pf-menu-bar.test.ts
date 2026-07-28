@@ -406,17 +406,19 @@ describe("pf-menu-bar popovers", () => {
     await element.updateComplete;
 
     setActiveProjectContext(contextB);
+    await element.updateComplete;
     const input = element.shadowRoot?.querySelector<HTMLInputElement>(
       ".project-name-input"
     );
     expect(input).toBeTruthy();
-    input!.value = "Renamed A";
-    input!.dispatchEvent(new FocusEvent("blur"));
+    expect(input!.value).toBe("Context A");
+    input!.value += " Revised";
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     await vi.waitFor(() => {
       expect(autoSaveServiceMock.saveNow).toHaveBeenCalled();
     });
 
-    expect(contextA.project.name.value).toBe("Renamed A");
+    expect(contextA.project.name.value).toBe("Context A Revised");
     expect(contextB.project.name.value).toBe("Context B");
     expect(autoSaveServiceMock.saveNow).toHaveBeenCalledWith(contextA);
   });

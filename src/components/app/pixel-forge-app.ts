@@ -366,6 +366,8 @@ export class PixelForgeApp extends BaseComponent {
   @state() private isResizingSidebar = false;
   @state() private hasLibraryProject = false;
   @state() private projectSelectionRequired = false;
+  @state() private isDeletingCurrentProject = false;
+  @state() private deleteCurrentProjectError: string | null = null;
   @state() private warningMessage: string | null = null;
   @state() private fileImportMessage: string | null = null;
 
@@ -518,10 +520,12 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleProjectFileDrop = (event: DragEvent) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+
+    event.preventDefault();
     const files = supportedProjectFiles(getDataTransferFiles(event.dataTransfer));
     if (files.length === 0) return;
 
-    event.preventDefault();
     void importProjectFiles(files).catch((error) => {
       log.error("Failed to import dropped project files:", error);
     });
@@ -596,12 +600,16 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private handleDeleteCurrentProject = () => {
+    if (this.isDeletingCurrentProject) return;
+
     this.deleteCurrentProjectContext = getActiveProjectContext();
+    this.deleteCurrentProjectError = null;
     this.showDeleteCurrentDialog = true;
   };
 
   private dismissDeleteCurrentProject = () => {
     this.deleteCurrentProjectContext = null;
+    this.deleteCurrentProjectError = null;
     this.showDeleteCurrentDialog = false;
   };
 
@@ -642,16 +650,23 @@ export class PixelForgeApp extends BaseComponent {
   };
 
   private confirmDeleteCurrentProject = async () => {
-    const context =
-      this.deleteCurrentProjectContext ?? getActiveProjectContext();
-    this.dismissDeleteCurrentProject();
+    const context = this.deleteCurrentProjectContext;
+    if (!context || this.isDeletingCurrentProject) return;
+
+    this.isDeletingCurrentProject = true;
+    this.deleteCurrentProjectError = null;
 
     try {
-      await projectLibrary.deleteProject(context.project.id.value, { context });
-      this.handleCurrentProjectDeleted();
+      const result = await workspaceStore.deleteProject(context.project.id.value);
+      this.dismissDeleteCurrentProject();
+      if (result.installedReplacement) {
+        this.handleCurrentProjectDeleted();
+      }
     } catch (error) {
       log.error("Failed to delete project:", error);
-      this.showWarning("Could not delete project");
+      this.deleteCurrentProjectError = "Could not delete project. Your project is still available.";
+    } finally {
+      this.isDeletingCurrentProject = false;
     }
   };
 
@@ -662,8 +677,7 @@ export class PixelForgeApp extends BaseComponent {
   }
 
   private handleBeforeUnload = (e: BeforeUnloadEvent) => {
-    // Check if there are unsaved changes (history has items)
-    const hasUnsavedChanges = historyStore.undoStack.value.length > 0;
+    const hasUnsavedChanges = autoSaveService.dirtyContexts.value.size > 0;
     if (hasUnsavedChanges) {
       // Modern browsers ignore custom messages, but the prompt will still show
       e.preventDefault();
@@ -989,6 +1003,43 @@ export class PixelForgeApp extends BaseComponent {
     return project.name.value;
   }
 
+  private renderDeleteCurrentProjectDialog(projectName: string) {
+    return html`
+      <pf-dialog
+        ?open=${this.showDeleteCurrentDialog}
+        .closeOnBackdrop=${!this.isDeletingCurrentProject}
+        .closeOnEscape=${!this.isDeletingCurrentProject}
+        .showCloseButton=${!this.isDeletingCurrentProject}
+        width="360px"
+        @pf-close=${this.dismissDeleteCurrentProject}
+      >
+        <span slot="title">Delete Current Project</span>
+        <p>Delete "${projectName}" from this browser?</p>
+        ${this.deleteCurrentProjectError
+          ? html`<p role="alert">${this.deleteCurrentProjectError}</p>`
+          : ""}
+        <div slot="actions">
+          <button
+            type="button"
+            class="secondary"
+            ?disabled=${this.isDeletingCurrentProject}
+            @click=${this.dismissDeleteCurrentProject}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="primary"
+            ?disabled=${this.isDeletingCurrentProject}
+            @click=${this.confirmDeleteCurrentProject}
+          >
+            ${this.isDeletingCurrentProject ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </pf-dialog>
+    `;
+  }
+
   render() {
     // Access panel states signal to ensure reactive updates when timeline visibility changes
     const isTimelineCollapsed =
@@ -1103,30 +1154,7 @@ export class PixelForgeApp extends BaseComponent {
           `
         : ""}
 
-      <pf-dialog
-        ?open=${this.showDeleteCurrentDialog}
-        width="360px"
-        @pf-close=${this.dismissDeleteCurrentProject}
-      >
-        <span slot="title">Delete Current Project</span>
-        <p>Delete "${deleteProjectName}" from this browser?</p>
-        <div slot="actions">
-          <button
-            type="button"
-            class="secondary"
-            @click=${this.dismissDeleteCurrentProject}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="primary"
-            @click=${this.confirmDeleteCurrentProject}
-          >
-            Delete
-          </button>
-        </div>
-      </pf-dialog>
+      ${this.renderDeleteCurrentProjectDialog(deleteProjectName)}
 
       <pf-keyboard-shortcuts-dialog
         ?open=${this.showKeyboardShortcutsDialog}

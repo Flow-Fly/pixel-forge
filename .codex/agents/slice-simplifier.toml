@@ -24,8 +24,9 @@ net, and materially improve readability. Otherwise report a future
 opportunity. Never expand into sibling cleanup outside the PR diff.
 
 If code changes, make one focused simplification commit after running affected
-tests, npx tsc --noEmit, npm run lint, npm run build, npm run fallow:audit, and
-git diff --check. Push the same branch. Do not merge. Return the exact new head
+tests, npm run test:run, npx tsc --noEmit, npm run lint, npm run build,
+npm run fallow:audit, and git diff --check. Push the same branch. Do not merge.
+Return the exact new head
 to the workflow director so it can mark the green PR ready and hand it to
 pr-reviewer.
 """
