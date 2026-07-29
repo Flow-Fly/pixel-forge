@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const database = vi.hoisted(() => ({
   getAllFromIndex: vi.fn(),
+  get: vi.fn(),
   put: vi.fn(),
 }));
 const openDatabase = vi.hoisted(() => vi.fn(() => Promise.resolve(database)));
@@ -47,6 +48,40 @@ describe('palettePersistence.savePalette', () => {
     await expect(palettePersistence.savePalette(palette)).resolves.toBe(false);
     expect(logError).toHaveBeenCalledWith(
       'Failed to save palette to IndexedDB:',
+      error,
+    );
+  });
+});
+
+describe('palettePersistence.updatePalette', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true after IndexedDB updates an existing palette', async () => {
+    database.get.mockResolvedValueOnce(palette);
+    database.put.mockResolvedValueOnce('saved-palette');
+
+    await expect(
+      palettePersistence.updatePalette('saved-palette', { name: 'Renamed palette' }),
+    ).resolves.toBe(true);
+    expect(database.put).toHaveBeenCalledWith('palettes', {
+      ...palette,
+      name: 'Renamed palette',
+      updatedAt: expect.any(Number),
+    });
+  });
+
+  it('returns false when IndexedDB rejects the update', async () => {
+    const error = new Error('IndexedDB unavailable');
+    database.get.mockResolvedValueOnce(palette);
+    database.put.mockRejectedValueOnce(error);
+
+    await expect(
+      palettePersistence.updatePalette('saved-palette', { name: 'Renamed palette' }),
+    ).resolves.toBe(false);
+    expect(logError).toHaveBeenCalledWith(
+      'Failed to update palette in IndexedDB:',
       error,
     );
   });

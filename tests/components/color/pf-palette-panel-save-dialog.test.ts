@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const paletteDatabase = vi.hoisted(() => ({
+  getAllFromIndex: vi.fn(() => Promise.resolve([])),
+  get: vi.fn(),
+  put: vi.fn(),
+}));
+const openPaletteDatabase = vi.hoisted(() => vi.fn(() => Promise.resolve(paletteDatabase)));
+
+vi.mock('idb', () => ({
+  openDB: openPaletteDatabase,
+}));
+
 vi.mock('../../../src/components/color/pf-color-picker-popup', () => ({}));
 
 import '../../../src/components/color/pf-palette-panel';
 import type { PFPalettePanel } from '../../../src/components/color/pf-palette-panel';
 import type { PfSavePaletteDialog } from '../../../src/components/color/pf-save-palette-dialog';
+import type { CustomPalette } from '../../../src/types/palette';
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -38,6 +50,7 @@ function shadowElement<T extends Element>(
 
 describe('pf-palette-panel save dialog', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     document.body.replaceChildren();
     localStorage.clear();
     context = createProjectContext();
@@ -105,5 +118,51 @@ describe('pf-palette-panel save dialog', () => {
     await settleWithDialog(panel, dialog);
 
     expect(dialog.shadowRoot?.querySelector('#palette-save-error')).toBeNull();
+  });
+
+  it('keeps rename open when the persistence adapter rejects the update', async () => {
+    const savedPalette: CustomPalette = {
+      id: 'saved-palette',
+      name: 'Saved palette',
+      colors: ['#112233'],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    context.palette.currentPresetId.value = null;
+    context.palette.currentCustomPaletteId.value = savedPalette.id;
+    context.palette.customPalettes.value = [savedPalette];
+    paletteDatabase.get.mockResolvedValueOnce(savedPalette);
+    paletteDatabase.put.mockRejectedValueOnce(new Error('IndexedDB write failed'));
+    const panel = document.createElement('pf-palette-panel') as PFPalettePanel;
+    document.body.append(panel);
+    await settle(panel);
+
+    shadowElement(panel, 'pf-palette-toolbar').dispatchEvent(
+      new CustomEvent('menu-rename'),
+    );
+    await settle(panel);
+
+    const dialog = shadowElement<PfSavePaletteDialog>(
+      panel,
+      'pf-save-palette-dialog',
+    );
+    const input = shadowElement<HTMLInputElement>(dialog, '.form-input');
+    input.value = 'Renamed palette';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settleWithDialog(panel, dialog);
+    shadowElement<HTMLButtonElement>(dialog, '.btn-save').click();
+    await settleWithDialog(panel, dialog);
+
+    expect(paletteDatabase.get).toHaveBeenCalledWith('palettes', 'saved-palette');
+    expect(paletteDatabase.put).toHaveBeenCalledWith('palettes', {
+      ...savedPalette,
+      name: 'Renamed palette',
+      updatedAt: expect.any(Number),
+    });
+    const error = shadowElement(dialog, '#palette-save-error');
+    expect(dialog.open).toBe(true);
+    expect(dialog.pending).toBe(false);
+    expect(error.getAttribute('role')).toBe('alert');
+    expect(error.textContent).toContain('Palette could not be renamed');
   });
 });

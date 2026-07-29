@@ -121,8 +121,8 @@ export async function saveAsNewPalette(
 export async function updatePalette(
   id: string,
   updates: Partial<Pick<CustomPalette, 'name' | 'colors'>>
-): Promise<void> {
-  await palettePersistence.updatePalette(id, updates);
+): Promise<boolean> {
+  return palettePersistence.updatePalette(id, updates);
 }
 
 /**
@@ -136,7 +136,10 @@ export async function deletePalette(id: string): Promise<void> {
  * Rename a custom palette.
  */
 export async function renamePalette(id: string, newName: string): Promise<void> {
-  await palettePersistence.updatePalette(id, { name: newName.trim() });
+  const updated = await palettePersistence.updatePalette(id, { name: newName.trim() });
+  if (!updated) {
+    throw new Error('Palette could not be renamed.');
+  }
 }
 
 // ==========================================
