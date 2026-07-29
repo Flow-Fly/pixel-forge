@@ -795,6 +795,10 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
     const selectedPalette = this.findPalette(this.selectedPalette);
     if (selectedPalette) {
+      if (this.selectedPalette.startsWith('custom:')) {
+        this.selectPalette(this.selectedPalette);
+        return;
+      }
       this.paletteMessage = this.describePaletteAdaptation(selectedPalette.colors.length);
       return;
     }

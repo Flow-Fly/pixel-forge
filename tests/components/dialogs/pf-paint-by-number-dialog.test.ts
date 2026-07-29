@@ -558,7 +558,11 @@ describe('pf-paint-by-number-dialog', () => {
       .mockResolvedValueOnce([saved])
       .mockRejectedValueOnce(new Error('IndexedDB unavailable'));
     const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
     await selectPalette(element, 'custom:night');
+    await vi.runAllTimersAsync();
 
     element.open = false;
     await settle(element);
@@ -574,6 +578,64 @@ describe('pf-paint-by-number-dialog', () => {
     );
     expect(element.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
       'Saved palettes could not be loaded',
+    );
+
+    element.shadowRoot?.querySelector<HTMLButtonElement>('button.primary')?.click();
+    await settle(element);
+
+    expect(createGuidedProjectMock).toHaveBeenCalledWith({
+      guide,
+      settings: {
+        longSide: 24,
+        paletteSource: 'restricted',
+        maxColors: undefined,
+        restrictedPalette: ['#101020', '#f0f0ff'],
+        mapping: 'color',
+        simplifyIsolatedPixels: true,
+      },
+      sourceName: 'portrait.png',
+    });
+  });
+
+  it('refreshes a selected custom palette snapshot when the dialog reopens', async () => {
+    const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
+    const updatedColors = Array.from(
+      { length: MAX_GUIDE_COLORS + 1 },
+      (_, index) => `#${index.toString(16).padStart(6, '0')}`,
+    );
+    const updated = customPalette('night', 'Updated night colors', updatedColors);
+    loadCustomPalettesOrThrowMock
+      .mockResolvedValueOnce([saved])
+      .mockResolvedValueOnce([updated]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+    await selectPalette(element, 'custom:night');
+    await vi.runAllTimersAsync();
+
+    element.open = false;
+    await settle(element);
+    element.open = true;
+    await settle(element);
+    await vi.runAllTimersAsync();
+
+    const adaptedColors = updatedColors.slice(0, MAX_GUIDE_COLORS);
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    expect(select?.value).toBe('custom:night');
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toContain(
+      'Updated night colors',
+    );
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: adaptedColors,
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+    expect(element.shadowRoot?.querySelector('#guided-palette-status')?.textContent).toContain(
+      'uses the first 255 colors',
     );
   });
 
