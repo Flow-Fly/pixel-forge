@@ -257,6 +257,67 @@ describe('pf-paint-by-number-dialog', () => {
     expect(activeProjectPaletteSpy).not.toHaveBeenCalled();
   });
 
+  it('rejects an empty saved palette without changing the current guide setup', async () => {
+    const valid = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
+    const empty = customPalette('empty', 'Empty palette', []);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([valid, empty]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+
+    await selectPalette(element, 'custom:night');
+    await vi.runAllTimersAsync();
+
+    const mapping = element.shadowRoot?.querySelector<HTMLSelectElement>('#guided-mapping');
+    if (mapping) {
+      mapping.value = 'luminance';
+      mapping.dispatchEvent(new Event('change'));
+    }
+    const simplify = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-simplify');
+    simplify?.click();
+    await vi.runAllTimersAsync();
+    await settle(element);
+
+    const generationCalls = generateNumberedGuideMock.mock.calls.length;
+    const guidePreview = element.shadowRoot?.querySelector('#guide-preview');
+    const create = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[form="guided-project-form"]',
+    );
+    expect(guidePreview).toBeTruthy();
+    expect(create?.disabled).toBe(false);
+
+    await selectPalette(element, 'custom:empty');
+    await vi.runAllTimersAsync();
+
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    const error = element.shadowRoot?.querySelector('#guided-palette-status');
+    expect(select?.value).toBe('custom:night');
+    expect(error?.getAttribute('role')).toBe('alert');
+    expect(error?.textContent).toContain('needs at least one color');
+    expect(generateNumberedGuideMock).toHaveBeenCalledTimes(generationCalls);
+    expect(element.shadowRoot?.querySelector('#guide-preview')).toBe(guidePreview);
+    expect(create?.disabled).toBe(false);
+
+    create?.click();
+    await settle(element);
+
+    expect(createGuidedProjectMock).toHaveBeenCalledWith({
+      guide,
+      settings: {
+        longSide: 24,
+        paletteSource: 'restricted',
+        maxColors: undefined,
+        restrictedPalette: ['#101020', '#f0f0ff'],
+        mapping: 'luminance',
+        simplifyIsolatedPixels: false,
+      },
+      sourceName: 'portrait.png',
+    });
+  });
+
   it('uses the first 255 colors from an oversized selected palette', async () => {
     const colors = Array.from(
       { length: MAX_GUIDE_COLORS + 1 },

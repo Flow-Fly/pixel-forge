@@ -826,6 +826,12 @@ export class PFPaintByNumberDialog extends BaseComponent {
       return;
     }
 
+    if (value.startsWith('custom:') && palette.colors.length === 0) {
+      if (this.paletteSelect) this.paletteSelect.value = this.selectedPalette;
+      this.paletteError = 'This saved palette needs at least one color before Guided Drawing can use it.';
+      return;
+    }
+
     this.selectedPalette = value;
     this.paletteSource = 'restricted';
     this.restrictedPalette = palette.colors.slice(0, MAX_GUIDE_COLORS);
