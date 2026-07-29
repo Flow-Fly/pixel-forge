@@ -627,7 +627,10 @@ export class PFPaintByNumberDialog extends BaseComponent {
           class="primary"
           type="submit"
           form="guided-project-form"
-          ?disabled=${!this.guide || this.isGenerating || this.isCreating}
+          ?disabled=${!this.guide
+            || this.isGenerating
+            || this.isCreating
+            || this.isSelectedCustomPaletteLoading()}
           @click=${this.createProject}
         >
           ${this.isCreating ? 'Creating…' : 'Create guided project'}
@@ -849,6 +852,10 @@ export class PFPaintByNumberDialog extends BaseComponent {
     return undefined;
   }
 
+  private isSelectedCustomPaletteLoading(): boolean {
+    return this.isLoadingPalettes && this.selectedPalette.startsWith('custom:');
+  }
+
   private beginPaletteCreation() {
     this.paletteName = '';
     this.paletteColors = [DEFAULT_NEW_COLOR];
@@ -972,7 +979,12 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
   private createProject = async (event: Event) => {
     event.preventDefault();
-    if (!this.guide || !this.sourceFile || this.isCreating) return;
+    if (
+      !this.guide
+      || !this.sourceFile
+      || this.isCreating
+      || this.isSelectedCustomPaletteLoading()
+    ) return;
 
     this.isCreating = true;
     this.errorMessage = '';

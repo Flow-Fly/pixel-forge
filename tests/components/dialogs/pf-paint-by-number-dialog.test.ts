@@ -597,18 +597,22 @@ describe('pf-paint-by-number-dialog', () => {
     });
   });
 
-  it('refreshes a selected custom palette snapshot when the dialog reopens', async () => {
+  it('waits for a selected custom palette to reload before creating a project', async () => {
     const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
     const updatedColors = Array.from(
       { length: MAX_GUIDE_COLORS + 1 },
       (_, index) => `#${index.toString(16).padStart(6, '0')}`,
     );
     const updated = customPalette('night', 'Updated night colors', updatedColors);
+    let resolveReload: ((palettes: CustomPalette[]) => void) | undefined;
     loadCustomPalettesOrThrowMock
       .mockResolvedValueOnce([saved])
-      .mockResolvedValueOnce([updated]);
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveReload = resolve;
+      }));
     const element = await createDialog();
-    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    const file = new File(['pixels'], 'portrait.png', { type: 'image/png' });
+    chooseFile(element, file);
     await Promise.resolve();
     await vi.runAllTimersAsync();
     await selectPalette(element, 'custom:night');
@@ -618,7 +622,23 @@ describe('pf-paint-by-number-dialog', () => {
     await settle(element);
     element.open = true;
     await settle(element);
+
+    const create = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[form="guided-project-form"]',
+    );
+    expect(create?.disabled).toBe(true);
+
+    create?.click();
+    element.shadowRoot?.querySelector<HTMLFormElement>('#guided-project-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle(element);
+
+    expect(createGuidedProjectMock).not.toHaveBeenCalled();
+
+    resolveReload?.([updated]);
+    await settle(element);
     await vi.runAllTimersAsync();
+    await settle(element);
 
     const adaptedColors = updatedColors.slice(0, MAX_GUIDE_COLORS);
     const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
@@ -637,6 +657,23 @@ describe('pf-paint-by-number-dialog', () => {
     expect(element.shadowRoot?.querySelector('#guided-palette-status')?.textContent).toContain(
       'uses the first 255 colors',
     );
+    expect(create?.disabled).toBe(false);
+
+    create?.click();
+    await settle(element);
+
+    expect(createGuidedProjectMock).toHaveBeenCalledWith({
+      guide,
+      settings: {
+        longSide: 24,
+        paletteSource: 'restricted',
+        maxColors: undefined,
+        restrictedPalette: adaptedColors,
+        mapping: 'color',
+        simplifyIsolatedPixels: true,
+      },
+      sourceName: file.name,
+    });
   });
 
   it('blocks duplicate palette saves while persistence is pending', async () => {
