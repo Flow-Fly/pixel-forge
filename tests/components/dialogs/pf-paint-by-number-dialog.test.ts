@@ -434,9 +434,60 @@ describe('pf-paint-by-number-dialog', () => {
       '#guided-long-side',
     )?.value).toBe('32');
     expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
+    const status = element.shadowRoot?.querySelector('#guided-palette-status');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.textContent).toContain('Palette saved and selected.');
     expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
       maxColors: undefined,
       palette: ['#0000ff', '#00ff00'],
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+  });
+
+  it('announces save confirmation and adaptation for a 256-color palette', async () => {
+    const colors = Array.from(
+      { length: MAX_PALETTE_SIZE },
+      (_, index) => `#${index.toString(16).padStart(6, '0')}`,
+    );
+    const created = customPalette('max-palette', 'Maximum palette', colors);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([]);
+    saveAsNewPaletteMock.mockResolvedValueOnce(created);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'source.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+    await selectPalette(element, 'create');
+
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    if (name) {
+      name.value = 'Maximum palette';
+      name.dispatchEvent(new Event('input'));
+    }
+    const paletteState = element as unknown as { paletteColors: string[] };
+    paletteState.paletteColors = colors;
+    await settle(element);
+
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
+      ?.click();
+    await settle(element);
+    await vi.runAllTimersAsync();
+    await settle(element);
+
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    const status = element.shadowRoot?.querySelector('#guided-palette-status');
+    expect(saveAsNewPaletteMock).toHaveBeenCalledWith('Maximum palette', colors);
+    expect(select?.value).toBe('custom:max-palette');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.textContent).toContain('Palette saved and selected.');
+    expect(status?.textContent).toContain('uses the first 255 colors');
+    expect(status?.textContent).toContain('omits 1 additional color');
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: colors.slice(0, MAX_GUIDE_COLORS),
       mapping: 'color',
       simplifyIsolatedPixels: true,
     });

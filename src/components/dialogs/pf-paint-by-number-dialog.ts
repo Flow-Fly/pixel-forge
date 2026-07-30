@@ -973,8 +973,11 @@ export class PFPaintByNumberDialog extends BaseComponent {
     this.isCreatingPalette = false;
     this.paletteName = '';
     this.paletteColors = [];
-    this.paletteMessage = 'Palette saved and selected.';
     this.selectPalette(`custom:${savedPalette.id}`);
+    const adaptationMessage = this.describePaletteAdaptation(savedPalette.colors.length);
+    this.paletteMessage = adaptationMessage
+      ? `Palette saved and selected. ${adaptationMessage}`
+      : 'Palette saved and selected.';
     this.isSavingPalette = false;
     await this.updateComplete;
     this.paletteSelect?.focus();
