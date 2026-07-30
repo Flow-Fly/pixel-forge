@@ -198,6 +198,40 @@ describe('pf-paint-by-number-dialog', () => {
     expect(input?.checked).toBe(false);
   });
 
+  it.each([
+    ['Palette saved and selected.', '', 'status'],
+    ['Guided Drawing uses the first 255 colors.', '', 'status'],
+    ['', 'Saved palettes could not be loaded.', 'alert'],
+  ])('keeps the palette label static when status text changes', async (
+    paletteMessage,
+    paletteError,
+    role,
+  ) => {
+    const element = await createDialog();
+    const state = element as unknown as {
+      paletteMessage: string;
+      paletteError: string;
+    };
+    state.paletteMessage = paletteMessage;
+    state.paletteError = paletteError;
+    await settle(element);
+
+    const label = element.shadowRoot?.querySelector<HTMLLabelElement>(
+      'label[for="guided-palette-source"]',
+    );
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    const status = element.shadowRoot?.querySelector('#guided-palette-status');
+    expect(label?.textContent?.trim()).toBe('Palette');
+    expect(label?.htmlFor).toBe(select?.id);
+    expect(label?.contains(status ?? null)).toBe(false);
+    expect(select?.getAttribute('aria-describedby')).toBe(status?.id);
+    expect(status?.getAttribute('role')).toBe(role);
+    expect(status?.getAttribute('aria-live')).toBe('polite');
+    expect(status?.textContent).toContain(paletteError || paletteMessage);
+  });
+
   it('selects preset and saved palettes without reading an active project palette', async () => {
     const activeProjectPaletteSpy = vi.spyOn(projectContext, 'getActiveProjectContext');
     const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);

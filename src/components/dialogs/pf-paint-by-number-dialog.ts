@@ -427,8 +427,8 @@ export class PFPaintByNumberDialog extends BaseComponent {
               >
             </label>
 
-            <label class="field" for="guided-palette-source">
-              <span class="field-label">Palette</span>
+            <div class="field">
+              <label class="field-label" for="guided-palette-source">Palette</label>
               <select
                 id="guided-palette-source"
                 .value=${this.selectedPalette}
@@ -469,7 +469,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
               >
                 ${this.paletteError || this.paletteMessage}
               </span>
-            </label>
+            </div>
 
             <label class="field" for="guided-mapping">
               <span class="field-label">Color matching</span>
