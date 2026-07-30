@@ -799,6 +799,11 @@ export class PFPaintByNumberDialog extends BaseComponent {
     const selectedPalette = this.findPalette(this.selectedPalette);
     if (selectedPalette) {
       if (this.selectedPalette.startsWith('custom:')) {
+        if (selectedPalette.colors.length === 0) {
+          this.selectPalette(GENERATED_PALETTE_VALUE);
+          this.paletteError = 'This saved palette can no longer be used because it needs at least one color. Generated colors are selected instead.';
+          return;
+        }
         this.selectPalette(this.selectedPalette);
         return;
       }

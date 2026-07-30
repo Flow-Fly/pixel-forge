@@ -658,6 +658,107 @@ describe('pf-paint-by-number-dialog', () => {
     });
   });
 
+  it('falls back to generated colors when the selected palette reloads empty', async () => {
+    const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
+    const empty = customPalette('night', 'Night colors', []);
+    loadCustomPalettesOrThrowMock
+      .mockResolvedValueOnce([saved])
+      .mockResolvedValueOnce([empty]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+    await selectPalette(element, 'custom:night');
+    await vi.runAllTimersAsync();
+
+    element.open = false;
+    await settle(element);
+    element.open = true;
+    await settle(element);
+    await vi.runAllTimersAsync();
+    await settle(element);
+
+    const paletteState = element as unknown as {
+      selectedPalette: string;
+      paletteSource: string;
+      restrictedPalette: string[] | undefined;
+    };
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    const status = element.shadowRoot?.querySelector('#guided-palette-status');
+    const create = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[form="guided-project-form"]',
+    );
+    expect(select?.value).toBe('generated');
+    expect(paletteState.selectedPalette).toBe('generated');
+    expect(paletteState.paletteSource).toBe('generated');
+    expect(paletteState.restrictedPalette).toBeUndefined();
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: 8,
+      palette: undefined,
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+    expect(status?.getAttribute('role')).toBe('alert');
+    expect(status?.textContent).toContain('needs at least one color');
+    expect(create?.disabled).toBe(false);
+
+    create?.click();
+    await settle(element);
+
+    expect(createGuidedProjectMock).toHaveBeenCalledWith({
+      guide,
+      settings: {
+        longSide: 24,
+        paletteSource: 'generated',
+        maxColors: 8,
+        restrictedPalette: undefined,
+        mapping: 'color',
+        simplifyIsolatedPixels: true,
+      },
+      sourceName: 'portrait.png',
+    });
+  });
+
+  it('falls back to generated colors when the selected palette is deleted before reload', async () => {
+    const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
+    loadCustomPalettesOrThrowMock
+      .mockResolvedValueOnce([saved])
+      .mockResolvedValueOnce([]);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'portrait.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+    await selectPalette(element, 'custom:night');
+    await vi.runAllTimersAsync();
+
+    element.open = false;
+    await settle(element);
+    element.open = true;
+    await settle(element);
+    await vi.runAllTimersAsync();
+    await settle(element);
+
+    const paletteState = element as unknown as {
+      selectedPalette: string;
+      paletteSource: string;
+      restrictedPalette: string[] | undefined;
+    };
+    expect(element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    )?.value).toBe('generated');
+    expect(paletteState.selectedPalette).toBe('generated');
+    expect(paletteState.paletteSource).toBe('generated');
+    expect(paletteState.restrictedPalette).toBeUndefined();
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: 8,
+      palette: undefined,
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+  });
+
   it('waits for a selected custom palette to reload before creating a project', async () => {
     const saved = customPalette('night', 'Night colors', ['#101020', '#f0f0ff']);
     const updatedColors = Array.from(
