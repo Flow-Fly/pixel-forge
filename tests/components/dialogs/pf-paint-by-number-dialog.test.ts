@@ -93,13 +93,33 @@ function chooseFile(element: PFPaintByNumberDialog, file: File) {
 }
 
 async function selectPalette(element: PFPaintByNumberDialog, value: string) {
-  const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
-    '#guided-palette-source',
-  );
-  if (!select) throw new Error('Palette select is unavailable');
+  const select = getElement<HTMLSelectElement>(element, '#guided-palette-source');
   select.value = value;
   select.dispatchEvent(new Event('change'));
   await settle(element);
+}
+
+function getElement<T extends Element>(
+  element: PFPaintByNumberDialog,
+  selector: string,
+): T {
+  const match = element.shadowRoot?.querySelector<T>(selector);
+  if (!match) throw new Error(`Expected ${selector}`);
+  return match;
+}
+
+function getGuidedSetup(element: PFPaintByNumberDialog) {
+  return {
+    advanced: getElement<HTMLDetailsElement>(element, 'details'),
+    filename: getElement<HTMLElement>(element, '#guided-source-filename'),
+    guidePreview: getElement(element, '#guide-preview'),
+    longSide: getElement<HTMLInputElement>(element, '#guided-long-side'),
+    mapping: getElement<HTMLSelectElement>(element, '#guided-mapping'),
+    select: getElement<HTMLSelectElement>(element, '#guided-palette-source'),
+    simplify: getElement<HTMLInputElement>(element, '#guided-simplify'),
+    sourcePreview: getElement(element, '#source-preview'),
+    status: getElement(element, '#guided-project-form > .status'),
+  };
 }
 
 async function enterPaletteCreationWithSetup(
@@ -110,31 +130,24 @@ async function enterPaletteCreationWithSetup(
   await Promise.resolve();
   await vi.runAllTimersAsync();
 
-  const advanced = element.shadowRoot?.querySelector<HTMLDetailsElement>('details');
-  if (!advanced) throw new Error('Advanced settings are unavailable');
+  const advanced = getElement<HTMLDetailsElement>(element, 'details');
   advanced.open = true;
   advanced.dispatchEvent(new Event('toggle'));
   await settle(element);
 
-  const longSide = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-long-side');
-  if (longSide) {
-    longSide.value = '32';
-    longSide.dispatchEvent(new Event('change'));
-  }
-  const mapping = element.shadowRoot?.querySelector<HTMLSelectElement>('#guided-mapping');
-  if (mapping) {
-    mapping.value = 'luminance';
-    mapping.dispatchEvent(new Event('change'));
-  }
-  element.shadowRoot?.querySelector<HTMLInputElement>('#guided-simplify')?.click();
+  const longSide = getElement<HTMLInputElement>(element, '#guided-long-side');
+  longSide.value = '32';
+  longSide.dispatchEvent(new Event('change'));
+  const mapping = getElement<HTMLSelectElement>(element, '#guided-mapping');
+  mapping.value = 'luminance';
+  mapping.dispatchEvent(new Event('change'));
+  getElement<HTMLInputElement>(element, '#guided-simplify').click();
   await selectPalette(element, 'preset:pico8');
   await vi.runAllTimersAsync();
   await settle(element);
 
   const previewCalls = generateNumberedGuideMock.mock.calls.length;
-  const statusText = element.shadowRoot
-    ?.querySelector('#guided-project-form > .status')
-    ?.textContent;
+  const statusText = getElement(element, '#guided-project-form > .status').textContent;
   await selectPalette(element, 'create');
   return { previewCalls, statusText };
 }
@@ -271,33 +284,27 @@ describe('pf-paint-by-number-dialog', () => {
 
   it('restores visible setup context after cancelling palette creation', async () => {
     const element = await createDialog();
-    expect(element.shadowRoot?.querySelector<HTMLDetailsElement>('details')?.open).toBe(false);
+    expect(getElement<HTMLDetailsElement>(element, 'details').open).toBe(false);
     const setup = await enterPaletteCreationWithSetup(element, 'cancel-source.png');
 
-    const cancel = Array.from(element.shadowRoot?.querySelectorAll('button') ?? [])
-      .find((button) => button.textContent?.trim() === 'Cancel palette');
-    cancel?.click();
+    getElement<HTMLButtonElement>(
+      element,
+      'div[slot="actions"] button.secondary',
+    ).click();
     await settle(element);
 
-    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
-      '#guided-palette-source',
-    );
-    expect(element.shadowRoot?.querySelector('#guided-source-filename')?.textContent)
-      .toContain('cancel-source.png');
-    expect(element.shadowRoot?.querySelector<HTMLDetailsElement>('details')?.open).toBe(true);
-    expect(element.shadowRoot?.querySelector<HTMLInputElement>('#guided-long-side')?.value)
-      .toBe('32');
-    expect(element.shadowRoot?.querySelector<HTMLSelectElement>('#guided-mapping')?.value)
-      .toBe('luminance');
-    expect(element.shadowRoot?.querySelector<HTMLInputElement>('#guided-simplify')?.checked)
-      .toBe(false);
-    expect(select?.value).toBe('preset:pico8');
-    expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
-    expect(element.shadowRoot?.querySelector('#guide-preview')).toBeTruthy();
-    expect(element.shadowRoot?.querySelector('#guided-project-form > .status')?.textContent)
-      .toBe(setup.statusText);
+    const restored = getGuidedSetup(element);
+    expect(restored.filename.textContent).toContain('cancel-source.png');
+    expect(restored.advanced.open).toBe(true);
+    expect(restored.longSide.value).toBe('32');
+    expect(restored.mapping.value).toBe('luminance');
+    expect(restored.simplify.checked).toBe(false);
+    expect(restored.select.value).toBe('preset:pico8');
+    expect(restored.sourcePreview).toBeTruthy();
+    expect(restored.guidePreview).toBeTruthy();
+    expect(restored.status.textContent).toBe(setup.statusText);
     expect(generateNumberedGuideMock).toHaveBeenCalledTimes(setup.previewCalls);
-    expect(element.shadowRoot?.activeElement).toBe(select);
+    expect(element.shadowRoot?.activeElement).toBe(restored.select);
   });
 
   it('restores visible setup context after saving a palette', async () => {
@@ -306,42 +313,34 @@ describe('pf-paint-by-number-dialog', () => {
     const element = await createDialog();
     const setup = await enterPaletteCreationWithSetup(element, 'save-source.png');
 
-    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
-    if (name) {
-      name.value = 'Saved palette';
-      name.dispatchEvent(new Event('input'));
-    }
-    element.shadowRoot
-      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
-      ?.click();
+    const name = getElement<HTMLInputElement>(element, '#guided-palette-name');
+    name.value = 'Saved palette';
+    name.dispatchEvent(new Event('input'));
+    getElement<HTMLButtonElement>(
+      element,
+      'button[form="palette-creation-form"]',
+    ).click();
     await settle(element);
     await vi.runAllTimersAsync();
     await settle(element);
 
-    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
-      '#guided-palette-source',
-    );
-    expect(element.shadowRoot?.querySelector('#guided-source-filename')?.textContent)
-      .toContain('save-source.png');
-    expect(element.shadowRoot?.querySelector<HTMLDetailsElement>('details')?.open).toBe(true);
-    expect(element.shadowRoot?.querySelector<HTMLInputElement>('#guided-long-side')?.value)
-      .toBe('32');
-    expect(element.shadowRoot?.querySelector<HTMLSelectElement>('#guided-mapping')?.value)
-      .toBe('luminance');
-    expect(element.shadowRoot?.querySelector<HTMLInputElement>('#guided-simplify')?.checked)
-      .toBe(false);
-    expect(select?.value).toBe('custom:new-palette');
-    expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
-    expect(element.shadowRoot?.querySelector('#guide-preview')).toBeTruthy();
-    expect(element.shadowRoot?.querySelector('#guided-project-form > .status')?.textContent)
-      .toBe(setup.statusText);
+    const restored = getGuidedSetup(element);
+    expect(restored.filename.textContent).toContain('save-source.png');
+    expect(restored.advanced.open).toBe(true);
+    expect(restored.longSide.value).toBe('32');
+    expect(restored.mapping.value).toBe('luminance');
+    expect(restored.simplify.checked).toBe(false);
+    expect(restored.select.value).toBe('custom:new-palette');
+    expect(restored.sourcePreview).toBeTruthy();
+    expect(restored.guidePreview).toBeTruthy();
+    expect(restored.status.textContent).toBe(setup.statusText);
     expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
       maxColors: undefined,
       palette: ['#123456'],
       mapping: 'luminance',
       simplifyIsolatedPixels: false,
     });
-    expect(element.shadowRoot?.activeElement).toBe(select);
+    expect(element.shadowRoot?.activeElement).toBe(restored.select);
   });
 
   it('selects preset and saved palettes without reading an active project palette', async () => {
