@@ -66,6 +66,8 @@ export class PFPalettePanel extends BaseComponent {
   @state() private saveDialogTitle = 'Save Palette';
   @state() private saveDialogDefaultName = '';
   @state() private isRenaming = false;
+  @state() private isSaveDialogPending = false;
+  @state() private saveDialogError = '';
 
   // Unsaved changes dialog state
   @state() private showUnsavedDialog = false;
@@ -110,6 +112,8 @@ export class PFPalettePanel extends BaseComponent {
       this.saveDialogDefaultName = '';
     }
     this.isRenaming = false;
+    this.isSaveDialogPending = false;
+    this.saveDialogError = '';
     this.showSaveDialog = true;
   }
 
@@ -118,6 +122,8 @@ export class PFPalettePanel extends BaseComponent {
     this.saveDialogTitle = 'Rename Palette';
     this.saveDialogDefaultName = context.palette.getCurrentPaletteName();
     this.isRenaming = true;
+    this.isSaveDialogPending = false;
+    this.saveDialogError = '';
     this.showSaveDialog = true;
   }
 
@@ -132,23 +138,39 @@ export class PFPalettePanel extends BaseComponent {
   // ==========================================
 
   private async handleSaveDialogSave(e: CustomEvent) {
+    if (this.isSaveDialogPending) return;
     const { name } = e.detail;
     const palette = this.saveDialogContext.palette;
 
-    if (this.isRenaming) {
-      const customId = palette.currentCustomPaletteId.value;
-      if (customId) {
-        await palette.renameCustomPalette(customId, name);
+    this.isSaveDialogPending = true;
+    this.saveDialogError = '';
+    try {
+      if (this.isRenaming) {
+        const customId = palette.currentCustomPaletteId.value;
+        if (customId) {
+          await palette.renameCustomPalette(customId, name);
+        }
+      } else {
+        await palette.saveAsNewPalette(name);
       }
-    } else {
-      await palette.saveAsNewPalette(name);
+      this.showSaveDialog = false;
+    } catch {
+      this.saveDialogError = this.isRenaming
+        ? 'Palette could not be renamed. Try again.'
+        : 'Palette could not be saved. Try again.';
+    } finally {
+      this.isSaveDialogPending = false;
     }
-
-    this.showSaveDialog = false;
   }
 
   private handleSaveDialogCancel() {
+    if (this.isSaveDialogPending) return;
     this.showSaveDialog = false;
+    this.saveDialogError = '';
+  }
+
+  private handleSaveDialogNameInput() {
+    this.saveDialogError = '';
   }
 
   // ==========================================
@@ -294,8 +316,11 @@ export class PFPalettePanel extends BaseComponent {
         ?open=${this.showSaveDialog}
         .title=${this.saveDialogTitle}
         .defaultName=${this.saveDialogDefaultName}
+        .pending=${this.isSaveDialogPending}
+        .errorMessage=${this.saveDialogError}
         @save=${this.handleSaveDialogSave}
         @cancel=${this.handleSaveDialogCancel}
+        @name-input=${this.handleSaveDialogNameInput}
       ></pf-save-palette-dialog>
 
       <pf-unsaved-changes-dialog

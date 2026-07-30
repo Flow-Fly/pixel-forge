@@ -1,15 +1,22 @@
-import { css, html } from 'lit';
+import { css, html, type PropertyValues } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
+import { PRESET_PALETTES } from '../../data/preset-palettes';
 import { checkboxStyles } from '../../styles/editor-control-styles';
 import {
   generateNumberedGuide,
+  MAX_GUIDE_COLORS,
   type NumberedGuide,
 } from '../../services/paint-by-number/guide-generator';
 import { createGuidedProject } from '../../services/paint-by-number/guided-project';
 import { decodeImageFile } from '../../services/paint-by-number/image-file';
 import { sampleImageToGrid } from '../../services/paint-by-number/image-sampling';
-import { getActiveProjectContext } from '../../stores/project-context';
+import {
+  loadCustomPalettesOrThrow,
+  saveAsNewPalette,
+} from '../../stores/palette/persistence';
+import { MAX_PALETTE_SIZE } from '../../stores/palette/types';
+import type { CustomPalette } from '../../types/palette';
 import type {
   GuidedColorMapping,
   GuidedDrawingSettings,
@@ -18,6 +25,9 @@ import type {
 import '../ui/pf-dialog';
 
 const PREVIEW_DEBOUNCE_MS = 180;
+const GENERATED_PALETTE_VALUE = 'generated';
+const CREATE_PALETTE_VALUE = 'create';
+const DEFAULT_NEW_COLOR = '#000000';
 
 const GUIDE_PRESETS = [
   { label: 'Compact', longSide: 16, maxColors: 6 },
@@ -61,6 +71,36 @@ export class PFPaintByNumberDialog extends BaseComponent {
       gap: 6px;
     }
 
+    .palette-colors {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .palette-color {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+      gap: 8px;
+      align-items: center;
+    }
+
+    .palette-color input[type='color'] {
+      min-height: 38px;
+      padding: 3px;
+    }
+
+    .palette-color button {
+      min-width: 34px;
+      padding-inline: 8px;
+    }
+
+    .palette-create-actions {
+      display: flex;
+      justify-content: flex-start;
+    }
+
     input,
     select {
       box-sizing: border-box;
@@ -77,6 +117,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
     input:focus-visible,
     select:focus-visible,
     button:focus-visible,
+    .palette-status:focus-visible,
     summary:focus-visible {
       outline: 2px solid var(--pf-color-accent);
       outline-offset: 2px;
@@ -217,6 +258,10 @@ export class PFPaintByNumberDialog extends BaseComponent {
       color: var(--pf-color-danger, #f0aaa2);
     }
 
+    .palette-status {
+      min-height: 1.45em;
+    }
+
     button {
       padding: 7px 12px;
       border-radius: var(--pf-radius-sm);
@@ -257,6 +302,16 @@ export class PFPaintByNumberDialog extends BaseComponent {
   @state() private longSide = 24;
   @state() private maxColors = 8;
   @state() private paletteSource: GuidedPaletteSource = 'generated';
+  @state() private selectedPalette = GENERATED_PALETTE_VALUE;
+  @state() private restrictedPalette: string[] | undefined;
+  @state() private customPalettes: CustomPalette[] = [];
+  @state() private isLoadingPalettes = false;
+  @state() private isCreatingPalette = false;
+  @state() private isSavingPalette = false;
+  @state() private paletteName = '';
+  @state() private paletteColors: string[] = [];
+  @state() private paletteMessage = '';
+  @state() private paletteError = '';
   @state() private mapping: GuidedColorMapping = 'color';
   @state() private simplifyIsolatedPixels = true;
   @state() private isGenerating = false;
@@ -265,155 +320,322 @@ export class PFPaintByNumberDialog extends BaseComponent {
   @state() private errorMessage = '';
   @query('#source-preview') private sourceCanvas?: HTMLCanvasElement;
   @query('#guide-preview') private guideCanvas?: HTMLCanvasElement;
+  @query('#guided-palette-source') private paletteSelect?: HTMLSelectElement;
+  @query('#guided-palette-name') private paletteNameInput?: HTMLInputElement;
+  @query('#guided-palette-creation-status')
+  private paletteCreationStatus?: HTMLParagraphElement;
 
   private previewTimer: number | null = null;
   private requestVersion = 0;
+  private paletteLoadVersion = 0;
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this.cancelPendingPreview();
   }
 
-  protected updated(): void {
+  protected updated(changedProperties: PropertyValues<this>): void {
+    super.updated(changedProperties);
     this.drawPreviews();
+    if (changedProperties.has('open') && this.open) {
+      void this.loadPaletteChoices();
+    }
   }
 
   render() {
     return html`
       <pf-dialog
         ?open=${this.open}
+        .closeOnBackdrop=${!this.isCreatingPalette && !this.isSavingPalette}
+        .closeOnEscape=${!this.isCreatingPalette}
+        .showCloseButton=${!this.isCreatingPalette && !this.isSavingPalette}
         width="min(760px, calc(100vw - 32px))"
+        @keydown=${this.handlePaletteCreationKeydown}
         @pf-close=${this.close}
       >
         <span slot="title">Guided drawing</span>
 
-        <form id="guided-project-form" @submit=${this.createProject}>
-          <label class="file-field" for="guided-source-file">
-            <span class="field-label">Source image</span>
-            <input
-              id="guided-source-file"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              @change=${this.handleFileChange}
-            >
-            <span class="local-note">Processed locally. The source image is not uploaded.</span>
-          </label>
+        ${this.isCreatingPalette
+          ? this.renderPaletteCreation()
+          : this.renderGuidedSetup()}
+        ${this.renderActions()}
+      </pf-dialog>
+    `;
+  }
 
-          <fieldset>
-            <legend>Guide preset</legend>
-            <div class="presets">
-              ${GUIDE_PRESETS.map((preset) => html`
-                <button
-                  class="preset"
-                  type="button"
-                  aria-pressed=${String(
-                    this.longSide === preset.longSide
-                      && this.maxColors === preset.maxColors,
-                  )}
-                  @click=${() => this.selectPreset(preset)}
-                >
-                  <span class="preset-name">${preset.label}</span>
-                  <span class="preset-meta">
-                    ${preset.longSide}px · ${preset.maxColors} colors
-                  </span>
-                </button>
-              `)}
-            </div>
-          </fieldset>
-
-          <details>
-            <summary>Advanced settings</summary>
-            <div class="advanced-fields">
-              <label class="field" for="guided-long-side">
-                <span class="field-label">Long side (pixels)</span>
-                <input
-                  id="guided-long-side"
-                  type="number"
-                  min="8"
-                  max="64"
-                  .value=${String(this.longSide)}
-                  @change=${this.handleLongSideChange}
-                >
-              </label>
-
-              <label class="field" for="guided-max-colors">
-                <span class="field-label">Maximum colors</span>
-                <input
-                  id="guided-max-colors"
-                  type="number"
-                  min="2"
-                  max="32"
-                  .value=${String(this.maxColors)}
-                  ?disabled=${this.paletteSource === 'restricted'}
-                  @change=${this.handleMaxColorsChange}
-                >
-              </label>
-
-              <label class="field" for="guided-palette-source">
-                <span class="field-label">Palette</span>
-                <select
-                  id="guided-palette-source"
-                  .value=${this.paletteSource}
-                  @change=${this.handlePaletteSourceChange}
-                >
-                  <option value="generated">Generate from image</option>
-                  <option value="restricted">Use current project palette</option>
-                </select>
-              </label>
-
-              <label class="field" for="guided-mapping">
-                <span class="field-label">Color matching</span>
-                <select
-                  id="guided-mapping"
-                  .value=${this.mapping}
-                  @change=${this.handleMappingChange}
-                >
-                  <option value="color">Perceptual color</option>
-                  <option value="luminance">Luminance only</option>
-                </select>
-              </label>
-
-              <label class="checkbox-field" for="guided-simplify">
-                <input
-                  id="guided-simplify"
-                  type="checkbox"
-                  .checked=${this.simplifyIsolatedPixels}
-                  @change=${this.handleSimplifyChange}
-                >
-                Simplify isolated single pixels
-              </label>
-            </div>
-          </details>
-
-          <div class="previews">
-            ${this.renderPreviewFigure('Source', 'source-preview', Boolean(this.sourceImage))}
-            ${this.renderPreviewFigure('Guide', 'guide-preview', Boolean(this.guide))}
-          </div>
-
-          <p
-            class="status"
-            role=${this.errorMessage ? 'alert' : 'status'}
-            aria-live="polite"
-            data-error=${String(Boolean(this.errorMessage))}
+  private renderGuidedSetup() {
+    return html`
+      <form id="guided-project-form" @submit=${this.createProject}>
+        <label class="file-field" for="guided-source-file">
+          <span class="field-label">Source image</span>
+          <input
+            id="guided-source-file"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            @change=${this.handleFileChange}
           >
-            ${this.errorMessage || this.statusMessage}
-          </p>
+          <span class="local-note">Processed locally. The source image is not uploaded.</span>
+        </label>
 
-        </form>
+        <fieldset>
+          <legend>Guide preset</legend>
+          <div class="presets">
+            ${GUIDE_PRESETS.map((preset) => html`
+              <button
+                class="preset"
+                type="button"
+                aria-pressed=${String(
+                  this.longSide === preset.longSide
+                    && this.maxColors === preset.maxColors,
+                )}
+                @click=${() => this.selectPreset(preset)}
+              >
+                <span class="preset-name">${preset.label}</span>
+                <span class="preset-meta">
+                  ${preset.longSide}px · ${preset.maxColors} colors
+                </span>
+              </button>
+            `)}
+          </div>
+        </fieldset>
 
+        <details>
+          <summary>Advanced settings</summary>
+          <div class="advanced-fields">
+            <label class="field" for="guided-long-side">
+              <span class="field-label">Long side (pixels)</span>
+              <input
+                id="guided-long-side"
+                type="number"
+                min="8"
+                max="64"
+                .value=${String(this.longSide)}
+                @change=${this.handleLongSideChange}
+              >
+            </label>
+
+            <label class="field" for="guided-max-colors">
+              <span class="field-label">Maximum colors</span>
+              <input
+                id="guided-max-colors"
+                type="number"
+                min="2"
+                max="32"
+                .value=${String(this.maxColors)}
+                ?disabled=${this.paletteSource === 'restricted'}
+                @change=${this.handleMaxColorsChange}
+              >
+            </label>
+
+            <div class="field">
+              <label class="field-label" for="guided-palette-source">Palette</label>
+              <select
+                id="guided-palette-source"
+                .value=${this.selectedPalette}
+                ?disabled=${this.isLoadingPalettes}
+                aria-describedby="guided-palette-status"
+                @change=${this.handlePaletteSelection}
+              >
+                <option
+                  value=${GENERATED_PALETTE_VALUE}
+                  ?selected=${this.selectedPalette === GENERATED_PALETTE_VALUE}
+                >Generate from image</option>
+                <optgroup label="Preset palettes">
+                  ${PRESET_PALETTES.map((palette) => html`
+                    <option
+                      value="preset:${palette.id}"
+                      ?selected=${this.selectedPalette === `preset:${palette.id}`}
+                    >${palette.name}</option>
+                  `)}
+                </optgroup>
+                <optgroup label="Saved custom palettes">
+                  ${this.customPalettes.length > 0
+                    ? this.customPalettes.map((palette) => html`
+                        <option
+                          value="custom:${palette.id}"
+                          ?selected=${this.selectedPalette === `custom:${palette.id}`}
+                        >${palette.name}</option>
+                      `)
+                    : html`<option disabled>No saved palettes</option>`}
+                </optgroup>
+                <option value=${CREATE_PALETTE_VALUE}>Create palette…</option>
+              </select>
+              <span
+                id="guided-palette-status"
+                class="status palette-status"
+                role=${this.paletteError ? 'alert' : 'status'}
+                aria-live="polite"
+                data-error=${String(Boolean(this.paletteError))}
+              >
+                ${this.paletteError || this.paletteMessage}
+              </span>
+            </div>
+
+            <label class="field" for="guided-mapping">
+              <span class="field-label">Color matching</span>
+              <select
+                id="guided-mapping"
+                .value=${this.mapping}
+                @change=${this.handleMappingChange}
+              >
+                <option value="color">Perceptual color</option>
+                <option value="luminance">Luminance only</option>
+              </select>
+            </label>
+
+            <label class="checkbox-field" for="guided-simplify">
+              <input
+                id="guided-simplify"
+                type="checkbox"
+                .checked=${this.simplifyIsolatedPixels}
+                @change=${this.handleSimplifyChange}
+              >
+              Simplify isolated single pixels
+            </label>
+          </div>
+        </details>
+
+        <div class="previews">
+          ${this.renderPreviewFigure('Source', 'source-preview', Boolean(this.sourceImage))}
+          ${this.renderPreviewFigure('Guide', 'guide-preview', Boolean(this.guide))}
+        </div>
+
+        <p
+          class="status"
+          role=${this.errorMessage ? 'alert' : 'status'}
+          aria-live="polite"
+          data-error=${String(Boolean(this.errorMessage))}
+        >
+          ${this.errorMessage || this.statusMessage}
+        </p>
+      </form>
+    `;
+  }
+
+  private renderPaletteCreation() {
+    return html`
+      <form
+        id="palette-creation-form"
+        aria-busy=${String(this.isSavingPalette)}
+        @submit=${this.saveCreatedPalette}
+      >
+        <p class="hint">
+          Create a reusable palette without leaving Guided Drawing. Your image and guide settings
+          stay unchanged.
+        </p>
+        <label class="field" for="guided-palette-name">
+          <span class="field-label">Palette name</span>
+          <input
+            id="guided-palette-name"
+            type="text"
+            required
+            autocomplete="off"
+            .value=${this.paletteName}
+            ?disabled=${this.isSavingPalette}
+            @input=${this.handlePaletteNameInput}
+          >
+        </label>
+
+        <fieldset>
+          <legend>Colors</legend>
+          <ol class="palette-colors">
+            ${this.paletteColors.map((color, index) => html`
+              <li class="palette-color">
+                <input
+                  type="color"
+                  .value=${color}
+                  aria-label="Color ${index + 1}"
+                  ?disabled=${this.isSavingPalette}
+                  @input=${(event: Event) => this.updatePaletteColor(index, event)}
+                >
+                <button
+                  class="secondary"
+                  type="button"
+                  aria-label="Move color ${index + 1} up"
+                  ?disabled=${index === 0 || this.isSavingPalette}
+                  @click=${() => this.movePaletteColor(index, index - 1)}
+                >↑</button>
+                <button
+                  class="secondary"
+                  type="button"
+                  aria-label="Move color ${index + 1} down"
+                  ?disabled=${index === this.paletteColors.length - 1 || this.isSavingPalette}
+                  @click=${() => this.movePaletteColor(index, index + 1)}
+                >↓</button>
+                <button
+                  class="secondary"
+                  type="button"
+                  aria-label="Remove color ${index + 1}"
+                  ?disabled=${this.isSavingPalette}
+                  @click=${() => this.removePaletteColor(index)}
+                >×</button>
+              </li>
+            `)}
+          </ol>
+          <div class="palette-create-actions">
+            <button
+              class="secondary"
+              type="button"
+              ?disabled=${this.isSavingPalette
+                || this.paletteColors.length >= MAX_PALETTE_SIZE}
+              @click=${this.addPaletteColor}
+            >Add color</button>
+          </div>
+        </fieldset>
+
+        <p
+          id="guided-palette-creation-status"
+          class="status palette-status"
+          role=${this.paletteError ? 'alert' : 'status'}
+          aria-live="polite"
+          tabindex="-1"
+          data-error=${String(Boolean(this.paletteError))}
+        >
+          ${this.paletteError || this.paletteMessage}
+        </p>
+      </form>
+    `;
+  }
+
+  private renderActions() {
+    if (this.isCreatingPalette) {
+      return html`
         <div slot="actions">
-          <button class="secondary" type="button" @click=${this.close}>Cancel</button>
+          <button
+            class="secondary"
+            type="button"
+            ?disabled=${this.isSavingPalette}
+            @click=${this.cancelPaletteCreation}
+          >Cancel palette</button>
           <button
             class="primary"
             type="submit"
-            form="guided-project-form"
-            ?disabled=${!this.guide || this.isGenerating || this.isCreating}
-            @click=${this.createProject}
+            form="palette-creation-form"
+            ?disabled=${this.isSavingPalette}
+            @click=${this.saveCreatedPalette}
           >
-            ${this.isCreating ? 'Creating…' : 'Create guided project'}
+            ${this.isSavingPalette ? 'Saving…' : 'Save palette'}
           </button>
         </div>
-      </pf-dialog>
+      `;
+    }
+
+    return html`
+      <div slot="actions">
+        <button class="secondary" type="button" @click=${this.close}>Cancel</button>
+        <button
+          class="primary"
+          type="submit"
+          form="guided-project-form"
+          ?disabled=${!this.guide
+            || this.isGenerating
+            || this.isCreating
+            || this.isSelectedCustomPaletteLoading()}
+          @click=${this.createProject}
+        >
+          ${this.isCreating ? 'Creating…' : 'Create guided project'}
+        </button>
+      </div>
     `;
   }
 
@@ -477,9 +699,14 @@ export class PFPaintByNumberDialog extends BaseComponent {
     this.schedulePreview();
   };
 
-  private handlePaletteSourceChange = (event: Event) => {
-    this.paletteSource = (event.currentTarget as HTMLSelectElement).value as GuidedPaletteSource;
-    this.schedulePreview();
+  private handlePaletteSelection = (event: Event) => {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    if (value === CREATE_PALETTE_VALUE) {
+      this.beginPaletteCreation();
+      return;
+    }
+
+    this.selectPalette(value);
   };
 
   private handleMappingChange = (event: Event) => {
@@ -511,12 +738,12 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
     try {
       const sampled = sampleImageToGrid(this.sourceImage, { longSide: this.longSide });
-      const restrictedPalette = this.getRestrictedPalette();
+      const settings = this.currentSettings();
       const guide = generateNumberedGuide(sampled, {
-        maxColors: this.maxColors,
-        palette: restrictedPalette,
-        mapping: this.mapping,
-        simplifyIsolatedPixels: this.simplifyIsolatedPixels,
+        maxColors: settings.maxColors,
+        palette: settings.restrictedPalette,
+        mapping: settings.mapping,
+        simplifyIsolatedPixels: settings.simplifyIsolatedPixels,
       });
       if (guide.palette.length === 0) {
         throw new Error('The image has no visible paintable pixels.');
@@ -538,8 +765,223 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
   private getRestrictedPalette(): string[] | undefined {
     if (this.paletteSource !== 'restricted') return undefined;
-    return [...getActiveProjectContext().palette.mainColors.value];
+    return this.restrictedPalette ? [...this.restrictedPalette] : undefined;
   }
+
+  private async loadPaletteChoices() {
+    const version = ++this.paletteLoadVersion;
+    this.isLoadingPalettes = true;
+    this.paletteError = '';
+    this.paletteMessage = 'Loading saved palettes…';
+
+    try {
+      const palettes = await loadCustomPalettesOrThrow();
+      if (version !== this.paletteLoadVersion) return;
+      this.applyLoadedPaletteChoices(palettes);
+    } catch {
+      if (version !== this.paletteLoadVersion) return;
+      this.paletteMessage = '';
+      this.paletteError = 'Saved palettes could not be loaded. Preset palettes are still available.';
+    } finally {
+      if (version === this.paletteLoadVersion) this.isLoadingPalettes = false;
+    }
+  }
+
+  private applyLoadedPaletteChoices(palettes: CustomPalette[]) {
+    this.customPalettes = palettes;
+    if (
+      this.selectedPalette.startsWith('custom:')
+      && !palettes.some((palette) => `custom:${palette.id}` === this.selectedPalette)
+    ) {
+      this.selectPalette(GENERATED_PALETTE_VALUE);
+    }
+
+    const selectedPalette = this.findPalette(this.selectedPalette);
+    if (selectedPalette) {
+      if (this.selectedPalette.startsWith('custom:')) {
+        if (selectedPalette.colors.length === 0) {
+          this.selectPalette(GENERATED_PALETTE_VALUE);
+          this.paletteError = 'This saved palette can no longer be used because it needs at least one color. Generated colors are selected instead.';
+          return;
+        }
+        this.selectPalette(this.selectedPalette);
+        return;
+      }
+      this.paletteMessage = this.describePaletteAdaptation(selectedPalette.colors.length);
+      return;
+    }
+    this.paletteMessage = palettes.length > 0
+      ? `${palettes.length} saved ${palettes.length === 1 ? 'palette' : 'palettes'} available.`
+      : 'No saved palettes yet.';
+  }
+
+  private selectPalette(value: string) {
+    if (value === GENERATED_PALETTE_VALUE) {
+      this.selectedPalette = value;
+      this.paletteSource = 'generated';
+      this.restrictedPalette = undefined;
+      this.paletteError = '';
+      this.schedulePreview();
+      return;
+    }
+
+    const palette = this.findPalette(value);
+    if (!palette) {
+      this.paletteError = 'That palette is no longer available.';
+      return;
+    }
+
+    if (value.startsWith('custom:') && palette.colors.length === 0) {
+      if (this.paletteSelect) this.paletteSelect.value = this.selectedPalette;
+      this.paletteError = 'This saved palette needs at least one color before Guided Drawing can use it.';
+      return;
+    }
+
+    this.selectedPalette = value;
+    this.paletteSource = 'restricted';
+    this.restrictedPalette = palette.colors.slice(0, MAX_GUIDE_COLORS);
+    this.paletteError = '';
+    this.paletteMessage = this.describePaletteAdaptation(palette.colors.length);
+    this.schedulePreview();
+  }
+
+  private describePaletteAdaptation(colorCount: number): string {
+    const omittedColors = colorCount - MAX_GUIDE_COLORS;
+    if (omittedColors <= 0) return '';
+    return `Guided Drawing uses the first ${MAX_GUIDE_COLORS} colors and omits ${omittedColors} additional ${omittedColors === 1 ? 'color' : 'colors'}.`;
+  }
+
+  private findPalette(value: string): { colors: string[] } | undefined {
+    if (value.startsWith('preset:')) {
+      const id = value.slice('preset:'.length);
+      return PRESET_PALETTES.find((palette) => palette.id === id);
+    }
+    if (value.startsWith('custom:')) {
+      const id = value.slice('custom:'.length);
+      return this.customPalettes.find((palette) => palette.id === id);
+    }
+    return undefined;
+  }
+
+  private isSelectedCustomPaletteLoading(): boolean {
+    return this.isLoadingPalettes && this.selectedPalette.startsWith('custom:');
+  }
+
+  private beginPaletteCreation() {
+    this.paletteName = '';
+    this.paletteColors = [DEFAULT_NEW_COLOR];
+    this.paletteMessage = '';
+    this.paletteError = '';
+    this.isCreatingPalette = true;
+    void this.updateComplete.then(() => {
+      this.paletteNameInput?.focus();
+    });
+  }
+
+  private cancelPaletteCreation = () => {
+    this.isCreatingPalette = false;
+    this.paletteName = '';
+    this.paletteColors = [];
+    this.paletteError = '';
+    this.paletteMessage = 'Palette creation cancelled.';
+    void this.updateComplete.then(() => {
+      this.paletteSelect?.focus();
+    });
+  };
+
+  private handlePaletteCreationKeydown = (event: KeyboardEvent) => {
+    if (!this.isCreatingPalette || event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.isSavingPalette) return;
+    this.cancelPaletteCreation();
+  };
+
+  private handlePaletteNameInput = (event: Event) => {
+    this.paletteName = (event.currentTarget as HTMLInputElement).value;
+    this.paletteError = '';
+  };
+
+  private updatePaletteColor(index: number, event: Event) {
+    const colors = [...this.paletteColors];
+    colors[index] = (event.currentTarget as HTMLInputElement).value;
+    this.paletteColors = colors;
+    this.paletteError = '';
+  }
+
+  private addPaletteColor = () => {
+    if (this.paletteColors.length >= MAX_PALETTE_SIZE) return;
+    this.paletteColors = [...this.paletteColors, DEFAULT_NEW_COLOR];
+    this.paletteError = '';
+    this.paletteMessage = this.paletteColors.length === MAX_PALETTE_SIZE
+      ? `Palette limit reached: ${MAX_PALETTE_SIZE} colors maximum.`
+      : '';
+  };
+
+  private removePaletteColor(index: number) {
+    this.paletteColors = this.paletteColors.filter((_, colorIndex) => colorIndex !== index);
+    this.paletteError = '';
+    this.paletteMessage = '';
+  }
+
+  private movePaletteColor(fromIndex: number, toIndex: number) {
+    if (toIndex < 0 || toIndex >= this.paletteColors.length) return;
+    const colors = [...this.paletteColors];
+    const [color] = colors.splice(fromIndex, 1);
+    colors.splice(toIndex, 0, color);
+    this.paletteColors = colors;
+  }
+
+  private saveCreatedPalette = async (event: Event) => {
+    event.preventDefault();
+    if (this.isSavingPalette) return;
+    const name = this.paletteName.trim();
+    if (!name) {
+      this.paletteError = 'Enter a palette name.';
+      this.paletteNameInput?.focus();
+      return;
+    }
+    if (this.paletteColors.length === 0) {
+      this.paletteError = 'Add at least one color.';
+      return;
+    }
+    if (this.paletteColors.length > MAX_PALETTE_SIZE) {
+      const extraColors = this.paletteColors.length - MAX_PALETTE_SIZE;
+      this.paletteError = `Palettes can contain at most ${MAX_PALETTE_SIZE} colors. Remove ${extraColors} ${extraColors === 1 ? 'color' : 'colors'} before saving.`;
+      await this.updateComplete;
+      this.paletteCreationStatus?.focus();
+      return;
+    }
+
+    this.isSavingPalette = true;
+    this.paletteError = '';
+    this.paletteMessage = 'Saving palette…';
+    let savedPalette: CustomPalette;
+    try {
+      savedPalette = await saveAsNewPalette(name, this.paletteColors);
+    } catch {
+      this.paletteMessage = '';
+      this.paletteError = 'Palette could not be saved. Try again.';
+      this.isSavingPalette = false;
+      return;
+    }
+
+    this.customPalettes = [
+      savedPalette,
+      ...this.customPalettes.filter((palette) => palette.id !== savedPalette.id),
+    ];
+    this.isCreatingPalette = false;
+    this.paletteName = '';
+    this.paletteColors = [];
+    this.selectPalette(`custom:${savedPalette.id}`);
+    const adaptationMessage = this.describePaletteAdaptation(savedPalette.colors.length);
+    this.paletteMessage = adaptationMessage
+      ? `Palette saved and selected. ${adaptationMessage}`
+      : 'Palette saved and selected.';
+    this.isSavingPalette = false;
+    await this.updateComplete;
+    this.paletteSelect?.focus();
+  };
 
   private describeGuide(guide: NumberedGuide): string {
     const { complexity } = guide;
@@ -551,7 +993,12 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
   private createProject = async (event: Event) => {
     event.preventDefault();
-    if (!this.guide || !this.sourceFile || this.isCreating) return;
+    if (
+      !this.guide
+      || !this.sourceFile
+      || this.isCreating
+      || this.isSelectedCustomPaletteLoading()
+    ) return;
 
     this.isCreating = true;
     this.errorMessage = '';
@@ -616,6 +1063,9 @@ export class PFPaintByNumberDialog extends BaseComponent {
 
   close = () => {
     this.cancelPendingPreview();
+    this.paletteLoadVersion += 1;
+    this.isCreatingPalette = false;
+    this.isSavingPalette = false;
     this.open = false;
     this.dispatchEvent(new CustomEvent('close'));
   };

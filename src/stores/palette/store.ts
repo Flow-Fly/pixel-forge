@@ -580,14 +580,14 @@ class PaletteStore {
   }
 
   async saveAsNewPalette(name: string): Promise<string> {
-    const id = await persistence.saveAsNewPalette(name, this.mainColors.value);
+    const palette = await persistence.saveAsNewPalette(name, this.mainColors.value);
     await this.loadCustomPalettes();
 
     this.currentPresetId.value = null;
-    this.currentCustomPaletteId.value = id;
+    this.currentCustomPaletteId.value = palette.id;
     this.isDirty.value = false;
 
-    return id;
+    return palette.id;
   }
 
   async deleteCustomPalette(id: string): Promise<void> {

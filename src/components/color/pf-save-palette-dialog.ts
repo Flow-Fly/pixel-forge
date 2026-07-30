@@ -98,7 +98,7 @@ export class PfSavePaletteDialog extends BaseComponent {
       color: var(--pf-color-text-main, #e0e0e0);
     }
 
-    .btn-cancel:hover {
+    .btn-cancel:not(:disabled):hover {
       background: var(--pf-color-bg-panel, #141414);
     }
 
@@ -108,11 +108,11 @@ export class PfSavePaletteDialog extends BaseComponent {
       color: white;
     }
 
-    .btn-save:hover {
+    .btn-save:not(:disabled):hover {
       opacity: 0.9;
     }
 
-    .btn-save:disabled {
+    .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
@@ -121,6 +121,8 @@ export class PfSavePaletteDialog extends BaseComponent {
   @property({ type: Boolean }) open = false;
   @property({ type: String }) defaultName = '';
   @property({ type: String }) title = 'Save Palette';
+  @property({ type: Boolean }) pending = false;
+  @property({ type: String }) errorMessage = '';
 
   @state() private name = '';
   @state() private error = '';
@@ -142,9 +144,18 @@ export class PfSavePaletteDialog extends BaseComponent {
   private handleNameInput(e: Event) {
     this.name = (e.target as HTMLInputElement).value;
     this.error = '';
+    this.dispatchEvent(new CustomEvent('name-input', {
+      bubbles: true,
+      composed: true
+    }));
   }
 
   private handleKeydown(e: KeyboardEvent) {
+    if (this.pending && (e.key === 'Enter' || e.key === 'Escape')) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (e.key === 'Enter') {
       this.handleSave();
     } else if (e.key === 'Escape') {
@@ -153,6 +164,7 @@ export class PfSavePaletteDialog extends BaseComponent {
   }
 
   private handleSave() {
+    if (this.pending) return;
     const trimmedName = this.name.trim();
     if (!trimmedName) {
       this.error = 'Please enter a name';
@@ -167,6 +179,7 @@ export class PfSavePaletteDialog extends BaseComponent {
   }
 
   private handleCancel() {
+    if (this.pending) return;
     this.dispatchEvent(new CustomEvent('cancel', {
       bubbles: true,
       composed: true
@@ -181,34 +194,52 @@ export class PfSavePaletteDialog extends BaseComponent {
 
   render() {
     if (!this.open) return nothing;
+    const visibleError = this.error || this.errorMessage;
 
     return html`
       <div class="overlay" @click=${this.handleOverlayClick}>
-        <div class="dialog" @click=${(e: Event) => e.stopPropagation()}>
+        <div
+          class="dialog"
+          aria-busy=${String(this.pending)}
+          @click=${(e: Event) => e.stopPropagation()}
+        >
           <h3 class="dialog-title">${this.title}</h3>
 
           <div class="form-group">
-            <label class="form-label">Palette Name</label>
+            <label class="form-label" for="palette-name">Palette Name</label>
             <input
+              id="palette-name"
               type="text"
-              class="form-input ${this.error ? 'error' : ''}"
+              class="form-input ${visibleError ? 'error' : ''}"
               .value=${this.name}
+              ?disabled=${this.pending}
+              aria-invalid=${String(Boolean(visibleError))}
+              aria-describedby=${visibleError ? 'palette-save-error' : nothing}
               @input=${this.handleNameInput}
               @keydown=${this.handleKeydown}
               placeholder="My Palette"
             />
-            ${this.error ? html`
-              <div class="error-message">${this.error}</div>
+            ${visibleError ? html`
+              <div
+                id="palette-save-error"
+                class="error-message"
+                role="alert"
+                aria-live="polite"
+              >${visibleError}</div>
             ` : nothing}
           </div>
 
           <div class="dialog-actions">
-            <button class="btn btn-cancel" @click=${this.handleCancel}>Cancel</button>
+            <button
+              class="btn btn-cancel"
+              ?disabled=${this.pending}
+              @click=${this.handleCancel}
+            >Cancel</button>
             <button
               class="btn btn-save"
               @click=${this.handleSave}
-              ?disabled=${!this.name.trim()}
-            >Save</button>
+              ?disabled=${this.pending || !this.name.trim()}
+            >${this.pending ? 'Saving…' : 'Save'}</button>
           </div>
         </div>
       </div>

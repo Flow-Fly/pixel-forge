@@ -6,7 +6,7 @@ import {
 } from '../../stores/palette/color-utils';
 import type { GuidedColorMapping } from '../../types/guided-drawing';
 
-const MAX_GUIDE_COLORS = 255;
+export const MAX_GUIDE_COLORS = 255;
 const DEFAULT_GUIDE_COLOR_COUNT = 12;
 
 export interface GuideGenerationOptions {

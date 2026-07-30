@@ -85,12 +85,19 @@ export async function loadCustomPalettes(): Promise<CustomPalette[]> {
 }
 
 /**
+ * Load all custom palettes while preserving storage errors for failure-aware UI.
+ */
+export async function loadCustomPalettesOrThrow(): Promise<CustomPalette[]> {
+  return palettePersistence.getAllPalettesOrThrow();
+}
+
+/**
  * Save current palette as a new custom palette.
  */
 export async function saveAsNewPalette(
   name: string,
   colors: string[]
-): Promise<string> {
+): Promise<CustomPalette> {
   const id = crypto.randomUUID();
   const now = Date.now();
   const palette: CustomPalette = {
@@ -101,8 +108,11 @@ export async function saveAsNewPalette(
     updatedAt: now,
   };
 
-  await palettePersistence.savePalette(palette);
-  return id;
+  const saved = await palettePersistence.savePalette(palette);
+  if (!saved) {
+    throw new Error('Palette could not be saved.');
+  }
+  return palette;
 }
 
 /**
@@ -111,8 +121,8 @@ export async function saveAsNewPalette(
 export async function updatePalette(
   id: string,
   updates: Partial<Pick<CustomPalette, 'name' | 'colors'>>
-): Promise<void> {
-  await palettePersistence.updatePalette(id, updates);
+): Promise<boolean> {
+  return palettePersistence.updatePalette(id, updates);
 }
 
 /**
@@ -126,7 +136,10 @@ export async function deletePalette(id: string): Promise<void> {
  * Rename a custom palette.
  */
 export async function renamePalette(id: string, newName: string): Promise<void> {
-  await palettePersistence.updatePalette(id, { name: newName.trim() });
+  const updated = await palettePersistence.updatePalette(id, { name: newName.trim() });
+  if (!updated) {
+    throw new Error('Palette could not be renamed.');
+  }
 }
 
 // ==========================================

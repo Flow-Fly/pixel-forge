@@ -29,9 +29,7 @@ class PalettePersistenceService {
    */
   async getAllPalettes(): Promise<StoredCustomPalette[]> {
     try {
-      const db = await this.dbPromise;
-      const palettes = await db.getAllFromIndex("palettes", "by-updated");
-      return palettes.reverse(); // Most recent first
+      return await this.getAllPalettesOrThrow();
     } catch (error) {
       log.error("Failed to load palettes from IndexedDB:", error);
       return [];
@@ -39,14 +37,25 @@ class PalettePersistenceService {
   }
 
   /**
+   * Get all custom palettes and expose storage failures to the caller.
+   */
+  async getAllPalettesOrThrow(): Promise<StoredCustomPalette[]> {
+    const db = await this.dbPromise;
+    const palettes = await db.getAllFromIndex("palettes", "by-updated");
+    return palettes.reverse(); // Most recent first
+  }
+
+  /**
    * Save a new palette or update existing
    */
-  async savePalette(palette: StoredCustomPalette): Promise<void> {
+  async savePalette(palette: StoredCustomPalette): Promise<boolean> {
     try {
       const db = await this.dbPromise;
       await db.put("palettes", palette);
+      return true;
     } catch (error) {
       log.error("Failed to save palette to IndexedDB:", error);
+      return false;
     }
   }
 
@@ -65,7 +74,7 @@ class PalettePersistenceService {
   /**
    * Update palette properties
    */
-  async updatePalette(id: string, updates: Partial<StoredCustomPalette>): Promise<void> {
+  async updatePalette(id: string, updates: Partial<StoredCustomPalette>): Promise<boolean> {
     try {
       const db = await this.dbPromise;
       const existing = await db.get("palettes", id);
@@ -75,9 +84,12 @@ class PalettePersistenceService {
           ...updates,
           updatedAt: Date.now(),
         });
+        return true;
       }
+      return false;
     } catch (error) {
       log.error("Failed to update palette in IndexedDB:", error);
+      return false;
     }
   }
 
