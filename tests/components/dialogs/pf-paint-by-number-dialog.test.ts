@@ -434,15 +434,51 @@ describe('pf-paint-by-number-dialog', () => {
       '#guided-long-side',
     )?.value).toBe('32');
     expect(element.shadowRoot?.querySelector('#source-preview')).toBeTruthy();
-    const status = element.shadowRoot?.querySelector('#guided-palette-status');
-    expect(status?.getAttribute('role')).toBe('status');
-    expect(status?.textContent).toContain('Palette saved and selected.');
     expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
       maxColors: undefined,
       palette: ['#0000ff', '#00ff00'],
       mapping: 'color',
       simplifyIsolatedPixels: true,
     });
+  });
+
+  it('announces confirmation after saving and selecting a palette', async () => {
+    const created = customPalette('new-palette', 'Saved palette', ['#000000']);
+    loadCustomPalettesOrThrowMock.mockResolvedValueOnce([]);
+    saveAsNewPaletteMock.mockResolvedValueOnce(created);
+    const element = await createDialog();
+    chooseFile(element, new File(['pixels'], 'source.png', { type: 'image/png' }));
+    await Promise.resolve();
+    await vi.runAllTimersAsync();
+    await selectPalette(element, 'create');
+
+    const name = element.shadowRoot?.querySelector<HTMLInputElement>('#guided-palette-name');
+    if (name) {
+      name.value = 'Saved palette';
+      name.dispatchEvent(new Event('input'));
+    }
+    element.shadowRoot
+      ?.querySelector<HTMLButtonElement>('button[form="palette-creation-form"]')
+      ?.click();
+    await settle(element);
+    await vi.runAllTimersAsync();
+    await settle(element);
+
+    const select = element.shadowRoot?.querySelector<HTMLSelectElement>(
+      '#guided-palette-source',
+    );
+    const status = element.shadowRoot?.querySelector('#guided-palette-status');
+    expect(saveAsNewPaletteMock).toHaveBeenCalledWith('Saved palette', ['#000000']);
+    expect(select?.value).toBe('custom:new-palette');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.textContent).toContain('Palette saved and selected.');
+    expect(generateNumberedGuideMock).toHaveBeenLastCalledWith(sampledImage, {
+      maxColors: undefined,
+      palette: ['#000000'],
+      mapping: 'color',
+      simplifyIsolatedPixels: true,
+    });
+    expect(element.shadowRoot?.activeElement).toBe(select);
   });
 
   it('announces save confirmation and adaptation for a 256-color palette', async () => {
