@@ -301,6 +301,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
   @state() private guide: NumberedGuide | null = null;
   @state() private longSide = 24;
   @state() private maxColors = 8;
+  @state() private isAdvancedOpen = false;
   @state() private paletteSource: GuidedPaletteSource = 'generated';
   @state() private selectedPalette = GENERATED_PALETTE_VALUE;
   @state() private restrictedPalette: string[] | undefined;
@@ -366,16 +367,23 @@ export class PFPaintByNumberDialog extends BaseComponent {
   private renderGuidedSetup() {
     return html`
       <form id="guided-project-form" @submit=${this.createProject}>
-        <label class="file-field" for="guided-source-file">
-          <span class="field-label">Source image</span>
+        <div class="file-field">
+          <label class="field-label" for="guided-source-file">Source image</label>
           <input
             id="guided-source-file"
             type="file"
             accept="image/png,image/jpeg,image/webp"
             @change=${this.handleFileChange}
           >
+          ${this.sourceFile
+            ? html`
+                <span id="guided-source-filename" class="local-note">
+                  Selected file: ${this.sourceFile.name}
+                </span>
+              `
+            : null}
           <span class="local-note">Processed locally. The source image is not uploaded.</span>
-        </label>
+        </div>
 
         <fieldset>
           <legend>Guide preset</legend>
@@ -399,7 +407,7 @@ export class PFPaintByNumberDialog extends BaseComponent {
           </div>
         </fieldset>
 
-        <details>
+        <details .open=${this.isAdvancedOpen} @toggle=${this.handleAdvancedToggle}>
           <summary>Advanced settings</summary>
           <div class="advanced-fields">
             <label class="field" for="guided-long-side">
@@ -697,6 +705,10 @@ export class PFPaintByNumberDialog extends BaseComponent {
   private handleMaxColorsChange = (event: Event) => {
     this.maxColors = clampNumber((event.currentTarget as HTMLInputElement).valueAsNumber, 2, 32, 8);
     this.schedulePreview();
+  };
+
+  private handleAdvancedToggle = (event: Event) => {
+    this.isAdvancedOpen = (event.currentTarget as HTMLDetailsElement).open;
   };
 
   private handlePaletteSelection = (event: Event) => {
