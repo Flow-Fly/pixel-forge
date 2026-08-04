@@ -1,4 +1,4 @@
-import { html } from 'lit';
+import { html, nothing } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { shouldPreserveNativeKeyboardBehavior } from '../../services/keyboard/native-keyboard-behavior';
@@ -12,6 +12,7 @@ import './pf-reference-transform-handles';
 import './pf-text-input';
 import './pf-ruler';
 import './pf-guides-overlay';
+import './pf-angled-guides-prototype';
 
 import {
   viewportStyles,
@@ -194,6 +195,12 @@ export class PFCanvasViewport extends BaseComponent {
       ></pf-transform-handles>
       <pf-text-input></pf-text-input>
       <pf-guides-overlay></pf-guides-overlay>
+      ${
+        import.meta.env.DEV &&
+        new URLSearchParams(window.location.search).get('prototype') === 'angled-guides'
+          ? html`<pf-angled-guides-prototype></pf-angled-guides-prototype>`
+          : nothing
+      }
       <div class="ruler-corner"></div>
       <pf-ruler orientation="horizontal"></pf-ruler>
       <pf-ruler orientation="vertical"></pf-ruler>
