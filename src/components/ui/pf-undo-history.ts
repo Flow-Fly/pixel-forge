@@ -6,6 +6,7 @@ import { isDrawableCommand } from '../../commands/index';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import { scrollbarStyles } from '../../styles/scrollbar-styles';
 import './pf-history-diff-tooltip';
+import './pf-history-prototype';
 import './pf-button';
 
 @customElement('pf-undo-history')
@@ -393,6 +394,11 @@ export class PFUndoHistory extends BaseComponent {
   }
 
   render() {
+    const prototypeName = new URLSearchParams(window.location.search).get('prototype');
+    if (import.meta.env.DEV && prototypeName === 'history') {
+      return html`<pf-history-prototype></pf-history-prototype>`;
+    }
+
     const undoStack = this.context.history.undoStack.value;
     const redoStack = this.context.history.redoStack.value;
     const highlightedId = this.context.historyHighlight.highlightedCommandId.value;
