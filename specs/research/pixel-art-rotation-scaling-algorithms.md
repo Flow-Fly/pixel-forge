@@ -1,8 +1,11 @@
 # Pixel-art rotation and scaling algorithms
 
-**Status:** Research decision for [issue #435](https://github.com/Flow-Fly/pixel-forge/issues/435)  
-**Map:** [Pixel Forge 1.0 trustworthy creative editor and automation plan](https://github.com/Flow-Fly/pixel-forge/issues/432)  
-**Investigated:** 2026-08-04  
+**Status:** Research decision for [issue #435](https://github.com/Flow-Fly/pixel-forge/issues/435)
+
+**Map:** [Pixel Forge 1.0 trustworthy creative editor and automation plan](https://github.com/Flow-Fly/pixel-forge/issues/432)
+
+**Investigated:** 2026-08-04
+
 **Pixel Forge baseline:** [`origin/develop` at `d737ac4`](https://github.com/Flow-Fly/pixel-forge/tree/d737ac42e8a5319ac88e1fdfa3e1de4b620dc10c)
 
 ## Decision
