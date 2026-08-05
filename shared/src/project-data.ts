@@ -1,11 +1,17 @@
-import type { LegacyProjectImageData, ProjectFile, ProjectFileInput } from './project.js';
+import type {
+  LegacyProjectImageData,
+  NormalizedProjectFileInput,
+  ProjectFileInput,
+} from './project.js';
 
 declare function atob(data: string): string;
 
 const LEGACY_BASE64_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?|[A-Za-z0-9+/]{4})?$/;
 
-export function normalizeProjectFileImageData(file: ProjectFileInput): ProjectFile {
+export function normalizeProjectFileImageData(
+  file: ProjectFileInput
+): NormalizedProjectFileInput {
   return {
     ...file,
     layers: file.layers.map((layer) => ({

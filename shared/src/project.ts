@@ -6,9 +6,10 @@
  *
  * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added
  * `layers[].continuous`, 4.0.0 removed `ephemeralPalette` and added reference
- * layer data, and 4.1.0 added optional guided drawing sessions.
+ * layer data, 4.1.0 added optional guided drawing sessions, and 4.2.0 added
+ * persisted layer type, lock, parent, and cel opacity state.
  */
-export const PROJECT_VERSION = '4.1.0';
+export const PROJECT_VERSION = '4.2.0';
 export const GUIDED_DRAWING_VERSION = 1;
 
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
@@ -75,11 +76,13 @@ export interface GuidedDrawingSessionFile {
 export interface ProjectLayerFile {
   id: string;
   name: string;
-  type?: LayerType;
+  type: LayerType;
   visible: boolean;
+  locked: boolean;
   opacity: number;
   blendMode?: BlendMode;
   continuous?: boolean;
+  parentId: string | null;
   data: ProjectImageData;
   textData?: TextLayerData;
   referenceData?: ReferenceLayerData;
@@ -88,6 +91,7 @@ export interface ProjectLayerFile {
 export interface ProjectCelFile {
   layerId: string;
   data: ProjectImageData;
+  opacity: number;
   indexData?: number[];
   linkedCelId?: string;
   linkType?: CelLinkType;
@@ -116,15 +120,22 @@ export interface ProjectFile {
   guidedDrawing?: GuidedDrawingSessionFile;
 }
 
-export type ProjectLayerFileInput = Omit<ProjectLayerFile, 'data'> & {
+export type ProjectLayerFileInput = Omit<
+  ProjectLayerFile,
+  'data' | 'type' | 'locked' | 'parentId'
+> & {
   data: LegacyProjectImageData;
+  type?: LayerType;
+  locked?: boolean;
+  parentId?: string | null;
   referenceData?: Omit<ReferenceLayerData, 'bytes'> & {
     bytes: LegacyProjectImageData;
   };
 };
 
-export type ProjectCelFileInput = Omit<ProjectCelFile, 'data'> & {
+export type ProjectCelFileInput = Omit<ProjectCelFile, 'data' | 'opacity'> & {
   data: LegacyProjectImageData;
+  opacity?: number;
 };
 
 export type ProjectFrameFileInput = Omit<ProjectFrameFile, 'cels'> & {
@@ -137,6 +148,32 @@ export type ProjectFileInput = Omit<ProjectFile, 'layers' | 'frames'> & {
   frames: ProjectFrameFileInput[];
 };
 
-export type LegacyProjectFile = ProjectFile & {
-  ephemeralPalette?: string[];
+export type NormalizedProjectLayerFileInput = Omit<
+  ProjectLayerFileInput,
+  'data' | 'referenceData'
+> & {
+  data: ProjectImageData;
+  referenceData?: ReferenceLayerData;
 };
+
+export type NormalizedProjectCelFileInput = Omit<ProjectCelFileInput, 'data'> & {
+  data: ProjectImageData;
+};
+
+export type NormalizedProjectFrameFileInput = Omit<ProjectFrameFileInput, 'cels'> & {
+  cels: NormalizedProjectCelFileInput[];
+};
+
+export type NormalizedProjectFileInput = Omit<ProjectFileInput, 'layers' | 'frames'> & {
+  layers: NormalizedProjectLayerFileInput[];
+  frames: NormalizedProjectFrameFileInput[];
+};
+
+export interface ProjectCompatibilityDiagnostics {
+  repairedParentLayerIds: string[];
+}
+
+export interface ProjectFileDecodeResult {
+  project: ProjectFile;
+  compatibility: ProjectCompatibilityDiagnostics;
+}

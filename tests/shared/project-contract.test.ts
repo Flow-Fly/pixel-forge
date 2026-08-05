@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { PROJECT_VERSION, decodeProjectFile, type ProjectFile } from '../../shared/src/index';
+import {
+  PROJECT_VERSION,
+  decodeProjectFile,
+  decodeProjectFileWithDiagnostics,
+  type ProjectFile,
+} from '../../shared/src/index';
 
 function completeProject(): ProjectFile {
   return {
@@ -14,9 +19,11 @@ function completeProject(): ProjectFile {
         name: 'Paint',
         type: 'image',
         visible: true,
+        locked: true,
         opacity: 255,
         blendMode: 'normal',
         continuous: false,
+        parentId: null,
         data: Uint8Array.from([1, 2, 3]),
       },
       {
@@ -24,7 +31,9 @@ function completeProject(): ProjectFile {
         name: 'Reference',
         type: 'reference',
         visible: true,
+        locked: false,
         opacity: 128,
+        parentId: null,
         data: new Uint8Array(0),
         referenceData: {
           bytes: Uint8Array.from([4, 5, 6]),
@@ -45,6 +54,7 @@ function completeProject(): ProjectFile {
           {
             layerId: 'paint',
             data: Uint8Array.from([7, 8, 9]),
+            opacity: 40,
             indexData: [1, 0, 2, 1],
             linkedCelId: 'linked-1',
             linkType: 'hard',
@@ -102,8 +112,14 @@ describe('shared ProjectFile contract', () => {
       height: 2,
     });
     expect(decoded.layers[0].data).toEqual(Uint8Array.from([1, 2, 3]));
+    expect(decoded.layers[0]).toMatchObject({
+      type: 'image',
+      locked: true,
+      parentId: null,
+    });
     expect(decoded.layers[1].referenceData?.bytes).toEqual(Uint8Array.from([4, 5, 6]));
     expect(decoded.frames[0].cels[0].data).toEqual(Uint8Array.from([7, 8, 9]));
+    expect(decoded.frames[0].cels[0].opacity).toBe(40);
   });
 
   // Regression: #425
@@ -177,10 +193,125 @@ describe('shared ProjectFile contract', () => {
 
     const decoded = decodeProjectFile(legacy);
 
-    expect(PROJECT_VERSION).toBe('4.1.0');
+    expect(PROJECT_VERSION).toBe('4.2.0');
     expect(decoded.version).toBe('3.2.0');
     expect(decoded.palette).toEqual(['#000000', '#ffffff', '#123456']);
     expect(decoded.frames[0].cels[0].indexData).toEqual([2, 3, 0, 1]);
     expect(decoded).not.toHaveProperty('ephemeralPalette');
+  });
+
+  it('migrates missing 4.1.0 editing fields without a compatibility repair', () => {
+    const legacy = serializedProject();
+    legacy.version = '4.1.0';
+    const layers = legacy.layers as Array<Record<string, unknown>>;
+    const cels = ((legacy.frames as Array<Record<string, unknown>>)[0].cels ?? []) as Array<
+      Record<string, unknown>
+    >;
+    delete layers[0].type;
+    delete layers[0].locked;
+    delete layers[0].parentId;
+    delete cels[0].opacity;
+
+    const result = decodeProjectFileWithDiagnostics(legacy);
+
+    expect(result.project.layers[0]).toMatchObject({
+      type: 'image',
+      locked: false,
+      parentId: null,
+    });
+    expect(result.project.frames[0].cels[0].opacity).toBe(100);
+    expect(result.compatibility.repairedParentLayerIds).toEqual([]);
+  });
+
+  it('preserves valid stored hierarchy and repairs invalid parent edges in stored order', () => {
+    const project = completeProject();
+    project.layers = [
+      {
+        ...project.layers[0],
+        id: 'child',
+        parentId: 'parent',
+      },
+      {
+        ...project.layers[0],
+        id: 'parent',
+        type: 'group',
+        parentId: 'child',
+      },
+      {
+        ...project.layers[0],
+        id: 'nested',
+        parentId: 'parent',
+      },
+      {
+        ...project.layers[0],
+        id: 'unknown',
+        parentId: 'missing',
+      },
+      {
+        ...project.layers[0],
+        id: 'non-group-child',
+        parentId: 'nested',
+      },
+      {
+        ...project.layers[0],
+        id: 'self',
+        parentId: 'self',
+      },
+    ];
+    project.frames[0].cels = project.layers.map((layer) => ({
+      ...project.frames[0].cels[0],
+      layerId: layer.id,
+    }));
+
+    const result = decodeProjectFileWithDiagnostics(project);
+
+    expect(result.project.layers.map((layer) => layer.id)).toEqual([
+      'child',
+      'parent',
+      'nested',
+      'unknown',
+      'non-group-child',
+      'self',
+    ]);
+    expect(result.project.layers.map((layer) => layer.parentId)).toEqual([
+      'parent',
+      null,
+      'parent',
+      null,
+      null,
+      null,
+    ]);
+    expect(result.compatibility.repairedParentLayerIds).toEqual([
+      'parent',
+      'unknown',
+      'non-group-child',
+      'self',
+    ]);
+  });
+
+  it('rejects invalid provided lock, parent, and cel opacity values', () => {
+    const invalidLock = serializedProject();
+    const invalidParent = serializedProject();
+    const invalidOpacity = serializedProject();
+    (invalidLock.layers as Array<Record<string, unknown>>)[0].locked = 'yes';
+    (invalidParent.layers as Array<Record<string, unknown>>)[0].parentId = '';
+    (((invalidOpacity.frames as Array<Record<string, unknown>>)[0].cels ?? []) as Array<
+      Record<string, unknown>
+    >)[0].opacity = 101;
+
+    expect(() => decodeProjectFile(invalidLock)).toThrow('layer lock is invalid');
+    expect(() => decodeProjectFile(invalidParent)).toThrow('layer parent is invalid');
+    expect(() => decodeProjectFile(invalidOpacity)).toThrow('cel opacity is invalid');
+  });
+
+  it('reaches a stable decoded project after a hierarchy repair', () => {
+    const malformed = completeProject();
+    malformed.layers[0].parentId = malformed.layers[0].id;
+
+    const once = decodeProjectFileWithDiagnostics(malformed);
+    const twice = decodeProjectFileWithDiagnostics(once.project);
+
+    expect(twice.project).toEqual(once.project);
+    expect(twice.compatibility.repairedParentLayerIds).toEqual([]);
   });
 });
