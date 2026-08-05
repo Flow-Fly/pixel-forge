@@ -395,6 +395,20 @@ describe('shared ProjectFile contract', () => {
     expect(
       legacy.project.frames.flatMap((frame) => frame.cels).every((cel) => cel.opacity === 100)
     ).toBe(true);
+    // The exact 4.1 writer at d737ac42e8a5319ac88e1fdfa3e1de4b620dc10c
+    // serialized each non-reference layer for every frame. When a group was
+    // created after the stored frames, it had no layer canvas and emitted an
+    // empty cel per frame. Keep this archive shape as compatibility evidence.
+    expect(Array.from(legacy.project.layers[0].data)).toEqual([]);
+    expect(
+      legacy.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'))
+    ).toEqual([
+      expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+      expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+    ]);
+    expect(
+      legacy.project.frames.flatMap((frame) => frame.cels).some((cel) => cel.layerId === 'reference')
+    ).toBe(false);
     expect(legacy.compatibility.repairedParentLayerIds).toEqual([]);
 
     expect(current.project.version).toBe('4.2.0');
@@ -408,7 +422,7 @@ describe('shared ProjectFile contract', () => {
     expect(Array.from(current.project.layers[3].referenceData?.bytes ?? [])).toEqual(
       FIXTURE_PNG_BYTES
     );
-    expect(current.project.frames.map((frame) => frame.cels[0])).toEqual([
+    expect(current.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'paint'))).toEqual([
       expect.objectContaining({ opacity: 45, indexData: [1], linkedCelId: 'walk-link' }),
       expect.objectContaining({ opacity: 45, indexData: [1], linkedCelId: 'walk-link' }),
     ]);

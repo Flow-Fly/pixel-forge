@@ -27,6 +27,7 @@ import {
 import { log } from '../utils/log';
 import type { Frame } from '../types/animation';
 import type { Layer } from '../types/layer';
+import { EMPTY_CEL_LINK_ID } from './animation/types';
 import type { createAnimationStore } from './animation/store';
 import type { createDirtyRectStore } from './dirty-rect-store';
 import type { createHistoryStore } from './history-store';
@@ -55,7 +56,7 @@ export interface ProjectStoreDependencies {
 }
 
 function layerSerializesCels(layer: Layer): boolean {
-  return layer.type === 'image' || layer.type === 'text';
+  return layer.type !== 'reference';
 }
 
 async function serializeCelForLayer(
@@ -80,8 +81,10 @@ async function serializeCelForLayer(
     opacity: cel.opacity ?? 100,
   };
 
-  if (cel.linkedCelId) celFile.linkedCelId = cel.linkedCelId;
-  if (cel.linkType) celFile.linkType = cel.linkType;
+  if (cel.linkedCelId && cel.linkedCelId !== EMPTY_CEL_LINK_ID) {
+    celFile.linkedCelId = cel.linkedCelId;
+    if (cel.linkType) celFile.linkType = cel.linkType;
+  }
   if (cel.indexBuffer) celFile.indexData = Array.from(cel.indexBuffer);
 
   const textCelData = animation.getTextCelData(layer.id, frame.id);

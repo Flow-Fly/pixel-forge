@@ -253,21 +253,37 @@ describe('project save -> load -> save round-trip (structural)', () => {
       expect(source.version).toBe(sourceVersion);
       expect(saved.version).toBe(PROJECT_VERSION);
       expect(normalizeRoundTripFile(reloaded)).toEqual(normalizeRoundTripFile(saved));
-
+      expect(saved.frames.map((frame) => frame.cels.map((cel) => cel.layerId))).toEqual(
+        source.frames.map((frame) => frame.cels.map((cel) => cel.layerId))
+      );
       expect(
         reloaded.layers.map((layer) => ({
           id: layer.id,
           type: layer.type,
           locked: layer.locked,
           parentId: layer.parentId,
+          data: Array.from(layer.data),
+          textData: layer.textData,
+          referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
         }))
       ).toEqual(
-        source.layers.map((layer) => ({
-          id: layer.id,
-          type: layer.type,
-          locked: layer.locked,
-          parentId: layer.parentId,
-        }))
+        source.layers.map((layer) => {
+          const savedLayer = saved.layers.find((candidate) => candidate.id === layer.id);
+          const data =
+            sourceVersion === '4.1.0' && layer.type === 'group'
+              ? (savedLayer?.data ?? layer.data)
+              : layer.data;
+
+          return {
+            id: layer.id,
+            type: layer.type,
+            locked: layer.locked,
+            parentId: layer.parentId,
+            data: Array.from(data),
+            textData: layer.textData,
+            referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
+          };
+        })
       );
       expect(hydratedIndexData).toEqual(
         sourceCelsWithIndexData.map((cel) => ({
@@ -280,36 +296,47 @@ describe('project save -> load -> save round-trip (structural)', () => {
           .flatMap((frame) => frame.cels)
           .map((cel) => ({
             layerId: cel.layerId,
+            data: Array.from(cel.data),
             opacity: cel.opacity,
             linkType: cel.linkType,
+            textCelData: cel.textCelData,
           }))
       ).toEqual(
         source.frames
-          .flatMap((frame) => frame.cels)
-          .map((cel) => ({
-            layerId: cel.layerId,
-            opacity: cel.opacity,
-            linkType: cel.linkType,
-          }))
+          .flatMap((frame, frameIndex) =>
+            frame.cels.map((cel) => {
+              const savedCel = saved.frames[frameIndex]?.cels.find(
+                (candidate) => candidate.layerId === cel.layerId
+              );
+              const expectedCel =
+                sourceVersion === '4.1.0' && cel.layerId === 'group' && savedCel
+                  ? savedCel
+                  : cel;
+
+              return {
+                layerId: expectedCel.layerId,
+                data: Array.from(expectedCel.data),
+                opacity: expectedCel.opacity,
+                linkType: expectedCel.linkType,
+                textCelData: expectedCel.textCelData,
+              };
+            })
+          )
       );
       expect(reloaded.palette).toEqual(source.palette);
       expect(reloaded.tags).toEqual(source.tags);
       expect(reloaded.guidedDrawing).toEqual(source.guidedDrawing);
-      expect(
-        reloaded.layers
-          .filter((layer) => layer.type !== 'group')
-          .map((layer) => Array.from(layer.data))
-      ).toEqual(
-        source.layers
-          .filter((layer) => layer.type !== 'group')
-          .map((layer) => Array.from(layer.data))
-      );
-      expect(
-        reloaded.frames.flatMap((frame) => frame.cels).map((cel) => Array.from(cel.data))
-      ).toEqual(source.frames.flatMap((frame) => frame.cels).map((cel) => Array.from(cel.data)));
-      expect(reloaded.layers.map((layer) => Array.from(layer.referenceData?.bytes ?? []))).toEqual(
-        source.layers.map((layer) => Array.from(layer.referenceData?.bytes ?? []))
-      );
+
+      if (sourceVersion === '4.1.0') {
+        const legacyGroup = source.layers.find((layer) => layer.id === 'group');
+        expect(Array.from(legacyGroup?.data ?? [])).toEqual([]);
+        expect(source.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'))).toEqual(
+          [
+            expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+            expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+          ]
+        );
+      }
     }
   );
 
