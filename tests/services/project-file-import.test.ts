@@ -121,14 +121,13 @@ describe('ProjectFileImportService', () => {
 
     await service.importFile(new File([bytes], 'current-4.2.pf'));
 
-    expect(deps.projectLibrary.importProjectFile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        version: '4.2.0',
-        layers: expect.arrayContaining([
-          expect.objectContaining({ id: 'paint', type: 'image', locked: true, parentId: 'group' }),
-        ]),
-      })
-    );
+    const [importedProject] = vi.mocked(deps.projectLibrary.importProjectFile).mock.calls[0];
+    const group = importedProject.layers.find((layer) => layer.type === 'group');
+    const paint = importedProject.layers.find((layer) => layer.name === 'Paint');
+    if (!group || !paint) throw new Error('Expected group and paint layers in the current fixture');
+
+    expect(importedProject.version).toBe('4.2.0');
+    expect(paint).toMatchObject({ type: 'image', locked: true, parentId: group.id });
   });
 
   it('shows one bounded local warning when an imported hierarchy is repaired', async () => {
