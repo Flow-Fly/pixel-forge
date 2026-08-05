@@ -74,6 +74,7 @@ type LinkedCelGroup = {
 // Keep this boundary free of store imports; this mirrors the animation store
 // marker for shared transparent cels.
 const EMPTY_CEL_LINK_ID = '__empty__';
+const COMPATIBILITY_WARNING_LAYER_LIMIT = 3;
 
 export function restoreProjectPaletteForLoad(stores: ProjectLoadStores, file: ProjectFile): void {
   const { palette } = stores;
@@ -161,8 +162,8 @@ function describeProjectCompatibilityWarning(
   const repairedLayerIds = diagnostics.repairedParentLayerIds;
   if (repairedLayerIds.length === 0) return null;
 
-  const visibleLayerIds = repairedLayerIds.slice(0, 3).join(', ');
-  const hiddenCount = repairedLayerIds.length - 3;
+  const visibleLayerIds = repairedLayerIds.slice(0, COMPATIBILITY_WARNING_LAYER_LIMIT).join(', ');
+  const hiddenCount = repairedLayerIds.length - COMPATIBILITY_WARNING_LAYER_LIMIT;
   const remaining = hiddenCount > 0 ? `, and ${hiddenCount} more` : '';
   return `Repaired invalid group links for layers: ${visibleLayerIds}${remaining}.`;
 }
@@ -182,7 +183,7 @@ async function hydrateProjectLayer(
   height: number
 ): Promise<void> {
   const { layers } = stores;
-  const layerType = layerFile.type || 'image';
+  const layerType = layerFile.type;
   const layer = createLoadedLayer(stores, layerFile, layerType, width, height);
 
   layers.updateLayer(layer.id, {
