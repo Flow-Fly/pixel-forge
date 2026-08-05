@@ -46,9 +46,7 @@ function expectReferenceLayer(file: ProjectFile, layerId: string): void {
   const referenceLayer = file.layers.find((layer) => layer.id === layerId);
 
   expect(referenceLayer?.type).toBe('reference');
-  expect(Array.from(referenceLayer?.referenceData?.bytes ?? [])).toEqual([
-    1, 2, 3, 4,
-  ]);
+  expect(Array.from(referenceLayer?.referenceData?.bytes ?? [])).toEqual([1, 2, 3, 4]);
   expect(referenceLayer?.referenceData).toMatchObject({
     mimeType: 'image/png',
     x: 1.5,
@@ -188,6 +186,68 @@ describe('project save -> load -> save round-trip (structural)', () => {
       };
     };
     expect(normalize(twice)).toEqual(normalize(once));
+  });
+
+  it('round-trips layer locks, groups, parent links, and cel opacity', async () => {
+    const body = layerStore.layers.value[0];
+    const shading = layerStore.addLayer('Shading', 16, 12);
+    const groupId = layerStore.createGroup([body.id, shading.id], 'Character');
+    if (!groupId) throw new Error('Expected the character group to be created');
+
+    layerStore.updateLayer(body.id, { locked: true });
+    const frameId = animationStore.frames.value[0].id;
+    const bodyCelKey = animationStore.getCelKey(body.id, frameId);
+    animationStore.setCelOpacity([bodyCelKey], 35);
+
+    const saved = await projectStore.saveProject();
+    await projectStore.loadProject(structuredClone(saved), false);
+    const resaved = await projectStore.saveProject();
+
+    expect(
+      resaved.layers.map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+        locked: layer.locked,
+        parentId: layer.parentId,
+      }))
+    ).toEqual(
+      saved.layers.map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+        locked: layer.locked,
+        parentId: layer.parentId,
+      }))
+    );
+    expect(resaved.frames[0].cels.find((cel) => cel.layerId === body.id)?.opacity).toBe(35);
+  });
+
+  it('warns once after repairing an IndexedDB hierarchy without warning for legacy defaults', async () => {
+    const saved = await buildSampleProject();
+    const malformed = structuredClone(saved);
+    malformed.layers[0].parentId = malformed.layers[0].id;
+    const warningListener = vi.fn();
+    window.addEventListener('show-warning-toast', warningListener);
+
+    try {
+      await projectStore.loadProject(malformed, false);
+      expect(warningListener).toHaveBeenCalledOnce();
+      expect(warningListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: {
+            message: `Repaired invalid group links for layers: ${malformed.layers[0].id}.`,
+          },
+        })
+      );
+
+      const legacy = structuredClone(saved) as ProjectFileInput;
+      delete legacy.layers[0].locked;
+      delete legacy.layers[0].parentId;
+      delete legacy.frames[0].cels[0].opacity;
+      await projectStore.loadProject(legacy, false);
+      expect(warningListener).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('show-warning-toast', warningListener);
+    }
   });
 
   it('drops every cel from the previous drawing when loading another project', async () => {
@@ -359,12 +419,8 @@ describe('project save -> load -> save round-trip (structural)', () => {
     await vi.runAllTimersAsync();
     vi.useRealTimers();
 
-    expect(guidedDrawingStore.session.value?.target).toEqual(
-      new Uint8Array([1, 2, 0, 1]),
-    );
-    expect((await projectStore.saveProject()).guidedDrawing).toEqual(
-      withGuide.guidedDrawing,
-    );
+    expect(guidedDrawingStore.session.value?.target).toEqual(new Uint8Array([1, 2, 0, 1]));
+    expect((await projectStore.saveProject()).guidedDrawing).toEqual(withGuide.guidedDrawing);
 
     await projectStore.loadProject(saved, false);
     expect(guidedDrawingStore.active).toBe(false);
@@ -396,9 +452,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     const resaved = await projectStore.saveProject();
     vi.useRealTimers();
 
-    const resavedReference = resaved.layers.find(
-      (layer) => layer.id === referenceLayer.id
-    );
+    const resavedReference = resaved.layers.find((layer) => layer.id === referenceLayer.id);
     expect(resavedReference?.id).toBe(referenceLayer.id);
     expectReferenceLayer(resaved, referenceLayer.id);
     expectNoFrameCelsForLayer(resaved, referenceLayer.id);

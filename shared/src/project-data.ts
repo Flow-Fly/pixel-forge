@@ -9,9 +9,7 @@ declare function atob(data: string): string;
 const LEGACY_BASE64_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?|[A-Za-z0-9+/]{4})?$/;
 
-export function normalizeProjectFileImageData(
-  file: ProjectFileInput
-): NormalizedProjectFileInput {
+export function normalizeProjectFileImageData(file: ProjectFileInput): NormalizedProjectFileInput {
   return {
     ...file,
     layers: file.layers.map((layer) => ({
@@ -95,9 +93,7 @@ function getBase64Payload(data: string): string {
   }
 
   const metadataTokens = data.slice(5, commaIndex).split(';');
-  const hasBase64Token = metadataTokens
-    .slice(1)
-    .some((token) => token.toLowerCase() === 'base64');
+  const hasBase64Token = metadataTokens.slice(1).some((token) => token.toLowerCase() === 'base64');
   if (!hasBase64Token) {
     throw new TypeError('Unsupported legacy image data URL: expected base64');
   }

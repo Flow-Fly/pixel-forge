@@ -33,10 +33,10 @@ import { projectStore } from '../../src/stores/project';
 import { layerStore } from '../../src/stores/layers';
 
 describe('project file format version', () => {
-  it('is in sync with the newest schema fields (4.1.0 = guided drawing)', () => {
+  it('is in sync with the newest schema fields (4.2.0 = editing state)', () => {
     // If this fails, the ProjectFile schema changed without bumping
     // PROJECT_VERSION — bump it in the same PR (see src/types/project.ts).
-    expect(PROJECT_VERSION).toBe('4.1.0');
+    expect(PROJECT_VERSION).toBe('4.2.0');
   });
 
   it('stamps saved projects with PROJECT_VERSION and serializes current-format fields', async () => {
@@ -55,6 +55,13 @@ describe('project file format version', () => {
     expect(file.layers.length).toBeGreaterThan(0);
     for (const layer of file.layers) {
       expect(layer).toHaveProperty('continuous');
+      expect(layer).toHaveProperty('locked');
+      expect(layer).toHaveProperty('parentId');
+    }
+    for (const frame of file.frames) {
+      for (const cel of frame.cels) {
+        expect(cel).toHaveProperty('opacity');
+      }
     }
   });
 });

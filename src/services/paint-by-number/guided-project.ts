@@ -1,10 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeProjectName } from '../project-defaults';
 import { workspaceStore, type WorkspaceProjectOptions } from '../../stores/workspace';
-import {
-  GUIDED_DRAWING_VERSION,
-  type GuidedDrawingSettings,
-} from '../../types/guided-drawing';
+import { GUIDED_DRAWING_VERSION, type GuidedDrawingSettings } from '../../types/guided-drawing';
 import { PROJECT_VERSION, type ProjectFile } from '../../types/project';
 import type { NumberedGuide } from './guide-generator';
 import { productTelemetry, type TelemetryClient } from '../telemetry';
@@ -20,7 +17,7 @@ export interface GuidedProjectInput {
 interface GuidedProjectWorkspace {
   createProjectFromFile(
     project: ProjectFile,
-    options?: WorkspaceProjectOptions,
+    options?: WorkspaceProjectOptions
   ): ReturnType<typeof workspaceStore.createProjectFromFile>;
 }
 
@@ -43,9 +40,11 @@ export function createGuidedProjectFile(input: GuidedProjectInput): ProjectFile 
         name: 'Painting',
         type: 'image',
         visible: true,
+        locked: false,
         opacity: 255,
         blendMode: 'normal',
         continuous: false,
+        parentId: null,
         data: new Uint8Array(0),
       },
     ],
@@ -57,6 +56,7 @@ export function createGuidedProjectFile(input: GuidedProjectInput): ProjectFile 
           {
             layerId,
             data: new Uint8Array(0),
+            opacity: 100,
             indexData: Array.from(new Uint8Array(guide.width * guide.height)),
           },
         ],
@@ -84,7 +84,7 @@ export async function createGuidedProject(
   input: GuidedProjectInput,
   options: WorkspaceProjectOptions = {},
   workspace: GuidedProjectWorkspace = workspaceStore,
-  telemetry: TelemetryClient = productTelemetry,
+  telemetry: TelemetryClient = productTelemetry
 ) {
   const result = await workspace.createProjectFromFile(createGuidedProjectFile(input), {
     activate: options.activate ?? true,
@@ -120,9 +120,7 @@ function validateGuide(guide: NumberedGuide): void {
 function cloneSettings(settings: GuidedDrawingSettings): GuidedDrawingSettings {
   return {
     ...settings,
-    restrictedPalette: settings.restrictedPalette
-      ? [...settings.restrictedPalette]
-      : undefined,
+    restrictedPalette: settings.restrictedPalette ? [...settings.restrictedPalette] : undefined,
   };
 }
 

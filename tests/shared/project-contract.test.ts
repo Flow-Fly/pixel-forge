@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
+import pako from 'pako';
 import {
   PROJECT_VERSION,
   decodeProjectFile,
@@ -98,6 +101,23 @@ function completeProject(): ProjectFile {
 function serializedProject(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(completeProject())) as Record<string, unknown>;
 }
+
+async function readProjectFixture(filename: string): Promise<Record<string, unknown>> {
+  const repositoryRoot =
+    basename(process.cwd()) === 'shared' ? resolve(process.cwd(), '..') : process.cwd();
+  const encoded = await readFile(
+    resolve(repositoryRoot, 'tests/fixtures/project-files', filename),
+    'utf8'
+  );
+  const compressed = Uint8Array.from(Buffer.from(encoded.trim(), 'base64'));
+  return JSON.parse(pako.inflate(compressed, { to: 'string' })) as Record<string, unknown>;
+}
+
+const FIXTURE_PNG_BYTES = [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4, 0, 0,
+  0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 252, 255, 31, 0, 2, 235, 1, 245,
+  105, 120, 93, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
 
 describe('shared ProjectFile contract', () => {
   it('decodes a complete current project and restores serialized bytes', () => {
@@ -295,9 +315,11 @@ describe('shared ProjectFile contract', () => {
     const invalidOpacity = serializedProject();
     (invalidLock.layers as Array<Record<string, unknown>>)[0].locked = 'yes';
     (invalidParent.layers as Array<Record<string, unknown>>)[0].parentId = '';
-    (((invalidOpacity.frames as Array<Record<string, unknown>>)[0].cels ?? []) as Array<
-      Record<string, unknown>
-    >)[0].opacity = 101;
+    (
+      ((invalidOpacity.frames as Array<Record<string, unknown>>)[0].cels ?? []) as Array<
+        Record<string, unknown>
+      >
+    )[0].opacity = 101;
 
     expect(() => decodeProjectFile(invalidLock)).toThrow('layer lock is invalid');
     expect(() => decodeProjectFile(invalidParent)).toThrow('layer parent is invalid');
@@ -313,5 +335,51 @@ describe('shared ProjectFile contract', () => {
 
     expect(twice.project).toEqual(once.project);
     expect(twice.compatibility.repairedParentLayerIds).toEqual([]);
+  });
+
+  it('reads checked-in 4.1 and 4.2 .pf byte fixtures without losing editing state', async () => {
+    const legacy = decodeProjectFileWithDiagnostics(
+      await readProjectFixture('legacy-4.1.pf.base64')
+    );
+    const current = decodeProjectFileWithDiagnostics(
+      await readProjectFixture('current-4.2.pf.base64')
+    );
+
+    expect(legacy.project.version).toBe('4.1.0');
+    expect(legacy.project.layers.map((layer) => layer.type)).toEqual([
+      'group',
+      'image',
+      'text',
+      'reference',
+    ]);
+    expect(legacy.project.layers.every((layer) => layer.locked === false)).toBe(true);
+    expect(legacy.project.layers.every((layer) => layer.parentId === null)).toBe(true);
+    expect(
+      legacy.project.frames.flatMap((frame) => frame.cels).every((cel) => cel.opacity === 100)
+    ).toBe(true);
+    expect(legacy.compatibility.repairedParentLayerIds).toEqual([]);
+
+    expect(current.project.version).toBe('4.2.0');
+    expect(current.project.layers[1]).toMatchObject({
+      id: 'paint',
+      type: 'image',
+      locked: true,
+      parentId: 'group',
+    });
+    expect(Array.from(current.project.layers[1].data)).toEqual(FIXTURE_PNG_BYTES);
+    expect(Array.from(current.project.layers[3].referenceData?.bytes ?? [])).toEqual(
+      FIXTURE_PNG_BYTES
+    );
+    expect(current.project.frames.map((frame) => frame.cels[0])).toEqual([
+      expect.objectContaining({ opacity: 45, indexData: [1], linkedCelId: 'walk-link' }),
+      expect.objectContaining({ opacity: 45, indexData: [1], linkedCelId: 'walk-link' }),
+    ]);
+    expect(current.project.tags?.[0]).toMatchObject({
+      id: 'walk',
+      startFrameIndex: 0,
+      endFrameIndex: 1,
+    });
+    expect(current.project.guidedDrawing).toMatchObject({ sourceName: 'guide.png', target: [1] });
+    expect(current.compatibility.repairedParentLayerIds).toEqual([]);
   });
 });

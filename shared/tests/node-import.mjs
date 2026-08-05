@@ -30,7 +30,7 @@ const project = decodeProjectFile({
 
 assert.equal(project.version, '4.2.0');
 assert.deepEqual(project.layers[0].data, Uint8Array.from([1]));
-assert.deepEqual(
-  parseProductEvent({ name: 'playback_started', dimensions: {} }),
-  { name: 'playback_started', dimensions: {} }
-);
+assert.deepEqual(parseProductEvent({ name: 'playback_started', dimensions: {} }), {
+  name: 'playback_started',
+  dimensions: {},
+});

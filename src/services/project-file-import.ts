@@ -1,4 +1,9 @@
-import type { ProjectFileInput } from '../types/project';
+import {
+  decodeProjectFileWithDiagnostics,
+  type ProjectFileDecodeResult,
+  type ProjectFileInput,
+} from '../types/project';
+import { dispatchProjectCompatibilityWarning } from '../serialization/project-load';
 import { projectLibrary, type ProjectLibraryService } from './project-library';
 import { workspaceStore, type WorkspaceStore } from '../stores/workspace';
 import { createProjectContext } from '../stores/project-context';
@@ -43,8 +48,8 @@ export class ProjectFileImportService {
   }
 
   async importFile(file: File): Promise<ProjectFileImportResult> {
-    const project = await this.decodeProjectFile(file);
-    const projectId = await this.projectLibrary.importProjectFile(project);
+    const decoded = await this.decodeProjectFile(file);
+    const projectId = await this.projectLibrary.importProjectFile(decoded.project);
     let openResult: Awaited<ReturnType<ImportWorkspace['openProject']>>;
 
     try {
@@ -61,6 +66,7 @@ export class ProjectFileImportService {
       name: 'project_created',
       dimensions: { source: 'import' },
     });
+    dispatchProjectCompatibilityWarning(decoded.compatibility);
     return { projectId, opened: openResult.ok };
   }
 
@@ -74,7 +80,7 @@ export class ProjectFileImportService {
     return importBatch;
   }
 
-  private async decodeProjectFile(file: File): Promise<ProjectFileInput> {
+  private async decodeProjectFile(file: File): Promise<ProjectFileDecodeResult> {
     const extension = getFileExtension(file.name);
 
     if (extension === 'ase' || extension === 'aseprite') {
@@ -107,28 +113,33 @@ export const projectFileImportService = new ProjectFileImportService({
 async function decodePixelForgeProjectFile(
   file: File,
   extension: string
-): Promise<ProjectFileInput> {
+): Promise<ProjectFileDecodeResult> {
   if (extension === 'pf') {
     const { default: pako } = await import('pako');
     const compressed = new Uint8Array(await file.arrayBuffer());
-    return JSON.parse(pako.inflate(compressed, { to: 'string' })) as ProjectFileInput;
+    return decodeProjectFileWithDiagnostics(
+      JSON.parse(pako.inflate(compressed, { to: 'string' })) as ProjectFileInput
+    );
   }
 
   if (extension === 'json') {
-    return JSON.parse(await file.text()) as ProjectFileInput;
+    return decodeProjectFileWithDiagnostics(JSON.parse(await file.text()) as ProjectFileInput);
   }
 
   throw new Error(`Unsupported project file: ${file.name}`);
 }
 
-async function decodeAsepriteProjectFile(file: File): Promise<ProjectFileInput> {
+async function decodeAsepriteProjectFile(file: File): Promise<ProjectFileDecodeResult> {
   const context = createProjectContext();
 
   try {
     const { importAseFile } = await import('./aseprite-service');
     await importAseFile(await file.arrayBuffer(), context);
     context.project.name.value = getFileStem(file.name);
-    return await context.project.saveProject();
+    return {
+      project: await context.project.saveProject(),
+      compatibility: { repairedParentLayerIds: [] },
+    };
   } finally {
     context.dispose();
   }

@@ -111,7 +111,10 @@ function assertLayer(
   assertImport(isNonEmptyString(value.id), 'layer ids must be strings');
   assertImport(typeof value.name === 'string', 'layer name is invalid');
   assertImport(value.type === undefined || LAYER_TYPES.has(value.type), 'layer type is invalid');
-  assertImport(value.locked === undefined || typeof value.locked === 'boolean', 'layer lock is invalid');
+  assertImport(
+    value.locked === undefined || typeof value.locked === 'boolean',
+    'layer lock is invalid'
+  );
   assertImport(
     value.parentId === undefined || value.parentId === null || isNonEmptyString(value.parentId),
     'layer parent is invalid'

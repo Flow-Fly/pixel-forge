@@ -113,9 +113,10 @@ function remapLegacyEphemeralIndices(
   }));
 }
 
-function normalizeProjectLayers(
-  layers: NormalizedProjectLayerFileInput[]
-): { layers: ProjectLayerFile[]; repairedParentLayerIds: string[] } {
+function normalizeProjectLayers(layers: NormalizedProjectLayerFileInput[]): {
+  layers: ProjectLayerFile[];
+  repairedParentLayerIds: string[];
+} {
   const layersById = new Map(layers.map((layer) => [layer.id, layer]));
   const acceptedParentIds = new Map<string, string | null>();
   const repairedParentLayerIds: string[] = [];
