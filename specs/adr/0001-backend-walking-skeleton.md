@@ -46,12 +46,13 @@ Moving the existing client into `client/` is explicitly rejected. It creates mig
 - pure project-file migrations.
 
 The current format is `4.2.0`. It explicitly persists a layer's type, lock, and
-parent relationship, plus cel opacity. Older files migrate missing values to an
-image layer, unlocked root placement, and full cel opacity. Invalid hierarchy
-edges detach only the affected layer to the root and return local compatibility
-diagnostics; diagnostics are not persisted in the project document. The root
-client keeps small compatibility re-exports so #266 does not become a broad
-import rewrite.
+parent relationship, plus cel opacity. Files from before `4.2.0` may omit those
+values and migrate to an image layer, unlocked root placement, and full cel
+opacity. Files declaring `4.2.0` or later must provide valid values. Invalid
+hierarchy edges detach only the affected layer to the root and return local
+compatibility diagnostics; diagnostics are not persisted in the project
+document. The root client keeps small compatibility re-exports so #266 does not
+become a broad import rewrite.
 
 The server may validate project data through `shared/`, but it must not hydrate editor stores. `shared/` exposes pure migrations; whether the later sync API accepts, migrates, or rejects older uploads is a separate protocol decision. The client remains authoritative for signed-out and local-only projects.
 

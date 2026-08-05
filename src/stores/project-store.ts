@@ -6,12 +6,10 @@ import { onionSkinCache } from '../services/onion-skin-cache';
 import { createProjectThumbnail } from '../services/project-thumbnail';
 import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_PALETTE_ID } from '../services/project-defaults';
 import { canvasToPngBytes } from '../utils/canvas-binary';
-import { normalizeProjectFileImageData } from '../serialization/project-data';
 import {
   dispatchProjectCompatibilityWarning,
   hydrateProjectFrames,
   hydrateProjectLayers,
-  migrateProjectFileForLoadWithDiagnostics,
   refreshProjectPaletteAfterLoad,
   restoreProjectAnimationState,
   restoreProjectFrameTags,
@@ -21,6 +19,7 @@ import {
 } from '../serialization/project-load';
 import {
   PROJECT_VERSION,
+  decodeProjectFileWithDiagnostics,
   type ProjectCelFile,
   type ProjectFile,
   type ProjectFileInput,
@@ -56,7 +55,7 @@ export interface ProjectStoreDependencies {
 }
 
 function layerSerializesCels(layer: Layer): boolean {
-  return layer.type !== 'reference';
+  return layer.type === 'image' || layer.type === 'text';
 }
 
 async function serializeCelForLayer(
@@ -211,10 +210,8 @@ class ProjectStore {
    * @param _fromAutoSave Kept for call-site compatibility. All load paths now
    *                      restore the palette from the file.
    */
-  async loadProject(input: ProjectFileInput, _fromAutoSave = false) {
-    const { project: file, compatibility } = migrateProjectFileForLoadWithDiagnostics(
-      normalizeProjectFileImageData(input)
-    );
+  async loadProject(input: ProjectFileInput, _fromAutoSave = false): Promise<ProjectFile> {
+    const { project: file, compatibility } = decodeProjectFileWithDiagnostics(input);
 
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
@@ -238,6 +235,8 @@ class ProjectStore {
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.
     window.dispatchEvent(new CustomEvent('project-loaded'));
+
+    return file;
   }
 
   /**

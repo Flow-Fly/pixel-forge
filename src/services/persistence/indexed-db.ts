@@ -1,6 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { v4 as uuidv4 } from 'uuid';
-import type { ProjectFile } from '../../types/project';
+import type { ProjectFile, ProjectFileInput } from '../../types/project';
 import type { ProjectMeta, ProjectRepository, WorkspaceState } from './project-repository';
 import { log } from '../../utils/log';
 
@@ -12,7 +12,7 @@ const WORKSPACE_STATE_SETTING_KEY = 'workspace-state';
 
 interface StoredProject {
   id: string;
-  project: ProjectFile;
+  project: ProjectFileInput;
   lastModified: number;
   thumbnail?: Uint8Array;
 }
@@ -93,7 +93,7 @@ class IndexedDbProjectRepository implements ProjectRepository {
       .sort((a, b) => b.lastModified - a.lastModified);
   }
 
-  async load(id: string): Promise<ProjectFile | null> {
+  async load(id: string): Promise<ProjectFileInput | null> {
     const db = await this.dbPromise;
     const stored = await db.get('sprites', id);
     return stored?.project ?? null;
@@ -106,8 +106,7 @@ class IndexedDbProjectRepository implements ProjectRepository {
   ): Promise<void> {
     const db = await this.dbPromise;
     const existing = await db.get('sprites', id);
-    const thumbnail =
-      options.thumbnail === undefined ? existing?.thumbnail : options.thumbnail;
+    const thumbnail = options.thumbnail === undefined ? existing?.thumbnail : options.thumbnail;
     await db.put('sprites', {
       id,
       project,
@@ -150,8 +149,7 @@ class IndexedDbProjectRepository implements ProjectRepository {
   }
 }
 
-export const projectRepository: ProjectRepository =
-  new IndexedDbProjectRepository();
+export const projectRepository: ProjectRepository = new IndexedDbProjectRepository();
 
 function parseWorkspaceState(value: unknown): WorkspaceState | null {
   if (!value || typeof value !== 'object') return null;

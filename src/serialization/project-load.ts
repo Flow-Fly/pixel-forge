@@ -12,8 +12,6 @@ import { loadImageDataToCanvas } from '../utils/canvas-binary';
 import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
 import { hasProjectImageData } from './project-data';
 
-export { migrateProjectFileForLoadWithDiagnostics } from '@pixel-forge/shared';
-
 type WritableSignal<T> = {
   value: T;
 };
@@ -75,6 +73,8 @@ type LinkedCelGroup = {
 // marker for shared transparent cels.
 const EMPTY_CEL_LINK_ID = '__empty__';
 const COMPATIBILITY_WARNING_LAYER_LIMIT = 3;
+const COMPATIBILITY_WARNING_LAYER_ID_LIMIT = 40;
+const COMPATIBILITY_WARNING_MESSAGE_LIMIT = 240;
 
 export function restoreProjectPaletteForLoad(stores: ProjectLoadStores, file: ProjectFile): void {
   const { palette } = stores;
@@ -162,10 +162,25 @@ function describeProjectCompatibilityWarning(
   const repairedLayerIds = diagnostics.repairedParentLayerIds;
   if (repairedLayerIds.length === 0) return null;
 
-  const visibleLayerIds = repairedLayerIds.slice(0, COMPATIBILITY_WARNING_LAYER_LIMIT).join(', ');
+  const visibleLayerIds = repairedLayerIds
+    .slice(0, COMPATIBILITY_WARNING_LAYER_LIMIT)
+    .map(limitCompatibilityWarningLayerId)
+    .join(', ');
   const hiddenCount = repairedLayerIds.length - COMPATIBILITY_WARNING_LAYER_LIMIT;
   const remaining = hiddenCount > 0 ? `, and ${hiddenCount} more` : '';
-  return `Repaired invalid group links for layers: ${visibleLayerIds}${remaining}.`;
+  return limitCompatibilityWarningMessage(
+    `Repaired invalid group links for layers: ${visibleLayerIds}${remaining}.`
+  );
+}
+
+function limitCompatibilityWarningLayerId(layerId: string): string {
+  if (layerId.length <= COMPATIBILITY_WARNING_LAYER_ID_LIMIT) return layerId;
+  return `${layerId.slice(0, COMPATIBILITY_WARNING_LAYER_ID_LIMIT - 1)}…`;
+}
+
+function limitCompatibilityWarningMessage(message: string): string {
+  if (message.length <= COMPATIBILITY_WARNING_MESSAGE_LIMIT) return message;
+  return `${message.slice(0, COMPATIBILITY_WARNING_MESSAGE_LIMIT - 1)}…`;
 }
 
 function clearLoadedLayers(stores: ProjectLoadStores): void {

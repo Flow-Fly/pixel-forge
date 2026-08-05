@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import pako from 'pako';
+
+const canvasBytes = vi.hoisted(() => new WeakMap<HTMLCanvasElement, Uint8Array>());
 
 // happy-dom has neither IndexedDB nor canvas encoding — mock the boundaries.
-// The canvas codec mock makes this a STRUCTURAL round-trip test: metadata,
-// layers, frames, palette, tags — not pixel contents (those need a real
-// canvas and are covered by manual/browser verification).
+// The canvas codec mock preserves loaded bytes through the writer, proving the
+// file boundary without claiming that happy-dom rendered the PNG pixels.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
   projectRepository: {
     list: vi.fn(async () => []),
@@ -26,8 +30,12 @@ vi.mock('../../src/services/persistence/palette-persistence', () => ({
 }));
 
 vi.mock('../../src/utils/canvas-binary', () => ({
-  canvasToPngBytes: vi.fn(async () => new Uint8Array([9, 9, 9])),
-  loadImageDataToCanvas: vi.fn(async () => {}),
+  canvasToPngBytes: vi.fn(async (canvas: HTMLCanvasElement) => {
+    return canvasBytes.get(canvas) ?? new Uint8Array([9, 9, 9]);
+  }),
+  loadImageDataToCanvas: vi.fn(async (data: Uint8Array, canvas: HTMLCanvasElement) => {
+    canvasBytes.set(canvas, new Uint8Array(data));
+  }),
 }));
 
 import { projectStore } from '../../src/stores/project';
@@ -35,12 +43,41 @@ import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
 import { paletteStore } from '../../src/stores/palette';
 import { guidedDrawingStore } from '../../src/stores/guided-drawing';
-import { PROJECT_VERSION } from '../../src/types/project';
+import { PROJECT_VERSION, decodeProjectFileWithDiagnostics } from '../../src/types/project';
 import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
 
 const PALETTE = ['#000000', '#ff0000', '#00ff00', '#0000ff', '#ffffff'];
 const mockedLoadImageDataToCanvas = vi.mocked(loadImageDataToCanvas);
+
+async function readCompressedProjectFixture(filename: string): Promise<ProjectFileInput> {
+  const encoded = await readFile(
+    resolve(process.cwd(), 'tests/fixtures/project-files', filename),
+    'utf8'
+  );
+  const compressed = Uint8Array.from(Buffer.from(encoded.trim(), 'base64'));
+  return JSON.parse(pako.inflate(compressed, { to: 'string' })) as ProjectFileInput;
+}
+
+function normalizeRoundTripFile(file: ProjectFile): ProjectFile {
+  const linkIds = new Map<string, string>();
+
+  return {
+    ...file,
+    version: PROJECT_VERSION,
+    frames: file.frames.map((frame, frameIndex) => ({
+      ...frame,
+      id: `frame-${frameIndex}`,
+      cels: frame.cels.map((cel) => {
+        if (!cel.linkedCelId) return cel;
+        if (!linkIds.has(cel.linkedCelId)) {
+          linkIds.set(cel.linkedCelId, `link-${linkIds.size}`);
+        }
+        return { ...cel, linkedCelId: linkIds.get(cel.linkedCelId) };
+      }),
+    })),
+  };
+}
 
 function expectReferenceLayer(file: ProjectFile, layerId: string): void {
   const referenceLayer = file.layers.find((layer) => layer.id === layerId);
@@ -188,6 +225,94 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(normalize(twice)).toEqual(normalize(once));
   });
 
+  it.each([
+    ['legacy-4.1.pf.base64', '4.1.0'],
+    ['current-4.2.pf.base64', '4.2.0'],
+  ])(
+    'round-trips the checked-in %s archive through decode, editor hydration, and the writer',
+    async (fixtureName, sourceVersion) => {
+      const input = await readCompressedProjectFixture(fixtureName);
+      const source = decodeProjectFileWithDiagnostics(input).project;
+
+      await projectStore.loadProject(input, false);
+      const sourceCelsWithIndexData = source.frames.flatMap((frame) =>
+        frame.cels.filter((cel) => cel.indexData !== undefined)
+      );
+      const hydratedIndexData = [...animationStore.cels.value.values()]
+        .map((cel) => ({
+          layerId: cel.layerId,
+          indexData: cel.indexBuffer ? Array.from(cel.indexBuffer) : undefined,
+        }))
+        .filter((cel) =>
+          sourceCelsWithIndexData.some((sourceCel) => sourceCel.layerId === cel.layerId)
+        );
+      const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+      await projectStore.loadProject(saved, false);
+      const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+      expect(source.version).toBe(sourceVersion);
+      expect(saved.version).toBe(PROJECT_VERSION);
+      expect(normalizeRoundTripFile(reloaded)).toEqual(normalizeRoundTripFile(saved));
+
+      expect(
+        reloaded.layers.map((layer) => ({
+          id: layer.id,
+          type: layer.type,
+          locked: layer.locked,
+          parentId: layer.parentId,
+        }))
+      ).toEqual(
+        source.layers.map((layer) => ({
+          id: layer.id,
+          type: layer.type,
+          locked: layer.locked,
+          parentId: layer.parentId,
+        }))
+      );
+      expect(hydratedIndexData).toEqual(
+        sourceCelsWithIndexData.map((cel) => ({
+          layerId: cel.layerId,
+          indexData: cel.indexData,
+        }))
+      );
+      expect(
+        reloaded.frames
+          .flatMap((frame) => frame.cels)
+          .map((cel) => ({
+            layerId: cel.layerId,
+            opacity: cel.opacity,
+            linkType: cel.linkType,
+          }))
+      ).toEqual(
+        source.frames
+          .flatMap((frame) => frame.cels)
+          .map((cel) => ({
+            layerId: cel.layerId,
+            opacity: cel.opacity,
+            linkType: cel.linkType,
+          }))
+      );
+      expect(reloaded.palette).toEqual(source.palette);
+      expect(reloaded.tags).toEqual(source.tags);
+      expect(reloaded.guidedDrawing).toEqual(source.guidedDrawing);
+      expect(
+        reloaded.layers
+          .filter((layer) => layer.type !== 'group')
+          .map((layer) => Array.from(layer.data))
+      ).toEqual(
+        source.layers
+          .filter((layer) => layer.type !== 'group')
+          .map((layer) => Array.from(layer.data))
+      );
+      expect(
+        reloaded.frames.flatMap((frame) => frame.cels).map((cel) => Array.from(cel.data))
+      ).toEqual(source.frames.flatMap((frame) => frame.cels).map((cel) => Array.from(cel.data)));
+      expect(reloaded.layers.map((layer) => Array.from(layer.referenceData?.bytes ?? []))).toEqual(
+        source.layers.map((layer) => Array.from(layer.referenceData?.bytes ?? []))
+      );
+    }
+  );
+
   it('round-trips layer locks, groups, parent links, and cel opacity', async () => {
     const body = layerStore.layers.value[0];
     const shading = layerStore.addLayer('Shading', 16, 12);
@@ -240,11 +365,38 @@ describe('project save -> load -> save round-trip (structural)', () => {
       );
 
       const legacy = structuredClone(saved) as ProjectFileInput;
+      legacy.version = '4.1.0';
       delete legacy.layers[0].locked;
       delete legacy.layers[0].parentId;
       delete legacy.frames[0].cels[0].opacity;
       await projectStore.loadProject(legacy, false);
       expect(warningListener).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('show-warning-toast', warningListener);
+    }
+  });
+
+  it('bounds repaired hierarchy warnings while preserving the hidden layer count', async () => {
+    const saved = await buildSampleProject();
+    const malformed = structuredClone(saved);
+    const oversizedLayerId = 'x'.repeat(100);
+    malformed.layers = Array.from({ length: 5 }, (_, index) => ({
+      ...malformed.layers[0],
+      id: index === 0 ? oversizedLayerId : `${String(index).repeat(100)}`,
+      parentId: 'missing-group',
+    }));
+    malformed.frames = malformed.frames.map((frame) => ({ ...frame, cels: [] }));
+    const warningListener = vi.fn();
+    window.addEventListener('show-warning-toast', warningListener);
+
+    try {
+      await projectStore.loadProject(malformed, false);
+
+      const message = warningListener.mock.calls[0]?.[0].detail.message as string;
+      expect(warningListener).toHaveBeenCalledOnce();
+      expect(message.length).toBeLessThanOrEqual(240);
+      expect(message).toContain(`${'x'.repeat(39)}…`);
+      expect(message).toContain(', and 2 more.');
     } finally {
       window.removeEventListener('show-warning-toast', warningListener);
     }
@@ -267,6 +419,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
       },
     ];
     secondProject.animation.currentFrameIndex = 0;
+    secondProject.tags = [];
 
     vi.useFakeTimers();
     await projectStore.loadProject(structuredClone(firstProject), false);

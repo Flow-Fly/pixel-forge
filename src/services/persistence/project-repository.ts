@@ -1,4 +1,4 @@
-import type { ProjectFile } from '../../types/project';
+import type { ProjectFile, ProjectFileInput } from '../../types/project';
 
 /** Lightweight listing info — everything a project browser needs without loading pixels. */
 export interface ProjectMeta {
@@ -30,15 +30,11 @@ export interface ProjectRepository {
   /** List all stored projects (metadata only), most recently modified first. */
   list(): Promise<ProjectMeta[]>;
 
-  /** Load a full project. Returns null when the id is unknown. */
-  load(id: string): Promise<ProjectFile | null>;
+  /** Load a full project input. Older records may need migration before use. */
+  load(id: string): Promise<ProjectFileInput | null>;
 
   /** Create or overwrite a project under the given id. */
-  save(
-    id: string,
-    project: ProjectFile,
-    options?: SaveProjectOptions
-  ): Promise<void>;
+  save(id: string, project: ProjectFile, options?: SaveProjectOptions): Promise<void>;
 
   /** Remove a project. Unknown ids are a no-op. */
   delete(id: string): Promise<void>;

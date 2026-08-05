@@ -71,9 +71,11 @@ function makeProject(name: string, width = 8, height = 8): ProjectFile {
         name: 'Layer 1',
         type: 'image',
         visible: true,
+        locked: false,
         opacity: 255,
         blendMode: 'normal',
         continuous: false,
+        parentId: null,
         data: new Uint8Array(0),
       },
     ],
@@ -85,6 +87,7 @@ function makeProject(name: string, width = 8, height = 8): ProjectFile {
           {
             layerId,
             data: new Uint8Array(0),
+            opacity: 100,
           },
         ],
       },
@@ -282,6 +285,41 @@ describe('ProjectLibraryService', () => {
     expect(repository.save).not.toHaveBeenCalled();
     expect(projects.size).toBe(0);
   });
+
+  it.each([
+    [
+      'an invalid lock value',
+      (project: ProjectFileInput) => {
+        (project.layers[0] as Record<string, unknown>).locked = 'yes';
+      },
+    ],
+    [
+      'a missing current lock',
+      (project: ProjectFileInput) => {
+        delete (project.layers[0] as Record<string, unknown>).locked;
+      },
+    ],
+  ])(
+    'keeps the active drawing and identity when local reopen finds %s',
+    async (_name, invalidate) => {
+      const invalidProject = structuredClone(
+        makeProject('Broken stored project')
+      ) as ProjectFileInput;
+      invalidate(invalidProject);
+      const activeLayers = defaultProjectContext.layers.layers.value;
+
+      repository.load.mockResolvedValueOnce(invalidProject);
+
+      await expect(service.openProject('broken', { saveCurrent: false })).rejects.toThrow(
+        'layer lock is invalid'
+      );
+
+      expect(projectStore.id.value).toBe('current');
+      expect(projectStore.name.value).toBe('Current');
+      expect(defaultProjectContext.layers.layers.value).toBe(activeLayers);
+      expect(repository.setLastOpenedProjectId).not.toHaveBeenCalled();
+    }
+  );
 
   it('saves edits to the open project before loading another project', async () => {
     projects.set('a', makeProject('Project A'));

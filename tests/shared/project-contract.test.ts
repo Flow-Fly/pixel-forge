@@ -243,6 +243,44 @@ describe('shared ProjectFile contract', () => {
     expect(result.compatibility.repairedParentLayerIds).toEqual([]);
   });
 
+  it.each([
+    [
+      'layer type',
+      'layer type is invalid',
+      (project: Record<string, unknown>) => {
+        delete (project.layers as Array<Record<string, unknown>>)[0].type;
+      },
+    ],
+    [
+      'layer lock',
+      'layer lock is invalid',
+      (project: Record<string, unknown>) => {
+        delete (project.layers as Array<Record<string, unknown>>)[0].locked;
+      },
+    ],
+    [
+      'layer parent',
+      'layer parent is invalid',
+      (project: Record<string, unknown>) => {
+        delete (project.layers as Array<Record<string, unknown>>)[0].parentId;
+      },
+    ],
+    [
+      'cel opacity',
+      'cel opacity is invalid',
+      (project: Record<string, unknown>) => {
+        const frames = project.frames as Array<Record<string, unknown>>;
+        delete (frames[0].cels as Array<Record<string, unknown>>)[0].opacity;
+      },
+    ],
+  ])('rejects a 4.2.0 document that omits %s', (_name, error, omitField) => {
+    const current = serializedProject();
+
+    omitField(current);
+
+    expect(() => decodeProjectFile(current)).toThrow(error);
+  });
+
   it('preserves valid stored hierarchy and repairs invalid parent edges in stored order', () => {
     const project = completeProject();
     project.layers = [
