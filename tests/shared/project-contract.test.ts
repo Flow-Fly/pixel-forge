@@ -422,9 +422,24 @@ describe('shared ProjectFile contract', () => {
     expect(Array.from(current.project.layers[3].referenceData?.bytes ?? [])).toEqual(
       FIXTURE_PNG_BYTES
     );
-    expect(current.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'paint'))).toEqual([
-      expect.objectContaining({ opacity: 45, indexData: [1], linkedCelId: 'walk-link' }),
-      expect.objectContaining({ opacity: 45, indexData: [1], linkedCelId: 'walk-link' }),
+    expect(Array.from(current.project.layers[0].data)).toEqual([]);
+    expect(
+      current.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'))
+    ).toEqual([
+      expect.objectContaining({ data: new Uint8Array(0), opacity: 100 }),
+      expect.objectContaining({ data: new Uint8Array(0), opacity: 100 }),
+    ]);
+    const paintCels = current.project.frames.map((frame) =>
+      frame.cels.find((cel) => cel.layerId === 'paint')
+    );
+    expect(paintCels).toEqual([
+      expect.objectContaining({ opacity: 45, indexData: [0], linkType: 'hard' }),
+      expect.objectContaining({ opacity: 45, indexData: [0], linkType: 'hard' }),
+    ]);
+    expect(paintCels[0]?.linkedCelId).toEqual(expect.any(String));
+    expect(paintCels.map((cel) => cel?.linkedCelId)).toEqual([
+      paintCels[0]?.linkedCelId,
+      paintCels[0]?.linkedCelId,
     ]);
     expect(current.project.tags?.[0]).toMatchObject({
       id: 'walk',

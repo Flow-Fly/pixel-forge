@@ -267,23 +267,15 @@ describe('project save -> load -> save round-trip (structural)', () => {
           referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
         }))
       ).toEqual(
-        source.layers.map((layer) => {
-          const savedLayer = saved.layers.find((candidate) => candidate.id === layer.id);
-          const data =
-            sourceVersion === '4.1.0' && layer.type === 'group'
-              ? (savedLayer?.data ?? layer.data)
-              : layer.data;
-
-          return {
-            id: layer.id,
-            type: layer.type,
-            locked: layer.locked,
-            parentId: layer.parentId,
-            data: Array.from(data),
-            textData: layer.textData,
-            referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
-          };
-        })
+        source.layers.map((layer) => ({
+          id: layer.id,
+          type: layer.type,
+          locked: layer.locked,
+          parentId: layer.parentId,
+          data: Array.from(layer.data),
+          textData: layer.textData,
+          referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
+        }))
       );
       expect(hydratedIndexData).toEqual(
         sourceCelsWithIndexData.map((cel) => ({
@@ -303,42 +295,112 @@ describe('project save -> load -> save round-trip (structural)', () => {
           }))
       ).toEqual(
         source.frames
-          .flatMap((frame, frameIndex) =>
-            frame.cels.map((cel) => {
-              const savedCel = saved.frames[frameIndex]?.cels.find(
-                (candidate) => candidate.layerId === cel.layerId
-              );
-              const expectedCel =
-                sourceVersion === '4.1.0' && cel.layerId === 'group' && savedCel
-                  ? savedCel
-                  : cel;
-
-              return {
-                layerId: expectedCel.layerId,
-                data: Array.from(expectedCel.data),
-                opacity: expectedCel.opacity,
-                linkType: expectedCel.linkType,
-                textCelData: expectedCel.textCelData,
-              };
-            })
+          .flatMap((frame) =>
+            frame.cels.map((cel) => ({
+              layerId: cel.layerId,
+              data: Array.from(cel.data),
+              opacity: cel.opacity,
+              linkType: cel.linkType,
+              textCelData: cel.textCelData,
+            }))
           )
       );
       expect(reloaded.palette).toEqual(source.palette);
       expect(reloaded.tags).toEqual(source.tags);
       expect(reloaded.guidedDrawing).toEqual(source.guidedDrawing);
 
+      const groupLayerData = (file: ProjectFile) =>
+        Array.from(file.layers.find((layer) => layer.id === 'group')?.data ?? []);
+      const groupCels = (file: ProjectFile) =>
+        file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'));
+
       if (sourceVersion === '4.1.0') {
-        const legacyGroup = source.layers.find((layer) => layer.id === 'group');
-        expect(Array.from(legacyGroup?.data ?? [])).toEqual([]);
-        expect(source.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'))).toEqual(
-          [
-            expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
-            expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
-          ]
-        );
+        expect(groupLayerData(source)).toEqual([]);
+        expect(groupCels(source)).toEqual([
+          expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+          expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+        ]);
       }
+
+      expect(groupLayerData(saved)).toEqual(groupLayerData(source));
+      expect(groupLayerData(reloaded)).toEqual(groupLayerData(source));
+      expect(groupCels(saved)).toEqual(groupCels(source));
+      expect(groupCels(reloaded)).toEqual(groupCels(source));
     }
   );
+
+  it('preserves loaded group payloads without reusing them for another project', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const group = project.layers.find((layer) => layer.id === 'group');
+    if (!group) throw new Error('Expected a group layer in the current fixture');
+
+    group.data = Uint8Array.from([7, 8, 9]);
+    await projectStore.loadProject(project, false);
+    const saved = await projectStore.saveProject();
+    expect(
+      Array.from(saved.layers.find((layer) => layer.id === 'group')?.data ?? [])
+    ).toEqual([7, 8, 9]);
+
+    group.data = Uint8Array.from([4, 5, 6]);
+    await projectStore.loadProject(project, false);
+    const replacement = await projectStore.saveProject();
+    expect(
+      Array.from(replacement.layers.find((layer) => layer.id === 'group')?.data ?? [])
+    ).toEqual([4, 5, 6]);
+
+    await projectStore.newProject(16, 12);
+    const layer = layerStore.layers.value[0];
+    const groupId = layerStore.createGroup([layer.id], 'New group');
+    if (!groupId) throw new Error('Expected the new group to be created');
+
+    const newProject = await projectStore.saveProject();
+    expect(
+      Array.from(newProject.layers.find((candidate) => candidate.id === groupId)?.data ?? [])
+    ).toEqual([]);
+  });
+
+  it('keeps non-empty group cels on the normal serialization path', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const groupCels = project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'));
+    if (groupCels.some((cel) => !cel)) throw new Error('Expected one group cel per frame');
+
+    for (const cel of groupCels) {
+      cel.data = Uint8Array.from([4, 5, 6]);
+      cel.opacity = 35;
+      cel.indexData = [0, 0];
+      cel.linkedCelId = 'loaded-group-link';
+      cel.linkType = 'hard';
+      cel.textCelData = { content: 'Group payload', x: 2, y: 3 };
+    }
+
+    await projectStore.loadProject(project, false);
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    await projectStore.loadProject(saved, false);
+    const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+    for (const file of [saved, reloaded]) {
+      const cels = file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'));
+
+      expect(cels).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            data: Uint8Array.from([4, 5, 6]),
+            opacity: 35,
+            indexData: [0, 0],
+            linkType: 'hard',
+            textCelData: { content: 'Group payload', x: 2, y: 3 },
+          }),
+        ])
+      );
+      expect(cels[0]?.linkedCelId).toEqual(expect.any(String));
+      expect(cels.map((cel) => cel?.linkedCelId)).toEqual([
+        cels[0]?.linkedCelId,
+        cels[0]?.linkedCelId,
+      ]);
+    }
+  });
 
   it('round-trips layer locks, groups, parent links, and cel opacity', async () => {
     const body = layerStore.layers.value[0];

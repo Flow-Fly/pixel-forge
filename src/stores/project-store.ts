@@ -25,7 +25,7 @@ import {
   type ProjectFileInput,
 } from '../types/project';
 import { log } from '../utils/log';
-import type { Frame } from '../types/animation';
+import type { Cel, Frame } from '../types/animation';
 import type { Layer } from '../types/layer';
 import { EMPTY_CEL_LINK_ID } from './animation/types';
 import type { createAnimationStore } from './animation/store';
@@ -59,6 +59,14 @@ function layerSerializesCels(layer: Layer): boolean {
   return layer.type !== 'reference';
 }
 
+function isRuntimeEmptyCel(
+  cel: Cel,
+  textCelData: ReturnType<ProjectAnimationStore['getTextCelData']>
+): boolean {
+  const hasPixelIndices = cel.indexBuffer?.some((index) => index !== 0) ?? false;
+  return cel.linkedCelId === EMPTY_CEL_LINK_ID && !textCelData && !hasPixelIndices;
+}
+
 async function serializeCelForLayer(
   animation: ProjectAnimationStore,
   layer: Layer,
@@ -75,6 +83,15 @@ async function serializeCelForLayer(
     };
   }
 
+  const textCelData = animation.getTextCelData(layer.id, frame.id);
+  if (isRuntimeEmptyCel(cel, textCelData)) {
+    return {
+      layerId: layer.id,
+      data: new Uint8Array(0),
+      opacity: cel.opacity ?? 100,
+    };
+  }
+
   const celFile: ProjectCelFile = {
     layerId: layer.id,
     data: await canvasToPngBytes(cel.canvas),
@@ -87,7 +104,6 @@ async function serializeCelForLayer(
   }
   if (cel.indexBuffer) celFile.indexData = Array.from(cel.indexBuffer);
 
-  const textCelData = animation.getTextCelData(layer.id, frame.id);
   if (textCelData) celFile.textCelData = textCelData;
 
   return celFile;
@@ -113,6 +129,9 @@ class ProjectStore {
   private readonly palette: ProjectPaletteStore;
   private readonly refs: StoreRefs;
   private readonly selection: ProjectSelectionStore;
+  // Group layers have no editor canvas. Keep their loaded bytes only for the
+  // currently open project so saving does not replace a legacy payload.
+  private loadedGroupLayerData = new Map<string, Uint8Array>();
 
   constructor(dependencies: ProjectStoreDependencies) {
     this.animation = dependencies.animation;
@@ -158,7 +177,12 @@ class ProjectStore {
         blendMode: layer.blendMode,
         continuous: layer.continuous,
         parentId: layer.parentId,
-        data: layer.canvas ? await canvasToPngBytes(layer.canvas) : new Uint8Array(0),
+        data:
+          layer.type === 'group'
+            ? new Uint8Array(this.loadedGroupLayerData.get(layer.id) ?? [])
+            : layer.canvas
+              ? await canvasToPngBytes(layer.canvas)
+              : new Uint8Array(0),
         // Include text layer metadata if present
         ...(layer.textData && { textData: layer.textData }),
         // Include reference layer metadata if present. Reference layers keep
@@ -215,6 +239,11 @@ class ProjectStore {
    */
   async loadProject(input: ProjectFileInput, _fromAutoSave = false): Promise<ProjectFile> {
     const { project: file, compatibility } = decodeProjectFileWithDiagnostics(input);
+    const loadedGroupLayerData = new Map(
+      file.layers
+        .filter((layer) => layer.type === 'group')
+        .map((layer) => [layer.id, new Uint8Array(layer.data)])
+    );
 
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
@@ -233,6 +262,7 @@ class ProjectStore {
     restoreProjectFrameTags(this.loadStores, file);
     refreshProjectPaletteAfterLoad(this.loadStores);
     selectFirstLoadedLayer(this.loadStores);
+    this.loadedGroupLayerData = loadedGroupLayerData;
     this.resetProjectLocalState();
     dispatchProjectCompatibilityWarning(compatibility);
 
@@ -252,6 +282,7 @@ class ProjectStore {
 
     // 0. New project = new storage identity (the old project stays stored)
     this.id.value = uuidv4();
+    this.loadedGroupLayerData = new Map();
 
     // 1. Set new dimensions and reset name
     this.setSize(width, height);
