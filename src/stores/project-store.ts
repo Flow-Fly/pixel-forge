@@ -83,6 +83,15 @@ async function serializeCelForLayer(
     };
   }
 
+  return serializeExistingCel(animation, layer, frame, cel);
+}
+
+async function serializeExistingCel(
+  animation: ProjectAnimationStore,
+  layer: Layer,
+  frame: Frame,
+  cel: Cel
+): Promise<ProjectCelFile> {
   const textCelData = animation.getTextCelData(layer.id, frame.id);
   if (isRuntimeEmptyCel(cel, textCelData)) {
     return {
