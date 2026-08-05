@@ -13,7 +13,11 @@ import type { createLayerStore } from '../layers-store';
 
 // Import extracted modules
 import type { PlaybackMode } from './types';
-import { EMPTY_CEL_LINK_ID, getCelKey } from './types';
+import { getCelKey } from './types';
+import {
+  isRuntimeEmptyCel as hasRuntimeEmptyCanvas,
+  markRuntimeEmptyCanvas,
+} from './empty-cel';
 import * as indexBuffer from './index-buffer';
 import * as paletteSync from './palette-sync';
 import * as celSelection from './cel-selection';
@@ -147,7 +151,7 @@ class AnimationStore {
         ctx.imageSmoothingEnabled = false;
       }
     }
-    return this.sharedTransparentCanvas;
+    return markRuntimeEmptyCanvas(this.sharedTransparentCanvas);
   }
 
   // ===== Cel Key Helper =====
@@ -159,6 +163,10 @@ class AnimationStore {
   getCelCanvas(frameId: string, layerId: string): HTMLCanvasElement | undefined {
     const key = getCelKey(layerId, frameId);
     return this.cels.value.get(key)?.canvas;
+  }
+
+  isRuntimeEmptyCel(cel: Cel): boolean {
+    return hasRuntimeEmptyCanvas(cel);
   }
 
   getEditableCelCanvas(layerId: string, frameId: string): HTMLCanvasElement | undefined {
@@ -184,8 +192,6 @@ class AnimationStore {
           layerId: layer.id,
           frameId,
           canvas: sharedCanvas,
-          linkedCelId: EMPTY_CEL_LINK_ID,
-          linkType: 'soft'
         });
       }
     });
@@ -313,8 +319,6 @@ class AnimationStore {
           layerId: layer.id,
           frameId: newFrame.id,
           canvas: sharedCanvas,
-          linkedCelId: EMPTY_CEL_LINK_ID,
-          linkType: 'soft'
         });
       }
     });

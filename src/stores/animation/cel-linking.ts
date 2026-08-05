@@ -9,7 +9,8 @@
 
 import type { Cel } from '../../types/animation';
 import { cloneIndexBuffer, createIndexBuffer } from '../../utils/indexed-color';
-import { EMPTY_CEL_LINK_ID, getCelKey } from './types';
+import { getCelKey } from './types';
+import { isRuntimeEmptyCel } from './empty-cel';
 
 /**
  * Link multiple cels together. They will share the same canvas.
@@ -130,18 +131,8 @@ export function ensureUnlinkedForEdit(
     return { cels, wasUnlinked: true };
   }
 
-  // Not linked - nothing to do
-  if (!cel.linkedCelId) {
-    return { cels, wasUnlinked: false };
-  }
-
-  // Hard links stay linked
-  if (cel.linkType === 'hard') {
-    return { cels, wasUnlinked: false };
-  }
-
   // Empty cel special case: give it a new canvas and index buffer
-  if (cel.linkedCelId === EMPTY_CEL_LINK_ID) {
+  if (isRuntimeEmptyCel(cel)) {
     const newCels = new Map(cels);
 
     const newCanvas = document.createElement('canvas');
@@ -166,6 +157,16 @@ export function ensureUnlinkedForEdit(
     });
 
     return { cels: newCels, wasUnlinked: true };
+  }
+
+  // Not linked - nothing to do
+  if (!cel.linkedCelId) {
+    return { cels, wasUnlinked: false };
+  }
+
+  // Hard links stay linked
+  if (cel.linkType === 'hard') {
+    return { cels, wasUnlinked: false };
   }
 
   // Check if there are other cels in the same link group

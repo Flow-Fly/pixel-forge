@@ -27,6 +27,7 @@ export type ProjectLoadStores = {
     getCelCanvas: (frameId: string, layerId: string) => HTMLCanvasElement | undefined;
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
+    isRuntimeEmptyCel: (cel: Cel) => boolean;
     linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
     rebuildAllCelCanvases: () => void;
     rebuildAllIndexBuffers: () => void;
@@ -69,9 +70,6 @@ type LinkedCelGroup = {
   linkType: CelLinkType;
 };
 
-// Keep this boundary free of store imports; this mirrors the animation store
-// marker for shared transparent cels.
-const EMPTY_CEL_LINK_ID = '__empty__';
 const COMPATIBILITY_WARNING_LAYER_LIMIT = 3;
 const COMPATIBILITY_WARNING_LAYER_ID_LIMIT = 40;
 const COMPATIBILITY_WARNING_MESSAGE_LIMIT = 240;
@@ -312,8 +310,11 @@ function giveSharedTransparentCelOwnCanvas(
   const cel = animation.cels.value.get(celKey);
   if (
     !cel ||
-    cel.linkedCelId !== EMPTY_CEL_LINK_ID ||
-    (!hasProjectImageData(celFile.data) && !(celFile.indexData && celFile.indexData.length > 0))
+    !animation.isRuntimeEmptyCel(cel) ||
+    (!hasProjectImageData(celFile.data) &&
+      !(celFile.indexData && celFile.indexData.length > 0) &&
+      !celFile.linkedCelId &&
+      !celFile.textCelData)
   ) {
     return;
   }

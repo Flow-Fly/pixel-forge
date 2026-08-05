@@ -34,7 +34,7 @@ import {
 import { trimTransparentPixels } from '../../src/commands/selection/image-data';
 import { maskPixelsOutsideSelection } from '../../src/commands/selection/pixels';
 import { selectionStore } from '../../src/stores/selection';
-import { EMPTY_CEL_LINK_ID } from '../../src/stores/animation';
+import { markRuntimeEmptyCanvas } from '../../src/stores/animation/empty-cel';
 import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
 import { type Rect } from '../../src/types/geometry';
 
@@ -237,15 +237,12 @@ describe('selection commands', () => {
     cels.set(firstKey, {
       ...cels.get(firstKey)!,
       canvas: shared.canvas,
-      linkedCelId: EMPTY_CEL_LINK_ID,
-      linkType: 'soft',
     });
     cels.set(secondKey, {
       ...cels.get(secondKey)!,
       canvas: shared.canvas,
-      linkedCelId: EMPTY_CEL_LINK_ID,
-      linkType: 'soft',
     });
+    markRuntimeEmptyCanvas(shared.canvas);
     context.animation.cels.value = cels;
     context.animation.goToFrame(firstFrameId);
 

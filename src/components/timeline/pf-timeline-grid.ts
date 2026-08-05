@@ -2,7 +2,6 @@ import { html, css } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { BaseComponent } from '../../core/base-component';
-import { EMPTY_CEL_LINK_ID } from '../../stores/animation';
 import { defaultProjectContext } from '../../stores/project-context';
 import { SetCelOpacityCommand } from '../../commands/cel-opacity-command';
 import type { FrameTag } from '../../types/animation';
@@ -399,10 +398,11 @@ export class PFTimelineGrid extends BaseComponent {
               // Normal cel rendering
               const key = animation.getCelKey(layer.id, frame.id);
               const cel = cels.get(key);
+              const isRuntimeEmpty = !!cel && animation.isRuntimeEmptyCel(cel);
               const isActive = layer.id === activeLayerId && frame.id === currentFrameId;
               const isSelected = selectedCels.has(key);
               // Exclude empty cels from linking visualization (they're just a memory optimization)
-              const isLinked = cel?.linkedCelId != null && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
+              const isLinked = !!cel && !isRuntimeEmpty && cel.linkedCelId != null;
               const isHardLinked = isLinked && cel?.linkType === 'hard';
               const linkColor = isLinked ? animation.getLinkColor(cel!.linkedCelId!) : null;
 
@@ -427,7 +427,7 @@ export class PFTimelineGrid extends BaseComponent {
               }
 
               // Empty cels (sharing transparent canvas) don't have content
-              const hasContent = !!cel && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
+              const hasContent = !!cel && !isRuntimeEmpty;
               const tagColor = this.getTagColorForFrame(frameIndex, tags);
               const hasTint = tagColor !== null;
 

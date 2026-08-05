@@ -27,7 +27,6 @@ import {
 import { log } from '../utils/log';
 import type { Cel, Frame } from '../types/animation';
 import type { Layer } from '../types/layer';
-import { EMPTY_CEL_LINK_ID } from './animation/types';
 import type { createAnimationStore } from './animation/store';
 import type { createDirtyRectStore } from './dirty-rect-store';
 import type { createHistoryStore } from './history-store';
@@ -59,12 +58,13 @@ function layerSerializesCels(layer: Layer): boolean {
   return layer.type !== 'reference';
 }
 
-function isRuntimeEmptyCel(
+function hasRuntimeEmptyCel(
+  animation: ProjectAnimationStore,
   cel: Cel,
   textCelData: ReturnType<ProjectAnimationStore['getTextCelData']>
 ): boolean {
   const hasPixelIndices = cel.indexBuffer?.some((index) => index !== 0) ?? false;
-  return cel.linkedCelId === EMPTY_CEL_LINK_ID && !textCelData && !hasPixelIndices;
+  return animation.isRuntimeEmptyCel(cel) && !textCelData && !hasPixelIndices;
 }
 
 async function serializeCelForLayer(
@@ -93,7 +93,7 @@ async function serializeExistingCel(
   cel: Cel
 ): Promise<ProjectCelFile> {
   const textCelData = animation.getTextCelData(layer.id, frame.id);
-  if (isRuntimeEmptyCel(cel, textCelData)) {
+  if (hasRuntimeEmptyCel(animation, cel, textCelData)) {
     return {
       layerId: layer.id,
       data: new Uint8Array(0),
@@ -107,7 +107,7 @@ async function serializeExistingCel(
     opacity: cel.opacity ?? 100,
   };
 
-  if (cel.linkedCelId && cel.linkedCelId !== EMPTY_CEL_LINK_ID) {
+  if (cel.linkedCelId) {
     celFile.linkedCelId = cel.linkedCelId;
     if (cel.linkType) celFile.linkType = cel.linkType;
   }

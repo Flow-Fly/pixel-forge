@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import pako from 'pako';
 import {
   PROJECT_VERSION,
@@ -114,10 +115,150 @@ async function readProjectFixture(filename: string): Promise<Record<string, unkn
 }
 
 const FIXTURE_PNG_BYTES = [
-  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4, 0, 0,
-  0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 252, 255, 31, 0, 2, 235, 1, 245,
-  105, 120, 93, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0,
+  0, 31, 21, 196, 137, 0, 0, 0, 14, 73, 68, 65, 84, 120, 1, 98, 250, 255, 255, 255, 127, 0, 0, 0, 0,
+  255, 255, 14, 200, 213, 204, 0, 0, 0, 6, 73, 68, 65, 84, 3, 0, 10, 5, 3, 255, 217, 59, 245, 175, 0, 0,
+  0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
+
+function readUint32(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset] << 24) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3]
+  ) >>> 0;
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+type ParsedPng = {
+  width: number;
+  height: number;
+  compressedPixels: Buffer;
+};
+
+function inspectPng(bytes: Uint8Array): { width: number; height: number; rgba: number[] } {
+  expect(Array.from(bytes.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+
+  const png = parsePng(bytes);
+  return {
+    width: png.width,
+    height: png.height,
+    rgba: decodePngPixels(inflateSync(png.compressedPixels), png.width, png.height),
+  };
+}
+
+function parsePng(bytes: Uint8Array): ParsedPng {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  const idatChunks: Uint8Array[] = [];
+
+  while (offset < bytes.length) {
+    const length = readUint32(bytes, offset);
+    const type = bytes.slice(offset + 4, offset + 8);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    const data = bytes.slice(dataStart, dataEnd);
+
+    validatePngChunk(bytes, type, data, dataEnd);
+
+    const name = new TextDecoder().decode(type);
+    if (name === 'IHDR') {
+      width = readUint32(data, 0);
+      height = readUint32(data, 4);
+      expect(data[8]).toBe(8);
+      expect(data[9]).toBe(6);
+    }
+    if (name === 'IDAT') idatChunks.push(data);
+    if (name === 'IEND') break;
+    offset = dataEnd + 4;
+  }
+
+  return { width, height, compressedPixels: Buffer.concat(idatChunks.map((chunk) => Buffer.from(chunk))) };
+}
+
+function validatePngChunk(
+  bytes: Uint8Array,
+  type: Uint8Array,
+  data: Uint8Array,
+  dataEnd: number
+): void {
+  expect(dataEnd + 4).toBeLessThanOrEqual(bytes.length);
+  expect(readUint32(bytes, dataEnd)).toBe(crc32(new Uint8Array([...type, ...data])));
+}
+
+function decodePngPixels(decoded: Uint8Array, width: number, height: number): number[] {
+  const stride = width * 4;
+  expect(decoded).toHaveLength((stride + 1) * height);
+
+  const rgba = new Uint8Array(stride * height);
+  let offsetInRow = 0;
+
+  for (let y = 0; y < height; y++) {
+    const filter = decoded[offsetInRow];
+    expect(filter).toBeGreaterThanOrEqual(0);
+    expect(filter).toBeLessThanOrEqual(4);
+    offsetInRow++;
+
+    for (let x = 0; x < stride; x++) {
+      const value = decoded[offsetInRow++];
+      const left = x >= 4 ? rgba[y * stride + x - 4] : 0;
+      const above = y > 0 ? rgba[(y - 1) * stride + x] : 0;
+      const upperLeft = y > 0 && x >= 4 ? rgba[(y - 1) * stride + x - 4] : 0;
+      rgba[y * stride + x] = (value + pngFilterPredictor(filter, left, above, upperLeft)) & 0xff;
+    }
+  }
+
+  return Array.from(rgba);
+}
+
+function pngFilterPredictor(filter: number, left: number, above: number, upperLeft: number): number {
+  switch (filter) {
+    case 0:
+      return 0;
+    case 1:
+      return left;
+    case 2:
+      return above;
+    case 3:
+      return Math.floor((left + above) / 2);
+    case 4:
+      return paethPredictor(left, above, upperLeft);
+    default:
+      throw new Error(`Unsupported PNG filter: ${filter}`);
+  }
+}
+
+function paethPredictor(left: number, above: number, upperLeft: number): number {
+  const estimate = left + above - upperLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const aboveDistance = Math.abs(estimate - above);
+  const upperLeftDistance = Math.abs(estimate - upperLeft);
+
+  if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) return left;
+  if (aboveDistance <= upperLeftDistance) return above;
+  return upperLeft;
+}
+
+function fixturePngs(project: ProjectFile): Uint8Array[] {
+  return [
+    ...project.layers.flatMap((layer) => [layer.data, layer.referenceData?.bytes]),
+    ...project.frames.flatMap((frame) => frame.cels.map((cel) => cel.data)),
+  ].filter((bytes): bytes is Uint8Array => bytes !== undefined && bytes.length > 0);
+}
 
 describe('shared ProjectFile contract', () => {
   it('decodes a complete current project and restores serialized bytes', () => {
@@ -399,42 +540,50 @@ describe('shared ProjectFile contract', () => {
     // serialized each non-reference layer for every frame. When a group was
     // created after the stored frames, it had no layer canvas and emitted an
     // empty cel per frame. Keep this archive shape as compatibility evidence.
-    expect(Array.from(legacy.project.layers[0].data)).toEqual([]);
+    const legacyGroup = legacy.project.layers.find((layer) => layer.type === 'group');
+    const legacyReference = legacy.project.layers.find((layer) => layer.type === 'reference');
+    if (!legacyGroup || !legacyReference) throw new Error('Expected group and reference fixture layers');
+    expect(Array.from(legacyGroup.data)).toEqual([]);
     expect(
-      legacy.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'))
+      legacy.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === legacyGroup.id))
     ).toEqual([
-      expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
-      expect.objectContaining({ layerId: 'group', data: new Uint8Array(0), opacity: 100 }),
+      expect.objectContaining({ layerId: legacyGroup.id, data: new Uint8Array(0), opacity: 100 }),
+      expect.objectContaining({ layerId: legacyGroup.id, data: new Uint8Array(0), opacity: 100 }),
     ]);
     expect(
-      legacy.project.frames.flatMap((frame) => frame.cels).some((cel) => cel.layerId === 'reference')
+      legacy.project.frames.flatMap((frame) => frame.cels).some((cel) => cel.layerId === legacyReference.id)
     ).toBe(false);
     expect(legacy.compatibility.repairedParentLayerIds).toEqual([]);
 
     expect(current.project.version).toBe('4.2.0');
-    expect(current.project.layers[1]).toMatchObject({
-      id: 'paint',
+    const currentGroup = current.project.layers.find((layer) => layer.type === 'group');
+    const currentPaint = current.project.layers.find((layer) => layer.name === 'Paint');
+    const currentReference = current.project.layers.find((layer) => layer.type === 'reference');
+    if (!currentGroup || !currentPaint || !currentReference) {
+      throw new Error('Expected current group, paint, and reference fixture layers');
+    }
+    expect(currentPaint).toMatchObject({
       type: 'image',
       locked: true,
-      parentId: 'group',
+      parentId: currentGroup.id,
     });
-    expect(Array.from(current.project.layers[1].data)).toEqual(FIXTURE_PNG_BYTES);
-    expect(Array.from(current.project.layers[3].referenceData?.bytes ?? [])).toEqual(
+    expect(Array.from(currentPaint.data)).toEqual(FIXTURE_PNG_BYTES);
+    expect(Array.from(currentReference.referenceData?.bytes ?? [])).toEqual(
       FIXTURE_PNG_BYTES
     );
-    expect(Array.from(current.project.layers[0].data)).toEqual([]);
+    expect(Array.from(currentGroup.data)).toEqual([]);
     expect(
-      current.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === 'group'))
+      current.project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === currentGroup.id))
     ).toEqual([
       expect.objectContaining({ data: new Uint8Array(0), opacity: 100 }),
       expect.objectContaining({ data: new Uint8Array(0), opacity: 100 }),
     ]);
     const paintCels = current.project.frames.map((frame) =>
-      frame.cels.find((cel) => cel.layerId === 'paint')
+      frame.cels.find((cel) => cel.layerId === currentPaint.id)
     );
     expect(paintCels).toEqual([
-      expect.objectContaining({ opacity: 45, indexData: [0], linkType: 'hard' }),
-      expect.objectContaining({ opacity: 45, indexData: [0], linkType: 'hard' }),
+      expect.objectContaining({ opacity: 45, indexData: [2], linkType: 'hard' }),
+      expect.objectContaining({ opacity: 45, indexData: [2], linkType: 'hard' }),
     ]);
     expect(paintCels[0]?.linkedCelId).toEqual(expect.any(String));
     expect(paintCels.map((cel) => cel?.linkedCelId)).toEqual([
@@ -442,11 +591,32 @@ describe('shared ProjectFile contract', () => {
       paintCels[0]?.linkedCelId,
     ]);
     expect(current.project.tags?.[0]).toMatchObject({
-      id: 'walk',
+      name: 'walk',
       startFrameIndex: 0,
       endFrameIndex: 1,
     });
-    expect(current.project.guidedDrawing).toMatchObject({ sourceName: 'guide.png', target: [1] });
+    expect(current.project.guidedDrawing).toMatchObject({ sourceName: 'guide.png', target: [2] });
     expect(current.compatibility.repairedParentLayerIds).toEqual([]);
+  });
+
+  it('validates real-browser fixture PNGs and their palette index meaning', async () => {
+    const legacy = decodeProjectFile(await readProjectFixture('legacy-4.1.pf.base64'));
+    const current = decodeProjectFile(await readProjectFixture('current-4.2.pf.base64'));
+
+    for (const png of [...fixturePngs(legacy), ...fixturePngs(current)]) {
+      inspectPng(png);
+    }
+
+    const paint = current.layers.find((layer) => layer.name === 'Paint');
+    const paintCel = current.frames[0].cels.find((cel) => cel.layerId === paint?.id);
+    if (!paintCel?.indexData) throw new Error('Expected indexed paint cel');
+
+    const png = inspectPng(paintCel.data);
+    expect({ width: png.width, height: png.height, rgba: png.rgba }).toEqual({
+      width: 1,
+      height: 1,
+      rgba: [255, 255, 255, 255],
+    });
+    expect(current.palette[paintCel.indexData[0] - 1]).toBe('#ffffff');
   });
 });

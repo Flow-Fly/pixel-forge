@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { animationStore, EMPTY_CEL_LINK_ID } from "../../src/stores/animation";
+import { animationStore } from "../../src/stores/animation";
 import { colorStore } from "../../src/stores/colors";
 import { dirtyRectStore } from "../../src/stores/dirty-rect";
 import { gridStore } from "../../src/stores/grid";
@@ -343,7 +343,8 @@ describe("ProjectContext", () => {
     expect(firstCel?.canvas).not.toBe(sharedCanvas);
     expect(firstCel?.linkedCelId).toBeUndefined();
     expect(secondCel?.canvas).toBe(sharedCanvas);
-    expect(secondCel?.linkedCelId).toBe(EMPTY_CEL_LINK_ID);
+    expect(secondCel).toBeDefined();
+    expect(context.animation.isRuntimeEmptyCel(secondCel!)).toBe(true);
   });
 
   it("keeps explicitly hard-linked cels shared when preparing one for editing", () => {
