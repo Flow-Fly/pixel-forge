@@ -525,6 +525,7 @@ describe('pixel-forge-app project dialogs', () => {
     expect(getComputedStyle(status!).pointerEvents).toBe('none');
     expect(getComputedStyle(dismiss!).pointerEvents).toBe('auto');
     expect(getComputedStyle(toast!).whiteSpace).toBe('normal');
+    expect(getComputedStyle(toast!).boxSizing).toBe('border-box');
     expect(getComputedStyle(toast!).maxInlineSize).toContain('calc(100vw - 2rem)');
     expect(dismiss?.tagName).toBe('BUTTON');
     expect(dismiss?.type).toBe('button');
@@ -598,6 +599,9 @@ describe('pixel-forge-app project dialogs', () => {
       'Could not paint reference layers'
     );
 
+    await vi.advanceTimersByTimeAsync(1000);
+    await element.updateComplete;
+
     window.dispatchEvent(
       new CustomEvent('show-warning-toast', { detail: { message: 'Could not duplicate project' } })
     );
@@ -606,7 +610,19 @@ describe('pixel-forge-app project dialogs', () => {
       'Could not duplicate project'
     );
 
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')?.textContent).toBe(
+      'Could not duplicate project'
+    );
+
+    await vi.advanceTimersByTimeAsync(999);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')?.textContent).toBe(
+      'Could not duplicate project'
+    );
+
+    await vi.advanceTimersByTimeAsync(1);
     await element.updateComplete;
     expect(element.shadowRoot?.querySelector('.warning-toast.transient')).toBeNull();
     expect(element.shadowRoot?.querySelector('.warning-toast.persistent')).toBeTruthy();
@@ -615,6 +631,9 @@ describe('pixel-forge-app project dialogs', () => {
       new CustomEvent('show-warning-toast', { detail: { message: 'Could not save project' } })
     );
     await element.updateComplete;
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await element.updateComplete;
     element.shadowRoot?.querySelector<HTMLButtonElement>('.warning-toast-dismiss')?.click();
     await element.updateComplete;
     expect(element.shadowRoot?.querySelector('.warning-toast.persistent')).toBeNull();
@@ -622,7 +641,13 @@ describe('pixel-forge-app project dialogs', () => {
       'Could not save project'
     );
 
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(999);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')?.textContent).toBe(
+      'Could not save project'
+    );
+
+    await vi.advanceTimersByTimeAsync(1);
     await element.updateComplete;
     expect(element.shadowRoot?.querySelector('.warning-toast.transient')).toBeNull();
   });

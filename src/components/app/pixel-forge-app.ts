@@ -293,6 +293,7 @@ export class PixelForgeApp extends BaseComponent {
       display: flex;
       align-items: flex-start;
       gap: 12px;
+      box-sizing: border-box;
       max-inline-size: min(36rem, calc(100vw - 2rem));
       white-space: normal;
       animation: none;
