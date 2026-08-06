@@ -62,10 +62,6 @@ import { productTelemetry } from "../../services/telemetry";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
 const SIDEBAR_KEYBOARD_STEP = 16;
-type WarningToast = {
-  message: string;
-  persistent: boolean;
-};
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -265,12 +261,21 @@ export class PixelForgeApp extends BaseComponent {
       backdrop-filter: blur(12px);
     }
 
-    /* Warning toast - rendered at app level to avoid viewport transform issues */
-    .warning-toast {
+    /* Warning toasts render at app level to avoid viewport transform issues. */
+    .warning-toast-region {
       position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .warning-toast {
+      position: relative;
       background: rgba(13, 16, 21, 0.95);
       border: 1px solid rgba(196, 124, 114, 0.8);
       color: #f0aaa2;
@@ -278,7 +283,6 @@ export class PixelForgeApp extends BaseComponent {
       border-radius: var(--pf-radius-md);
       font-size: 13px;
       font-weight: 500;
-      z-index: 10000;
       pointer-events: none;
       animation: toastFadeInOut 2s ease-in-out forwards;
       box-shadow: var(--pf-shadow-lg);
@@ -290,18 +294,19 @@ export class PixelForgeApp extends BaseComponent {
       align-items: flex-start;
       gap: 12px;
       max-inline-size: min(36rem, calc(100vw - 2rem));
-      pointer-events: auto;
       white-space: normal;
       animation: none;
     }
 
     .warning-toast-message {
       min-inline-size: 0;
+      pointer-events: none;
       overflow-wrap: anywhere;
     }
 
     .warning-toast-dismiss {
       flex: none;
+      pointer-events: auto;
       border: 1px solid currentColor;
       border-radius: var(--pf-radius-sm);
       background: transparent;
@@ -324,19 +329,19 @@ export class PixelForgeApp extends BaseComponent {
     @keyframes toastFadeInOut {
       0% {
         opacity: 0;
-        transform: translate(-50%, -50%) translateY(10px);
+        transform: translateY(10px);
       }
       15% {
         opacity: 1;
-        transform: translate(-50%, -50%) translateY(0);
+        transform: translateY(0);
       }
       85% {
         opacity: 1;
-        transform: translate(-50%, -50%) translateY(0);
+        transform: translateY(0);
       }
       100% {
         opacity: 0;
-        transform: translate(-50%, -50%) translateY(-10px);
+        transform: translateY(-10px);
       }
     }
 
@@ -408,7 +413,8 @@ export class PixelForgeApp extends BaseComponent {
   @state() private projectSelectionRequired = false;
   @state() private isDeletingCurrentProject = false;
   @state() private deleteCurrentProjectError: string | null = null;
-  @state() private warningToast: WarningToast | null = null;
+  @state() private compatibilityWarningMessage: string | null = null;
+  @state() private transientWarningMessage: string | null = null;
   @state() private fileImportMessage: string | null = null;
 
   private resizeStartY = 0;
@@ -505,28 +511,26 @@ export class PixelForgeApp extends BaseComponent {
     e: CustomEvent<{ message: string; persistent?: boolean }>
   ) => {
     const persistent = e.detail.persistent === true;
-    if (this.warningToast?.persistent && !persistent) return;
+    if (persistent) {
+      this.compatibilityWarningMessage = e.detail.message;
+      return;
+    }
 
     if (this.warningTimer !== null) {
       clearTimeout(this.warningTimer);
       this.warningTimer = null;
     }
 
-    this.warningToast = { message: e.detail.message, persistent };
-    if (persistent) return;
+    this.transientWarningMessage = e.detail.message;
 
     this.warningTimer = window.setTimeout(() => {
-      this.warningToast = null;
+      this.transientWarningMessage = null;
       this.warningTimer = null;
     }, 2000);
   };
 
-  private dismissWarningToast = () => {
-    if (this.warningTimer !== null) {
-      clearTimeout(this.warningTimer);
-      this.warningTimer = null;
-    }
-    this.warningToast = null;
+  private dismissCompatibilityWarning = () => {
+    this.compatibilityWarningMessage = null;
   };
 
   private handleProjectFileImportReport = (
@@ -1051,28 +1055,32 @@ export class PixelForgeApp extends BaseComponent {
     `;
   }
 
-  private renderWarningToast() {
-    const warning = this.warningToast;
-    if (!warning) return "";
+  private renderWarningToasts() {
+    if (!this.compatibilityWarningMessage && !this.transientWarningMessage) return "";
 
     return html`
-      <div class="warning-toast ${warning.persistent ? "persistent" : ""}">
-        <span
-          class="warning-toast-message"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          >${warning.message}</span
-        >
-        ${warning.persistent
-          ? html`<button
-              class="warning-toast-dismiss"
-              type="button"
-              aria-label="Dismiss compatibility warning"
-              @click=${this.dismissWarningToast}
-            >
-              Dismiss
-            </button>`
+      <div class="warning-toast-region">
+        ${this.compatibilityWarningMessage
+          ? html`<div class="warning-toast persistent">
+              <span
+                class="warning-toast-message"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >${this.compatibilityWarningMessage}</span
+              >
+              <button
+                class="warning-toast-dismiss"
+                type="button"
+                aria-label="Dismiss compatibility warning"
+                @click=${this.dismissCompatibilityWarning}
+              >
+                Dismiss
+              </button>
+            </div>`
+          : ""}
+        ${this.transientWarningMessage
+          ? html`<div class="warning-toast transient">${this.transientWarningMessage}</div>`
           : ""}
       </div>
     `;
@@ -1250,7 +1258,7 @@ export class PixelForgeApp extends BaseComponent {
       <pf-checker-settings-dialog></pf-checker-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
 
-      ${this.renderWarningToast()}
+      ${this.renderWarningToasts()}
       ${this.renderFileImportStatus()}
       <pf-pwa-update-toast></pf-pwa-update-toast>
     `;

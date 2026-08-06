@@ -508,9 +508,11 @@ describe('pixel-forge-app project dialogs', () => {
 
     const toast = element.shadowRoot?.querySelector<HTMLElement>('.warning-toast');
     const status = element.shadowRoot?.querySelector<HTMLElement>('[role="status"]');
+    const warningRegion = element.shadowRoot?.querySelector<HTMLElement>('.warning-toast-region');
     const dismiss = element.shadowRoot?.querySelector<HTMLButtonElement>(
       '.warning-toast-dismiss'
     );
+    if (!warningRegion) throw new Error('Expected warning toast region');
     expect(status?.textContent).toBe('Repaired invalid group links for layers: layer-1.');
     expect(status?.getAttribute('aria-live')).toBe('polite');
     expect(status?.getAttribute('aria-atomic')).toBe('true');
@@ -518,6 +520,10 @@ describe('pixel-forge-app project dialogs', () => {
     expect(toast?.classList.contains('persistent')).toBe(true);
     expect(toast?.getAttribute('role')).toBeNull();
     expect(toast?.hasAttribute('aria-modal')).toBe(false);
+    expect(getComputedStyle(warningRegion).pointerEvents).toBe('none');
+    expect(getComputedStyle(toast!).pointerEvents).toBe('none');
+    expect(getComputedStyle(status!).pointerEvents).toBe('none');
+    expect(getComputedStyle(dismiss!).pointerEvents).toBe('auto');
     expect(getComputedStyle(toast!).whiteSpace).toBe('normal');
     expect(getComputedStyle(toast!).maxInlineSize).toContain('calc(100vw - 2rem)');
     expect(dismiss?.tagName).toBe('BUTTON');
@@ -563,6 +569,62 @@ describe('pixel-forge-app project dialogs', () => {
     await vi.advanceTimersByTimeAsync(2000);
     await element.updateComplete;
     expect(element.shadowRoot?.querySelector('.warning-toast')).toBeNull();
+  });
+
+  it('keeps compatibility and ordinary warning lifecycles independent', async () => {
+    vi.useFakeTimers();
+    await import('../../../src/components/app/pixel-forge-app');
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', {
+        detail: { message: 'Repaired invalid group links for layers: layer-1.', persistent: true },
+      })
+    );
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', { detail: { message: 'Could not paint reference layers' } })
+    );
+    await element.updateComplete;
+
+    const region = element.shadowRoot?.querySelector<HTMLElement>('.warning-toast-region');
+    if (!region) throw new Error('Expected warning toast region');
+    expect(getComputedStyle(region).display).toBe('flex');
+    expect(getComputedStyle(region).flexDirection).toBe('column');
+    expect(element.shadowRoot?.querySelector('.warning-toast.persistent')).toBeTruthy();
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')?.textContent).toBe(
+      'Could not paint reference layers'
+    );
+
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', { detail: { message: 'Could not duplicate project' } })
+    );
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')?.textContent).toBe(
+      'Could not duplicate project'
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')).toBeNull();
+    expect(element.shadowRoot?.querySelector('.warning-toast.persistent')).toBeTruthy();
+
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', { detail: { message: 'Could not save project' } })
+    );
+    await element.updateComplete;
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.warning-toast-dismiss')?.click();
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.persistent')).toBeNull();
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')?.textContent).toBe(
+      'Could not save project'
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast.transient')).toBeNull();
   });
 
   it('opens the project browser from the project tab strip', async () => {
