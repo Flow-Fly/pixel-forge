@@ -4,7 +4,7 @@
  * Linked cels share the same canvas for memory efficiency.
  * - Soft links: Auto-created during frame duplication, break on edit
  * - Hard links: User-explicit, stay linked during edits
- * - Empty cel links: Share transparent canvas singleton
+ * - Empty cels: Share transparent canvas singleton
  */
 
 import type { Cel } from '../../types/animation';

@@ -14,10 +14,7 @@ import type { createLayerStore } from '../layers-store';
 // Import extracted modules
 import type { PlaybackMode } from './types';
 import { getCelKey } from './types';
-import {
-  isRuntimeEmptyCel as hasRuntimeEmptyCanvas,
-  markRuntimeEmptyCanvas,
-} from './empty-cel';
+import { isRuntimeEmptyCel, markRuntimeEmptyCanvas } from './empty-cel';
 import * as indexBuffer from './index-buffer';
 import * as paletteSync from './palette-sync';
 import * as celSelection from './cel-selection';
@@ -166,7 +163,7 @@ class AnimationStore {
   }
 
   isRuntimeEmptyCel(cel: Cel): boolean {
-    return hasRuntimeEmptyCanvas(cel);
+    return isRuntimeEmptyCel(cel);
   }
 
   getEditableCelCanvas(layerId: string, frameId: string): HTMLCanvasElement | undefined {
