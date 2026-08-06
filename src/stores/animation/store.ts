@@ -312,7 +312,10 @@ class AnimationStore {
     const sourceCel = cels.get(sourceKey);
 
     if (sourceCel && sourceFrameIndex !== -1 && isRuntimeEmptyCel(sourceCel)) {
-      cels.set(targetKey, this.createRuntimeEmptyCel(layer.id, targetFrameId, sourceCel.canvas));
+      cels.set(
+        targetKey,
+        this.createRuntimeEmptyCel(layer.id, targetFrameId, sourceCel.canvas, sourceCel.opacity)
+      );
       return;
     }
 
@@ -324,12 +327,18 @@ class AnimationStore {
     this.linkNewFrameCel(cels, layer, sourceKey, targetKey, targetFrameId, sourceCel);
   }
 
-  private createRuntimeEmptyCel(layerId: string, frameId: string, canvas: HTMLCanvasElement): Cel {
+  private createRuntimeEmptyCel(
+    layerId: string,
+    frameId: string,
+    canvas: HTMLCanvasElement,
+    opacity?: number
+  ): Cel {
     return {
       id: crypto.randomUUID(),
       layerId,
       frameId,
       canvas,
+      ...(opacity !== undefined && { opacity }),
     };
   }
 

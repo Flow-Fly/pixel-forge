@@ -166,6 +166,10 @@ describe('timeline active project context binding', () => {
     expect(cels).toHaveLength(2);
     expect(cels.every((cel) => !cel.classList.contains('has-content'))).toBe(true);
     expect(cels.every((cel) => !cel.classList.contains('linked'))).toBe(true);
+    expect(cels.every((cel) => !cel.classList.contains('hard-linked'))).toBe(true);
+    expect(cels.every((cel) => !cel.classList.contains('link-continues-left'))).toBe(true);
+    expect(cels.every((cel) => !cel.classList.contains('link-continues-right'))).toBe(true);
+    expect(grid.shadowRoot?.querySelector('.link-badge')).toBeNull();
   });
 
   it('records layer toolbar actions in the active context history', async () => {

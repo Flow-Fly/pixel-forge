@@ -352,17 +352,42 @@ describe("ProjectContext", () => {
     const layerId = context.layers.layers.value[0].id;
     const sourceFrameId = context.animation.currentFrameId.value;
     const sourceKey = context.animation.getCelKey(layerId, sourceFrameId);
-    const sourceCel = context.animation.cels.value.get(sourceKey);
+    context.animation.setCelOpacity([sourceKey], 35);
 
     context.animation.addFrame(true);
 
     const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(sourceKey);
     const targetCel = context.animation.cels.value.get(
       context.animation.getCelKey(layerId, targetFrameId)
     );
 
     expect(sourceCel).toBeDefined();
     expect(targetCel).toBeDefined();
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(true);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(true);
+    expect(sourceCel?.canvas).toBe(targetCel?.canvas);
+    expect(sourceCel?.linkedCelId).toBeUndefined();
+    expect(targetCel?.linkedCelId).toBeUndefined();
+    expect(sourceCel?.opacity).toBe(35);
+    expect(targetCel?.opacity).toBe(35);
+  });
+
+  it("keeps an untouched continuous frame runtime-empty", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    context.layers.updateLayer(layerId, { continuous: true });
+    const sourceFrameId = context.animation.currentFrameId.value;
+    const sourceKey = context.animation.getCelKey(layerId, sourceFrameId);
+
+    context.animation.addFrame(false);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(sourceKey);
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
     expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(true);
     expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(true);
     expect(sourceCel?.canvas).toBe(targetCel?.canvas);
