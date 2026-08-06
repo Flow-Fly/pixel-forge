@@ -203,26 +203,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     const twice = await projectStore.saveProject();
     vi.useRealTimers();
 
-    // Frame ids and linked-cel group ids regenerate every load; normalize
-    // both (linked ids by order of first appearance, preserving grouping).
-    const normalize = (file: typeof once) => {
-      const linkIds = new Map<string, string>();
-      return {
-        ...file,
-        frames: file.frames.map((f) => ({
-          ...f,
-          id: 'X',
-          cels: f.cels.map((c) => {
-            if (!c.linkedCelId) return c;
-            if (!linkIds.has(c.linkedCelId)) {
-              linkIds.set(c.linkedCelId, `link-${linkIds.size}`);
-            }
-            return { ...c, linkedCelId: linkIds.get(c.linkedCelId) };
-          }),
-        })),
-      };
-    };
-    expect(normalize(twice)).toEqual(normalize(once));
+    expect(normalizeRoundTripFile(twice)).toEqual(normalizeRoundTripFile(once));
   });
 
   it.each([
