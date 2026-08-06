@@ -62,6 +62,10 @@ import { productTelemetry } from "../../services/telemetry";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
 const SIDEBAR_KEYBOARD_STEP = 16;
+type WarningToast = {
+  message: string;
+  persistent: boolean;
+};
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
@@ -281,6 +285,42 @@ export class PixelForgeApp extends BaseComponent {
       white-space: nowrap;
     }
 
+    .warning-toast.persistent {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      max-inline-size: min(36rem, calc(100vw - 2rem));
+      pointer-events: auto;
+      white-space: normal;
+      animation: none;
+    }
+
+    .warning-toast-message {
+      min-inline-size: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .warning-toast-dismiss {
+      flex: none;
+      border: 1px solid currentColor;
+      border-radius: var(--pf-radius-sm);
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+      line-height: 1;
+      padding: 4px 6px;
+    }
+
+    .warning-toast-dismiss:hover {
+      background: rgba(240, 170, 162, 0.14);
+    }
+
+    .warning-toast-dismiss:focus-visible {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: 2px;
+    }
+
     @keyframes toastFadeInOut {
       0% {
         opacity: 0;
@@ -368,7 +408,7 @@ export class PixelForgeApp extends BaseComponent {
   @state() private projectSelectionRequired = false;
   @state() private isDeletingCurrentProject = false;
   @state() private deleteCurrentProjectError: string | null = null;
-  @state() private warningMessage: string | null = null;
+  @state() private warningToast: WarningToast | null = null;
   @state() private fileImportMessage: string | null = null;
 
   private resizeStartY = 0;
@@ -461,19 +501,32 @@ export class PixelForgeApp extends BaseComponent {
     });
   }
 
-  private handleShowWarningToast = (e: CustomEvent<{ message: string }>) => {
-    // Clear any existing timer
+  private handleShowWarningToast = (
+    e: CustomEvent<{ message: string; persistent?: boolean }>
+  ) => {
+    const persistent = e.detail.persistent === true;
+    if (this.warningToast?.persistent && !persistent) return;
+
     if (this.warningTimer !== null) {
       clearTimeout(this.warningTimer);
+      this.warningTimer = null;
     }
 
-    this.warningMessage = e.detail.message;
+    this.warningToast = { message: e.detail.message, persistent };
+    if (persistent) return;
 
-    // Auto-hide after animation completes
     this.warningTimer = window.setTimeout(() => {
-      this.warningMessage = null;
+      this.warningToast = null;
       this.warningTimer = null;
     }, 2000);
+  };
+
+  private dismissWarningToast = () => {
+    if (this.warningTimer !== null) {
+      clearTimeout(this.warningTimer);
+      this.warningTimer = null;
+    }
+    this.warningToast = null;
   };
 
   private handleProjectFileImportReport = (
@@ -1170,8 +1223,28 @@ export class PixelForgeApp extends BaseComponent {
       <pf-checker-settings-dialog></pf-checker-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
 
-      ${this.warningMessage
-        ? html`<div class="warning-toast">${this.warningMessage}</div>`
+      ${this.warningToast
+        ? html`
+            <div class="warning-toast ${this.warningToast.persistent ? "persistent" : ""}">
+              <span
+                class="warning-toast-message"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                >${this.warningToast.message}</span
+              >
+              ${this.warningToast.persistent
+                ? html`<button
+                    class="warning-toast-dismiss"
+                    type="button"
+                    aria-label="Dismiss compatibility warning"
+                    @click=${this.dismissWarningToast}
+                  >
+                    Dismiss
+                  </button>`
+                : ""}
+            </div>
+          `
         : ""}
       ${this.renderFileImportStatus()}
       <pf-pwa-update-toast></pf-pwa-update-toast>

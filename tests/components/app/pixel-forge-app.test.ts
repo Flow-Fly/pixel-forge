@@ -113,6 +113,7 @@ describe('pixel-forge-app project dialogs', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     restoreDefaultProjectContext();
@@ -473,6 +474,95 @@ describe('pixel-forge-app project dialogs', () => {
     element.shadowRoot?.querySelector<HTMLButtonElement>('.file-import-status button')?.click();
     await element.updateComplete;
     expect(element.shadowRoot?.querySelector('.file-import-status')).toBeNull();
+  });
+
+  it('keeps a compatibility repair warning visible and dismissible without changing editor state', async () => {
+    vi.useFakeTimers();
+    await import('../../../src/components/app/pixel-forge-app');
+    const context = createProjectContext();
+    createdContexts.push(context);
+    setActiveProjectContext(context);
+    const layerParents = context.layers.layers.value.map((layer) => ({
+      id: layer.id,
+      parentId: layer.parentId,
+    }));
+    const undoStack = [...context.history.undoStack.value];
+    const wasDirty = autoSaveService.isDirty(context);
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    const editorControl = document.createElement('button');
+    editorControl.type = 'button';
+    document.body.append(element, editorControl);
+    editorControl.focus();
+
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', {
+        detail: {
+          message: 'Repaired invalid group links for layers: layer-1.',
+          persistent: true,
+        },
+      })
+    );
+    await element.updateComplete;
+
+    const toast = element.shadowRoot?.querySelector<HTMLElement>('.warning-toast');
+    const status = element.shadowRoot?.querySelector<HTMLElement>('[role="status"]');
+    const dismiss = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '.warning-toast-dismiss'
+    );
+    expect(status?.textContent).toBe('Repaired invalid group links for layers: layer-1.');
+    expect(status?.getAttribute('aria-live')).toBe('polite');
+    expect(status?.getAttribute('aria-atomic')).toBe('true');
+    expect(document.activeElement).toBe(editorControl);
+    expect(toast?.classList.contains('persistent')).toBe(true);
+    expect(toast?.getAttribute('role')).toBeNull();
+    expect(toast?.hasAttribute('aria-modal')).toBe(false);
+    expect(getComputedStyle(toast!).whiteSpace).toBe('normal');
+    expect(getComputedStyle(toast!).maxInlineSize).toContain('calc(100vw - 2rem)');
+    expect(dismiss?.tagName).toBe('BUTTON');
+    expect(dismiss?.type).toBe('button');
+    expect(dismiss?.disabled).toBe(false);
+    expect(dismiss?.getAttribute('aria-label')).toBe('Dismiss compatibility warning');
+    expect(element.shadowRoot?.querySelector('pf-drawing-canvas')?.hasAttribute('inert')).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2001);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast')).toBeTruthy();
+
+    dismiss?.focus();
+    expect(element.shadowRoot?.activeElement).toBe(dismiss);
+    dismiss?.click();
+    await element.updateComplete;
+
+    expect(element.shadowRoot?.querySelector('.warning-toast')).toBeNull();
+    expect(context.layers.layers.value.map((layer) => ({ id: layer.id, parentId: layer.parentId }))).toEqual(
+      layerParents
+    );
+    expect(context.history.undoStack.value).toEqual(undoStack);
+    expect(autoSaveService.isDirty(context)).toBe(wasDirty);
+  });
+
+  it('keeps ordinary warnings transient', async () => {
+    vi.useFakeTimers();
+    await import('../../../src/components/app/pixel-forge-app');
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', { detail: { message: 'Could not duplicate project' } })
+    );
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast')?.textContent).toContain(
+      'Could not duplicate project'
+    );
+    expect(element.shadowRoot?.querySelector('.warning-toast-dismiss')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await element.updateComplete;
+    expect(element.shadowRoot?.querySelector('.warning-toast')).toBeNull();
   });
 
   it('opens the project browser from the project tab strip', async () => {

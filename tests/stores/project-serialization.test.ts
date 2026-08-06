@@ -539,7 +539,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(resaved.frames[0].cels.find((cel) => cel.layerId === body.id)?.opacity).toBe(35);
   });
 
-  it('warns once after repairing an IndexedDB hierarchy without warning for legacy defaults', async () => {
+  it('warns once after repairing an IndexedDB hierarchy and not after reopening the repaired project', async () => {
     const saved = await buildSampleProject();
     const malformed = structuredClone(saved);
     malformed.layers[0].parentId = malformed.layers[0].id;
@@ -553,9 +553,14 @@ describe('project save -> load -> save round-trip (structural)', () => {
         expect.objectContaining({
           detail: {
             message: `Repaired invalid group links for layers: ${malformed.layers[0].id}.`,
+            persistent: true,
           },
         })
       );
+
+      const repaired = await projectStore.saveProject();
+      await projectStore.loadProject(repaired, false);
+      expect(warningListener).toHaveBeenCalledOnce();
 
       const legacy = structuredClone(saved) as ProjectFileInput;
       legacy.version = '4.1.0';
@@ -586,10 +591,12 @@ describe('project save -> load -> save round-trip (structural)', () => {
       await projectStore.loadProject(malformed, false);
 
       const message = warningListener.mock.calls[0]?.[0].detail.message as string;
+      const expectedMessage =
+        `Repaired invalid group links for layers: ${'x'.repeat(39)}…, ` +
+        `${'1'.repeat(39)}…, ${'2'.repeat(39)}…, and 2 more.`;
       expect(warningListener).toHaveBeenCalledOnce();
+      expect(message).toBe(expectedMessage);
       expect(message.length).toBeLessThanOrEqual(240);
-      expect(message).toContain(`${'x'.repeat(39)}…`);
-      expect(message).toContain(', and 2 more.');
     } finally {
       window.removeEventListener('show-warning-toast', warningListener);
     }
