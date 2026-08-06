@@ -349,14 +349,19 @@ describe('project save -> load -> save round-trip (structural)', () => {
     const input = await readCompressedProjectFixture('current-4.2.pf.base64');
     const project = decodeProjectFileWithDiagnostics(input).project;
     const group = project.layers.find((layer) => layer.type === 'group');
+    const paint = project.layers.find((layer) => layer.name === 'Paint');
     if (!group) throw new Error('Expected a group layer in the current fixture');
+    const paintCel = project.frames[0].cels.find((cel) => cel.layerId === paint?.id);
+    if (!paintCel) throw new Error('Expected the current fixture paint cel');
+    expect(paintCel.indexData).toEqual([2]);
+
     const groupCels = project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === group.id));
     if (groupCels.some((cel) => !cel)) throw new Error('Expected one group cel per frame');
 
     for (const cel of groupCels) {
-      cel.data = Uint8Array.from([4, 5, 6]);
+      cel.data = paintCel.data;
       cel.opacity = 35;
-      cel.indexData = [0, 0];
+      cel.indexData = [2];
       cel.linkedCelId = 'loaded-group-link';
       cel.linkType = 'hard';
       cel.textCelData = { content: 'Group payload', x: 2, y: 3 };
@@ -371,15 +376,22 @@ describe('project save -> load -> save round-trip (structural)', () => {
       const cels = file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === group.id));
 
       expect(cels).toEqual(
-        expect.arrayContaining([
+        [
           expect.objectContaining({
-            data: Uint8Array.from([4, 5, 6]),
+            data: paintCel.data,
             opacity: 35,
-            indexData: [0, 0],
+            indexData: [2],
             linkType: 'hard',
             textCelData: { content: 'Group payload', x: 2, y: 3 },
           }),
-        ])
+          expect.objectContaining({
+            data: paintCel.data,
+            opacity: 35,
+            indexData: [2],
+            linkType: 'hard',
+            textCelData: { content: 'Group payload', x: 2, y: 3 },
+          }),
+        ]
       );
       expect(cels[0]?.linkedCelId).toEqual(expect.any(String));
       expect(cels.map((cel) => cel?.linkedCelId)).toEqual([
@@ -387,6 +399,29 @@ describe('project save -> load -> save round-trip (structural)', () => {
         cels[0]?.linkedCelId,
       ]);
     }
+  });
+
+  it('keeps loader-created missing cels as default blanks', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const group = project.layers.find((layer) => layer.type === 'group');
+    if (!group) throw new Error('Expected a group layer in the current fixture');
+
+    const sourceCel = project.frames[0].cels.find((cel) => cel.layerId === group.id);
+    if (!sourceCel) throw new Error('Expected a source group cel');
+    sourceCel.opacity = 35;
+    project.frames[1].cels = project.frames[1].cels.filter((cel) => cel.layerId !== group.id);
+
+    await projectStore.loadProject(project, false);
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    const loadedCel = saved.frames[1].cels.find((cel) => cel.layerId === group.id);
+
+    expect(loadedCel).toEqual(
+      expect.objectContaining({ data: new Uint8Array(0), opacity: 100 })
+    );
+    expect(loadedCel?.indexData).toBeUndefined();
+    expect(loadedCel?.linkedCelId).toBeUndefined();
+    expect(loadedCel?.linkType).toBeUndefined();
   });
 
   it('does not persist the runtime empty-cel marker', async () => {

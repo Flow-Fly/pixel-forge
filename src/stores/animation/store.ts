@@ -311,7 +311,7 @@ class AnimationStore {
     const targetKey = getCelKey(layer.id, targetFrameId);
     const sourceCel = cels.get(sourceKey);
 
-    if (sourceCel && sourceFrameIndex !== -1 && isRuntimeEmptyCel(sourceCel)) {
+    if (shouldLink && sourceCel && sourceFrameIndex !== -1 && isRuntimeEmptyCel(sourceCel)) {
       cels.set(
         targetKey,
         this.createRuntimeEmptyCel(layer.id, targetFrameId, sourceCel.canvas, sourceCel.opacity)
