@@ -7,13 +7,15 @@
 
 import { signal } from '../../core/signal';
 import type { Frame, Cel, OnionSkinSettings, FrameTag } from '../../types/animation';
+import type { Layer } from '../../types/layer';
 import type { TextCelData } from '../../types/text';
 import { type StoreRefs } from '../store-refs';
 import type { createLayerStore } from '../layers-store';
 
 // Import extracted modules
 import type { PlaybackMode } from './types';
-import { EMPTY_CEL_LINK_ID, getCelKey } from './types';
+import { getCelKey } from './types';
+import { isRuntimeEmptyCel, markRuntimeEmptyCanvas } from './empty-cel';
 import * as indexBuffer from './index-buffer';
 import * as paletteSync from './palette-sync';
 import * as celSelection from './cel-selection';
@@ -147,7 +149,7 @@ class AnimationStore {
         ctx.imageSmoothingEnabled = false;
       }
     }
-    return this.sharedTransparentCanvas;
+    return markRuntimeEmptyCanvas(this.sharedTransparentCanvas);
   }
 
   // ===== Cel Key Helper =====
@@ -159,6 +161,10 @@ class AnimationStore {
   getCelCanvas(frameId: string, layerId: string): HTMLCanvasElement | undefined {
     const key = getCelKey(layerId, frameId);
     return this.cels.value.get(key)?.canvas;
+  }
+
+  isRuntimeEmptyCel(cel: Cel): boolean {
+    return isRuntimeEmptyCel(cel);
   }
 
   getEditableCelCanvas(layerId: string, frameId: string): HTMLCanvasElement | undefined {
@@ -184,8 +190,6 @@ class AnimationStore {
           layerId: layer.id,
           frameId,
           canvas: sharedCanvas,
-          linkedCelId: EMPTY_CEL_LINK_ID,
-          linkType: 'soft'
         });
       }
     });
@@ -275,53 +279,94 @@ class AnimationStore {
     const { width, height } = this.refs.getCanvasSize();
     const sharedCanvas = this.getSharedTransparentCanvas(width, height);
 
-    layers.filter(layer => layer.type !== 'reference').forEach(layer => {
-      const sourceKey = getCelKey(layer.id, frameIdToUse);
-      const targetKey = getCelKey(layer.id, newFrame.id);
-      const sourceCel = cels.get(sourceKey);
-
-      // Determine if this layer should link to source:
-      // - If duplicate=true: all layers link (explicit duplicate action)
-      // - If duplicate=false: only continuous layers link
-      const shouldLink = duplicate || layer.continuous;
-
-      if (shouldLink && sourceCel && sourceFrameIndex !== -1) {
-        // Create linked cel
-        const linkedCelId = sourceCel.linkedCelId ?? crypto.randomUUID();
-        // Continuous layers use hard links (edits propagate to all linked cels)
-        // Non-continuous use soft links (edits break the link via copy-on-write)
-        const linkTypeToUse = layer.continuous ? 'hard' : (sourceCel.linkType ?? 'soft');
-
-        if (!sourceCel.linkedCelId) {
-          cels.set(sourceKey, { ...sourceCel, linkedCelId, linkType: linkTypeToUse });
-        }
-
-        cels.set(targetKey, {
-          id: crypto.randomUUID(),
-          layerId: layer.id,
-          frameId: newFrame.id,
-          canvas: sourceCel.canvas,
-          linkedCelId,
-          linkType: linkTypeToUse,
-          opacity: sourceCel.opacity,
-          textCelData: sourceCel.textCelData
-        });
-      } else {
-        // Create empty cel (non-continuous layer with new empty frame)
-        cels.set(targetKey, {
-          id: crypto.randomUUID(),
-          layerId: layer.id,
-          frameId: newFrame.id,
-          canvas: sharedCanvas,
-          linkedCelId: EMPTY_CEL_LINK_ID,
-          linkType: 'soft'
-        });
-      }
-    });
+    layers
+      .filter(layer => layer.type !== 'reference')
+      .forEach(layer =>
+        this.addCelForNewFrame(
+          cels,
+          layer,
+          frameIdToUse,
+          newFrame.id,
+          sourceFrameIndex,
+          duplicate || layer.continuous === true,
+          sharedCanvas
+        )
+      );
 
     this.cels.value = cels;
 
     this.goToFrame(newFrame.id);
+  }
+
+  private addCelForNewFrame(
+    cels: Map<string, Cel>,
+    layer: Layer,
+    sourceFrameId: string,
+    targetFrameId: string,
+    sourceFrameIndex: number,
+    shouldLink: boolean,
+    sharedCanvas: HTMLCanvasElement
+  ): void {
+    const sourceKey = getCelKey(layer.id, sourceFrameId);
+    const targetKey = getCelKey(layer.id, targetFrameId);
+    const sourceCel = cels.get(sourceKey);
+
+    if (shouldLink && sourceCel && sourceFrameIndex !== -1 && isRuntimeEmptyCel(sourceCel)) {
+      cels.set(
+        targetKey,
+        this.createRuntimeEmptyCel(layer.id, targetFrameId, sourceCel.canvas, sourceCel.opacity)
+      );
+      return;
+    }
+
+    if (!shouldLink || !sourceCel || sourceFrameIndex === -1) {
+      cels.set(targetKey, this.createRuntimeEmptyCel(layer.id, targetFrameId, sharedCanvas));
+      return;
+    }
+
+    this.linkNewFrameCel(cels, layer, sourceKey, targetKey, targetFrameId, sourceCel);
+  }
+
+  private createRuntimeEmptyCel(
+    layerId: string,
+    frameId: string,
+    canvas: HTMLCanvasElement,
+    opacity?: number
+  ): Cel {
+    return {
+      id: crypto.randomUUID(),
+      layerId,
+      frameId,
+      canvas,
+      ...(opacity !== undefined && { opacity }),
+    };
+  }
+
+  private linkNewFrameCel(
+    cels: Map<string, Cel>,
+    layer: Layer,
+    sourceKey: string,
+    targetKey: string,
+    targetFrameId: string,
+    sourceCel: Cel
+  ): void {
+    const linkedCelId = sourceCel.linkedCelId ?? crypto.randomUUID();
+    const linkType = layer.continuous ? 'hard' : (sourceCel.linkType ?? 'soft');
+
+    if (!sourceCel.linkedCelId) {
+      cels.set(sourceKey, { ...sourceCel, linkedCelId, linkType });
+    }
+
+    cels.set(targetKey, {
+      id: crypto.randomUUID(),
+      layerId: layer.id,
+      frameId: targetFrameId,
+      canvas: sourceCel.canvas,
+      linkedCelId,
+      linkType,
+      opacity: sourceCel.opacity,
+      textCelData: sourceCel.textCelData
+    });
   }
 
   deleteFrame(frameId: string) {

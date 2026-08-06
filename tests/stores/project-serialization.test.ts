@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import pako from 'pako';
+
+const canvasBytes = vi.hoisted(() => new WeakMap<HTMLCanvasElement, Uint8Array>());
 
 // happy-dom has neither IndexedDB nor canvas encoding — mock the boundaries.
-// The canvas codec mock makes this a STRUCTURAL round-trip test: metadata,
-// layers, frames, palette, tags — not pixel contents (those need a real
-// canvas and are covered by manual/browser verification).
+// The canvas codec mock preserves loaded bytes through the writer, proving the
+// file boundary without claiming that happy-dom rendered the PNG pixels.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
   projectRepository: {
     list: vi.fn(async () => []),
@@ -26,8 +30,12 @@ vi.mock('../../src/services/persistence/palette-persistence', () => ({
 }));
 
 vi.mock('../../src/utils/canvas-binary', () => ({
-  canvasToPngBytes: vi.fn(async () => new Uint8Array([9, 9, 9])),
-  loadImageDataToCanvas: vi.fn(async () => {}),
+  canvasToPngBytes: vi.fn(async (canvas: HTMLCanvasElement) => {
+    return canvasBytes.get(canvas) ?? new Uint8Array([9, 9, 9]);
+  }),
+  loadImageDataToCanvas: vi.fn(async (data: Uint8Array, canvas: HTMLCanvasElement) => {
+    canvasBytes.set(canvas, new Uint8Array(data));
+  }),
 }));
 
 import { projectStore } from '../../src/stores/project';
@@ -35,20 +43,47 @@ import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
 import { paletteStore } from '../../src/stores/palette';
 import { guidedDrawingStore } from '../../src/stores/guided-drawing';
-import { PROJECT_VERSION } from '../../src/types/project';
+import { PROJECT_VERSION, decodeProjectFileWithDiagnostics } from '../../src/types/project';
 import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
 
 const PALETTE = ['#000000', '#ff0000', '#00ff00', '#0000ff', '#ffffff'];
 const mockedLoadImageDataToCanvas = vi.mocked(loadImageDataToCanvas);
 
+async function readCompressedProjectFixture(filename: string): Promise<ProjectFileInput> {
+  const encoded = await readFile(
+    resolve(process.cwd(), 'tests/fixtures/project-files', filename),
+    'utf8'
+  );
+  const compressed = Uint8Array.from(Buffer.from(encoded.trim(), 'base64'));
+  return JSON.parse(pako.inflate(compressed, { to: 'string' })) as ProjectFileInput;
+}
+
+function normalizeRoundTripFile(file: ProjectFile): ProjectFile {
+  const linkIds = new Map<string, string>();
+
+  return {
+    ...file,
+    version: PROJECT_VERSION,
+    frames: file.frames.map((frame, frameIndex) => ({
+      ...frame,
+      id: `frame-${frameIndex}`,
+      cels: frame.cels.map((cel) => {
+        if (!cel.linkedCelId) return cel;
+        if (!linkIds.has(cel.linkedCelId)) {
+          linkIds.set(cel.linkedCelId, `link-${linkIds.size}`);
+        }
+        return { ...cel, linkedCelId: linkIds.get(cel.linkedCelId) };
+      }),
+    })),
+  };
+}
+
 function expectReferenceLayer(file: ProjectFile, layerId: string): void {
   const referenceLayer = file.layers.find((layer) => layer.id === layerId);
 
   expect(referenceLayer?.type).toBe('reference');
-  expect(Array.from(referenceLayer?.referenceData?.bytes ?? [])).toEqual([
-    1, 2, 3, 4,
-  ]);
+  expect(Array.from(referenceLayer?.referenceData?.bytes ?? [])).toEqual([1, 2, 3, 4]);
   expect(referenceLayer?.referenceData).toMatchObject({
     mimeType: 'image/png',
     x: 1.5,
@@ -168,26 +203,396 @@ describe('project save -> load -> save round-trip (structural)', () => {
     const twice = await projectStore.saveProject();
     vi.useRealTimers();
 
-    // Frame ids and linked-cel group ids regenerate every load; normalize
-    // both (linked ids by order of first appearance, preserving grouping).
-    const normalize = (file: typeof once) => {
-      const linkIds = new Map<string, string>();
-      return {
-        ...file,
-        frames: file.frames.map((f) => ({
-          ...f,
-          id: 'X',
-          cels: f.cels.map((c) => {
-            if (!c.linkedCelId) return c;
-            if (!linkIds.has(c.linkedCelId)) {
-              linkIds.set(c.linkedCelId, `link-${linkIds.size}`);
-            }
-            return { ...c, linkedCelId: linkIds.get(c.linkedCelId) };
-          }),
-        })),
+    expect(normalizeRoundTripFile(twice)).toEqual(normalizeRoundTripFile(once));
+  });
+
+  it.each([
+    ['legacy-4.1.pf.base64', '4.1.0'],
+    ['current-4.2.pf.base64', '4.2.0'],
+  ])(
+    'round-trips the checked-in %s archive through decode, editor hydration, and the writer',
+    async (fixtureName, sourceVersion) => {
+      const input = await readCompressedProjectFixture(fixtureName);
+      const source = decodeProjectFileWithDiagnostics(input).project;
+
+      await projectStore.loadProject(input, false);
+      const sourceCelsWithIndexData = source.frames.flatMap((frame) =>
+        frame.cels.filter((cel) => cel.indexData !== undefined)
+      );
+      const hydratedIndexData = [...animationStore.cels.value.values()]
+        .map((cel) => ({
+          layerId: cel.layerId,
+          indexData: cel.indexBuffer ? Array.from(cel.indexBuffer) : undefined,
+        }))
+        .filter((cel) =>
+          sourceCelsWithIndexData.some((sourceCel) => sourceCel.layerId === cel.layerId)
+        );
+      const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+      await projectStore.loadProject(saved, false);
+      const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+      expect(source.version).toBe(sourceVersion);
+      expect(saved.version).toBe(PROJECT_VERSION);
+      expect(normalizeRoundTripFile(reloaded)).toEqual(normalizeRoundTripFile(saved));
+      expect(saved.frames.map((frame) => frame.cels.map((cel) => cel.layerId))).toEqual(
+        source.frames.map((frame) => frame.cels.map((cel) => cel.layerId))
+      );
+      expect(
+        reloaded.layers.map((layer) => ({
+          id: layer.id,
+          type: layer.type,
+          locked: layer.locked,
+          parentId: layer.parentId,
+          data: Array.from(layer.data),
+          textData: layer.textData,
+          referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
+        }))
+      ).toEqual(
+        source.layers.map((layer) => ({
+          id: layer.id,
+          type: layer.type,
+          locked: layer.locked,
+          parentId: layer.parentId,
+          data: Array.from(layer.data),
+          textData: layer.textData,
+          referenceBytes: Array.from(layer.referenceData?.bytes ?? []),
+        }))
+      );
+      expect(hydratedIndexData).toEqual(
+        sourceCelsWithIndexData.map((cel) => ({
+          layerId: cel.layerId,
+          indexData: cel.indexData,
+        }))
+      );
+      expect(
+        normalizeRoundTripFile(reloaded).frames
+          .flatMap((frame) => frame.cels)
+          .map((cel) => ({
+            layerId: cel.layerId,
+            data: Array.from(cel.data),
+            opacity: cel.opacity,
+            linkedCelId: cel.linkedCelId,
+            linkType: cel.linkType,
+            textCelData: cel.textCelData,
+          }))
+      ).toEqual(
+        normalizeRoundTripFile(source).frames
+          .flatMap((frame) =>
+            frame.cels.map((cel) => ({
+              layerId: cel.layerId,
+              data: Array.from(cel.data),
+              opacity: cel.opacity,
+              linkedCelId: cel.linkedCelId,
+              linkType: cel.linkType,
+              textCelData: cel.textCelData,
+            }))
+          )
+      );
+      expect(reloaded.palette).toEqual(source.palette);
+      expect(reloaded.tags).toEqual(source.tags);
+      expect(reloaded.guidedDrawing).toEqual(source.guidedDrawing);
+
+      const groupLayer = (file: ProjectFile) => file.layers.find((layer) => layer.type === 'group');
+      const groupLayerData = (file: ProjectFile) => Array.from(groupLayer(file)?.data ?? []);
+      const groupCels = (file: ProjectFile) => {
+        const groupId = groupLayer(file)?.id;
+        return file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === groupId));
       };
-    };
-    expect(normalize(twice)).toEqual(normalize(once));
+
+      if (sourceVersion === '4.1.0') {
+        expect(groupLayerData(source)).toEqual([]);
+        expect(groupCels(source)).toEqual([
+          expect.objectContaining({ data: new Uint8Array(0), opacity: 100 }),
+          expect.objectContaining({ data: new Uint8Array(0), opacity: 100 }),
+        ]);
+      }
+
+      expect(groupLayerData(saved)).toEqual(groupLayerData(source));
+      expect(groupLayerData(reloaded)).toEqual(groupLayerData(source));
+      expect(groupCels(saved)).toEqual(groupCels(source));
+      expect(groupCels(reloaded)).toEqual(groupCels(source));
+    }
+  );
+
+  it('preserves loaded group payloads without reusing them for another project', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const group = project.layers.find((layer) => layer.type === 'group');
+    if (!group) throw new Error('Expected a group layer in the current fixture');
+
+    group.data = Uint8Array.from([7, 8, 9]);
+    await projectStore.loadProject(project, false);
+    const saved = await projectStore.saveProject();
+    expect(
+      Array.from(saved.layers.find((layer) => layer.id === group.id)?.data ?? [])
+    ).toEqual([7, 8, 9]);
+
+    group.data = Uint8Array.from([4, 5, 6]);
+    await projectStore.loadProject(project, false);
+    const replacement = await projectStore.saveProject();
+    expect(
+      Array.from(replacement.layers.find((layer) => layer.id === group.id)?.data ?? [])
+    ).toEqual([4, 5, 6]);
+
+    await projectStore.newProject(16, 12);
+    const layer = layerStore.layers.value[0];
+    const groupId = layerStore.createGroup([layer.id], 'New group');
+    if (!groupId) throw new Error('Expected the new group to be created');
+
+    const newProject = await projectStore.saveProject();
+    expect(
+      Array.from(newProject.layers.find((candidate) => candidate.id === groupId)?.data ?? [])
+    ).toEqual([]);
+  });
+
+  it('keeps non-empty group cels on the normal serialization path', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const group = project.layers.find((layer) => layer.type === 'group');
+    const paint = project.layers.find((layer) => layer.name === 'Paint');
+    if (!group) throw new Error('Expected a group layer in the current fixture');
+    const paintCel = project.frames[0].cels.find((cel) => cel.layerId === paint?.id);
+    if (!paintCel) throw new Error('Expected the current fixture paint cel');
+    expect(paintCel.indexData).toEqual([2]);
+
+    const groupCels = project.frames.map((frame) => frame.cels.find((cel) => cel.layerId === group.id));
+    if (groupCels.some((cel) => !cel)) throw new Error('Expected one group cel per frame');
+
+    for (const cel of groupCels) {
+      cel.data = paintCel.data;
+      cel.opacity = 35;
+      cel.indexData = [2];
+      cel.linkedCelId = 'loaded-group-link';
+      cel.linkType = 'hard';
+      cel.textCelData = { content: 'Group payload', x: 2, y: 3 };
+    }
+
+    await projectStore.loadProject(project, false);
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    await projectStore.loadProject(saved, false);
+    const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+    for (const file of [saved, reloaded]) {
+      const cels = file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === group.id));
+
+      expect(cels).toEqual(
+        [
+          expect.objectContaining({
+            data: paintCel.data,
+            opacity: 35,
+            indexData: [2],
+            linkType: 'hard',
+            textCelData: { content: 'Group payload', x: 2, y: 3 },
+          }),
+          expect.objectContaining({
+            data: paintCel.data,
+            opacity: 35,
+            indexData: [2],
+            linkType: 'hard',
+            textCelData: { content: 'Group payload', x: 2, y: 3 },
+          }),
+        ]
+      );
+      expect(cels[0]?.linkedCelId).toEqual(expect.any(String));
+      expect(cels.map((cel) => cel?.linkedCelId)).toEqual([
+        cels[0]?.linkedCelId,
+        cels[0]?.linkedCelId,
+      ]);
+    }
+  });
+
+  it('keeps loader-created missing cels as default blanks', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const group = project.layers.find((layer) => layer.type === 'group');
+    if (!group) throw new Error('Expected a group layer in the current fixture');
+
+    const sourceCel = project.frames[0].cels.find((cel) => cel.layerId === group.id);
+    if (!sourceCel) throw new Error('Expected a source group cel');
+    sourceCel.opacity = 35;
+    project.frames[1].cels = project.frames[1].cels.filter((cel) => cel.layerId !== group.id);
+
+    await projectStore.loadProject(project, false);
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    const loadedCel = saved.frames[1].cels.find((cel) => cel.layerId === group.id);
+
+    expect(loadedCel).toEqual(
+      expect.objectContaining({ data: new Uint8Array(0), opacity: 100 })
+    );
+    expect(loadedCel?.indexData).toBeUndefined();
+    expect(loadedCel?.linkedCelId).toBeUndefined();
+    expect(loadedCel?.linkType).toBeUndefined();
+  });
+
+  it('does not persist the runtime empty-cel marker', async () => {
+    animationStore.addFrame(false);
+    const frame = animationStore.frames.value[1];
+    const emptyCel = animationStore.cels.value.get(
+      animationStore.getCelKey(layerStore.layers.value[0].id, frame.id)
+    );
+    if (!emptyCel) throw new Error('Expected a new project cel');
+
+    expect(animationStore.isRuntimeEmptyCel(emptyCel)).toBe(true);
+
+    const saved = await projectStore.saveProject();
+    const cel = saved.frames[1].cels.find((candidate) => candidate.layerId === emptyCel.layerId);
+
+    expect(cel).toMatchObject({ data: new Uint8Array(0) });
+    expect(cel?.linkedCelId).toBeUndefined();
+    expect(cel?.linkType).toBeUndefined();
+  });
+
+  it('serializes an untouched duplicated blank frame without content or links', async () => {
+    const layerId = layerStore.layers.value[0].id;
+    animationStore.addFrame(false);
+    const sourceFrameId = animationStore.currentFrameId.value;
+
+    animationStore.addFrame(true);
+
+    const targetFrameId = animationStore.currentFrameId.value;
+    const sourceCel = animationStore.cels.value.get(
+      animationStore.getCelKey(layerId, sourceFrameId)
+    );
+    const targetCel = animationStore.cels.value.get(
+      animationStore.getCelKey(layerId, targetFrameId)
+    );
+    if (!sourceCel || !targetCel) throw new Error('Expected source and duplicated blank cels');
+
+    expect(animationStore.isRuntimeEmptyCel(sourceCel)).toBe(true);
+    expect(animationStore.isRuntimeEmptyCel(targetCel)).toBe(true);
+    expect(sourceCel.canvas).toBe(targetCel.canvas);
+
+    const saved = await projectStore.saveProject();
+    const cels = saved.frames
+      .slice(1)
+      .map((frame) => frame.cels.find((cel) => cel.layerId === layerId));
+
+    expect(cels).toEqual([
+      expect.objectContaining({ data: new Uint8Array(0) }),
+      expect.objectContaining({ data: new Uint8Array(0) }),
+    ]);
+    expect(cels.map((cel) => cel?.indexData)).toEqual([undefined, undefined]);
+    expect(cels.map((cel) => cel?.linkedCelId)).toEqual([undefined, undefined]);
+    expect(cels.map((cel) => cel?.linkType)).toEqual([undefined, undefined]);
+  });
+
+  it('round-trips a persisted link id that matches the retired empty marker', async () => {
+    const input = await readCompressedProjectFixture('current-4.2.pf.base64');
+    const project = decodeProjectFileWithDiagnostics(input).project;
+    const paint = project.layers.find((layer) => layer.name === 'Paint');
+    const firstFrame = project.frames[0];
+    const paintCel = firstFrame?.cels.find((cel) => cel.layerId === paint?.id);
+    if (!paintCel) throw new Error('Expected the current fixture paint cel');
+
+    project.frames = [{ ...firstFrame, cels: [{ ...paintCel, linkedCelId: '__empty__', linkType: 'soft' }] }];
+    project.animation.currentFrameIndex = 0;
+    project.tags = [];
+
+    await projectStore.loadProject(project, false);
+
+    const runtimeCel = [...animationStore.cels.value.values()].find(
+      (cel) => cel.layerId === paintCel.layerId
+    );
+    expect(runtimeCel).toBeDefined();
+    expect(animationStore.isRuntimeEmptyCel(runtimeCel!)).toBe(false);
+
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    await projectStore.loadProject(saved, false);
+    const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+    for (const file of [saved, reloaded]) {
+      const cel = file.frames[0].cels.find((candidate) => candidate.layerId === paintCel.layerId);
+      expect(cel).toMatchObject({ linkedCelId: '__empty__', linkType: 'soft' });
+    }
+  });
+
+  it('round-trips layer locks, groups, parent links, and cel opacity', async () => {
+    const body = layerStore.layers.value[0];
+    const shading = layerStore.addLayer('Shading', 16, 12);
+    const groupId = layerStore.createGroup([body.id, shading.id], 'Character');
+    if (!groupId) throw new Error('Expected the character group to be created');
+
+    layerStore.updateLayer(body.id, { locked: true });
+    const frameId = animationStore.frames.value[0].id;
+    const bodyCelKey = animationStore.getCelKey(body.id, frameId);
+    animationStore.setCelOpacity([bodyCelKey], 35);
+
+    const saved = await projectStore.saveProject();
+    await projectStore.loadProject(structuredClone(saved), false);
+    const resaved = await projectStore.saveProject();
+
+    expect(
+      resaved.layers.map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+        locked: layer.locked,
+        parentId: layer.parentId,
+      }))
+    ).toEqual(
+      saved.layers.map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+        locked: layer.locked,
+        parentId: layer.parentId,
+      }))
+    );
+    expect(resaved.frames[0].cels.find((cel) => cel.layerId === body.id)?.opacity).toBe(35);
+  });
+
+  it('warns once after repairing an IndexedDB hierarchy without warning for legacy defaults', async () => {
+    const saved = await buildSampleProject();
+    const malformed = structuredClone(saved);
+    malformed.layers[0].parentId = malformed.layers[0].id;
+    const warningListener = vi.fn();
+    window.addEventListener('show-warning-toast', warningListener);
+
+    try {
+      await projectStore.loadProject(malformed, false);
+      expect(warningListener).toHaveBeenCalledOnce();
+      expect(warningListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: {
+            message: `Repaired invalid group links for layers: ${malformed.layers[0].id}.`,
+          },
+        })
+      );
+
+      const legacy = structuredClone(saved) as ProjectFileInput;
+      legacy.version = '4.1.0';
+      delete legacy.layers[0].locked;
+      delete legacy.layers[0].parentId;
+      delete legacy.frames[0].cels[0].opacity;
+      await projectStore.loadProject(legacy, false);
+      expect(warningListener).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('show-warning-toast', warningListener);
+    }
+  });
+
+  it('bounds repaired hierarchy warnings while preserving the hidden layer count', async () => {
+    const saved = await buildSampleProject();
+    const malformed = structuredClone(saved);
+    const oversizedLayerId = 'x'.repeat(100);
+    malformed.layers = Array.from({ length: 5 }, (_, index) => ({
+      ...malformed.layers[0],
+      id: index === 0 ? oversizedLayerId : `${String(index).repeat(100)}`,
+      parentId: 'missing-group',
+    }));
+    malformed.frames = malformed.frames.map((frame) => ({ ...frame, cels: [] }));
+    const warningListener = vi.fn();
+    window.addEventListener('show-warning-toast', warningListener);
+
+    try {
+      await projectStore.loadProject(malformed, false);
+
+      const message = warningListener.mock.calls[0]?.[0].detail.message as string;
+      expect(warningListener).toHaveBeenCalledOnce();
+      expect(message.length).toBeLessThanOrEqual(240);
+      expect(message).toContain(`${'x'.repeat(39)}…`);
+      expect(message).toContain(', and 2 more.');
+    } finally {
+      window.removeEventListener('show-warning-toast', warningListener);
+    }
   });
 
   it('drops every cel from the previous drawing when loading another project', async () => {
@@ -207,6 +612,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
       },
     ];
     secondProject.animation.currentFrameIndex = 0;
+    secondProject.tags = [];
 
     vi.useFakeTimers();
     await projectStore.loadProject(structuredClone(firstProject), false);
@@ -359,12 +765,8 @@ describe('project save -> load -> save round-trip (structural)', () => {
     await vi.runAllTimersAsync();
     vi.useRealTimers();
 
-    expect(guidedDrawingStore.session.value?.target).toEqual(
-      new Uint8Array([1, 2, 0, 1]),
-    );
-    expect((await projectStore.saveProject()).guidedDrawing).toEqual(
-      withGuide.guidedDrawing,
-    );
+    expect(guidedDrawingStore.session.value?.target).toEqual(new Uint8Array([1, 2, 0, 1]));
+    expect((await projectStore.saveProject()).guidedDrawing).toEqual(withGuide.guidedDrawing);
 
     await projectStore.loadProject(saved, false);
     expect(guidedDrawingStore.active).toBe(false);
@@ -396,9 +798,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     const resaved = await projectStore.saveProject();
     vi.useRealTimers();
 
-    const resavedReference = resaved.layers.find(
-      (layer) => layer.id === referenceLayer.id
-    );
+    const resavedReference = resaved.layers.find((layer) => layer.id === referenceLayer.id);
     expect(resavedReference?.id).toBe(referenceLayer.id);
     expectReferenceLayer(resaved, referenceLayer.id);
     expectNoFrameCelsForLayer(resaved, referenceLayer.id);

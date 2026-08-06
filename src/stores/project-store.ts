@@ -1,42 +1,39 @@
-import { signal } from "../core/signal";
-import { type StoreRefs } from "./store-refs";
-import { v4 as uuidv4 } from "uuid";
-import { projectRepository } from "../services/persistence/indexed-db";
-import { onionSkinCache } from "../services/onion-skin-cache";
-import { createProjectThumbnail } from "../services/project-thumbnail";
+import { signal } from '../core/signal';
+import { type StoreRefs } from './store-refs';
+import { v4 as uuidv4 } from 'uuid';
+import { projectRepository } from '../services/persistence/indexed-db';
+import { onionSkinCache } from '../services/onion-skin-cache';
+import { createProjectThumbnail } from '../services/project-thumbnail';
+import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_PALETTE_ID } from '../services/project-defaults';
+import { canvasToPngBytes } from '../utils/canvas-binary';
 import {
-  DEFAULT_PROJECT_NAME,
-  DEFAULT_PROJECT_PALETTE_ID,
-} from "../services/project-defaults";
-import { canvasToPngBytes } from "../utils/canvas-binary";
-import { normalizeProjectFileImageData } from "../serialization/project-data";
-import {
+  dispatchProjectCompatibilityWarning,
   hydrateProjectFrames,
   hydrateProjectLayers,
-  migrateProjectFileForLoad,
   refreshProjectPaletteAfterLoad,
   restoreProjectAnimationState,
   restoreProjectFrameTags,
   restoreProjectPaletteForLoad,
   selectFirstLoadedLayer,
   type ProjectLoadStores,
-} from "../serialization/project-load";
+} from '../serialization/project-load';
 import {
   PROJECT_VERSION,
+  decodeProjectFileWithDiagnostics,
   type ProjectCelFile,
   type ProjectFile,
   type ProjectFileInput,
-} from "../types/project";
-import { log } from "../utils/log";
-import type { Frame } from "../types/animation";
-import type { Layer } from "../types/layer";
-import type { createAnimationStore } from "./animation/store";
-import type { createDirtyRectStore } from "./dirty-rect-store";
-import type { createHistoryStore } from "./history-store";
-import type { createGuidedDrawingStore } from "./guided-drawing-store";
-import type { createLayerStore } from "./layers-store";
-import type { createPaletteStore } from "./palette/store";
-import type { createSelectionStore } from "./selection/store";
+} from '../types/project';
+import { log } from '../utils/log';
+import type { Cel, Frame } from '../types/animation';
+import type { Layer } from '../types/layer';
+import type { createAnimationStore } from './animation/store';
+import type { createDirtyRectStore } from './dirty-rect-store';
+import type { createHistoryStore } from './history-store';
+import type { createGuidedDrawingStore } from './guided-drawing-store';
+import type { createLayerStore } from './layers-store';
+import type { createPaletteStore } from './palette/store';
+import type { createSelectionStore } from './selection/store';
 
 type ProjectAnimationStore = ReturnType<typeof createAnimationStore>;
 type ProjectDirtyRectStore = ReturnType<typeof createDirtyRectStore>;
@@ -61,6 +58,15 @@ function layerSerializesCels(layer: Layer): boolean {
   return layer.type !== 'reference';
 }
 
+function hasRuntimeEmptyCel(
+  animation: ProjectAnimationStore,
+  cel: Cel,
+  textCelData: ReturnType<ProjectAnimationStore['getTextCelData']>
+): boolean {
+  const hasPixelIndices = cel.indexBuffer?.some((index) => index !== 0) ?? false;
+  return animation.isRuntimeEmptyCel(cel) && !textCelData && !hasPixelIndices;
+}
+
 async function serializeCelForLayer(
   animation: ProjectAnimationStore,
   layer: Layer,
@@ -73,19 +79,40 @@ async function serializeCelForLayer(
     return {
       layerId: layer.id,
       data: new Uint8Array(0),
+      opacity: 100,
+    };
+  }
+
+  return serializeExistingCel(animation, layer, frame, cel);
+}
+
+async function serializeExistingCel(
+  animation: ProjectAnimationStore,
+  layer: Layer,
+  frame: Frame,
+  cel: Cel
+): Promise<ProjectCelFile> {
+  const textCelData = animation.getTextCelData(layer.id, frame.id);
+  if (hasRuntimeEmptyCel(animation, cel, textCelData)) {
+    return {
+      layerId: layer.id,
+      data: new Uint8Array(0),
+      opacity: cel.opacity ?? 100,
     };
   }
 
   const celFile: ProjectCelFile = {
     layerId: layer.id,
     data: await canvasToPngBytes(cel.canvas),
+    opacity: cel.opacity ?? 100,
   };
 
-  if (cel.linkedCelId) celFile.linkedCelId = cel.linkedCelId;
-  if (cel.linkType) celFile.linkType = cel.linkType;
+  if (cel.linkedCelId) {
+    celFile.linkedCelId = cel.linkedCelId;
+    if (cel.linkType) celFile.linkType = cel.linkType;
+  }
   if (cel.indexBuffer) celFile.indexData = Array.from(cel.indexBuffer);
 
-  const textCelData = animation.getTextCelData(layer.id, frame.id);
   if (textCelData) celFile.textCelData = textCelData;
 
   return celFile;
@@ -99,7 +126,7 @@ class ProjectStore {
   /** Background color for export. null = transparent (default) */
   backgroundColor = signal<string | null>(null);
   /** Project name for display */
-  name = signal("Untitled");
+  name = signal('Untitled');
   /** Timestamp of last auto-save */
   lastSaved = signal<number | null>(null);
   private readonly animation: ProjectAnimationStore;
@@ -111,6 +138,9 @@ class ProjectStore {
   private readonly palette: ProjectPaletteStore;
   private readonly refs: StoreRefs;
   private readonly selection: ProjectSelectionStore;
+  // Group layers have no editor canvas. Keep their loaded bytes only for the
+  // currently open project so saving does not replace a legacy payload.
+  private loadedGroupLayerData = new Map<string, Uint8Array>();
 
   constructor(dependencies: ProjectStoreDependencies) {
     this.animation = dependencies.animation;
@@ -151,12 +181,17 @@ class ProjectStore {
         name: layer.name,
         type: layer.type,
         visible: layer.visible,
+        locked: layer.locked,
         opacity: layer.opacity,
         blendMode: layer.blendMode,
         continuous: layer.continuous,
-        data: layer.canvas
-          ? await canvasToPngBytes(layer.canvas)
-          : new Uint8Array(0),
+        parentId: layer.parentId,
+        data:
+          layer.type === 'group'
+            ? new Uint8Array(this.loadedGroupLayerData.get(layer.id) ?? [])
+            : layer.canvas
+              ? await canvasToPngBytes(layer.canvas)
+              : new Uint8Array(0),
         // Include text layer metadata if present
         ...(layer.textData && { textData: layer.textData }),
         // Include reference layer metadata if present. Reference layers keep
@@ -211,8 +246,13 @@ class ProjectStore {
    * @param _fromAutoSave Kept for call-site compatibility. All load paths now
    *                      restore the palette from the file.
    */
-  async loadProject(input: ProjectFileInput, _fromAutoSave = false) {
-    const file = migrateProjectFileForLoad(normalizeProjectFileImageData(input));
+  async loadProject(input: ProjectFileInput, _fromAutoSave = false): Promise<ProjectFile> {
+    const { project: file, compatibility } = decodeProjectFileWithDiagnostics(input);
+    const loadedGroupLayerData = new Map(
+      file.layers
+        .filter((layer) => layer.type === 'group')
+        .map((layer) => [layer.id, new Uint8Array(layer.data)])
+    );
 
     // Clear onion skin cache (old project's cels are no longer valid)
     onionSkinCache.clear();
@@ -231,10 +271,14 @@ class ProjectStore {
     restoreProjectFrameTags(this.loadStores, file);
     refreshProjectPaletteAfterLoad(this.loadStores);
     selectFirstLoadedLayer(this.loadStores);
+    this.loadedGroupLayerData = loadedGroupLayerData;
     this.resetProjectLocalState();
+    dispatchProjectCompatibilityWarning(compatibility);
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.
-    window.dispatchEvent(new CustomEvent("project-loaded"));
+    window.dispatchEvent(new CustomEvent('project-loaded'));
+
+    return file;
   }
 
   /**
@@ -247,6 +291,7 @@ class ProjectStore {
 
     // 0. New project = new storage identity (the old project stays stored)
     this.id.value = uuidv4();
+    this.loadedGroupLayerData = new Map();
 
     // 1. Set new dimensions and reset name
     this.setSize(width, height);
@@ -268,7 +313,7 @@ class ProjectStore {
     this.animation.cels.value = new Map();
 
     // 5. Create a fresh layer with new dimensions
-    this.layers.addLayer("Layer 1", width, height);
+    this.layers.addLayer('Layer 1', width, height);
 
     // 6. Ensure animation store syncs with the new layer
     this.animation.syncLayerCanvases();
@@ -300,7 +345,7 @@ class ProjectStore {
       });
       await projectRepository.setLastOpenedProjectId(this.id.value);
     } catch (error) {
-      log.error("Failed to save new project:", error);
+      log.error('Failed to save new project:', error);
     }
   }
 
@@ -316,15 +361,12 @@ class ProjectStore {
         height: this.height.value,
       });
     } catch (error) {
-      log.error("Thumbnail generation failed:", error);
+      log.error('Thumbnail generation failed:', error);
       return undefined;
     }
   }
 
-  private compositeFrame(
-    frameId: string,
-    targetCtx: CanvasRenderingContext2D,
-  ): void {
+  private compositeFrame(frameId: string, targetCtx: CanvasRenderingContext2D): void {
     targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
 
     for (const layer of this.layers.layers.value) {
@@ -337,14 +379,14 @@ class ProjectStore {
 
       targetCtx.globalAlpha = (layer.opacity / 255) * ((cel?.opacity ?? 100) / 100);
       targetCtx.globalCompositeOperation =
-        layer.blendMode === "normal"
-          ? "source-over"
+        layer.blendMode === 'normal'
+          ? 'source-over'
           : (layer.blendMode as GlobalCompositeOperation);
       targetCtx.drawImage(canvasToUse, 0, 0);
     }
 
     targetCtx.globalAlpha = 1;
-    targetCtx.globalCompositeOperation = "source-over";
+    targetCtx.globalCompositeOperation = 'source-over';
   }
 
   private resetProjectLocalState() {

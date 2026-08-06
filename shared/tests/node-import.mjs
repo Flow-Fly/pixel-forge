@@ -12,7 +12,9 @@ const project = decodeProjectFile({
       name: 'Layer 1',
       type: 'image',
       visible: true,
+      locked: false,
       opacity: 255,
+      parentId: null,
       data: { 0: 1 },
     },
   ],
@@ -20,15 +22,15 @@ const project = decodeProjectFile({
     {
       id: 'frame-1',
       duration: 100,
-      cels: [{ layerId: 'layer-1', data: {} }],
+      cels: [{ layerId: 'layer-1', data: {}, opacity: 100 }],
     },
   ],
   animation: { fps: 12, currentFrameIndex: 0 },
 });
 
-assert.equal(project.version, '4.1.0');
+assert.equal(project.version, '4.2.0');
 assert.deepEqual(project.layers[0].data, Uint8Array.from([1]));
-assert.deepEqual(
-  parseProductEvent({ name: 'playback_started', dimensions: {} }),
-  { name: 'playback_started', dimensions: {} }
-);
+assert.deepEqual(parseProductEvent({ name: 'playback_started', dimensions: {} }), {
+  name: 'playback_started',
+  dimensions: {},
+});

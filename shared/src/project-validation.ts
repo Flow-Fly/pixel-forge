@@ -3,12 +3,13 @@ import {
   isSerializedProjectImageData,
   normalizeProjectFileImageData,
 } from './project-data.js';
-import { migrateProjectFileForLoad } from './project-migrations.js';
+import { migrateProjectFileForLoadWithDiagnostics } from './project-migrations.js';
 import {
   GUIDED_DRAWING_VERSION,
   type GuidedDrawingSessionFile,
   type LegacyProjectImageData,
   type ProjectCelFile,
+  type ProjectFileDecodeResult,
   type ProjectFile,
   type ProjectFileInput,
   type ProjectFrameFile,
@@ -26,15 +27,33 @@ const BLEND_MODES: ReadonlySet<unknown> = new Set([
 ]);
 
 export function decodeProjectFile(value: unknown): ProjectFile {
+  return decodeProjectFileWithDiagnostics(value).project;
+}
+
+export function decodeProjectFileWithDiagnostics(value: unknown): ProjectFileDecodeResult {
   assertProjectFileInput(value);
   const normalized = normalizeProjectFileImageData(value);
-  const migrated = migrateProjectFileForLoad(normalized);
-  assertProjectFile(migrated);
-  return migrated;
+  const result = migrateProjectFileForLoadWithDiagnostics(normalized);
+  assertProjectFile(result.project);
+  return result;
 }
 
 export function assertProjectFile(value: unknown): asserts value is ProjectFile {
   assertProjectShape(value, isProjectImageData);
+  const project = value as ProjectFile;
+  project.layers.forEach((layer) => {
+    assertImport(LAYER_TYPES.has(layer.type), 'layer type is invalid');
+    assertImport(typeof layer.locked === 'boolean', 'layer lock is invalid');
+    assertImport(
+      layer.parentId === null || isNonEmptyString(layer.parentId),
+      'layer parent is invalid'
+    );
+  });
+  project.frames.forEach((frame) => {
+    frame.cels.forEach((cel) => {
+      assertImport(isCelOpacity(cel.opacity), 'cel opacity is invalid');
+    });
+  });
 }
 
 function assertProjectFileInput(value: unknown): asserts value is ProjectFileInput {
@@ -50,6 +69,7 @@ function assertProjectShape(
 ): asserts value is ProjectFileInput {
   assertImport(isRecord(value), 'project must be an object');
   assertImport(isNonEmptyString(value.version), 'version is missing');
+  const requiresEditingState = isCurrentEditingStateVersion(value.version);
   assertImport(value.name === undefined || typeof value.name === 'string', 'name is invalid');
   assertImport(isPositiveInteger(value.width), 'width must be a positive integer');
   assertImport(isPositiveInteger(value.height), 'height must be a positive integer');
@@ -60,8 +80,8 @@ function assertProjectShape(
 
   const layers = value.layers as unknown[];
   const frames = value.frames as unknown[];
-  layers.forEach((layer) => assertLayer(layer, isImageData));
-  frames.forEach((frame) => assertFrame(frame, isImageData));
+  layers.forEach((layer) => assertLayer(layer, isImageData, requiresEditingState));
+  frames.forEach((frame) => assertFrame(frame, isImageData, requiresEditingState));
 
   const layerIds = layers.map((layer) => (layer as ProjectLayerFile).id);
   assertImport(new Set(layerIds).size === layerIds.length, 'layer ids must be unique');
@@ -86,12 +106,30 @@ function assertProjectShape(
 
 function assertLayer(
   value: unknown,
-  isImageData: (value: unknown) => value is LegacyProjectImageData
+  isImageData: (value: unknown) => value is LegacyProjectImageData,
+  requiresEditingState: boolean
 ): asserts value is ProjectLayerFile {
   assertImport(isRecord(value), 'layer data is incomplete');
   assertImport(isNonEmptyString(value.id), 'layer ids must be strings');
   assertImport(typeof value.name === 'string', 'layer name is invalid');
-  assertImport(value.type === undefined || LAYER_TYPES.has(value.type), 'layer type is invalid');
+  assertEditingStateField(
+    value.type,
+    requiresEditingState,
+    (type) => LAYER_TYPES.has(type),
+    'layer type is invalid'
+  );
+  assertEditingStateField(
+    value.locked,
+    requiresEditingState,
+    (locked) => typeof locked === 'boolean',
+    'layer lock is invalid'
+  );
+  assertEditingStateField(
+    value.parentId,
+    requiresEditingState,
+    (parentId) => parentId === null || isNonEmptyString(parentId),
+    'layer parent is invalid'
+  );
   assertImport(typeof value.visible === 'boolean', 'layer visibility is invalid');
   assertImport(isFiniteNumber(value.opacity), 'layer opacity is invalid');
   assertImport(
@@ -111,22 +149,30 @@ function assertLayer(
 
 function assertFrame(
   value: unknown,
-  isImageData: (value: unknown) => value is LegacyProjectImageData
+  isImageData: (value: unknown) => value is LegacyProjectImageData,
+  requiresEditingState: boolean
 ): asserts value is ProjectFrameFile {
   assertImport(isRecord(value), 'frame data is incomplete');
   assertImport(isNonEmptyString(value.id), 'frame data is incomplete');
   assertImport(isFiniteNumber(value.duration), 'frame duration is invalid');
   assertImport(Array.isArray(value.cels), 'frame data is incomplete');
-  value.cels.forEach((cel) => assertCel(cel, isImageData));
+  value.cels.forEach((cel) => assertCel(cel, isImageData, requiresEditingState));
 }
 
 function assertCel(
   value: unknown,
-  isImageData: (value: unknown) => value is LegacyProjectImageData
+  isImageData: (value: unknown) => value is LegacyProjectImageData,
+  requiresEditingState: boolean
 ): asserts value is ProjectCelFile {
   assertImport(isRecord(value), 'cel data is incomplete');
   assertImport(isNonEmptyString(value.layerId), 'cel layer id is invalid');
   assertImport(isImageData(value.data), 'cel image data is invalid');
+  assertEditingStateField(
+    value.opacity,
+    requiresEditingState,
+    isCelOpacity,
+    'cel opacity is invalid'
+  );
   assertImport(
     value.indexData === undefined || isProjectByteArray(value.indexData),
     'cel index data is invalid'
@@ -140,6 +186,20 @@ function assertCel(
     'cel link type is invalid'
   );
   if (value.textCelData !== undefined) assertTextCelData(value.textCelData);
+}
+
+function isCurrentEditingStateVersion(version: string): boolean {
+  const [major, minor] = version.split('.', 3).map(Number);
+  return major > 4 || (major === 4 && minor >= 2);
+}
+
+function assertEditingStateField(
+  value: unknown,
+  required: boolean,
+  isValid: (value: unknown) => boolean,
+  detail: string
+): void {
+  assertImport(value === undefined ? !required : isValid(value), detail);
 }
 
 function assertReferenceData(
@@ -268,6 +328,10 @@ function isPositiveNumber(value: unknown): value is number {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isCelOpacity(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && value <= 100;
 }
 
 function isFrameIndex(value: unknown, frameCount: number): value is number {

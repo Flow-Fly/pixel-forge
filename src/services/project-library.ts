@@ -99,7 +99,7 @@ export class ProjectLibraryService {
   }
 
   async duplicateProject(id: string): Promise<string> {
-    const project = await this.getProjectOrThrow(id);
+    const project = decodeProjectFile(await this.getProjectOrThrow(id));
     const sourceMeta = await this.findProjectMeta(id);
     const copyId = uuidv4();
     const copy = structuredClone(project);
@@ -112,7 +112,7 @@ export class ProjectLibraryService {
   }
 
   async renameProject(id: string, name: string): Promise<void> {
-    const project = await this.getProjectOrThrow(id);
+    const project = decodeProjectFile(await this.getProjectOrThrow(id));
     await this.repository.save(id, {
       ...project,
       name: normalizeProjectName(name),
@@ -126,19 +126,20 @@ export class ProjectLibraryService {
 
   private async loadStoredProject(id: string, context: ProjectContext): Promise<ProjectFile> {
     const project = await this.getProjectOrThrow(id);
+    let loadedProject!: ProjectFile;
 
     await autoSaveService.runWithoutSaving(async () => {
+      loadedProject = await context.project.loadProject(project);
       context.project.id.value = id;
-      await context.project.loadProject(project);
       context.project.lastSaved.value = Date.now();
       context.viewport.resetView();
     }, context);
 
     await this.repository.setLastOpenedProjectId(id);
-    return project;
+    return loadedProject;
   }
 
-  private async getProjectOrThrow(id: string): Promise<ProjectFile> {
+  private async getProjectOrThrow(id: string): Promise<ProjectFileInput> {
     const project = await this.repository.load(id);
     if (!project) {
       throw new Error(`Project not found: ${id}`);
@@ -178,9 +179,11 @@ function createBlankProjectFile(options: CreateProjectOptions): ProjectFile {
         name: 'Layer 1',
         type: 'image',
         visible: true,
+        locked: false,
         opacity: 255,
         blendMode: 'normal',
         continuous: false,
+        parentId: null,
         data: new Uint8Array(0),
       },
     ],
@@ -192,6 +195,7 @@ function createBlankProjectFile(options: CreateProjectOptions): ProjectFile {
           {
             layerId,
             data: new Uint8Array(0),
+            opacity: 100,
           },
         ],
       },

@@ -1,9 +1,59 @@
-import type { LegacyProjectFile, ProjectFile, ProjectFrameFile } from './project.js';
+import type {
+  NormalizedProjectFileInput,
+  NormalizedProjectLayerFileInput,
+  ProjectFile,
+  ProjectFileDecodeResult,
+  ProjectLayerFile,
+} from './project.js';
 
-export function migrateProjectFileForLoad(file: LegacyProjectFile): ProjectFile {
+export function migrateProjectFileForLoad(file: NormalizedProjectFileInput): ProjectFile {
+  return migrateProjectFileForLoadWithDiagnostics(file).project;
+}
+
+export function migrateProjectFileForLoadWithDiagnostics(
+  file: NormalizedProjectFileInput
+): ProjectFileDecodeResult {
   const fileWithoutEphemeral = stripEphemeralPalette(file);
-  if (!shouldFoldEphemeralPalette(file)) return fileWithoutEphemeral;
+  const fileWithPalette = shouldFoldEphemeralPalette(file)
+    ? foldLegacyEphemeralPalette(file, fileWithoutEphemeral)
+    : fileWithoutEphemeral;
+  const { layers, repairedParentLayerIds } = normalizeProjectLayers(fileWithPalette.layers);
 
+  return {
+    project: {
+      ...fileWithPalette,
+      layers,
+      frames: fileWithPalette.frames.map((frame) => ({
+        ...frame,
+        cels: frame.cels.map((cel) => ({
+          ...cel,
+          opacity: cel.opacity ?? 100,
+        })),
+      })),
+    },
+    compatibility: { repairedParentLayerIds },
+  };
+}
+
+function shouldFoldEphemeralPalette(file: NormalizedProjectFileInput): boolean {
+  return (
+    compareVersions(file.version, '4.0.0') < 0 &&
+    Array.isArray(file.ephemeralPalette) &&
+    file.ephemeralPalette.length > 0
+  );
+}
+
+function stripEphemeralPalette(
+  file: NormalizedProjectFileInput
+): Omit<NormalizedProjectFileInput, 'ephemeralPalette'> {
+  const { ephemeralPalette: _ephemeralPalette, ...currentFile } = file;
+  return currentFile;
+}
+
+function foldLegacyEphemeralPalette(
+  file: NormalizedProjectFileInput,
+  fileWithoutEphemeral: Omit<NormalizedProjectFileInput, 'ephemeralPalette'>
+): Omit<NormalizedProjectFileInput, 'ephemeralPalette'> {
   const basePalette = Array.isArray(file.palette) ? file.palette : [];
   const legacyPalette = file.ephemeralPalette ?? [];
   const { palette, oldIndexToNewIndex } = foldEphemeralPalette(basePalette, legacyPalette);
@@ -13,20 +63,6 @@ export function migrateProjectFileForLoad(file: LegacyProjectFile): ProjectFile 
     palette,
     frames: remapLegacyEphemeralIndices(file.frames, oldIndexToNewIndex),
   };
-}
-
-function shouldFoldEphemeralPalette(file: LegacyProjectFile): boolean {
-  return (
-    compareVersions(file.version, '4.0.0') < 0 &&
-    Array.isArray(file.ephemeralPalette) &&
-    file.ephemeralPalette.length > 0
-  );
-}
-
-function stripEphemeralPalette(file: LegacyProjectFile): ProjectFile {
-  const currentFile = { ...file };
-  delete currentFile.ephemeralPalette;
-  return currentFile;
 }
 
 function foldEphemeralPalette(
@@ -61,9 +97,9 @@ function foldEphemeralPalette(
 }
 
 function remapLegacyEphemeralIndices(
-  frames: ProjectFrameFile[],
+  frames: NormalizedProjectFileInput['frames'],
   oldIndexToNewIndex: Map<number, number>
-): ProjectFrameFile[] {
+): NormalizedProjectFileInput['frames'] {
   if (oldIndexToNewIndex.size === 0) return frames;
 
   return frames.map((frame) => ({
@@ -75,6 +111,62 @@ function remapLegacyEphemeralIndices(
         : cel.indexData,
     })),
   }));
+}
+
+function normalizeProjectLayers(layers: NormalizedProjectLayerFileInput[]): {
+  layers: ProjectLayerFile[];
+  repairedParentLayerIds: string[];
+} {
+  const layersById = new Map(layers.map((layer) => [layer.id, layer]));
+  const acceptedParentIds = new Map<string, string | null>();
+  const repairedParentLayerIds: string[] = [];
+
+  const normalizedLayers = layers.map((layer) => {
+    const parentId = normalizeParentId(layer, layersById, acceptedParentIds);
+    if (parentId === null && layer.parentId !== undefined && layer.parentId !== null) {
+      repairedParentLayerIds.push(layer.id);
+    }
+    acceptedParentIds.set(layer.id, parentId);
+
+    return {
+      ...layer,
+      type: layer.type ?? 'image',
+      locked: layer.locked ?? false,
+      parentId,
+    };
+  });
+
+  return { layers: normalizedLayers, repairedParentLayerIds };
+}
+
+function normalizeParentId(
+  layer: NormalizedProjectLayerFileInput,
+  layersById: Map<string, NormalizedProjectLayerFileInput>,
+  acceptedParentIds: Map<string, string | null>
+): string | null {
+  const parentId = layer.parentId;
+  if (parentId === undefined || parentId === null) return null;
+
+  const parent = layersById.get(parentId);
+  if (!parent || parent.type !== 'group' || parentId === layer.id) return null;
+  if (wouldCloseParentCycle(layer.id, parentId, acceptedParentIds)) return null;
+
+  return parentId;
+}
+
+function wouldCloseParentCycle(
+  layerId: string,
+  parentId: string,
+  acceptedParentIds: Map<string, string | null>
+): boolean {
+  let currentParentId: string | null = parentId;
+
+  while (currentParentId) {
+    if (currentParentId === layerId) return true;
+    currentParentId = acceptedParentIds.get(currentParentId) ?? null;
+  }
+
+  return false;
 }
 
 function normalizeHex(hex: string): string {

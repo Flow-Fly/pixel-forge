@@ -3,6 +3,7 @@ import type { Layer } from '../types/layer';
 import type { ReferenceLayerData } from '../types/reference';
 import type {
   ProjectCelFile,
+  ProjectCompatibilityDiagnostics,
   ProjectFile,
   ProjectFrameFile,
   ProjectLayerFile,
@@ -10,8 +11,6 @@ import type {
 import { loadImageDataToCanvas } from '../utils/canvas-binary';
 import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
 import { hasProjectImageData } from './project-data';
-
-export { migrateProjectFileForLoad } from '@pixel-forge/shared';
 
 type WritableSignal<T> = {
   value: T;
@@ -25,12 +24,10 @@ export type ProjectLoadStores = {
     tags: WritableSignal<FrameTag[]>;
     addFrame: (duplicate?: boolean) => void;
     deleteFrame: (frameId: string) => void;
-    getCelCanvas: (
-      frameId: string,
-      layerId: string
-    ) => HTMLCanvasElement | undefined;
+    getCelCanvas: (frameId: string, layerId: string) => HTMLCanvasElement | undefined;
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
+    isRuntimeEmptyCel: (cel: Cel) => boolean;
     linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
     rebuildAllCelCanvases: () => void;
     rebuildAllIndexBuffers: () => void;
@@ -73,18 +70,14 @@ type LinkedCelGroup = {
   linkType: CelLinkType;
 };
 
-// Keep this boundary free of store imports; this mirrors the animation store
-// marker for shared transparent cels.
-const EMPTY_CEL_LINK_ID = '__empty__';
+const COMPATIBILITY_WARNING_LAYER_LIMIT = 3;
+const COMPATIBILITY_WARNING_LAYER_ID_LIMIT = 40;
+const COMPATIBILITY_WARNING_MESSAGE_LIMIT = 240;
 
-export function restoreProjectPaletteForLoad(
-  stores: ProjectLoadStores,
-  file: ProjectFile
-): void {
+export function restoreProjectPaletteForLoad(stores: ProjectLoadStores, file: ProjectFile): void {
   const { palette } = stores;
 
-  const filePalette =
-    file.palette && Array.isArray(file.palette) ? file.palette : [];
+  const filePalette = file.palette && Array.isArray(file.palette) ? file.palette : [];
 
   if (filePalette.length > 0) {
     palette.setPalette(filePalette);
@@ -119,10 +112,7 @@ export async function hydrateProjectFrames(
   deletePlaceholderFrame(stores, placeholderFrameId);
 }
 
-export function restoreProjectAnimationState(
-  stores: ProjectLoadStores,
-  file: ProjectFile
-): void {
+export function restoreProjectAnimationState(stores: ProjectLoadStores, file: ProjectFile): void {
   const { animation } = stores;
 
   animation.fps.value = file.animation.fps;
@@ -133,17 +123,11 @@ export function restoreProjectAnimationState(
   }
 }
 
-export function restoreProjectFrameTags(
-  stores: ProjectLoadStores,
-  file: ProjectFile
-): void {
-  stores.animation.tags.value =
-    file.tags && Array.isArray(file.tags) ? file.tags : [];
+export function restoreProjectFrameTags(stores: ProjectLoadStores, file: ProjectFile): void {
+  stores.animation.tags.value = file.tags && Array.isArray(file.tags) ? file.tags : [];
 }
 
-export function refreshProjectPaletteAfterLoad(
-  stores: ProjectLoadStores
-): void {
+export function refreshProjectPaletteAfterLoad(stores: ProjectLoadStores): void {
   const { palette } = stores;
 
   palette.refreshUsedColors();
@@ -155,6 +139,46 @@ export function selectFirstLoadedLayer(stores: ProjectLoadStores): void {
   if (layers.length > 0) {
     layerStore.setActiveLayer(layers[0].id);
   }
+}
+
+export function dispatchProjectCompatibilityWarning(
+  diagnostics: ProjectCompatibilityDiagnostics
+): void {
+  const message = describeProjectCompatibilityWarning(diagnostics);
+  if (!message || typeof window === 'undefined') return;
+
+  window.dispatchEvent(
+    new CustomEvent('show-warning-toast', {
+      detail: { message },
+    })
+  );
+}
+
+function describeProjectCompatibilityWarning(
+  diagnostics: ProjectCompatibilityDiagnostics
+): string | null {
+  const repairedLayerIds = diagnostics.repairedParentLayerIds;
+  if (repairedLayerIds.length === 0) return null;
+
+  const visibleLayerIds = repairedLayerIds
+    .slice(0, COMPATIBILITY_WARNING_LAYER_LIMIT)
+    .map(limitCompatibilityWarningLayerId)
+    .join(', ');
+  const hiddenCount = repairedLayerIds.length - COMPATIBILITY_WARNING_LAYER_LIMIT;
+  const remaining = hiddenCount > 0 ? `, and ${hiddenCount} more` : '';
+  return limitCompatibilityWarningMessage(
+    `Repaired invalid group links for layers: ${visibleLayerIds}${remaining}.`
+  );
+}
+
+function limitCompatibilityWarningLayerId(layerId: string): string {
+  if (layerId.length <= COMPATIBILITY_WARNING_LAYER_ID_LIMIT) return layerId;
+  return `${layerId.slice(0, COMPATIBILITY_WARNING_LAYER_ID_LIMIT - 1)}…`;
+}
+
+function limitCompatibilityWarningMessage(message: string): string {
+  if (message.length <= COMPATIBILITY_WARNING_MESSAGE_LIMIT) return message;
+  return `${message.slice(0, COMPATIBILITY_WARNING_MESSAGE_LIMIT - 1)}…`;
 }
 
 function clearLoadedLayers(stores: ProjectLoadStores): void {
@@ -172,15 +196,19 @@ async function hydrateProjectLayer(
   height: number
 ): Promise<void> {
   const { layers } = stores;
-  const layerType = layerFile.type || 'image';
+  const layerType = layerFile.type;
   const layer = createLoadedLayer(stores, layerFile, layerType, width, height);
 
   layers.updateLayer(layer.id, {
     id: layerFile.id,
+    type: layerType,
     visible: layerFile.visible,
+    locked: layerFile.locked,
     opacity: layerFile.opacity,
     blendMode: layerFile.blendMode || 'normal',
     continuous: layerFile.continuous || false,
+    parentId: layerFile.parentId,
+    ...(layerType === 'group' && { canvas: undefined }),
   });
 
   const restored = layers.layers.value.find((x) => x.id === layerFile.id);
@@ -244,10 +272,7 @@ function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
   return animation.frames.value[0]?.id;
 }
 
-function addLoadedFrame(
-  stores: ProjectLoadStores,
-  frameFile: ProjectFrameFile
-): Frame {
+function addLoadedFrame(stores: ProjectLoadStores, frameFile: ProjectFrameFile): Frame {
   const { animation } = stores;
 
   animation.addFrame(false);
@@ -285,9 +310,11 @@ function giveSharedTransparentCelOwnCanvas(
   const cel = animation.cels.value.get(celKey);
   if (
     !cel ||
-    cel.linkedCelId !== EMPTY_CEL_LINK_ID ||
-    !hasProjectImageData(celFile.data)
-    && !(celFile.indexData && celFile.indexData.length > 0)
+    !animation.isRuntimeEmptyCel(cel) ||
+    (!hasProjectImageData(celFile.data) &&
+      !(celFile.indexData && celFile.indexData.length > 0) &&
+      !celFile.linkedCelId &&
+      !celFile.textCelData)
   ) {
     return;
   }
@@ -338,15 +365,20 @@ function restoreCelIndexBuffer(
   if (!cel) return;
 
   const cels = new Map(animation.cels.value);
+  const restoredCel = {
+    ...cel,
+    opacity: celFile.opacity,
+  };
+  cels.set(celKey, restoredCel);
 
   if (celFile.indexData && Array.isArray(celFile.indexData)) {
     cels.set(celKey, {
-      ...cel,
+      ...restoredCel,
       indexBuffer: new Uint8Array(celFile.indexData),
     });
   } else if (canvas && hasProjectImageData(celFile.data) && !file.palette) {
     cels.set(celKey, {
-      ...cel,
+      ...restoredCel,
       indexBuffer: buildIndexBufferFromCanvas(canvas, stores.palette, true),
     });
   }
@@ -360,11 +392,7 @@ function restoreTextCelData(
   celFile: ProjectCelFile
 ): void {
   if (celFile.textCelData) {
-    stores.animation.setTextCelData(
-      celFile.layerId,
-      frameId,
-      celFile.textCelData
-    );
+    stores.animation.setTextCelData(celFile.layerId, frameId, celFile.textCelData);
   }
 }
 

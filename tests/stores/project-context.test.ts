@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { animationStore, EMPTY_CEL_LINK_ID } from "../../src/stores/animation";
+import { animationStore } from "../../src/stores/animation";
 import { colorStore } from "../../src/stores/colors";
 import { dirtyRectStore } from "../../src/stores/dirty-rect";
 import { gridStore } from "../../src/stores/grid";
@@ -343,7 +343,106 @@ describe("ProjectContext", () => {
     expect(firstCel?.canvas).not.toBe(sharedCanvas);
     expect(firstCel?.linkedCelId).toBeUndefined();
     expect(secondCel?.canvas).toBe(sharedCanvas);
-    expect(secondCel?.linkedCelId).toBe(EMPTY_CEL_LINK_ID);
+    expect(secondCel).toBeDefined();
+    expect(context.animation.isRuntimeEmptyCel(secondCel!)).toBe(true);
+  });
+
+  it("keeps an untouched duplicated frame runtime-empty", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const sourceFrameId = context.animation.currentFrameId.value;
+    const sourceKey = context.animation.getCelKey(layerId, sourceFrameId);
+    context.animation.setCelOpacity([sourceKey], 35);
+
+    context.animation.addFrame(true);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(sourceKey);
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
+    expect(sourceCel).toBeDefined();
+    expect(targetCel).toBeDefined();
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(true);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(true);
+    expect(sourceCel?.canvas).toBe(targetCel?.canvas);
+    expect(sourceCel?.linkedCelId).toBeUndefined();
+    expect(targetCel?.linkedCelId).toBeUndefined();
+    expect(sourceCel?.opacity).toBe(35);
+    expect(targetCel?.opacity).toBe(35);
+  });
+
+  it("creates a default blank frame when the source blank is not linked", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const sourceFrameId = context.animation.currentFrameId.value;
+    const sourceKey = context.animation.getCelKey(layerId, sourceFrameId);
+    context.animation.setCelOpacity([sourceKey], 35);
+
+    context.animation.addFrame(false);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(sourceKey);
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(true);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(true);
+    expect(sourceCel?.opacity).toBe(35);
+    expect(targetCel?.opacity).toBeUndefined();
+    expect(targetCel?.linkedCelId).toBeUndefined();
+    expect(targetCel?.linkType).toBeUndefined();
+  });
+
+  it("keeps an untouched continuous frame runtime-empty", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    context.layers.updateLayer(layerId, { continuous: true });
+    const sourceFrameId = context.animation.currentFrameId.value;
+    const sourceKey = context.animation.getCelKey(layerId, sourceFrameId);
+
+    context.animation.addFrame(false);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(sourceKey);
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(true);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(true);
+    expect(sourceCel?.canvas).toBe(targetCel?.canvas);
+    expect(sourceCel?.linkedCelId).toBeUndefined();
+    expect(targetCel?.linkedCelId).toBeUndefined();
+  });
+
+  it("keeps a non-empty duplicated frame soft-linked", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const sourceFrameId = context.animation.currentFrameId.value;
+
+    context.animation.getEditableCelCanvas(layerId, sourceFrameId);
+    const indexBuffer = new Uint8Array(64);
+    indexBuffer[0] = 1;
+    context.animation.updateCelIndexBuffer(layerId, sourceFrameId, indexBuffer);
+    context.animation.addFrame(true);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, sourceFrameId)
+    );
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(false);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(false);
+    expect(sourceCel?.canvas).toBe(targetCel?.canvas);
+    expect(sourceCel?.linkedCelId).toEqual(targetCel?.linkedCelId);
+    expect(sourceCel?.linkType).toBe('soft');
+    expect(targetCel?.linkType).toBe('soft');
   });
 
   it("keeps explicitly hard-linked cels shared when preparing one for editing", () => {

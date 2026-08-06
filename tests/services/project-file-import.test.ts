@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import pako from 'pako';
 import { ProjectFileImportService } from '../../src/services/project-file-import';
 import { WorkspaceStore } from '../../src/stores/workspace';
@@ -22,9 +24,11 @@ function project(name = 'Imported project'): ProjectFile {
         name: 'Layer 1',
         type: 'image',
         visible: true,
+        locked: false,
         opacity: 255,
         blendMode: 'normal',
         continuous: false,
+        parentId: null,
         data: new Uint8Array(0),
       },
     ],
@@ -32,7 +36,7 @@ function project(name = 'Imported project'): ProjectFile {
       {
         id: 'frame-1',
         duration: 100,
-        cels: [{ layerId, data: new Uint8Array(0) }],
+        cels: [{ layerId, data: new Uint8Array(0), opacity: 100 }],
       },
     ],
     animation: { fps: 12, currentFrameIndex: 0 },
@@ -63,6 +67,14 @@ function dependencies(opened = true) {
   };
 
   return { projectLibrary, workspace, telemetry };
+}
+
+async function readProjectFixture(filename: string): Promise<Uint8Array> {
+  const encoded = await readFile(
+    resolve(process.cwd(), 'tests/fixtures/project-files', filename),
+    'utf8'
+  );
+  return Uint8Array.from(Buffer.from(encoded.trim(), 'base64'));
 }
 
 describe('ProjectFileImportService', () => {
@@ -100,6 +112,51 @@ describe('ProjectFileImportService', () => {
       opened: false,
     });
     expect(deps.projectLibrary.importProjectFile).toHaveBeenCalledOnce();
+  });
+
+  it('imports the checked-in 4.2 .pf fixture through the compressed file path', async () => {
+    const deps = dependencies();
+    const service = new ProjectFileImportService(deps);
+    const bytes = await readProjectFixture('current-4.2.pf.base64');
+
+    await service.importFile(new File([bytes], 'current-4.2.pf'));
+
+    const [importedProject] = vi.mocked(deps.projectLibrary.importProjectFile).mock.calls[0];
+    const group = importedProject.layers.find((layer) => layer.type === 'group');
+    const paint = importedProject.layers.find((layer) => layer.name === 'Paint');
+    if (!group || !paint) throw new Error('Expected group and paint layers in the current fixture');
+
+    expect(importedProject.version).toBe('4.2.0');
+    expect(paint).toMatchObject({ type: 'image', locked: true, parentId: group.id });
+  });
+
+  it('shows one bounded local warning when an imported hierarchy is repaired', async () => {
+    const source = project();
+    source.layers[0].parentId = 'missing-group';
+    const warningListener = vi.fn();
+    window.addEventListener('show-warning-toast', warningListener);
+    const deps = dependencies();
+    const service = new ProjectFileImportService(deps);
+
+    try {
+      await service.importFile(new File([JSON.stringify(source)], 'repair.json'));
+
+      expect(deps.projectLibrary.importProjectFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          layers: [expect.objectContaining({ id: 'layer-1', parentId: null })],
+        })
+      );
+      expect(warningListener).toHaveBeenCalledOnce();
+      expect(warningListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: {
+            message: 'Repaired invalid group links for layers: layer-1.',
+          },
+        })
+      );
+    } finally {
+      window.removeEventListener('show-warning-toast', warningListener);
+    }
   });
 
   it('keeps the active drawing untouched when a real workspace is full', async () => {

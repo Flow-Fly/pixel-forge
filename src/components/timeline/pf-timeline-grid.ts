@@ -2,14 +2,32 @@ import { html, css } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { BaseComponent } from '../../core/base-component';
-import { EMPTY_CEL_LINK_ID } from '../../stores/animation';
 import { defaultProjectContext } from '../../stores/project-context';
 import { SetCelOpacityCommand } from '../../commands/cel-opacity-command';
-import type { FrameTag } from '../../types/animation';
+import type { Cel, Frame, FrameTag } from '../../types/animation';
+import type { Layer } from '../../types/layer';
 import '../ui/pf-context-menu';
 import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
+
+type CelLinkPresentation = {
+  isLinked: boolean;
+  isHardLinked: boolean;
+  linkColor: string | null;
+  continuesLeft: boolean;
+  continuesRight: boolean;
+};
+
+type CelPresentation = {
+  key: string;
+  hasContent: boolean;
+  hasTint: boolean;
+  tagColor: string | null;
+  hasResizePreview: boolean;
+  resizePreviewColor: string | null;
+  link: CelLinkPresentation;
+};
 
 @customElement('pf-timeline-grid')
 export class PFTimelineGrid extends BaseComponent {
@@ -355,133 +373,190 @@ export class PFTimelineGrid extends BaseComponent {
     return info;
   }
 
-  render() {
+  private renderLayerRow(
+    layer: Layer,
+    frames: Frame[],
+    frameRenderInfo: Map<
+      number,
+      { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }
+    >,
+    tags: FrameTag[]
+  ) {
+    return html`
+      <div class="grid-row">
+        ${frames.map((frame, frameIndex) =>
+          this.renderFrameCell(layer, frame, frameIndex, frameRenderInfo, tags)
+        )}
+      </div>
+    `;
+  }
+
+  private renderFrameCell(
+    layer: Layer,
+    frame: Frame,
+    frameIndex: number,
+    frameRenderInfo: Map<
+      number,
+      { tag: FrameTag | null; isFirstOfCollapsed: boolean; isHidden: boolean }
+    >,
+    tags: FrameTag[]
+  ) {
+    const renderInfo = frameRenderInfo.get(frameIndex);
+
+    if (renderInfo?.isHidden) return '';
+    if (renderInfo?.isFirstOfCollapsed && renderInfo.tag) {
+      return this.renderCollapsedTagCell(renderInfo.tag);
+    }
+
+    return this.renderNormalCel(layer, frame, frameIndex, tags);
+  }
+
+  private renderCollapsedTagCell(tag: FrameTag) {
+    return html`
+      <div
+        class="cel collapsed-tag"
+        @click=${() => this.handleCollapsedTagClick(tag)}
+        title="${tag.name} - Click to expand"
+      >
+        <div class="collapsed-tag-block" style="background-color: ${tag.color};"></div>
+      </div>
+    `;
+  }
+
+  private renderNormalCel(layer: Layer, frame: Frame, frameIndex: number, tags: FrameTag[]) {
     const animation = this.context.animation;
+    const presentation = this.getCelPresentation(layer, frame, frameIndex, tags);
+    const celClasses = {
+      cel: true,
+      active: layer.id === this.context.layers.activeLayerId.value && frame.id === animation.currentFrameId.value,
+      selected: animation.selectedCelKeys.value.has(presentation.key),
+      'has-content': presentation.hasContent,
+      linked: presentation.link.isLinked,
+      'hard-linked': presentation.link.isHardLinked,
+      'link-continues-left': presentation.link.continuesLeft,
+      'link-continues-right': presentation.link.continuesRight,
+    };
+    const style = this.getCelStyle(
+      presentation.hasTint,
+      presentation.tagColor,
+      presentation.link.isLinked,
+      presentation.link.isHardLinked
+        ? presentation.link.linkColor
+        : 'var(--pf-color-text-muted)',
+      presentation.hasResizePreview,
+      presentation.resizePreviewColor
+    );
+
+    return html`
+      <div
+        class=${classMap(celClasses)}
+        style="${style}"
+        @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
+        @contextmenu=${(e: MouseEvent) => this.handleCelContextMenu(e, presentation.key)}
+        @mouseenter=${(e: MouseEvent) =>
+          this.handleCelMouseEnter(e, layer.id, frame.id, layer.name, frameIndex)}
+        @mouseleave=${this.handleCelMouseLeave}
+      >
+        ${presentation.hasTint ? html`<div class="tag-tint"></div>` : ''}
+        ${presentation.hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ''}
+        <div class="cel-content"></div>
+        ${
+          presentation.link.isHardLinked
+            ? html`<div class="link-badge" style="background-color: ${presentation.link.linkColor}"></div>`
+            : ''
+        }
+      </div>
+    `;
+  }
+
+  private getCelPresentation(
+    layer: Layer,
+    frame: Frame,
+    frameIndex: number,
+    tags: FrameTag[]
+  ): CelPresentation {
+    const animation = this.context.animation;
+    const key = animation.getCelKey(layer.id, frame.id);
+    const cel = animation.cels.value.get(key);
+    const isRuntimeEmpty = !!cel && animation.isRuntimeEmptyCel(cel);
+    const tagColor = this.getTagColorForFrame(frameIndex, tags);
+    const resizePreview = this.getResizePreviewForFrame(frameIndex, tags);
+
+    return {
+      key,
+      hasContent: !!cel && !isRuntimeEmpty,
+      hasTint: tagColor !== null,
+      tagColor,
+      hasResizePreview: resizePreview.inPreview,
+      resizePreviewColor: resizePreview.color,
+      link: this.getCelLinkPresentation(layer.id, frameIndex, cel, isRuntimeEmpty),
+    };
+  }
+
+  private getCelLinkPresentation(
+    layerId: string,
+    frameIndex: number,
+    cel: Cel | undefined,
+    isRuntimeEmpty: boolean
+  ): CelLinkPresentation {
+    const linkedCelId = isRuntimeEmpty ? undefined : cel?.linkedCelId;
+    const isLinked = linkedCelId != null;
+    const isHardLinked = isLinked && cel?.linkType === 'hard';
+    const continuity = this.getLinkContinuity(layerId, frameIndex, linkedCelId);
+
+    return {
+      isLinked,
+      isHardLinked,
+      linkColor: linkedCelId != null ? this.context.animation.getLinkColor(linkedCelId) : null,
+      continuesLeft: continuity.left,
+      continuesRight: continuity.right,
+    };
+  }
+
+  private getLinkContinuity(layerId: string, frameIndex: number, linkedCelId: string | undefined) {
+    if (!linkedCelId) return { left: false, right: false };
+
+    const animation = this.context.animation;
+    const frames = animation.frames.value;
+    return {
+      left: this.frameHasLink(layerId, frames[frameIndex - 1], linkedCelId),
+      right: this.frameHasLink(layerId, frames[frameIndex + 1], linkedCelId),
+    };
+  }
+
+  private frameHasLink(layerId: string, frame: Frame | undefined, linkedCelId: string): boolean {
+    if (!frame) return false;
+    const key = this.context.animation.getCelKey(layerId, frame.id);
+    return this.context.animation.cels.value.get(key)?.linkedCelId === linkedCelId;
+  }
+
+  private getCelStyle(
+    hasTint: boolean,
+    tagColor: string | null,
+    isLinked: boolean,
+    linkColor: string | null,
+    hasResizePreview: boolean,
+    resizePreviewColor: string | null
+  ): string {
+    return [
+      hasTint ? `--tag-tint-color: ${tagColor}` : '',
+      isLinked ? `--link-line-color: ${linkColor}` : '',
+      hasResizePreview ? `--resize-preview-color: ${resizePreviewColor}` : '',
+    ]
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  render() {
     const layerStore = this.context.layers;
     const layers = [...layerStore.layers.value].reverse();
+    const animation = this.context.animation;
     const frames = animation.frames.value;
-    const currentFrameId = animation.currentFrameId.value;
-    const activeLayerId = layerStore.activeLayerId.value;
-    const cels = animation.cels.value;
     const tags = animation.tags.value;
-    // Read selection signal to trigger re-renders on selection change
-    const selectedCels = animation.selectedCelKeys.value;
-
-    // Get frame render info (which frames are collapsed/hidden)
     const frameRenderInfo = this.getFrameRenderInfo(tags, frames.length);
 
     return html`
-      ${layers.map(
-        (layer) => html`
-          <div class="grid-row">
-            ${frames.map((frame, frameIndex) => {
-              const renderInfo = frameRenderInfo.get(frameIndex);
-
-              // Skip hidden frames (part of a collapsed tag but not the first)
-              if (renderInfo?.isHidden) {
-                return '';
-              }
-
-              // Render collapsed tag cell
-              if (renderInfo?.isFirstOfCollapsed && renderInfo.tag) {
-                const tag = renderInfo.tag;
-                return html`
-                  <div
-                    class="cel collapsed-tag"
-                    @click=${() => this.handleCollapsedTagClick(tag)}
-                    title="${tag.name} - Click to expand"
-                  >
-                    <div class="collapsed-tag-block" style="background-color: ${tag.color};"></div>
-                  </div>
-                `;
-              }
-
-              // Normal cel rendering
-              const key = animation.getCelKey(layer.id, frame.id);
-              const cel = cels.get(key);
-              const isActive = layer.id === activeLayerId && frame.id === currentFrameId;
-              const isSelected = selectedCels.has(key);
-              // Exclude empty cels from linking visualization (they're just a memory optimization)
-              const isLinked = cel?.linkedCelId != null && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
-              const isHardLinked = isLinked && cel?.linkType === 'hard';
-              const linkColor = isLinked ? animation.getLinkColor(cel!.linkedCelId!) : null;
-
-              // Check link continuity with neighboring frames
-              let linkContinuesLeft = false;
-              let linkContinuesRight = false;
-              if (isLinked && cel?.linkedCelId) {
-                // Check previous frame
-                if (frameIndex > 0) {
-                  const prevFrame = frames[frameIndex - 1];
-                  const prevKey = animation.getCelKey(layer.id, prevFrame.id);
-                  const prevCel = cels.get(prevKey);
-                  linkContinuesLeft = prevCel?.linkedCelId === cel.linkedCelId;
-                }
-                // Check next frame
-                if (frameIndex < frames.length - 1) {
-                  const nextFrame = frames[frameIndex + 1];
-                  const nextKey = animation.getCelKey(layer.id, nextFrame.id);
-                  const nextCel = cels.get(nextKey);
-                  linkContinuesRight = nextCel?.linkedCelId === cel.linkedCelId;
-                }
-              }
-
-              // Empty cels (sharing transparent canvas) don't have content
-              const hasContent = !!cel && cel.linkedCelId !== EMPTY_CEL_LINK_ID;
-              const tagColor = this.getTagColorForFrame(frameIndex, tags);
-              const hasTint = tagColor !== null;
-
-              // Check for resize preview
-              const resizePreview = this.getResizePreviewForFrame(frameIndex, tags);
-              const hasResizePreview = resizePreview.inPreview;
-
-              const celClasses = {
-                cel: true,
-                active: isActive,
-                selected: isSelected,
-                'has-content': hasContent,
-                linked: isLinked,
-                'hard-linked': isHardLinked,
-                'link-continues-left': linkContinuesLeft,
-                'link-continues-right': linkContinuesRight,
-              };
-
-              // Build style string with link line color
-              // Soft links: colorless (same as cel-content dot)
-              // Hard links: colored (distinct per link group)
-              const effectiveLinkColor = isHardLinked ? linkColor : 'var(--pf-color-text-muted)';
-              const styleStr = [
-                hasTint ? `--tag-tint-color: ${tagColor}` : '',
-                isLinked ? `--link-line-color: ${effectiveLinkColor}` : '',
-                hasResizePreview ? `--resize-preview-color: ${resizePreview.color}` : '',
-              ]
-                .filter(Boolean)
-                .join('; ');
-
-              return html`
-                <div
-                  class=${classMap(celClasses)}
-                  style="${styleStr}"
-                  @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
-                  @contextmenu=${(e: MouseEvent) => this.handleCelContextMenu(e, key)}
-                  @mouseenter=${(e: MouseEvent) =>
-                    this.handleCelMouseEnter(e, layer.id, frame.id, layer.name, frameIndex)}
-                  @mouseleave=${this.handleCelMouseLeave}
-                >
-                  ${hasTint ? html`<div class="tag-tint"></div>` : ''}
-                  ${hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ''}
-                  <div class="cel-content"></div>
-                  ${
-                    isHardLinked
-                      ? html`<div class="link-badge" style="background-color: ${linkColor}"></div>`
-                      : ''
-                  }
-                </div>
-              `;
-            })}
-          </div>
-        `
-      )}
+      ${layers.map((layer) => this.renderLayerRow(layer, frames, frameRenderInfo, tags))}
       <pf-context-menu></pf-context-menu>
       <pf-timeline-tooltip></pf-timeline-tooltip>
     `;
