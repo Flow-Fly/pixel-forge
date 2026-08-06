@@ -260,6 +260,18 @@ function fixturePngs(project: ProjectFile): Uint8Array[] {
   ].filter((bytes): bytes is Uint8Array => bytes !== undefined && bytes.length > 0);
 }
 
+function currentFixtureLayers(project: ProjectFile) {
+  const group = project.layers.find((layer) => layer.type === 'group');
+  const paint = project.layers.find((layer) => layer.name === 'Paint');
+  const reference = project.layers.find((layer) => layer.type === 'reference');
+
+  if (!group || !paint || !reference) {
+    throw new Error('Expected current group, paint, and reference fixture layers');
+  }
+
+  return { group, paint, reference };
+}
+
 describe('shared ProjectFile contract', () => {
   it('decodes a complete current project and restores serialized bytes', () => {
     const serialized = serializedProject();
@@ -516,13 +528,8 @@ describe('shared ProjectFile contract', () => {
     expect(twice.compatibility.repairedParentLayerIds).toEqual([]);
   });
 
-  it('reads checked-in 4.1 and 4.2 .pf byte fixtures without losing editing state', async () => {
-    const legacy = decodeProjectFileWithDiagnostics(
-      await readProjectFixture('legacy-4.1.pf.base64')
-    );
-    const current = decodeProjectFileWithDiagnostics(
-      await readProjectFixture('current-4.2.pf.base64')
-    );
+  it('reads the checked-in 4.1 .pf fixture with its legacy writer shape', async () => {
+    const legacy = decodeProjectFileWithDiagnostics(await readProjectFixture('legacy-4.1.pf.base64'));
 
     expect(legacy.project.version).toBe('4.1.0');
     expect(legacy.project.layers.map((layer) => layer.type)).toEqual([
@@ -554,14 +561,17 @@ describe('shared ProjectFile contract', () => {
       legacy.project.frames.flatMap((frame) => frame.cels).some((cel) => cel.layerId === legacyReference.id)
     ).toBe(false);
     expect(legacy.compatibility.repairedParentLayerIds).toEqual([]);
+  });
+
+  it('reads the checked-in 4.2 .pf fixture without losing editing state', async () => {
+    const current = decodeProjectFileWithDiagnostics(
+      await readProjectFixture('current-4.2.pf.base64')
+    );
 
     expect(current.project.version).toBe('4.2.0');
-    const currentGroup = current.project.layers.find((layer) => layer.type === 'group');
-    const currentPaint = current.project.layers.find((layer) => layer.name === 'Paint');
-    const currentReference = current.project.layers.find((layer) => layer.type === 'reference');
-    if (!currentGroup || !currentPaint || !currentReference) {
-      throw new Error('Expected current group, paint, and reference fixture layers');
-    }
+    const { group: currentGroup, paint: currentPaint, reference: currentReference } = currentFixtureLayers(
+      current.project
+    );
     expect(currentPaint).toMatchObject({
       type: 'image',
       locked: true,
