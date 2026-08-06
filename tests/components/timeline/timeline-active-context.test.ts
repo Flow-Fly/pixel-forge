@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import '../../../src/components/timeline/pf-playback-controls';
 import '../../../src/components/timeline/pf-timeline';
 import '../../../src/components/timeline/pf-timeline-layers';
+import '../../../src/components/timeline/pf-timeline-grid';
 import '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import type { PFPlaybackControls } from '../../../src/components/timeline/pf-playback-controls';
 import type { PFTimeline } from '../../../src/components/timeline/pf-timeline';
 import type { PFTimelineLayers } from '../../../src/components/timeline/pf-timeline-layers';
+import type { PFTimelineGrid } from '../../../src/components/timeline/pf-timeline-grid';
 import type { PFTimelineFrameCells } from '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import {
   createProjectContext,
@@ -70,6 +72,13 @@ async function createPlaybackControls() {
 
 async function createTimeline() {
   const element = document.createElement('pf-timeline') as PFTimeline;
+  document.body.append(element);
+  await element.updateComplete;
+  return element;
+}
+
+async function createTimelineGrid() {
+  const element = document.createElement('pf-timeline-grid') as PFTimelineGrid;
   document.body.append(element);
   await element.updateComplete;
   return element;
@@ -144,6 +153,19 @@ describe('timeline active project context binding', () => {
     await waitForContextRender(frameCells);
 
     expect(frameLabels(frameCells)).toEqual(['1']);
+  });
+
+  it('renders duplicated runtime-empty cels without content or link state', async () => {
+    const context = createContext('Blank duplicate');
+    context.animation.addFrame(true);
+    setActiveProjectContext(context);
+
+    const grid = await createTimelineGrid();
+    const cels = [...(grid.shadowRoot?.querySelectorAll<HTMLElement>('.cel') ?? [])];
+
+    expect(cels).toHaveLength(2);
+    expect(cels.every((cel) => !cel.classList.contains('has-content'))).toBe(true);
+    expect(cels.every((cel) => !cel.classList.contains('linked'))).toBe(true);
   });
 
   it('records layer toolbar actions in the active context history', async () => {

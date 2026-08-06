@@ -347,6 +347,56 @@ describe("ProjectContext", () => {
     expect(context.animation.isRuntimeEmptyCel(secondCel!)).toBe(true);
   });
 
+  it("keeps an untouched duplicated frame runtime-empty", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const sourceFrameId = context.animation.currentFrameId.value;
+    const sourceKey = context.animation.getCelKey(layerId, sourceFrameId);
+    const sourceCel = context.animation.cels.value.get(sourceKey);
+
+    context.animation.addFrame(true);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
+    expect(sourceCel).toBeDefined();
+    expect(targetCel).toBeDefined();
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(true);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(true);
+    expect(sourceCel?.canvas).toBe(targetCel?.canvas);
+    expect(sourceCel?.linkedCelId).toBeUndefined();
+    expect(targetCel?.linkedCelId).toBeUndefined();
+  });
+
+  it("keeps a non-empty duplicated frame soft-linked", () => {
+    const context = createTestContext(8, 8);
+    const layerId = context.layers.layers.value[0].id;
+    const sourceFrameId = context.animation.currentFrameId.value;
+
+    context.animation.getEditableCelCanvas(layerId, sourceFrameId);
+    const indexBuffer = new Uint8Array(64);
+    indexBuffer[0] = 1;
+    context.animation.updateCelIndexBuffer(layerId, sourceFrameId, indexBuffer);
+    context.animation.addFrame(true);
+
+    const targetFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, sourceFrameId)
+    );
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, targetFrameId)
+    );
+
+    expect(context.animation.isRuntimeEmptyCel(sourceCel!)).toBe(false);
+    expect(context.animation.isRuntimeEmptyCel(targetCel!)).toBe(false);
+    expect(sourceCel?.canvas).toBe(targetCel?.canvas);
+    expect(sourceCel?.linkedCelId).toEqual(targetCel?.linkedCelId);
+    expect(sourceCel?.linkType).toBe('soft');
+    expect(targetCel?.linkType).toBe('soft');
+  });
+
   it("keeps explicitly hard-linked cels shared when preparing one for editing", () => {
     const context = createTestContext(8, 8);
     const layerId = context.layers.layers.value[0].id;

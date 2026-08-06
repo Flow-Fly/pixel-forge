@@ -426,6 +426,40 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(cel?.linkType).toBeUndefined();
   });
 
+  it('serializes an untouched duplicated blank frame without content or links', async () => {
+    const layerId = layerStore.layers.value[0].id;
+    animationStore.addFrame(false);
+    const sourceFrameId = animationStore.currentFrameId.value;
+
+    animationStore.addFrame(true);
+
+    const targetFrameId = animationStore.currentFrameId.value;
+    const sourceCel = animationStore.cels.value.get(
+      animationStore.getCelKey(layerId, sourceFrameId)
+    );
+    const targetCel = animationStore.cels.value.get(
+      animationStore.getCelKey(layerId, targetFrameId)
+    );
+    if (!sourceCel || !targetCel) throw new Error('Expected source and duplicated blank cels');
+
+    expect(animationStore.isRuntimeEmptyCel(sourceCel)).toBe(true);
+    expect(animationStore.isRuntimeEmptyCel(targetCel)).toBe(true);
+    expect(sourceCel.canvas).toBe(targetCel.canvas);
+
+    const saved = await projectStore.saveProject();
+    const cels = saved.frames
+      .slice(1)
+      .map((frame) => frame.cels.find((cel) => cel.layerId === layerId));
+
+    expect(cels).toEqual([
+      expect.objectContaining({ data: new Uint8Array(0) }),
+      expect.objectContaining({ data: new Uint8Array(0) }),
+    ]);
+    expect(cels.map((cel) => cel?.indexData)).toEqual([undefined, undefined]);
+    expect(cels.map((cel) => cel?.linkedCelId)).toEqual([undefined, undefined]);
+    expect(cels.map((cel) => cel?.linkType)).toEqual([undefined, undefined]);
+  });
+
   it('round-trips a persisted link id that matches the retired empty marker', async () => {
     const input = await readCompressedProjectFixture('current-4.2.pf.base64');
     const project = decodeProjectFileWithDiagnostics(input).project;
