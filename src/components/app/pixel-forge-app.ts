@@ -1051,6 +1051,33 @@ export class PixelForgeApp extends BaseComponent {
     `;
   }
 
+  private renderWarningToast() {
+    const warning = this.warningToast;
+    if (!warning) return "";
+
+    return html`
+      <div class="warning-toast ${warning.persistent ? "persistent" : ""}">
+        <span
+          class="warning-toast-message"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          >${warning.message}</span
+        >
+        ${warning.persistent
+          ? html`<button
+              class="warning-toast-dismiss"
+              type="button"
+              aria-label="Dismiss compatibility warning"
+              @click=${this.dismissWarningToast}
+            >
+              Dismiss
+            </button>`
+          : ""}
+      </div>
+    `;
+  }
+
   private getDeleteProjectName(activeProject: ProjectContext["project"]) {
     const project = this.deleteCurrentProjectContext?.project ?? activeProject;
     return project.name.value;
@@ -1223,29 +1250,7 @@ export class PixelForgeApp extends BaseComponent {
       <pf-checker-settings-dialog></pf-checker-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
 
-      ${this.warningToast
-        ? html`
-            <div class="warning-toast ${this.warningToast.persistent ? "persistent" : ""}">
-              <span
-                class="warning-toast-message"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                >${this.warningToast.message}</span
-              >
-              ${this.warningToast.persistent
-                ? html`<button
-                    class="warning-toast-dismiss"
-                    type="button"
-                    aria-label="Dismiss compatibility warning"
-                    @click=${this.dismissWarningToast}
-                  >
-                    Dismiss
-                  </button>`
-                : ""}
-            </div>
-          `
-        : ""}
+      ${this.renderWarningToast()}
       ${this.renderFileImportStatus()}
       <pf-pwa-update-toast></pf-pwa-update-toast>
     `;
