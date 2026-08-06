@@ -426,7 +426,7 @@ export class PixelForgeApp extends BaseComponent {
   private sidebarResizeHandle: HTMLElement | null = null;
   private previousBodyCursor = "";
   private previousBodyUserSelect = "";
-  private warningTimer: number | null = null;
+  private transientWarningTimer: number | null = null;
   private fileImportTimer: number | null = null;
   private editorLoadedTimer: number | null = null;
   private fileDropHandlingStarted = false;
@@ -517,16 +517,16 @@ export class PixelForgeApp extends BaseComponent {
       return;
     }
 
-    if (this.warningTimer !== null) {
-      clearTimeout(this.warningTimer);
-      this.warningTimer = null;
+    if (this.transientWarningTimer !== null) {
+      clearTimeout(this.transientWarningTimer);
+      this.transientWarningTimer = null;
     }
 
     this.transientWarningMessage = e.detail.message;
 
-    this.warningTimer = window.setTimeout(() => {
+    this.transientWarningTimer = window.setTimeout(() => {
       this.transientWarningMessage = null;
-      this.warningTimer = null;
+      this.transientWarningTimer = null;
     }, 2000);
   };
 
