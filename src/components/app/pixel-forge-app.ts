@@ -104,6 +104,20 @@ export class PixelForgeApp extends BaseComponent {
       z-index: 1;
     }
 
+    :host > :is(
+      pf-dialog,
+      pf-export-dialog,
+      pf-new-project-dialog,
+      pf-paint-by-number-dialog,
+      pf-keyboard-shortcuts-dialog,
+      pf-resize-dialog,
+      pf-grid-settings-dialog,
+      pf-checker-settings-dialog,
+      pf-accent-color-dialog
+    ) {
+      z-index: auto;
+    }
+
     .menu-bar {
       grid-column: 1 / -1;
       grid-row: 1;
@@ -265,7 +279,7 @@ export class PixelForgeApp extends BaseComponent {
     .warning-toast-region {
       position: fixed;
       inset: 0;
-      z-index: 10000;
+      z-index: calc(var(--pf-z-modal, 1000) - 1);
       display: flex;
       flex-direction: column;
       align-items: center;

@@ -59,6 +59,23 @@ HTMLElement.prototype.showPopover = vi.fn();
 HTMLElement.prototype.hidePopover = vi.fn();
 
 const createdContexts: ProjectContext[] = [];
+const DIRECT_MODAL_HOSTS = [
+  'pf-dialog',
+  'pf-export-dialog',
+  'pf-new-project-dialog',
+  'pf-paint-by-number-dialog',
+  'pf-keyboard-shortcuts-dialog',
+  'pf-resize-dialog',
+  'pf-grid-settings-dialog',
+  'pf-checker-settings-dialog',
+  'pf-accent-color-dialog',
+];
+
+function getRequiredElement<T extends Element>(root: ParentNode, selector: string): T {
+  const element = root.querySelector<T>(selector);
+  if (!element) throw new Error(`Expected ${selector}`);
+  return element;
+}
 
 vi.mock('../../../src/services/persistence/indexed-db', () => ({
   projectRepository: projectRepositoryMock,
@@ -548,6 +565,68 @@ describe('pixel-forge-app project dialogs', () => {
     );
     expect(context.history.undoStack.value).toEqual(undoStack);
     expect(autoSaveService.isDirty(context)).toBe(wasDirty);
+  });
+
+  it('keeps a persistent compatibility warning below Export Options until dismissal', async () => {
+    vi.useFakeTimers();
+    await import('../../../src/components/app/pixel-forge-app');
+    const element = document.createElement('pixel-forge-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+
+    const warningMessage = 'Repaired invalid group links for layers: layer-1.';
+    window.dispatchEvent(
+      new CustomEvent('show-warning-toast', {
+        detail: { message: warningMessage, persistent: true },
+      })
+    );
+    window.dispatchEvent(new CustomEvent('show-export-dialog'));
+    await element.updateComplete;
+
+    const appRoot = element.shadowRoot!;
+    const warningRegion = getRequiredElement<HTMLElement>(appRoot, '.warning-toast-region');
+    const exportDialog = getRequiredElement<HTMLElement & {
+      updateComplete: Promise<unknown>;
+    }>(appRoot, 'pf-export-dialog');
+    await exportDialog.updateComplete;
+    const exportRoot = exportDialog.shadowRoot!;
+    const sharedDialog = getRequiredElement<HTMLElement & {
+      close: () => void;
+      updateComplete: Promise<unknown>;
+    }>(exportRoot, 'pf-dialog');
+    await sharedDialog.updateComplete;
+    const modalOverlay = getRequiredElement<HTMLElement>(sharedDialog.shadowRoot!, '.overlay');
+    const scale = getRequiredElement<HTMLSelectElement>(exportRoot, '#export-scale');
+    const frames = Array.from(exportRoot.querySelectorAll<HTMLSelectElement>('select')).find(
+      (control) => control.value === 'current'
+    )!;
+    const modalZIndex = getComputedStyle(modalOverlay).zIndex;
+    expect(warningRegion.textContent).toContain(warningMessage);
+    expect(modalZIndex).toBe('1000');
+    expect(getComputedStyle(warningRegion).zIndex).toBe(`calc(${modalZIndex} - 1)`);
+    expect(
+      DIRECT_MODAL_HOSTS.map(
+        (tagName) => getComputedStyle(getRequiredElement<HTMLElement>(appRoot, tagName)).zIndex
+      )
+    ).toEqual(DIRECT_MODAL_HOSTS.map(() => ''));
+    expect(scale.disabled).toBe(false);
+    expect(frames.disabled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2001);
+    await element.updateComplete;
+    expect(getRequiredElement<HTMLElement>(appRoot, '.warning-toast-region').textContent).toContain(
+      warningMessage
+    );
+
+    sharedDialog.close();
+    await exportDialog.updateComplete;
+    await element.updateComplete;
+
+    expect(exportDialog.open).toBe(false);
+    expect(getRequiredElement<HTMLElement>(appRoot, '.warning-toast-region').textContent).toContain(
+      warningMessage
+    );
   });
 
   it('keeps ordinary warnings transient', async () => {
