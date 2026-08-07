@@ -4,6 +4,20 @@ Pixel Forge uses project-scoped Codex agents from `.codex/agents/` and the
 workflow contract in `docs/operations/codex-agent-workflow.md`. Do not route
 this workflow through retired protocol skills or the generic `$ship` router.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub at `Flow-Fly/pixel-forge`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the five canonical labels; repository-specific implementation permission remains governed by `AGENTS.md`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Pixel Forge uses a single-context layout with `CONTEXT.md` and `docs/adr/` at the repository root. See `docs/agents/domain.md`.
+
 ## Read first
 
 Before issue- or pull-request-driven delivery work, read:
