@@ -2,6 +2,10 @@ import type { Layer } from '../types/layer';
 import type { Cel } from '../types/animation';
 import { animationStore } from '../stores/animation';
 import type { ProjectContext } from '../stores/project-context';
+import {
+  createArtworkCompositionPlan,
+  drawArtworkComposition,
+} from '../services/export-composition';
 
 type PreviewAnimationStore = Pick<ProjectContext['animation'], 'frames' | 'tags' | 'getCelKey'>;
 
@@ -25,34 +29,13 @@ export function renderFrameToCanvas(
   // Clear the canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Render each visible layer
-  for (const layer of layers) {
-    if (!layer.visible) continue;
-
-    const key = animation.getCelKey(layer.id, frameId);
-    const cel = cels.get(key);
-
-    // Fall back to layer.canvas if cel doesn't exist yet (new layers)
-    const canvasToUse = cel?.canvas ?? layer.canvas;
-
-    if (canvasToUse) {
-      // Calculate effective opacity: layer opacity * cel opacity
-      // Layer opacity is 0-255, cel opacity is 0-100
-      const layerOpacity = layer.opacity / 255;
-      const celOpacity = (cel?.opacity ?? 100) / 100;
-      ctx.globalAlpha = layerOpacity * celOpacity;
-
-      ctx.globalCompositeOperation =
-        layer.blendMode === 'normal'
-          ? 'source-over'
-          : (layer.blendMode as GlobalCompositeOperation);
-      ctx.drawImage(canvasToUse, 0, 0);
-    }
-  }
-
-  // Reset composite settings
-  ctx.globalAlpha = 1;
-  ctx.globalCompositeOperation = 'source-over';
+  const plan = createArtworkCompositionPlan({
+    frameId,
+    layers,
+    cels,
+    getCelKey: animation.getCelKey,
+  });
+  drawArtworkComposition(ctx, plan);
 }
 
 /**

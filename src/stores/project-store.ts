@@ -4,6 +4,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { projectRepository } from '../services/persistence/indexed-db';
 import { onionSkinCache } from '../services/onion-skin-cache';
 import { createProjectThumbnail } from '../services/project-thumbnail';
+import {
+  createArtworkCompositionPlan,
+  drawArtworkComposition,
+} from '../services/export-composition';
 import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_PALETTE_ID } from '../services/project-defaults';
 import { canvasToPngBytes } from '../utils/canvas-binary';
 import {
@@ -355,7 +359,18 @@ class ProjectStore {
 
     try {
       return await createProjectThumbnail({
-        compositeFrame: (frameId, targetCtx) => this.compositeFrame(frameId, targetCtx),
+        compositeFrame: (frameId, targetCtx) => {
+          targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
+          drawArtworkComposition(
+            targetCtx,
+            createArtworkCompositionPlan({
+              frameId,
+              layers: this.layers.layers.value,
+              cels: this.animation.cels.value,
+              getCelKey: this.animation.getCelKey,
+            })
+          );
+        },
         frameId: frame.id,
         width: this.width.value,
         height: this.height.value,
@@ -364,29 +379,6 @@ class ProjectStore {
       log.error('Thumbnail generation failed:', error);
       return undefined;
     }
-  }
-
-  private compositeFrame(frameId: string, targetCtx: CanvasRenderingContext2D): void {
-    targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
-
-    for (const layer of this.layers.layers.value) {
-      if (!layer.visible) continue;
-
-      const key = this.animation.getCelKey(layer.id, frameId);
-      const cel = this.animation.cels.value.get(key);
-      const canvasToUse = cel?.canvas ?? layer.canvas;
-      if (!canvasToUse) continue;
-
-      targetCtx.globalAlpha = (layer.opacity / 255) * ((cel?.opacity ?? 100) / 100);
-      targetCtx.globalCompositeOperation =
-        layer.blendMode === 'normal'
-          ? 'source-over'
-          : (layer.blendMode as GlobalCompositeOperation);
-      targetCtx.drawImage(canvasToUse, 0, 0);
-    }
-
-    targetCtx.globalAlpha = 1;
-    targetCtx.globalCompositeOperation = 'source-over';
   }
 
   private resetProjectLocalState() {

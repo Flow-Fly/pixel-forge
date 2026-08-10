@@ -148,6 +148,24 @@ _Avoid_: Mock editor, fixture-only command, validation bypass
 The version-negotiated, permission-limited public subset of stabilized Editor Catalog operations and extension points. It never exposes editor stores or browser internals.
 _Avoid_: Automation API, internal command classes, experimental catalog
 
+## Artwork composition
+
+**Canonical Artwork Composition**:
+The deterministic flattened artwork result for one Project Target and frame. It includes visible non-reference layers in stored order, with layer and cel opacity combined and each supported blend mode applied consistently across editor previews, thumbnails, and raster export.
+_Avoid_: Surface-specific artwork rules, active-tab resolution, reference artwork in durable output
+
+**Editable Text Artwork**:
+The authoritative editable text content and presentation metadata for one text layer and frame. The editor and every flattened artwork surface derive visible text from this metadata using Pixel Forge's current bitmap fonts.
+_Avoid_: Raster pixels as the editable source, browser font rendering, duplicated text implementations
+
+**Derived Text Raster**:
+Optional text-cel pixel data retained for compatibility or cache purposes. It is ignored whenever authoritative editable text metadata exists and is never used to replace that metadata.
+_Avoid_: Independent text source, silent metadata migration, deleted preserved bytes
+
+**Group Cel Artwork**:
+The frame-specific drawable artwork representing a group layer. Archived group payload remains compatibility data and is not part of the visible composition.
+_Avoid_: Layer archive bytes as artwork, flattened child re-composition, group export leakage
+
 ## History and recovery
 
 **Local Project Library**:
