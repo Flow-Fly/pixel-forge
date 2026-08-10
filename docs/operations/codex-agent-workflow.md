@@ -42,6 +42,11 @@ product outcome, runtime surface, and verification path. Do not batch unrelated
 work merely to make a pull request larger. Avoid names based on nesting depth
 such as "sub-sub-issue."
 
+Native GitHub `blocked by` relationships connect delivery slices. They do not
+encode the implementation order of tasks inside one slice: keep that order in
+the delivery brief and pull request instead. When a slice is approved, all of
+its linked tasks become executable together before the worker starts.
+
 ## Durable state
 
 Before acting, read the live GitHub state rather than relying on a previous
@@ -52,14 +57,16 @@ conversation:
 - linked dependencies and sibling status;
 - open pull requests and their exact head commits;
 - current checks and unresolved review findings;
-- readiness, risk, blocked, and human-decision labels.
+- readiness, blocked, and human-decision labels.
 
 Use exact issue, branch, base, and head references in every handoff. If live
 state contradicts the handoff, stop without editing and report the mismatch.
 
-`ready-for-agent` is a permission grant. Every task issue included in a worker
-slice must also be `risk:low` and must not carry `needs-human`,
-`not-ready-for-agent`, `agent:blocked`, `risk:medium`, or `risk:high`.
+`ready-for-agent` is a permission grant only for a bounded, unblocked task
+under an approved delivery slice. Every task issue included in a worker slice
+must not carry `needs-human`, `not-ready-for-agent`, or `agent:blocked`.
+Task issues do not duplicate their parent slice's native dependencies and do
+not block sibling tasks from the same pull request.
 
 ## 1. Shape and manage — `workflow-director`
 
@@ -87,7 +94,7 @@ Every delivery slice contains a compact delivery brief:
 - acceptance criteria through public behavior;
 - explicit non-goals and write boundaries;
 - expected contract and runtime surfaces;
-- risk and decision gates;
+- decision and safety gates;
 - task or commit outline when useful;
 - relevant verification commands;
 - dependencies and unblock conditions.
@@ -116,8 +123,8 @@ Before editing:
 
 1. Verify the exact delivery slice, linked task issues, branch, base, and
    current `origin/develop` head.
-2. Confirm every linked task issue is ready, low risk, unblocked, and free of a
-   human stop label.
+2. Confirm every linked task issue is ready, unblocked, and free of a human or
+   blocked stop label.
 3. Probe whether the named artifact already exists before treating it as new.
 4. Map the contract shift across types, runtime behavior, persistence,
    UI state, tests, active documentation, and peer readers or writers.

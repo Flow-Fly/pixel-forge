@@ -11,9 +11,13 @@ and only the source documents needed for the slice. Do not use retired protocol
 skills or the $ship router.
 
 Before editing, verify the exact linked issues, feature branch, current
-origin/develop base, readiness, risk, dependencies, and absence of human stop
+origin/develop base, readiness, dependencies, and absence of human stop
 labels. Every linked task issue must pass the worker permission gate. Stop
 without editing if live state disagrees with the handoff.
+
+Follow the linked-task order in the delivery brief and pull request. Sibling
+tasks in one slice do not block one another through native GitHub dependencies;
+all must already be executable before work begins.
 
 Probe whether the requested artifact already exists. Map the contract shift
 across types, runtime behavior, persistence, UI state, tests, documentation, and
