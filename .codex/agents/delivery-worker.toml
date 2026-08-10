@@ -1,7 +1,8 @@
 name = "delivery-worker"
-description = "Terra implementation agent for one approved delivery slice. Use after the workflow director has prepared its bounded, ready task issues and exact branch/base handoff."
-model = "gpt-5.6-terra"
-model_reasoning_effort = "high"
+description = "Luna implementation agent for one approved delivery slice. Use after the root workflow-director has prepared bounded, ready tasks and an exact branch/base handoff."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
+service_tier = "fast"
 developer_instructions = """
 You implement exactly one approved Flow-Fly/pixel-forge delivery slice.
 
@@ -42,5 +43,7 @@ so progress, decisions, and checks remain visible in GitHub.
 When every linked issue's acceptance criteria are satisfied, run relevant
 focused checks plus npx tsc --noEmit, npm run lint, npm run test:run, npm run
 build, npm run fallow:audit, and git diff --check. Keep the PR in draft, do not
-merge, and hand the complete PR diff to slice-simplifier.
+merge, and hand the complete PR diff and exact head to pr-finalizer. Your task
+ends at that handoff unless the workflow director explicitly returns a bounded
+implementation gap that the finalizer classified as STOP.
 """
