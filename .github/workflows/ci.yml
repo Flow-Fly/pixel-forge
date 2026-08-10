@@ -25,6 +25,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Install Chromium for Browser Mode
+        run: npx playwright install --with-deps --only-shell chromium
+
       - name: Shared workspace checks
         run: npm run shared:check
 
@@ -42,6 +45,9 @@ jobs:
 
       - name: Tests
         run: npm run test:run
+
+      - name: Browser tests
+        run: npm run test:browser
 
       - name: Build
         run: npm run build
