@@ -149,7 +149,7 @@ export function dispatchProjectCompatibilityWarning(
 
   window.dispatchEvent(
     new CustomEvent('show-warning-toast', {
-      detail: { message },
+      detail: { message, persistent: true },
     })
   );
 }

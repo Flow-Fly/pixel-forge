@@ -151,6 +151,7 @@ describe('ProjectFileImportService', () => {
         expect.objectContaining({
           detail: {
             message: 'Repaired invalid group links for layers: layer-1.',
+            persistent: true,
           },
         })
       );
