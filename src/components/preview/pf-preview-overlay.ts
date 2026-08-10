@@ -14,9 +14,11 @@ import {
   type CrtParamKey,
   type CrtPresetId,
 } from '../../services/view-effects';
-import type { Cel } from '../../types/animation';
-import type { Layer } from '../../types/layer';
 import { togglePlayback } from '../../services/playback-action';
+import {
+  createArtworkCompositionPlan,
+  drawArtworkComposition,
+} from '../../services/export-composition';
 
 type BackgroundType = 'white' | 'black' | 'checker';
 
@@ -630,52 +632,22 @@ export class PFPreviewOverlay extends BaseComponent {
     // Clear at actual canvas size
     this.ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    for (const layer of visibleLayers) {
-      const key = `${layer.id}:${currentFrameId}`;
-      this.drawPreviewLayer(layer, cels.get(key), canvas, previewScale);
-    }
-
-    // Reset composite settings
-    this.ctx.globalAlpha = 1;
-    this.ctx.globalCompositeOperation = 'source-over';
+    const plan = createArtworkCompositionPlan({
+      frameId: currentFrameId,
+      layers: visibleLayers,
+      cels,
+      getCelKey: animation.getCelKey,
+    });
+    const sourceWidth = this.context.project.width.value;
+    const sourceHeight = this.context.project.height.value;
+    const scaleX = previewScale >= 1 ? 1 : canvas.width / sourceWidth;
+    const scaleY = previewScale >= 1 ? 1 : canvas.height / sourceHeight;
+    this.ctx.save();
+    this.ctx.scale(scaleX, scaleY);
+    drawArtworkComposition(this.ctx, plan);
+    this.ctx.restore();
 
     this.renderViewEffect(canvas, previewScale);
-  }
-
-  private drawPreviewLayer(
-    layer: Layer,
-    cel: Cel | undefined,
-    canvas: HTMLCanvasElement,
-    previewScale: number
-  ): void {
-    if (!layer.visible) return;
-
-    const canvasToUse = this.getLayerPreviewCanvas(layer, cel);
-    if (!canvasToUse || !this.ctx) return;
-
-    this.ctx.globalAlpha = (layer.opacity / 255) * this.getCelOpacity(cel);
-    this.ctx.globalCompositeOperation = this.getLayerCompositeOperation(layer);
-
-    if (previewScale >= 1) {
-      this.ctx.drawImage(canvasToUse, 0, 0);
-      return;
-    }
-    this.ctx.drawImage(canvasToUse, 0, 0, canvas.width, canvas.height);
-  }
-
-  private getLayerPreviewCanvas(layer: Layer, cel: Cel | undefined): HTMLCanvasElement | null {
-    if (cel) return cel.canvas;
-    return layer.canvas ?? null;
-  }
-
-  private getCelOpacity(cel: Cel | undefined): number {
-    return cel ? (cel.opacity ?? 100) / 100 : 1;
-  }
-
-  private getLayerCompositeOperation(layer: Layer): GlobalCompositeOperation {
-    return layer.blendMode === 'normal'
-      ? 'source-over'
-      : (layer.blendMode as GlobalCompositeOperation);
   }
 
   private renderViewEffect(source: HTMLCanvasElement, previewScale: number) {

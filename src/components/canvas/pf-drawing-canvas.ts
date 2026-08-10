@@ -12,6 +12,10 @@ import {
   type ReferenceLayerRenderPlan,
 } from '../../services/reference-render-plan';
 import { ReferenceViewportRenderer } from '../../services/reference-viewport-renderer';
+import {
+  createArtworkCompositionPlan,
+  drawArtworkComposition,
+} from '../../services/export-composition';
 import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
 import type { ModifierKeys, Point } from '../../tools/base-tool';
 import { ToolController } from '../../tools/tool-controller';
@@ -20,7 +24,6 @@ import type { Layer } from '../../types/layer';
 import { extractIndexRegion } from '../../utils/buffer-region';
 import {
   getFont,
-  renderText,
   getCursorX,
   renderCursor,
   getDefaultFont,
@@ -322,57 +325,36 @@ export class PFDrawingCanvas extends BaseComponent {
     const layers = context.layers.layers.value;
     const currentFrameId = context.animation.currentFrameId.value;
 
-    const cels = context.animation.cels.value;
+    const plan = createArtworkCompositionPlan({
+      frameId: currentFrameId,
+      layers,
+      cels: context.animation.cels.value,
+      getCelKey: context.animation.getCelKey,
+    });
 
-    for (const layer of layers) {
-      if (!layer.visible) continue;
-
-      // Get cel for current frame to apply cel-level opacity
-      const celKey = context.animation.getCelKey(layer.id, currentFrameId);
-      const cel = cels.get(celKey);
-
-      // Combine layer opacity (0-255) and cel opacity (0-100)
-      const layerOpacity = layer.opacity / 255;
-      const celOpacity = (cel?.opacity ?? 100) / 100;
-      this.ctx.globalAlpha = layerOpacity * celOpacity;
-      this.ctx.globalCompositeOperation =
-        layer.blendMode === 'normal'
-          ? 'source-over'
-          : (layer.blendMode as GlobalCompositeOperation);
-
-      if (layer.type === 'text') {
-        // Render text layer using pixel font
-        this.renderTextLayer(layer.id, currentFrameId, context);
-      } else if (layer.canvas) {
-        // Render raster layer
-        if (dirtyRect) {
-          // Draw only the dirty region from layer
-          this.ctx.drawImage(
-            layer.canvas,
-            dirtyRect.x,
-            dirtyRect.y,
-            dirtyRect.width,
-            dirtyRect.height,
-            dirtyRect.x,
-            dirtyRect.y,
-            dirtyRect.width,
-            dirtyRect.height
-          );
-        } else {
-          this.ctx.drawImage(layer.canvas, 0, 0);
-        }
-      }
+    if (dirtyRect) {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
+      this.ctx.clip();
+      drawArtworkComposition(this.ctx, plan);
+      this.renderTextCursor(currentFrameId, context);
+      this.ctx.restore();
+      return;
     }
 
-    // Reset composite operation
-    this.ctx.globalAlpha = 1;
-    this.ctx.globalCompositeOperation = 'source-over';
+    drawArtworkComposition(this.ctx, plan);
+    this.renderTextCursor(currentFrameId, context);
   }
 
   /**
-   * Render a text layer using pixel fonts.
+   * Render the editor-only text cursor above canonical artwork.
    */
-  private renderTextLayer(layerId: string, frameId: string, context: ProjectContext) {
+  private renderTextCursor(frameId: string, context: ProjectContext) {
+    const editingState = TextTool.editingState.value;
+    if (!editingState.isEditing || !editingState.cursorVisible || !editingState.layerId) return;
+
+    const layerId = editingState.layerId;
     const layer = context.layers.layers.value.find((l) => l.id === layerId);
     if (!layer || layer.type !== 'text' || !layer.textData) return;
 
@@ -381,21 +363,14 @@ export class PFDrawingCanvas extends BaseComponent {
 
     const { content, x, y } = textCelData;
     const { font: fontId, color } = layer.textData;
-
-    // Get the font
     const font = getFont(fontId) || getDefaultFont();
 
-    // Render the text
-    if (content) {
-      renderText(this.ctx, content, x, y, font, color);
-    }
-
-    // Render cursor if editing this layer
-    const editingState = TextTool.editingState.value;
-    if (editingState.isEditing && editingState.layerId === layerId && editingState.cursorVisible) {
-      const cursorX = getCursorX(content || '', editingState.cursorPosition, font, x);
-      renderCursor(this.ctx, cursorX, y, font.charHeight, color);
-    }
+    const cursorX = getCursorX(content || '', editingState.cursorPosition, font, x);
+    this.ctx.save();
+    this.ctx.globalAlpha = 1;
+    this.ctx.globalCompositeOperation = 'source-over';
+    renderCursor(this.ctx, cursorX, y, font.charHeight, color);
+    this.ctx.restore();
   }
 
   private drawOnionSkins(context: ProjectContext) {

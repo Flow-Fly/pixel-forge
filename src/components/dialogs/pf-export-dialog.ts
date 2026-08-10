@@ -316,8 +316,8 @@ export class PFExportDialog extends BaseComponent {
       width: this.exportContext.project.width.value,
       height: this.exportContext.project.height.value,
       layers: this.exportContext.layers.layers.value,
-      getCelCanvas: (currentFrameId, layerId) =>
-        this.exportContext.animation.getCelCanvas(currentFrameId, layerId),
+      cels: this.exportContext.animation.cels.value,
+      getCelKey: this.exportContext.animation.getCelKey,
       useBackground: this.useBackground,
       backgroundColor: this.backgroundColor,
     });

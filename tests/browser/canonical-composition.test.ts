@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  composeExportFrame,
   createArtworkCompositionPlan,
   drawArtworkComposition,
 } from '../../src/services/export-composition';
+import { createProjectThumbnail } from '../../src/services/project-thumbnail';
+import { compositeFrame } from '../../src/utils/canvas-utils';
+import { renderFrameToCanvas } from '../../src/utils/preview-renderer';
 import type { Cel } from '../../src/types/animation';
 import type { Layer } from '../../src/types/layer';
+import type { ProjectContext } from '../../src/stores/project-context';
 
 function canvas(width: number, height: number, color?: string): HTMLCanvasElement {
   const result = document.createElement('canvas');
@@ -54,6 +59,12 @@ function pixel(source: HTMLCanvasElement, x: number, y: number): number[] {
   const context = source.getContext('2d');
   if (!context) throw new Error('Chromium did not provide a 2D canvas context');
   return [...context.getImageData(x, y, 1, 1).data];
+}
+
+function pixels(source: HTMLCanvasElement): number[] {
+  const context = source.getContext('2d');
+  if (!context) throw new Error('Chromium did not provide a 2D canvas context');
+  return [...context.getImageData(0, 0, source.width, source.height).data];
 }
 
 function drawFixture(
@@ -151,5 +162,88 @@ describe('canonical artwork composition in Chromium', () => {
     );
 
     expect(pixel(target, 1, 0)).toEqual([255, 0, 0, 255]);
+  });
+
+  it('keeps preview, thumbnail PNG, and export frame RGBA identical', async () => {
+    const imageCanvas = canvas(8, 8, '#123456');
+    const groupCanvas = canvas(8, 8);
+    const groupContext = groupCanvas.getContext('2d');
+    if (!groupContext) throw new Error('Chromium did not provide a 2D canvas context');
+    groupContext.fillStyle = '#d4e5f6';
+    groupContext.fillRect(4, 0, 4, 8);
+    const archiveCanvas = canvas(8, 8, '#ff00ff');
+    const staleTextRaster = canvas(8, 8, '#0000ff');
+    const layers = [
+      layer({ id: 'image' }),
+      layer({ id: 'group', type: 'group', canvas: archiveCanvas }),
+      layer({
+        id: 'text',
+        type: 'text',
+        textData: { font: 'small-5x7', color: '#ff0000' },
+      }),
+    ];
+    const cels = new Map<string, Cel>([
+      ['image:frame-1', cel('image', 'frame-1', imageCanvas)],
+      ['group:frame-1', cel('group', 'frame-1', groupCanvas)],
+      [
+        'text:frame-1',
+        cel('text', 'frame-1', staleTextRaster, {
+          textCelData: { content: 'A', x: 0, y: 0 },
+        }),
+      ],
+    ]);
+    const getCelKey = (layerId: string, frameId: string) => `${layerId}:${frameId}`;
+    const animation = {
+      cels: { value: cels },
+      getCelKey,
+    } as unknown as ProjectContext['animation'];
+    const layerStore = { layers: { value: layers } } as unknown as ProjectContext['layers'];
+    const context = { animation, layers: layerStore } as Pick<
+      ProjectContext,
+      'animation' | 'layers'
+    >;
+
+    const previewCanvas = canvas(8, 8);
+    const previewContext = previewCanvas.getContext('2d');
+    if (!previewContext) throw new Error('Chromium did not provide a 2D canvas context');
+    renderFrameToCanvas(previewContext, 'frame-1', layers, cels, animation);
+
+    const exportCanvas = composeExportFrame({
+      frameId: 'frame-1',
+      width: 8,
+      height: 8,
+      scale: 1,
+      layers,
+      cels,
+      getCelKey,
+    });
+
+    const compositeCanvas = canvas(8, 8);
+    const compositeContext = compositeCanvas.getContext('2d');
+    if (!compositeContext) throw new Error('Chromium did not provide a 2D canvas context');
+    compositeFrame('frame-1', compositeContext, { context });
+
+    const thumbnailBytes = await createProjectThumbnail({
+      compositeFrame: (frameId, targetContext) =>
+        compositeFrame(frameId, targetContext, { context }),
+      frameId: 'frame-1',
+      width: 8,
+      height: 8,
+    });
+    expect(thumbnailBytes).toBeDefined();
+    if (!thumbnailBytes) throw new Error('Thumbnail PNG was not created');
+
+    const thumbnailBitmap = await createImageBitmap(
+      new Blob([thumbnailBytes as BlobPart], { type: 'image/png' })
+    );
+    const thumbnailCanvas = canvas(thumbnailBitmap.width, thumbnailBitmap.height);
+    const thumbnailContext = thumbnailCanvas.getContext('2d');
+    if (!thumbnailContext) throw new Error('Chromium did not provide a 2D canvas context');
+    thumbnailContext.drawImage(thumbnailBitmap, 0, 0);
+    thumbnailBitmap.close();
+
+    expect(pixels(previewCanvas)).toEqual(pixels(exportCanvas));
+    expect(pixels(previewCanvas)).toEqual(pixels(compositeCanvas));
+    expect(pixels(previewCanvas)).toEqual(pixels(thumbnailCanvas));
   });
 });
