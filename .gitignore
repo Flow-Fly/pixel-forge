@@ -27,6 +27,10 @@ workers/telemetry/worker-configuration.d.ts
 
 # Documentation and notes
 /docs/
+!/docs/
+/docs/*
+!/docs/agents/
+!/docs/agents/**
 /ux/
 CLAUDE.md
 feature.md
