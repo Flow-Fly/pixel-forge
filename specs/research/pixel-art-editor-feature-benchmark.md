@@ -97,7 +97,7 @@ Create one initiative named **Pixel Forge 1.0 — trustworthy core editor** with
 
 Link already completed palette, project-library, multi-tab, reference-layer, PWA, CRT, and Guided Drawing work as evidence. Do not recreate completed features as open backlog.
 
-### 2. Make the first repair slices boring and risk ordered
+### 2. Make the first repair slices boring and dependency ordered
 
 1. **Make Canvas Resize safe and undoable.** Define Canvas Size versus Sprite Size, anchor/crop behavior, history, autosave, and regression tests.
 2. **Make export match the editor.** Preserve supported blend and cel/layer opacity semantics across PNG, WebP, animated WebP, and sprite sheets.
@@ -112,7 +112,7 @@ Link already completed palette, project-library, multi-tab, reference-layer, PWA
 - refresh #72 against current `develop` and separate editor, launch, cloud/growth, and deferred expansion;
 - reconcile #134 with #404 and create native parent/child links for launch issues;
 - label the real human decisions;
-- turn only the first approved core repair into `risk:low` + `ready-for-agent` atomic issues.
+- turn only the first approved core repair into bounded `ready-for-agent` atomic issues.
 
 ### 4. Pause expansion without deleting it
 

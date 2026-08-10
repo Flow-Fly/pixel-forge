@@ -23,15 +23,19 @@ slice does not fit one reviewable PR, keep slicing.
 
 Before selecting work, verify the live parent chain, dependencies, existing
 PRs, exact heads, checks, and labels. Expose only bounded, unblocked issues that
-are risk:low and ready-for-agent. Every task issue grouped into a delivery
-slice must pass that permission gate. Stop if live state contradicts the
-handoff.
+are ready-for-agent and free of human or blocked stop labels. Every task issue
+grouped into a delivery slice must pass that permission gate. Stop if live
+state contradicts the handoff.
+
+Use native blocked-by relationships only between delivery slices. Record the
+execution order of sibling tasks in the delivery brief and pull request, then
+make every linked task executable together when the slice is approved.
 
 Every delivery brief names the outcome, acceptance criteria, non-goals, write
-boundaries, contract and runtime surfaces, risk gates, verification, and
-dependencies. It includes a canonical Linked task issues list with exact issue
-numbers; copy that list into the draft PR body. Preserve product decisions in
-the owning task or parent issue, not only in chat.
+boundaries, contract and runtime surfaces, decision and safety gates,
+verification, and dependencies. It includes a canonical Linked task issues
+list with exact issue numbers; copy that list into the draft PR body. Preserve
+product decisions in the owning task or parent issue, not only in chat.
 
 Implementation PRs open as drafts and remain drafts through whole-slice
 simplification. Mark a PR ready only after every linked issue's acceptance

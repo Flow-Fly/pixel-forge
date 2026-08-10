@@ -69,10 +69,15 @@ practical, use one focused commit per issue. Do not batch unrelated work merely
 to make a pull request larger. If an item needs multiple pull requests, treat
 it as a capability and slice it again.
 
+Native GitHub `blocked by` relationships express dependencies between delivery
+slices. They do not express the implementation order of tasks inside one
+slice. Keep that task order in the delivery brief and pull request, and make all
+linked tasks executable together when the slice is approved.
+
 GitHub issues, labels, pull requests, checks, and review comments are durable
-workflow state. `ready-for-agent` is implementation permission only when the
-issue is also `risk:low` and has none of `needs-human`, `not-ready-for-agent`,
-`agent:blocked`, `risk:medium`, or `risk:high`.
+workflow state. `ready-for-agent` is implementation permission only for a
+bounded, unblocked task issue under an approved delivery slice, with none of
+`needs-human`, `not-ready-for-agent`, or `agent:blocked`.
 
 Start delivery branches from current `origin/develop` and use the `dev-`
 prefix. Implementation pull requests target `develop` and open as drafts early

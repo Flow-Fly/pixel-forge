@@ -14,10 +14,6 @@ github:
   child_issue_label: "agentic-task"
   needs_human_label: "needs-human"
   spec_pr_label: "spec"
-  risk_labels:
-    low: "risk:low"
-    medium: "risk:medium"
-    high: "risk:high"
   type_labels:
     bug: "bug"
     feature: "enhancement"
@@ -30,14 +26,11 @@ triage:
   assessment_heading: "Agent Assessment"
   create_missing_labels: true
   ready_requires:
-    - "risk:low"
     - "ready-for-agent"
   ready_excludes:
     - "needs-human"
     - "not-ready-for-agent"
     - "agent:blocked"
-    - "risk:medium"
-    - "risk:high"
 
 workflow:
   branch_prefix: "dev-"
