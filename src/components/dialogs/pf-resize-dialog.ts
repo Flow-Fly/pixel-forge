@@ -1,8 +1,9 @@
-import { html, css } from 'lit';
+import { html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext, type ProjectContext } from '../../stores/project-context';
 import {
+  CANVAS_SIZE_MAX_DIMENSION,
   captureProjectTarget,
   executeCanvasSize,
   previewCanvasSize,
@@ -103,8 +104,6 @@ export class PFResizeDialog extends BaseComponent {
   render() {
     const operationContext = this.operationContext ?? this.context;
     const guidedProject = operationContext.guidedDrawing.active;
-    const actionLabel = this.pendingConfirmation ? 'Confirm Crop' : 'Resize';
-    const messageId = this.message ? 'resize-message' : undefined;
 
     return html`
       <pf-dialog
@@ -114,73 +113,95 @@ export class PFResizeDialog extends BaseComponent {
       >
         <span slot="title">Resize Canvas</span>
 
-        ${guidedProject
-          ? html`
-              <p class="restriction" role="status">
-                Guided projects keep their canvas size fixed so every number stays aligned.
-              </p>
-            `
-          : ''}
+        ${this.renderRestriction(guidedProject)}
 
         <form @submit=${this.handleSubmit}>
-          <div class="input-group">
-            <label for="resize-canvas-width">Width (px)</label>
-            <input
-              id="resize-canvas-width"
-              name="width"
-              type="number"
-              min="1"
-              max="2048"
-              inputmode="numeric"
-              ?disabled=${guidedProject || this.submitting}
-              aria-describedby=${messageId ?? ''}
-              aria-invalid=${this.messageIsError ? 'true' : 'false'}
-              .value=${String(this.width)}
-              @input=${this.handleWidthInput}
-            >
-          </div>
-          <div class="input-group">
-            <label for="resize-canvas-height">Height (px)</label>
-            <input
-              id="resize-canvas-height"
-              name="height"
-              type="number"
-              min="1"
-              max="2048"
-              inputmode="numeric"
-              ?disabled=${guidedProject || this.submitting}
-              aria-describedby=${messageId ?? ''}
-              aria-invalid=${this.messageIsError ? 'true' : 'false'}
-              .value=${String(this.height)}
-              @input=${this.handleHeightInput}
-            >
-          </div>
+          ${this.renderDimensionInput(
+            'Width (px)',
+            'resize-canvas-width',
+            this.width,
+            guidedProject,
+            this.handleWidthInput
+          )}
+          ${this.renderDimensionInput(
+            'Height (px)',
+            'resize-canvas-height',
+            this.height,
+            guidedProject,
+            this.handleHeightInput
+          )}
 
-          ${this.message
-            ? html`
-                <p
-                  id="resize-message"
-                  class="message"
-                  role=${this.messageIsError ? 'alert' : 'status'}
-                  aria-live="polite"
-                >${this.message}</p>
-              `
-            : ''}
-
-          <div slot="actions">
-            <button class="secondary" type="button" ?disabled=${this.submitting} @click=${this.close}>
-              Cancel
-            </button>
-            <button
-              class="primary"
-              type="submit"
-              ?disabled=${guidedProject || this.submitting}
-            >
-              ${actionLabel}
-            </button>
-          </div>
+          ${this.renderMessage()}
+          ${this.renderActions(guidedProject)}
         </form>
       </pf-dialog>
+    `;
+  }
+
+  private renderRestriction(guidedProject: boolean) {
+    if (!guidedProject) return nothing;
+    return html`
+      <p class="restriction" role="status">
+        Guided projects keep their canvas size fixed so every number stays aligned.
+      </p>
+    `;
+  }
+
+  private renderDimensionInput(
+    label: string,
+    id: string,
+    value: number,
+    guidedProject: boolean,
+    onInput: (event: Event) => void
+  ) {
+    const messageId = this.message ? 'resize-message' : undefined;
+    return html`
+      <div class="input-group">
+        <label for=${id}>${label}</label>
+        <input
+          id=${id}
+          name=${id.endsWith('width') ? 'width' : 'height'}
+          type="number"
+          min="1"
+          max=${CANVAS_SIZE_MAX_DIMENSION}
+          inputmode="numeric"
+          ?disabled=${guidedProject || this.submitting}
+          aria-describedby=${messageId ?? ''}
+          aria-invalid=${this.messageIsError ? 'true' : 'false'}
+          .value=${String(value)}
+          @input=${onInput}
+        >
+      </div>
+    `;
+  }
+
+  private renderMessage() {
+    if (!this.message) return nothing;
+    return html`
+      <p
+        id="resize-message"
+        class="message"
+        role=${this.messageIsError ? 'alert' : 'status'}
+        aria-live="polite"
+      >${this.message}</p>
+    `;
+  }
+
+  private renderActions(guidedProject: boolean) {
+    const actionLabel = this.pendingConfirmation ? 'Confirm Crop' : 'Resize';
+    return html`
+      <div slot="actions">
+        <button class="secondary" type="button" ?disabled=${this.submitting} @click=${this.close}>
+          Cancel
+        </button>
+        <button
+          class="primary"
+          type="submit"
+          ?disabled=${guidedProject || this.submitting}
+        >
+          ${actionLabel}
+        </button>
+      </div>
     `;
   }
 

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CANVAS_SIZE_COMMAND_ID,
+  CANVAS_SIZE_MAX_DIMENSION,
+  canvasSizeCatalog,
   createCanvasSizeRequest,
   executeCanvasSize,
   previewCanvasSize,
@@ -8,6 +11,7 @@ import { createProjectThumbnail } from '../../src/services/project-thumbnail';
 import { autoSaveService } from '../../src/services/auto-save';
 import { compositeFrame } from '../../src/utils/canvas-utils';
 import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
+import type { Cel } from '../../src/types/animation';
 
 const contexts: ProjectContext[] = [];
 
@@ -28,9 +32,98 @@ function createContext() {
 }
 
 function pixel(canvas: HTMLCanvasElement, x: number, y: number) {
+  return [...getCanvasContext(canvas).getImageData(x, y, 1, 1).data];
+}
+
+function getCanvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Chromium did not provide a 2D canvas context');
-  return [...context.getImageData(x, y, 1, 1).data];
+  return context;
+}
+
+function getCel(context: ProjectContext, layerId: string, frameId: string): Cel {
+  const cel = context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId));
+  if (!cel) throw new Error('Expected a raster cel');
+  return cel;
+}
+
+function prepareLinkedPayloads(context: ProjectContext, cel: Cel): {
+  linkedFrameId: string;
+  linkedId: string;
+} {
+  context.palette.setPalette(['#000000', '#ff0000']);
+  const canvasContext = getCanvasContext(cel.canvas);
+  canvasContext.fillStyle = '#ff0000';
+  canvasContext.fillRect(1, 1, 1, 1);
+  const indexBuffer = new Uint8Array(16);
+  indexBuffer[5] = 2;
+  context.animation.updateCelIndexBuffer(cel.layerId, cel.frameId, indexBuffer);
+  canvasContext.fillStyle = '#ff0000';
+  canvasContext.fillRect(1, 1, 1, 1);
+
+  context.animation.addFrame(false);
+  const linkedFrameId = context.animation.currentFrameId.value;
+  const linkedKey = context.animation.getCelKey(cel.layerId, linkedFrameId);
+  const sourceKey = context.animation.getCelKey(cel.layerId, cel.frameId);
+  const linkedId = context.animation.linkCels([sourceKey, linkedKey], 'soft');
+  if (!linkedId) throw new Error('Expected linked cels');
+  expect(context.animation.cels.value.get(linkedKey)?.canvas)
+    .toBe(context.animation.cels.value.get(sourceKey)?.canvas);
+  expect(context.animation.cels.value.get(linkedKey)?.indexBuffer)
+    .toBe(context.animation.cels.value.get(sourceKey)?.indexBuffer);
+  return { linkedFrameId, linkedId };
+}
+
+function assertResizedPayloads(
+  context: ProjectContext,
+  cel: Cel,
+  linkedFrameId: string,
+  linkedId: string
+): void {
+  expect(cel.canvas.width).toBe(4);
+  const resizedCel = getCel(context, cel.layerId, cel.frameId);
+  expect(resizedCel.canvas).not.toBe(cel.canvas);
+  expect(resizedCel.canvas.width).toBe(6);
+  expect(resizedCel.canvas.height).toBe(5);
+  expect(pixel(resizedCel.canvas, 1, 1)).toEqual([255, 0, 0, 255]);
+  expect(pixel(resizedCel.canvas, 5, 4)).toEqual([0, 0, 0, 0]);
+  expect(resizedCel.indexBuffer?.length).toBe(30);
+  expect(resizedCel.indexBuffer?.[1 + 1 * 6]).toBe(2);
+  expect(resizedCel.indexBuffer?.[5 + 4 * 6]).toBe(0);
+  const resizedLinkedCel = getCel(context, cel.layerId, linkedFrameId);
+  expect(resizedLinkedCel.canvas).toBe(resizedCel.canvas);
+  expect(resizedLinkedCel.indexBuffer).toBe(resizedCel.indexBuffer);
+  expect(resizedLinkedCel.linkedCelId).toBe(linkedId);
+}
+
+async function assertDurableOutputs(context: ProjectContext, layerId: string): Promise<void> {
+  const composed = document.createElement('canvas');
+  composed.width = 6;
+  composed.height = 5;
+  const composedContext = getCanvasContext(composed);
+  const frameId = context.animation.currentFrameId.value;
+  compositeFrame(frameId, composedContext, { context });
+  expect(pixel(composed, 1, 1)).toEqual([255, 0, 0, 255]);
+
+  const thumbnail = await createProjectThumbnail({
+    compositeFrame: (previewFrameId, targetContext) =>
+      compositeFrame(previewFrameId, targetContext, { context }),
+    frameId,
+    width: context.project.width.value,
+    height: context.project.height.value,
+  });
+  expect(thumbnail?.byteLength).toBeGreaterThan(0);
+
+  const saved = await context.project.saveProject();
+  await context.project.loadProject(structuredClone(saved));
+  expect(context.project.width.value).toBe(6);
+  expect(context.project.height.value).toBe(5);
+  const reloadedCel = getCel(context, layerId, context.animation.currentFrameId.value);
+  expect(reloadedCel.canvas.width).toBe(6);
+  expect(reloadedCel.canvas.height).toBe(5);
+  expect(pixel(reloadedCel.canvas, 1, 1)).toEqual([255, 0, 0, 255]);
+  expect(reloadedCel.indexBuffer?.length).toBe(30);
+  expect(reloadedCel.indexBuffer?.[1 + 1 * 6]).toBe(2);
 }
 
 describe('Canvas Size transaction in Chromium', () => {
@@ -43,36 +136,16 @@ describe('Canvas Size transaction in Chromium', () => {
 
   it('enlarges every raster payload with transparent indexed extension and one revision', async () => {
     const { context, cel } = createContext();
+    expect(context.projectRevision).toBe(context.project.revision);
+    expect(context.projectChangeEvents).toBe(context.project.changeEvents);
+    expect(canvasSizeCatalog.command.id).toBe(CANVAS_SIZE_COMMAND_ID);
+    expect(CANVAS_SIZE_MAX_DIMENSION).toBe(2048);
     autoSaveService.start(context);
     expect(autoSaveService.isDirty(context)).toBe(false);
-    context.palette.setPalette(['#000000', '#ff0000']);
-    const canvasContext = cel.canvas.getContext('2d');
-    if (!canvasContext) throw new Error('Chromium did not provide a 2D canvas context');
-    canvasContext.fillStyle = '#ff0000';
-    canvasContext.fillRect(1, 1, 1, 1);
-    const indexBuffer = new Uint8Array(16);
-    indexBuffer[5] = 2;
-    context.animation.updateCelIndexBuffer(
-      cel.layerId,
-      cel.frameId,
-      indexBuffer
-    );
-    canvasContext.fillStyle = '#ff0000';
-    canvasContext.fillRect(1, 1, 1, 1);
-
-    context.animation.addFrame(false);
-    const linkedFrameId = context.animation.currentFrameId.value;
-    const linkedKey = context.animation.getCelKey(cel.layerId, linkedFrameId);
-    const sourceKey = context.animation.getCelKey(cel.layerId, cel.frameId);
-    const linkedId = context.animation.linkCels([sourceKey, linkedKey], 'soft');
-    expect(linkedId).toBeTruthy();
-    expect(context.animation.cels.value.get(linkedKey)?.canvas)
-      .toBe(context.animation.cels.value.get(sourceKey)?.canvas);
-    expect(context.animation.cels.value.get(linkedKey)?.indexBuffer)
-      .toBe(context.animation.cels.value.get(sourceKey)?.indexBuffer);
+    const { linkedFrameId, linkedId } = prepareLinkedPayloads(context, cel);
 
     const events: unknown[] = [];
-    context.project.changeEvents.addEventListener('project-change', (event) => {
+    context.projectChangeEvents.addEventListener('project-change', (event) => {
       events.push((event as CustomEvent).detail);
     });
     const result = await executeCanvasSize(
@@ -83,22 +156,7 @@ describe('Canvas Size transaction in Chromium', () => {
     expect(result.ok).toBe(true);
     expect(context.project.width.value).toBe(6);
     expect(context.project.height.value).toBe(5);
-    expect(cel.canvas.width).toBe(4);
-    const resizedCel = context.animation.cels.value.get(
-      context.animation.getCelKey(cel.layerId, cel.frameId)
-    );
-    expect(resizedCel?.canvas).not.toBe(cel.canvas);
-    expect(resizedCel?.canvas.width).toBe(6);
-    expect(resizedCel?.canvas.height).toBe(5);
-    expect(pixel(resizedCel!.canvas, 1, 1)).toEqual([255, 0, 0, 255]);
-    expect(pixel(resizedCel!.canvas, 5, 4)).toEqual([0, 0, 0, 0]);
-    expect(resizedCel?.indexBuffer?.length).toBe(30);
-    expect(resizedCel?.indexBuffer?.[1 + 1 * 6]).toBe(2);
-    expect(resizedCel?.indexBuffer?.[5 + 4 * 6]).toBe(0);
-    const resizedLinkedCel = context.animation.cels.value.get(linkedKey);
-    expect(resizedLinkedCel?.canvas).toBe(resizedCel?.canvas);
-    expect(resizedLinkedCel?.indexBuffer).toBe(resizedCel?.indexBuffer);
-    expect(resizedLinkedCel?.linkedCelId).toBe(linkedId);
+    assertResizedPayloads(context, cel, linkedFrameId, linkedId);
     expect(context.project.revision.value).toBe(1);
     expect(events).toHaveLength(1);
     expect(context.history.undoStack.value).toHaveLength(1);
@@ -116,34 +174,7 @@ describe('Canvas Size transaction in Chromium', () => {
     expect(context.project.revision.value).toBe(3);
     expect(context.history.version.value).toBe(3);
 
-    const composed = document.createElement('canvas');
-    composed.width = 6;
-    composed.height = 5;
-    const composedContext = composed.getContext('2d');
-    if (!composedContext) throw new Error('Chromium did not provide a composition context');
-    compositeFrame(context.animation.currentFrameId.value, composedContext, { context });
-    expect(pixel(composed, 1, 1)).toEqual([255, 0, 0, 255]);
-    const thumbnail = await createProjectThumbnail({
-      compositeFrame: (frameId, targetContext) =>
-        compositeFrame(frameId, targetContext, { context }),
-      frameId: context.animation.currentFrameId.value,
-      width: context.project.width.value,
-      height: context.project.height.value,
-    });
-    expect(thumbnail?.byteLength).toBeGreaterThan(0);
-
-    const saved = await context.project.saveProject();
-    await context.project.loadProject(structuredClone(saved));
-    expect(context.project.width.value).toBe(6);
-    expect(context.project.height.value).toBe(5);
-    const reloadedCel = context.animation.cels.value.get(
-      context.animation.getCelKey(cel.layerId, context.animation.currentFrameId.value)
-    );
-    expect(reloadedCel?.canvas.width).toBe(6);
-    expect(reloadedCel?.canvas.height).toBe(5);
-    expect(pixel(reloadedCel!.canvas, 1, 1)).toEqual([255, 0, 0, 255]);
-    expect(reloadedCel?.indexBuffer?.length).toBe(30);
-    expect(reloadedCel?.indexBuffer?.[1 + 1 * 6]).toBe(2);
+    await assertDurableOutputs(context, cel.layerId);
   });
 
   it('requires crop confirmation for meaningful RGBA or indexed content', async () => {

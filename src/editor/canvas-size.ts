@@ -5,6 +5,7 @@ import type {
 } from '../stores/project-store';
 import type { ProjectContext } from '../stores/project-context';
 import type { Cel } from '../types/animation';
+import type { Layer } from '../types/layer';
 import { isRuntimeEmptyCel, markRuntimeEmptyCanvas } from '../stores/animation/empty-cel';
 
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
@@ -142,6 +143,12 @@ interface PreparedCanvasSize {
   readonly after: CanvasSizeSnapshot;
 }
 
+interface CanvasPreparationState {
+  readonly canvasReplacements: Map<HTMLCanvasElement, HTMLCanvasElement>;
+  readonly indexReplacements: Map<Uint8Array, Uint8Array>;
+  transparentSource?: HTMLCanvasElement;
+}
+
 export function captureProjectTarget(context: ProjectContext): ProjectTarget {
   return { projectId: context.project.id.value };
 }
@@ -215,10 +222,7 @@ export async function executeCanvasSize(
   }
 }
 
-/** Compatibility name for callers that already describe the operation as resize. */
-export const resizeCanvas = executeCanvasSize;
-
-export class ResizeCanvasCommand implements Command {
+class ResizeCanvasCommand implements Command {
   readonly id = crypto.randomUUID();
   readonly name = 'Resize Canvas';
   readonly memorySize: number;
@@ -329,35 +333,10 @@ function validateCanvasSize(
   request: CanvasSizeRequest
 ): ValidatedCanvasSize {
   validateRequestShape(request);
-
-  if (context.project.id.value !== request.target.projectId) {
-    throw editorError('target_not_found', true);
-  }
-
-  if (context.project.revision.value !== request.expectedRevision) {
-    throw editorError('revision_conflict', true, {
-      expectedRevision: request.expectedRevision,
-      currentRevision: context.project.revision.value,
-    });
-  }
-
-  if (context.guidedDrawing.active) {
-    throw editorError('unsupported', false, { feature: 'guided-drawing-canvas-resize' });
-  }
-
-  const currentWidth = context.project.width.value;
-  const currentHeight = context.project.height.value;
-  if (
-    !isDimension(currentWidth) ||
-    !isDimension(currentHeight)
-  ) {
-    throw editorError('invalid_state', false, { reason: 'current_dimensions' });
-  }
-
-  if (request.width === currentWidth && request.height === currentHeight &&
-      request.offset.x === 0 && request.offset.y === 0) {
-    throw editorError('invalid_request', false, { reason: 'dimensions_unchanged' });
-  }
+  validateTargetAndRevision(context, request);
+  validateCanvasSizeAvailability(context);
+  const { width: currentWidth, height: currentHeight } = readCurrentDimensions(context);
+  rejectUnchangedRequest(request, currentWidth, currentHeight);
 
   const entries = collectEntries(context, currentWidth, currentHeight);
   const crop = inspectCrop(entries, currentWidth, currentHeight, request);
@@ -369,6 +348,50 @@ function validateCanvasSize(
     entries,
     crop,
   };
+}
+
+function validateTargetAndRevision(
+  context: ProjectContext,
+  request: CanvasSizeRequest
+): void {
+  if (context.project.id.value !== request.target.projectId) {
+    throw editorError('target_not_found', true);
+  }
+
+  if (context.project.revision.value !== request.expectedRevision) {
+    throw editorError('revision_conflict', true, {
+      expectedRevision: request.expectedRevision,
+      currentRevision: context.project.revision.value,
+    });
+  }
+}
+
+function validateCanvasSizeAvailability(context: ProjectContext): void {
+  if (context.guidedDrawing.active) {
+    throw editorError('unsupported', false, { feature: 'guided-drawing-canvas-resize' });
+  }
+}
+
+function readCurrentDimensions(
+  context: ProjectContext
+): { width: number; height: number } {
+  const width = context.project.width.value;
+  const height = context.project.height.value;
+  if (!isDimension(width) || !isDimension(height)) {
+    throw editorError('invalid_state', false, { reason: 'current_dimensions' });
+  }
+  return { width, height };
+}
+
+function rejectUnchangedRequest(
+  request: CanvasSizeRequest,
+  currentWidth: number,
+  currentHeight: number
+): void {
+  if (request.width === currentWidth && request.height === currentHeight &&
+      request.offset.x === 0 && request.offset.y === 0) {
+    throw editorError('invalid_request', false, { reason: 'dimensions_unchanged' });
+  }
 }
 
 function validateRequestShape(request: CanvasSizeRequest): void {
@@ -422,37 +445,54 @@ function collectEntries(
   for (const frame of frames) {
     for (const layer of layers) {
       if (layer.type === 'reference') continue;
-
-      const key = context.animation.getCelKey(layer.id, frame.id);
-      expectedKeys.add(key);
-      const cel = cels.get(key);
-      const sourceCanvas = cel?.canvas ??
-        (frame.id === currentFrameId ? layer.canvas : undefined);
-
-      if (cel) {
-        validateCelShape(cel, currentWidth, currentHeight);
-      }
-      if (sourceCanvas) {
-        validateCanvasShape(sourceCanvas, currentWidth, currentHeight);
-      }
-
-      entries.push({
-        key,
-        layerId: layer.id,
-        frameId: frame.id,
-        cel,
-        sourceCanvas,
-      });
+      const entry = collectEntry(
+        context,
+        layer,
+        frame.id,
+        frame.id === currentFrameId ? layer.canvas : undefined,
+        cels,
+        currentWidth,
+        currentHeight
+      );
+      expectedKeys.add(entry.key);
+      entries.push(entry);
     }
   }
 
+  rejectOrphanCels(cels, layerIds, expectedKeys);
+
+  return entries;
+}
+
+function collectEntry(
+  context: ProjectContext,
+  layer: Layer,
+  frameId: string,
+  currentLayerCanvas: HTMLCanvasElement | undefined,
+  cels: Map<string, Cel>,
+  currentWidth: number,
+  currentHeight: number
+): CanvasSizeEntry {
+  const key = context.animation.getCelKey(layer.id, frameId);
+  const cel = cels.get(key);
+  const sourceCanvas = cel?.canvas ?? currentLayerCanvas;
+
+  if (cel) validateCelShape(cel, currentWidth, currentHeight);
+  if (sourceCanvas) validateCanvasShape(sourceCanvas, currentWidth, currentHeight);
+
+  return { key, layerId: layer.id, frameId, cel, sourceCanvas };
+}
+
+function rejectOrphanCels(
+  cels: Map<string, Cel>,
+  layerIds: Set<string>,
+  expectedKeys: Set<string>
+): void {
   for (const [key, cel] of cels) {
     if (!layerIds.has(cel.layerId) || !expectedKeys.has(key)) {
       throw editorError('invalid_state', false, { reason: 'orphan_cel' });
     }
   }
-
-  return entries;
 }
 
 function validateCelShape(cel: Cel, width: number, height: number): void {
@@ -534,34 +574,13 @@ function countMeaningfulRgbaOutside(
   height: number,
   request: CanvasSizeRequest
 ): number {
-  const context = source.getContext('2d', { willReadFrequently: true });
-  if (!context) {
-    throw editorError('invalid_state', false, { reason: 'canvas_context' });
-  }
-
-  let imageData: ImageData;
-  try {
-    imageData = context.getImageData(0, 0, width, height);
-  } catch {
-    throw editorError('invalid_state', false, { reason: 'canvas_readback' });
-  }
-
-  let meaningfulPixels = 0;
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const alpha = imageData.data[(y * width + x) * 4 + 3];
-      if (alpha === 0) continue;
-
-      const targetX = x + request.offset.x;
-      const targetY = y + request.offset.y;
-      if (targetX < 0 || targetX >= request.width ||
-          targetY < 0 || targetY >= request.height) {
-        meaningfulPixels += 1;
-      }
-    }
-  }
-
-  return meaningfulPixels;
+  const imageData = readCanvasPixels(source, width, height);
+  return countOutsidePixels(
+    width,
+    height,
+    request,
+    (x, y) => imageData.data[(y * width + x) * 4 + 3] > 0
+  );
 }
 
 function countMeaningfulIndicesOutside(
@@ -570,21 +589,43 @@ function countMeaningfulIndicesOutside(
   height: number,
   request: CanvasSizeRequest
 ): number {
-  let meaningfulPixels = 0;
+  return countOutsidePixels(width, height, request, (x, y) => source[y * width + x] !== 0);
+}
+
+function readCanvasPixels(
+  source: HTMLCanvasElement,
+  width: number,
+  height: number
+): ImageData {
+  const context = source.getContext('2d', { willReadFrequently: true });
+  if (!context) throw editorError('invalid_state', false, { reason: 'canvas_context' });
+
+  try {
+    return context.getImageData(0, 0, width, height);
+  } catch {
+    throw editorError('invalid_state', false, { reason: 'canvas_readback' });
+  }
+}
+
+function countOutsidePixels(
+  width: number,
+  height: number,
+  request: CanvasSizeRequest,
+  isMeaningful: (x: number, y: number) => boolean
+): number {
+  let count = 0;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const index = source[y * width + x];
-      if (index === 0) continue;
-
+      if (!isMeaningful(x, y)) continue;
       const targetX = x + request.offset.x;
       const targetY = y + request.offset.y;
       if (targetX < 0 || targetX >= request.width ||
           targetY < 0 || targetY >= request.height) {
-        meaningfulPixels += 1;
+        count += 1;
       }
     }
   }
-  return meaningfulPixels;
+  return count;
 }
 
 function prepareCanvasSize(validated: ValidatedCanvasSize): PreparedCanvasSize {
@@ -593,70 +634,14 @@ function prepareCanvasSize(validated: ValidatedCanvasSize): PreparedCanvasSize {
     height: validated.currentHeight,
     cels: validatedContextCels(validated),
   };
-  const canvasReplacements = new Map<HTMLCanvasElement, HTMLCanvasElement>();
-  const indexReplacements = new Map<Uint8Array, Uint8Array>();
-  let transparentSource: HTMLCanvasElement | undefined;
+  const state: CanvasPreparationState = {
+    canvasReplacements: new Map(),
+    indexReplacements: new Map(),
+  };
 
   const afterCels = new Map(before.cels);
   for (const entry of validated.entries) {
-    let sourceCanvas = entry.sourceCanvas;
-    if (!sourceCanvas) {
-      transparentSource ??= createTransparentCanvas(
-        validated.currentWidth,
-        validated.currentHeight
-      );
-      sourceCanvas = transparentSource;
-    }
-
-    let replacementCanvas = canvasReplacements.get(sourceCanvas);
-    if (!replacementCanvas) {
-      replacementCanvas = createResizedCanvas(
-        sourceCanvas,
-        validated.request.width,
-        validated.request.height,
-        validated.request.offset
-      );
-      canvasReplacements.set(sourceCanvas, replacementCanvas);
-    }
-
-    const originalCel = entry.cel;
-    const originalIndexBuffer = originalCel?.indexBuffer;
-    let replacementIndexBuffer: Uint8Array | undefined;
-    if (originalIndexBuffer) {
-      replacementIndexBuffer = indexReplacements.get(originalIndexBuffer);
-      if (!replacementIndexBuffer) {
-        replacementIndexBuffer = resizeIndexBuffer(
-          originalIndexBuffer,
-          validated.currentWidth,
-          validated.currentHeight,
-          validated.request.width,
-          validated.request.height,
-          validated.request.offset
-        );
-        indexReplacements.set(originalIndexBuffer, replacementIndexBuffer);
-      }
-    }
-
-    if (originalCel) {
-      if (isRuntimeEmptyCel(originalCel)) {
-        markRuntimeEmptyCanvas(replacementCanvas);
-      }
-      afterCels.set(entry.key, {
-        ...originalCel,
-        canvas: replacementCanvas,
-        ...(replacementIndexBuffer
-          ? { indexBuffer: replacementIndexBuffer }
-          : { indexBuffer: undefined }),
-      });
-    } else {
-      markRuntimeEmptyCanvas(replacementCanvas);
-      afterCels.set(entry.key, {
-        id: crypto.randomUUID(),
-        layerId: entry.layerId,
-        frameId: entry.frameId,
-        canvas: replacementCanvas,
-      });
-    }
+    afterCels.set(entry.key, prepareEntry(entry, validated, state));
   }
 
   return {
@@ -666,6 +651,96 @@ function prepareCanvasSize(validated: ValidatedCanvasSize): PreparedCanvasSize {
       height: validated.request.height,
       cels: afterCels,
     },
+  };
+}
+
+function prepareEntry(
+  entry: CanvasSizeEntry,
+  validated: ValidatedCanvasSize,
+  state: CanvasPreparationState
+): Cel {
+  const sourceCanvas = getEntrySourceCanvas(entry, validated, state);
+  const replacementCanvas = getCanvasReplacement(sourceCanvas, validated, state);
+  const replacementIndexBuffer = getIndexReplacement(entry, validated, state);
+  return createPreparedCel(entry, replacementCanvas, replacementIndexBuffer);
+}
+
+function getEntrySourceCanvas(
+  entry: CanvasSizeEntry,
+  validated: ValidatedCanvasSize,
+  state: CanvasPreparationState
+): HTMLCanvasElement {
+  if (entry.sourceCanvas) return entry.sourceCanvas;
+  state.transparentSource ??= createTransparentCanvas(
+    validated.currentWidth,
+    validated.currentHeight
+  );
+  return state.transparentSource;
+}
+
+function getCanvasReplacement(
+  sourceCanvas: HTMLCanvasElement,
+  validated: ValidatedCanvasSize,
+  state: CanvasPreparationState
+): HTMLCanvasElement {
+  const existing = state.canvasReplacements.get(sourceCanvas);
+  if (existing) return existing;
+
+  const replacement = createResizedCanvas(
+    sourceCanvas,
+    validated.request.width,
+    validated.request.height,
+    validated.request.offset
+  );
+  state.canvasReplacements.set(sourceCanvas, replacement);
+  return replacement;
+}
+
+function getIndexReplacement(
+  entry: CanvasSizeEntry,
+  validated: ValidatedCanvasSize,
+  state: CanvasPreparationState
+): Uint8Array | undefined {
+  const source = entry.cel?.indexBuffer;
+  if (!source) return undefined;
+
+  const existing = state.indexReplacements.get(source);
+  if (existing) return existing;
+
+  const replacement = resizeIndexBuffer(
+    source,
+    validated.currentWidth,
+    validated.currentHeight,
+    validated.request.width,
+    validated.request.height,
+    validated.request.offset
+  );
+  state.indexReplacements.set(source, replacement);
+  return replacement;
+}
+
+function createPreparedCel(
+  entry: CanvasSizeEntry,
+  replacementCanvas: HTMLCanvasElement,
+  replacementIndexBuffer: Uint8Array | undefined
+): Cel {
+  if (!entry.cel) {
+    markRuntimeEmptyCanvas(replacementCanvas);
+    return {
+      id: crypto.randomUUID(),
+      layerId: entry.layerId,
+      frameId: entry.frameId,
+      canvas: replacementCanvas,
+    };
+  }
+
+  if (isRuntimeEmptyCel(entry.cel)) markRuntimeEmptyCanvas(replacementCanvas);
+  return {
+    ...entry.cel,
+    canvas: replacementCanvas,
+    ...(replacementIndexBuffer
+      ? { indexBuffer: replacementIndexBuffer }
+      : { indexBuffer: undefined }),
   };
 }
 
@@ -681,19 +756,7 @@ function validatedContextCels(validated: ValidatedCanvasSize): Map<string, Cel> 
 }
 
 function createTransparentCanvas(width: number, height: number): HTMLCanvasElement {
-  let canvas: HTMLCanvasElement;
-  try {
-    canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-  } catch {
-    throw editorError('limit_exceeded', false, { limitId: 'canvas-size-allocation' });
-  }
-
-  const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
-  if (!context) {
-    throw editorError('invalid_state', false, { reason: 'canvas_context' });
-  }
+  const { canvas, context } = createCanvasSurface(width, height);
   context.clearRect(0, 0, width, height);
   return markRuntimeEmptyCanvas(canvas);
 }
@@ -704,19 +767,7 @@ function createResizedCanvas(
   height: number,
   offset: CanvasOffset
 ): HTMLCanvasElement {
-  let canvas: HTMLCanvasElement;
-  try {
-    canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-  } catch {
-    throw editorError('limit_exceeded', false, { limitId: 'canvas-size-allocation' });
-  }
-
-  const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
-  if (!context) {
-    throw editorError('invalid_state', false, { reason: 'canvas_context' });
-  }
+  const { canvas, context } = createCanvasSurface(width, height);
 
   try {
     context.imageSmoothingEnabled = false;
@@ -729,6 +780,27 @@ function createResizedCanvas(
   }
 
   return canvas;
+}
+
+function createCanvasSurface(
+  width: number,
+  height: number
+): { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } {
+  let canvas: HTMLCanvasElement;
+  try {
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+  } catch {
+    throw editorError('limit_exceeded', false, { limitId: 'canvas-size-allocation' });
+  }
+
+  const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!context) {
+    throw editorError('invalid_state', false, { reason: 'canvas_context' });
+  }
+
+  return { canvas, context };
 }
 
 function resizeIndexBuffer(

@@ -28,8 +28,6 @@ export type ProjectLayerStore = ReturnType<typeof createLayerStore>;
 export type ProjectPaletteStore = ReturnType<typeof createPaletteStore>;
 export type ProjectStore = ReturnType<typeof createProjectStore>;
 export type ProjectSelectionStore = ReturnType<typeof createSelectionStore>;
-export type ProjectChangeDomain = import('./project-store').ProjectChangeDomain;
-export type ProjectChangeEvent = import('./project-store').ProjectChangeEvent;
 export type ProjectViewportStore = ReturnType<typeof createViewportStore>;
 
 export interface ProjectContextStores {
