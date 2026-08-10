@@ -3,7 +3,8 @@
 The repository keeps two separate browser boundaries:
 
 - `npm run test:run` is the existing default suite. It uses Happy DOM for
-  unit and component tests and keeps its current include patterns unchanged.
+  unit and component tests and excludes `tests/browser/`, which is reserved
+  for the dedicated Browser Mode command.
 - `npm run test:browser` is the small Vitest Browser Mode suite under
   `tests/browser/`. It uses the Playwright provider with one headless
   Chromium instance and does not start the Pixel Forge application or require
