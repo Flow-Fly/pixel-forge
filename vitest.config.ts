@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts'],
+    exclude: ['tests/browser/**/*.test.ts'],
     setupFiles: ['fake-indexeddb/auto'],
     coverage: {
       provider: 'v8',
