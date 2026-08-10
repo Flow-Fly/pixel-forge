@@ -47,7 +47,7 @@ export function setTextCelData(
       layerId,
       frameId,
       canvas: null as unknown as HTMLCanvasElement,
-      opacity: 255,
+      opacity: 100,
       textCelData
     });
   }
@@ -82,7 +82,7 @@ export function updateTextCelData(
       layerId,
       frameId,
       canvas: null as unknown as HTMLCanvasElement,
-      opacity: 255,
+      opacity: 100,
       textCelData: { ...defaultData, ...updates }
     });
   }
