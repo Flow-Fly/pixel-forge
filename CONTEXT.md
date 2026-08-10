@@ -155,7 +155,7 @@ The deterministic flattened artwork result for one Project Target and frame. It 
 _Avoid_: Surface-specific artwork rules, active-tab resolution, reference artwork in durable output
 
 **Editable Text Artwork**:
-The authoritative text content and presentation stored in `Layer.textData` and `Cel.textCelData`. The editor and every flattened artwork surface derive the visible text from this metadata using Pixel Forge's current bitmap fonts.
+The authoritative editable text content and presentation metadata for one text layer and frame. The editor and every flattened artwork surface derive visible text from this metadata using Pixel Forge's current bitmap fonts.
 _Avoid_: Raster pixels as the editable source, browser font rendering, duplicated text implementations
 
 **Derived Text Raster**:
@@ -163,7 +163,7 @@ Optional text-cel pixel data retained for compatibility or cache purposes. It is
 _Avoid_: Independent text source, silent metadata migration, deleted preserved bytes
 
 **Group Cel Artwork**:
-The drawable artwork for a group layer at one frame, held by that frame's group cel. Preserved group-layer archive bytes remain compatibility data and are not part of the visible composition.
+The frame-specific drawable artwork representing a group layer. Archived group payload remains compatibility data and is not part of the visible composition.
 _Avoid_: Layer archive bytes as artwork, flattened child re-composition, group export leakage
 
 ## History and recovery
