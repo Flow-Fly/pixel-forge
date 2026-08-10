@@ -52,9 +52,8 @@ Use these project-scoped roles:
   into `develop`.
 - `delivery-worker` implements one approved delivery slice in an isolated
   worktree.
-- `slice-simplifier` reviews the complete pull request diff and removes
-  unnecessary complexity without changing scope.
-- `pr-reviewer` performs a fresh, exact-head, read-only review.
+- `pr-finalizer` reviews the complete draft pull request, applies safe in-scope
+  fixes and simplifications, and returns `APPROVE`, `FIXED`, or `STOP`.
 
 Use this hierarchy:
 
@@ -82,12 +81,14 @@ bounded, unblocked task issue under an approved delivery slice, with none of
 Start delivery branches from current `origin/develop` and use the `dev-`
 prefix. Implementation pull requests target `develop` and open as drafts early
 so progress and decisions remain visible. The PR body keeps a canonical
-`Linked task issues` list with exact issue numbers. A PR becomes ready for
-independent review only after every linked issue's acceptance criteria are
-satisfied, the complete diff is simplified, and checks are green. A reviewed,
-mergeable, green delivery pull request may be merged into `develop` by the
-workflow director after explicit human approval. Only the project owner
-promotes `develop` to `main`.
+`Linked task issues` list with exact issue numbers. After the worker satisfies
+every linked issue and the draft head is green, a fresh finalizer examines the
+whole PR. `APPROVE` makes that unchanged exact head eligible to become ready.
+`FIXED` requires a new finalizer instance to validate the corrected head;
+`STOP` returns a decision to the workflow director or owner. A
+finalizer-approved, mergeable, green delivery pull request may be merged into
+`develop` by the workflow director after explicit human approval. Only the
+project owner promotes `develop` to `main`.
 
 ## Implementation style
 

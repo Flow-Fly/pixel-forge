@@ -5,18 +5,21 @@ Status: operating rule
 Adapted for Pixel Forge on 2026-07-21.
 
 This workflow turns the GitHub issue tree into a supervised sequence of
-product shaping, implementation, simplification, independent review, repair,
-and selection of future work. GitHub is the durable state; agent conversations
-are disposable execution contexts.
+product shaping, implementation, whole-PR finalization, and selection of future
+work. GitHub is the durable state; agent conversations are disposable execution
+contexts.
 
 The project agents live in `.codex/agents/`:
 
-| Agent               | Model                   | Reasoning | Responsibility                          |
-| ------------------- | ----------------------- | --------- | --------------------------------------- |
-| `workflow-director` | Sol (`gpt-5.6-sol`)     | `xhigh`   | Product slicing and workflow management |
-| `delivery-worker`   | Terra (`gpt-5.6-terra`) | `high`    | Delivery-slice implementation           |
-| `slice-simplifier`  | Terra (`gpt-5.6-terra`) | `high`    | Whole-slice simplification              |
-| `pr-reviewer`       | Sol (`gpt-5.6-sol`)     | `high`    | Fresh, read-only PR review              |
+| Agent               | Model                   | Reasoning | Tier | Responsibility                          |
+| ------------------- | ----------------------- | --------- | ---- | --------------------------------------- |
+| `workflow-director` | Sol (`gpt-5.6-sol`)     | `xhigh`   | Default | Product slicing and workflow management |
+| `delivery-worker`   | Luna (`gpt-5.6-luna`)   | `max`     | Fast | Delivery-slice implementation           |
+| `pr-finalizer`      | Terra (`gpt-5.6-terra`) | `xhigh`   | Default | Whole-PR review, safe fixes, and approval |
+
+Sol absorbs ambiguity and controls gates. Luna performs the high-volume
+implementation loop. Terra judges the complete result from a fresh context and
+applies only corrections that are already determined by the approved slice.
 
 Do not route this workflow through retired global protocol skills or through
 the generic `$ship` router.
@@ -170,96 +173,54 @@ git diff --check
 
 The worker keeps the draft pull request updated against `develop`. After every
 linked issue's acceptance criteria are satisfied and the implementation checks
-are green, it stops for whole-slice simplification. The pull request remains a
-draft during simplification.
+are green, it hands the complete diff and exact head to `pr-finalizer`.
 
-## 3. Simplify — `slice-simplifier`
+## 3. Finalize — `pr-finalizer`
 
-Simplification runs once after all linked issues and implementation tasks in
-the delivery slice are complete. Its scope is the complete diff from
-`origin/develop` to the pull request head.
+Finalization starts once per complete delivery slice, in a fresh context, while
+the pull request remains draft. The finalizer reads every linked task, the
+parent intent, the complete `origin/develop...HEAD` diff, unresolved comments,
+and current checks. It treats the tickets and code as primary evidence rather
+than inheriting the worker's reasoning.
 
-Review for:
+The pass combines:
 
-- unnecessary wrappers or indirection;
-- names that hide business meaning;
-- nested control flow that can use early returns;
-- duplicated rules that should change together;
-- new helpers that duplicate an existing local utility;
-- parameter or type shapes wider than the behavior requires;
-- redundant computation, I/O, or lifecycle work;
-- comments that restate the code.
+- acceptance-criteria and non-goal compliance;
+- correctness, failure behavior, and regression review;
+- test quality and triggered specialist review lenses;
+- removal of accidental complexity, duplication, unnecessary indirection, and
+  code that is difficult for a junior-to-mid-level developer to follow;
+- direct application of safe corrections and simplifications already
+  determined by the approved slice.
 
-Apply mechanical and clearly local simplifications directly. Apply structural
-changes only when they remain inside the approved behavior, have a green safety
-net, and materially improve readability. Otherwise report the opportunity for
-future work. Never expand into sibling files merely because a similar smell is
-visible there.
+A safe finalizer edit stays inside the named write boundaries and product
+behavior, has a convincing verification path, and requires no new decision.
+The finalizer groups its edits into one focused commit, pushes the same branch,
+and reruns affected checks plus the full repository gates. It does not mark the
+pull request ready or merge it.
 
-If simplification changes code, create one focused simplification commit and
-rerun the affected checks before review.
+Every pass returns exactly one verdict:
 
-When every linked issue's acceptance criteria are satisfied, the complete diff
-is simplified, and all checks are green, the workflow director marks the pull
-request ready for independent review.
+- `APPROVE`: the pass made no edits, the exact reviewed head is green, every
+  criterion is satisfied, and no blocking finding remains. The director may
+  mark this unchanged head ready.
+- `FIXED`: the pass committed safe changes. The PR stays draft and a new
+  finalizer instance must validate the new exact head. A pass never approves
+  its own edits.
+- `STOP`: the remaining issue requires a product, architecture, migration,
+  destructive, privacy, security, auth, launch, or scope decision, or no safe
+  in-scope repair is established.
 
-## 4. Review — `pr-reviewer`
+Stop after two finalizer passes without `APPROVE`. Passing CI is necessary but
+is not approval; any head change invalidates the earlier verdict.
 
-Review runs in a fresh context at the exact pull request head. It is strictly
-read-only: no file edits, commits, pushes, repairs, thread resolution, or
-merges. Do not review a draft pull request as the final delivery verdict.
+## 4. Merge and continue
 
-Always verify:
-
-- every linked task issue and parent intent;
-- acceptance criteria and non-goals;
-- the actual diff rather than the author summary;
-- directness and correctness of the changed path;
-- risk-proportionate test quality;
-- current check state;
-- remaining simplification opportunities.
-
-Apply specialist lenses only when the diff triggers them:
-
-| Changed surface                | Review lens                                     |
-| ------------------------------ | ----------------------------------------------- |
-| contracts, routes, clients     | producer and consumer compatibility             |
-| persistence, import, export    | data integrity and rollback                     |
-| writes, retries, transactions  | concurrency and idempotency                     |
-| auth, secrets, untrusted input | security and authorization                      |
-| asynchronous boundaries        | failure visibility and observability            |
-| dependencies or client imports | supply chain and bundle boundaries              |
-| user-facing UI                 | semantic HTML, accessibility, and async states  |
-| tests                          | assertions exercise changed production behavior |
-
-The review comment contains, in order:
-
-1. findings by severity with exact file and line references;
-2. a short synthesis of what the change does;
-3. simplification opportunities, including non-blocking ones;
-4. a one-line approachability grade for a junior-to-mid-level developer;
-5. verification evidence and one verdict;
-6. residual risk when there are no findings.
-
-Passing CI is necessary but is not approval. When the pull request head
-changes, discard the stale verdict and review the new exact head.
-
-## 5. Repair and continue
-
-Valid review findings return to the original implementation task. The repair
-stays inside the same pull request. The director moves the pull request back to
-draft before repair begins. The worker adds a focused follow-up commit, then
-reruns checks and simplification when the repair changed structure. When the
-repaired head is simplified and green, the director marks the pull request
-ready and requests a new exact-head review.
-
-After two unsuccessful review or repair attempts, the director stops for human
-direction.
-
-When the pull request is reviewed, mergeable, and green, the director requests
-or confirms explicit human merge approval. After approval, the director may
-merge it into `develop`, update every linked and parent issue, and choose the
-next delivery slice. Only the project owner may merge `develop` into `main`.
+When the pull request is finalizer-approved, mergeable, and green, the director
+requests or confirms explicit human merge approval. After approval, the
+director may merge it into `develop`, update every linked and parent issue, and
+choose the next delivery slice. Only the project owner may merge `develop` into
+`main`.
 
 ## Human decision gates
 
@@ -275,7 +236,7 @@ Stop rather than infer when:
 
 ## Automation boundary
 
-Pixel Forge does not currently run an automated Codex review Action. The
+Pixel Forge does not currently run an automated Codex finalizer Action. The
 Platform workflow depends on a dedicated trusted self-hosted runner and
-publisher scripts that are not present here. Use `pr-reviewer` manually until
-equivalent infrastructure is explicitly approved and configured.
+publisher scripts that are not present here. Dispatch `pr-finalizer` manually
+until equivalent infrastructure is explicitly approved and configured.
