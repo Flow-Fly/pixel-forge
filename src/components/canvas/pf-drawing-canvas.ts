@@ -286,7 +286,7 @@ export class PFDrawingCanvas extends BaseComponent {
       this.ctx.clearRect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
 
       // Render layers (clipped)
-      this.renderLayers(dirtyRect, context);
+      this.renderLayers(context);
 
       this.ctx.restore();
     } else {
@@ -299,7 +299,7 @@ export class PFDrawingCanvas extends BaseComponent {
       this.renderReferenceEntries(referencePlan.belowArtwork);
 
       // Render all layers
-      this.renderLayers(null, context);
+      this.renderLayers(context);
 
       this.renderReferenceEntries(referencePlan.aboveArtwork);
     }
@@ -319,9 +319,9 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   /**
-   * Render visible layers, optionally clipped to a dirty rect.
+   * Render visible layers. The caller owns any dirty-region clipping.
    */
-  private renderLayers(dirtyRect: Rect | null, context: ProjectContext) {
+  private renderLayers(context: ProjectContext) {
     const layers = context.layers.layers.value;
     const currentFrameId = context.animation.currentFrameId.value;
 
@@ -332,17 +332,6 @@ export class PFDrawingCanvas extends BaseComponent {
       getCelKey: context.animation.getCelKey,
     });
 
-    if (dirtyRect) {
-      this.ctx.save();
-      this.ctx.beginPath();
-      this.ctx.rect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
-      this.ctx.clip();
-      drawArtworkComposition(this.ctx, plan);
-      this.renderTextCursor(currentFrameId, context);
-      this.ctx.restore();
-      return;
-    }
-
     drawArtworkComposition(this.ctx, plan);
     this.renderTextCursor(currentFrameId, context);
   }
@@ -352,20 +341,23 @@ export class PFDrawingCanvas extends BaseComponent {
    */
   private renderTextCursor(frameId: string, context: ProjectContext) {
     const editingState = TextTool.editingState.value;
-    if (!editingState.isEditing || !editingState.cursorVisible || !editingState.layerId) return;
+    if (![editingState.isEditing, editingState.cursorVisible, editingState.layerId].every(Boolean)) {
+      return;
+    }
 
-    const layerId = editingState.layerId;
+    const layerId = editingState.layerId as string;
     const layer = context.layers.layers.value.find((l) => l.id === layerId);
-    if (!layer || layer.type !== 'text' || !layer.textData) return;
+    const textData = layer?.textData;
+    if (![layer, layer?.type === 'text', textData].every(Boolean)) return;
 
     const textCelData = context.animation.getTextCelData(layerId, frameId);
     if (!textCelData) return;
 
     const { content, x, y } = textCelData;
-    const { font: fontId, color } = layer.textData;
-    const font = getFont(fontId) || getDefaultFont();
+    const { font: fontId, color } = textData!;
+    const font = [getFont(fontId), getDefaultFont()].find(Boolean)!;
 
-    const cursorX = getCursorX(content || '', editingState.cursorPosition, font, x);
+    const cursorX = getCursorX(content, editingState.cursorPosition, font, x);
     this.ctx.save();
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
