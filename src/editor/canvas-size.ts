@@ -376,9 +376,8 @@ function validateRequestShape(request: CanvasSizeRequest): void {
     throw editorError('invalid_request', false, { reason: 'expected_revision' });
   }
 
-  if (!isDimension(request.width) || !isDimension(request.height)) {
-    throw editorError('invalid_request', false, { reason: 'dimensions' });
-  }
+  validateRequestedDimension(request.width, 'width');
+  validateRequestedDimension(request.height, 'height');
 
   if (!Number.isInteger(request.offset.x) || !Number.isInteger(request.offset.y)) {
     throw editorError('invalid_request', false, { reason: 'offset' });
@@ -386,7 +385,20 @@ function validateRequestShape(request: CanvasSizeRequest): void {
 
   if (Math.abs(request.offset.x) > CANVAS_SIZE_MAX_DIMENSION ||
       Math.abs(request.offset.y) > CANVAS_SIZE_MAX_DIMENSION) {
-    throw editorError('invalid_request', false, { reason: 'offset_limit' });
+    throw editorError('limit_exceeded', false, { limitId: 'canvas-offset', max: CANVAS_SIZE_MAX_DIMENSION });
+  }
+}
+
+function validateRequestedDimension(value: number, axis: 'width' | 'height'): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw editorError('invalid_request', false, { reason: 'dimensions', axis });
+  }
+  if (value > CANVAS_SIZE_MAX_DIMENSION) {
+    throw editorError('limit_exceeded', false, {
+      limitId: 'canvas-dimension',
+      axis,
+      max: CANVAS_SIZE_MAX_DIMENSION,
+    });
   }
 }
 
