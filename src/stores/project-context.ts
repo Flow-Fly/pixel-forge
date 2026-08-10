@@ -28,6 +28,8 @@ export type ProjectLayerStore = ReturnType<typeof createLayerStore>;
 export type ProjectPaletteStore = ReturnType<typeof createPaletteStore>;
 export type ProjectStore = ReturnType<typeof createProjectStore>;
 export type ProjectSelectionStore = ReturnType<typeof createSelectionStore>;
+export type ProjectChangeDomain = import('./project-store').ProjectChangeDomain;
+export type ProjectChangeEvent = import('./project-store').ProjectChangeEvent;
 export type ProjectViewportStore = ReturnType<typeof createViewportStore>;
 
 export interface ProjectContextStores {
@@ -118,6 +120,16 @@ export class ProjectContext {
   readonly refs: StoreRefs;
   readonly selection: ProjectSelectionStore;
   readonly viewport: ProjectViewportStore;
+
+  /** The active project's monotonic committed-document revision. */
+  get projectRevision() {
+    return this.project.revision;
+  }
+
+  /** Ordered in-process project change notifications. */
+  get projectChangeEvents() {
+    return this.project.changeEvents;
+  }
 
   private started = false;
 

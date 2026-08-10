@@ -39,6 +39,17 @@ import type { createLayerStore } from './layers-store';
 import type { createPaletteStore } from './palette/store';
 import type { createSelectionStore } from './selection/store';
 
+export type ProjectChangeDomain = 'canvas-bounds' | 'raster-content';
+
+export interface ProjectChangeEvent {
+  type: 'project-change';
+  target: string;
+  fromRevision: number;
+  toRevision: number;
+  transactionId: string;
+  domains: readonly ProjectChangeDomain[];
+}
+
 type ProjectAnimationStore = ReturnType<typeof createAnimationStore>;
 type ProjectDirtyRectStore = ReturnType<typeof createDirtyRectStore>;
 type ProjectHistoryStore = ReturnType<typeof createHistoryStore>;
@@ -125,6 +136,10 @@ async function serializeExistingCel(
 class ProjectStore {
   /** Storage identity of the open project (repository key). */
   id = signal<string>(uuidv4());
+  /** Monotonic revision of committed document changes for this project target. */
+  revision = signal(0);
+  /** Ordered in-process notifications for committed document changes. */
+  readonly changeEvents = new EventTarget();
   width = signal(64);
   height = signal(64);
   /** Background color for export. null = transparent (default) */
@@ -168,9 +183,54 @@ class ProjectStore {
     this.height.value = height;
   }
 
-  resizeCanvas(newWidth: number, newHeight: number) {
-    this.width.value = newWidth;
-    this.height.value = newHeight;
+  resetRevision() {
+    this.revision.value = 0;
+  }
+
+  commitChange(
+    transactionId: string,
+    domains: readonly ProjectChangeDomain[]
+  ): ProjectChangeEvent {
+    const fromRevision = this.revision.value;
+    const event: ProjectChangeEvent = {
+      type: 'project-change',
+      target: this.id.value,
+      fromRevision,
+      toRevision: fromRevision + 1,
+      transactionId,
+      domains: [...domains],
+    };
+
+    this.revision.value = event.toRevision;
+    this.changeEvents.dispatchEvent(
+      new CustomEvent<ProjectChangeEvent>('project-change', { detail: event })
+    );
+    return event;
+  }
+
+  /**
+   * Apply a prepared canvas-size state. Callers must validate and allocate all
+   * replacement payloads before entering this method so the swap has no
+   * failure path between its document stores.
+   */
+  applyCanvasSizeState(
+    width: number,
+    height: number,
+    cels: Map<string, Cel>
+  ) {
+    this.width.value = width;
+    this.height.value = height;
+    this.animation.cels.value = cels;
+
+    const currentFrameId = this.animation.currentFrameId.value;
+    this.layers.layers.value = this.layers.layers.value.map((layer) => {
+      if (layer.type === 'reference') return layer;
+
+      const cel = cels.get(this.animation.getCelKey(layer.id, currentFrameId));
+      return cel ? { ...layer, canvas: cel.canvas } : layer;
+    });
+
+    this.dirtyRect.requestFullRedraw();
   }
 
   async saveProject(): Promise<ProjectFile> {
@@ -265,6 +325,7 @@ class ProjectStore {
     this.animation.cels.value = new Map();
 
     this.setSize(file.width, file.height);
+    this.resetRevision();
     this.name.value = file.name || DEFAULT_PROJECT_NAME;
     this.guidedDrawing.load(file.guidedDrawing);
 
@@ -295,6 +356,7 @@ class ProjectStore {
 
     // 0. New project = new storage identity (the old project stays stored)
     this.id.value = uuidv4();
+    this.resetRevision();
     this.loadedGroupLayerData = new Map();
 
     // 1. Set new dimensions and reset name
