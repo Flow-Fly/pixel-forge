@@ -245,7 +245,7 @@ class AnimationStore {
     }
   }
 
-  addFrame(duplicate: boolean = true, sourceFrameId?: string) {
+  addFrame(duplicate: boolean = true, sourceFrameId?: string, frameId?: string) {
     this.syncLayerCanvases();
 
     const frames = this.frames.value;
@@ -254,7 +254,7 @@ class AnimationStore {
     const insertIndex = sourceFrameIndex === -1 ? frames.length : sourceFrameIndex + 1;
 
     const newFrame: Frame = {
-      id: crypto.randomUUID(),
+      id: frameId ?? crypto.randomUUID(),
       order: insertIndex,
       duration: 100
     };
@@ -296,6 +296,7 @@ class AnimationStore {
     this.cels.value = cels;
 
     this.goToFrame(newFrame.id);
+    return newFrame.id;
   }
 
   private addCelForNewFrame(
@@ -389,7 +390,8 @@ class AnimationStore {
     this.frames.value = newFrames;
 
     // Adjust tags for frame deletion
-    this.tags.value = tagManager.adjustTagsForFrameDelete(this.tags.value, frameIndex);
+    this.tags.value = tagManager.adjustTagsForFrameDelete(this.tags.value, frameIndex, newFrames.length);
+    this.clearActiveTagIfMissing();
 
     if (this.currentFrameId.value === frameId) {
       const newIndex = Math.max(0, frameIndex - 1);
@@ -548,13 +550,20 @@ class AnimationStore {
   // ===== Frame Tags (delegated) =====
 
   addFrameTag(name: string, color: string, startFrameIndex: number, endFrameIndex: number): string | null {
-    const result = tagManager.addFrameTag(this.tags.value, name, color, startFrameIndex, endFrameIndex);
+    const result = tagManager.addFrameTag(
+      this.tags.value,
+      name,
+      color,
+      startFrameIndex,
+      endFrameIndex,
+      this.frames.value.length,
+    );
     this.tags.value = result.tags;
     return result.tagId;
   }
 
   updateFrameTag(tagId: string, updates: Partial<Omit<FrameTag, 'id'>>): boolean {
-    const result = tagManager.updateFrameTag(this.tags.value, tagId, updates);
+    const result = tagManager.updateFrameTag(this.tags.value, tagId, updates, this.frames.value.length);
     this.tags.value = result.tags;
     return result.success;
   }
@@ -565,9 +574,16 @@ class AnimationStore {
 
   removeFrameTag(tagId: string) {
     this.tags.value = tagManager.removeFrameTag(this.tags.value, tagId);
-    if (this.activeTagId.value === tagId) {
+    this.clearActiveTagIfMissing();
+  }
+
+  private clearActiveTagIfMissing(): void {
+    const activeTagId = this.activeTagId.value;
+    if (activeTagId && !this.tags.value.some((tag) => tag.id === activeTagId)) {
       this.activeTagId.value = null;
       this.playbackMode.value = 'all';
+      this.playbackEngine.activeTagId = null;
+      this.playbackEngine.playbackMode = 'all';
     }
   }
 

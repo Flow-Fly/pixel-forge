@@ -18,6 +18,15 @@ import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 import type { PFTagPreview } from './pf-tag-preview';
 import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 import type { PFTimelineResizePreview } from './timeline-header/pf-timeline-resize-preview';
+import type { FrameTag } from '../../types/animation';
+import {
+  executeTimelineProjectState,
+} from '../../editor/timeline-project-state';
+import type {
+  FrameTagRequest,
+  FrameTagRequestInput,
+} from '../../editor/timeline-project-state';
+import type { ProjectTarget } from '../../editor/contracts';
 
 const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
 const TAG_COLORS = [
@@ -34,6 +43,9 @@ const TAG_COLORS = [
   '#795548',
   '#8bc34a',
 ];
+
+type TagRequestInput = FrameTagRequestInput;
+type TagRequestBuilder = (request: TagRequestInput) => FrameTagRequest;
 
 @customElement('pf-timeline-header')
 export class PFTimelineHeader extends BaseComponent {
@@ -65,6 +77,8 @@ export class PFTimelineHeader extends BaseComponent {
   private menuAnchorElement: HTMLElement | null = null;
   private context = defaultProjectContext;
   private resizeContext = defaultProjectContext;
+  private resizeTarget: ProjectTarget | null = null;
+  private resizeExpectedRevision = 0;
 
   @query('pf-timeline-tooltip') private tooltip!: PFTimelineTooltip;
   @query('pf-context-menu') private contextMenu!: PFContextMenu;
@@ -143,6 +157,48 @@ export class PFTimelineHeader extends BaseComponent {
     }
   }
 
+  private createTagRequestBuilder(context: typeof this.context): TagRequestBuilder {
+    const target = { projectId: context.project.id.value };
+    const expectedRevision = context.project.revision.value;
+    return (request) => ({ ...request, target, expectedRevision });
+  }
+
+  private createTagEditFields(
+    tag: FrameTag,
+    context: typeof this.context,
+    tagRequest = this.createTagRequestBuilder(context),
+  ): ContextMenuItem[] {
+    return [
+      {
+        type: 'input',
+        label: 'Tag Name',
+        inputValue: tag.name,
+        placeholder: 'Enter tag name',
+        onInputSubmit: (name: string) => {
+          if (name.trim()) {
+            void executeTimelineProjectState(
+              context,
+              tagRequest({ kind: 'tag.rename', tagId: tag.id, name: name.trim() }),
+            );
+          }
+        },
+      },
+      {
+        type: 'color-picker',
+        label: 'Tag Color',
+        colors: TAG_COLORS,
+        selectedColor: tag.color,
+        onColorSelect: (color: string) => {
+          void executeTimelineProjectState(
+            context,
+            tagRequest({ kind: 'tag.recolor', tagId: tag.id, color }),
+          );
+        },
+      },
+      { type: 'divider' },
+    ];
+  }
+
   // ==========================================
   // Frame context menu
   // ==========================================
@@ -158,6 +214,7 @@ export class PFTimelineHeader extends BaseComponent {
     this.menuAnchorElement = anchor;
     const existingTags = animation.getTagsForFrame(frameIndex);
     const originalDuration = frame.duration;
+    const tagRequest = this.createTagRequestBuilder(context);
 
     const items: ContextMenuItem[] = [
       {
@@ -212,17 +269,14 @@ export class PFTimelineHeader extends BaseComponent {
           type: 'item',
           label: '🏷️ Remove from Tag',
           action: () => {
-            if (tag.startFrameIndex === tag.endFrameIndex) {
-              animation.removeFrameTag(tag.id);
-            } else if (frameIndex === tag.startFrameIndex) {
-              animation.updateFrameTag(tag.id, {
-                startFrameIndex: tag.startFrameIndex + 1,
-              });
-            } else if (frameIndex === tag.endFrameIndex) {
-              animation.updateFrameTag(tag.id, {
-                endFrameIndex: tag.endFrameIndex - 1,
-              });
-            }
+            void executeTimelineProjectState(
+              context,
+              tagRequest({
+                kind: 'tag.remove-frame',
+                tagId: tag.id,
+                frameIndex,
+              }),
+            );
           },
         }
       );
@@ -252,29 +306,10 @@ export class PFTimelineHeader extends BaseComponent {
     const isActiveLoop = animation.activeTagId.value === tagId;
     this.menuAnchorElement = anchor;
     const totalFrames = animation.frames.value.length;
+    const tagRequest = this.createTagRequestBuilder(context);
 
     const items: ContextMenuItem[] = [
-      {
-        type: 'input',
-        label: 'Tag Name',
-        inputValue: tag.name,
-        placeholder: 'Enter tag name',
-        onInputSubmit: (name: string) => {
-          if (name.trim()) {
-            animation.updateFrameTag(tagId, { name: name.trim() });
-          }
-        },
-      },
-      {
-        type: 'color-picker',
-        label: 'Tag Color',
-        colors: TAG_COLORS,
-        selectedColor: tag.color,
-        onColorSelect: (color: string) => {
-          animation.updateFrameTag(tagId, { color });
-        },
-      },
-      { type: 'divider' },
+      ...this.createTagEditFields(tag, context, tagRequest),
       {
         type: 'input',
         inputType: 'number',
@@ -285,7 +320,15 @@ export class PFTimelineHeader extends BaseComponent {
         onNumberChange: (value: number) => {
           const newStart = value - 1;
           if (newStart >= 0 && newStart <= tag.endFrameIndex) {
-            animation.updateFrameTag(tagId, { startFrameIndex: newStart });
+            void executeTimelineProjectState(
+              context,
+              tagRequest({
+                kind: 'tag.range',
+                tagId,
+                startFrameIndex: newStart,
+                endFrameIndex: tag.endFrameIndex,
+              }),
+            );
           }
         },
       },
@@ -299,7 +342,15 @@ export class PFTimelineHeader extends BaseComponent {
         onNumberChange: (value: number) => {
           const newEnd = value - 1;
           if (newEnd >= tag.startFrameIndex && newEnd < totalFrames) {
-            animation.updateFrameTag(tagId, { endFrameIndex: newEnd });
+            void executeTimelineProjectState(
+              context,
+              tagRequest({
+                kind: 'tag.range',
+                tagId,
+                startFrameIndex: tag.startFrameIndex,
+                endFrameIndex: newEnd,
+              }),
+            );
           }
         },
       },
@@ -319,7 +370,12 @@ export class PFTimelineHeader extends BaseComponent {
       {
         type: 'item',
         label: '🗑 Delete Tag',
-        action: () => animation.removeFrameTag(tagId),
+        action: () => {
+          void executeTimelineProjectState(
+            context,
+            tagRequest({ kind: 'tag.delete', tagId }),
+          );
+        },
       },
     ];
 
@@ -330,33 +386,19 @@ export class PFTimelineHeader extends BaseComponent {
     const animation = context.animation;
     const tag = animation.tags.value.find((t) => t.id === tagId);
     if (!tag || !this.menuAnchorElement) return;
+    const tagRequest = this.createTagRequestBuilder(context);
 
     const items: ContextMenuItem[] = [
-      {
-        type: 'input',
-        label: 'Tag Name',
-        inputValue: tag.name,
-        placeholder: 'Enter tag name',
-        onInputSubmit: (name: string) => {
-          if (name.trim()) {
-            animation.updateFrameTag(tagId, { name: name.trim() });
-          }
-        },
-      },
-      {
-        type: 'color-picker',
-        label: 'Tag Color',
-        colors: TAG_COLORS,
-        selectedColor: tag.color,
-        onColorSelect: (color: string) => {
-          animation.updateFrameTag(tagId, { color });
-        },
-      },
-      { type: 'divider' },
+      ...this.createTagEditFields(tag, context, tagRequest),
       {
         type: 'item',
         label: '🗑 Delete Tag',
-        action: () => animation.removeFrameTag(tagId),
+        action: () => {
+          void executeTimelineProjectState(
+            context,
+            tagRequest({ kind: 'tag.delete', tagId }),
+          );
+        },
       },
     ];
 
@@ -365,11 +407,12 @@ export class PFTimelineHeader extends BaseComponent {
 
   private showAddTagMenu(frameIndex: number, context = this.context) {
     if (!this.menuAnchorElement) return;
-    const animation = context.animation;
 
     this.pendingTagName = 'New Tag';
     this.pendingTagColor = TAG_COLORS[0];
     this.pendingTagFrameIndex = frameIndex;
+    const tagTarget = { projectId: context.project.id.value };
+    const tagExpectedRevision = context.project.revision.value;
 
     const items: ContextMenuItem[] = [
       {
@@ -396,12 +439,15 @@ export class PFTimelineHeader extends BaseComponent {
         label: '✓ Create Tag',
         action: () => {
           const name = this.pendingTagName.trim() || 'New Tag';
-          animation.addFrameTag(
+          void executeTimelineProjectState(context, {
+            kind: 'tag.create',
+            target: tagTarget,
+            expectedRevision: tagExpectedRevision,
             name,
-            this.pendingTagColor,
-            this.pendingTagFrameIndex,
-            this.pendingTagFrameIndex
-          );
+            color: this.pendingTagColor,
+            startFrameIndex: this.pendingTagFrameIndex,
+            endFrameIndex: this.pendingTagFrameIndex,
+          });
           this.pendingTagName = '';
           this.pendingTagColor = '';
           this.pendingTagFrameIndex = -1;
@@ -440,6 +486,8 @@ export class PFTimelineHeader extends BaseComponent {
     this.resizingTagId = tagId;
     this.resizingEdge = edge;
     this.resizeContext = this.context;
+    this.resizeTarget = { projectId: this.context.project.id.value };
+    this.resizeExpectedRevision = this.context.project.revision.value;
 
     window.addEventListener('mousemove', this.handleTagResizeMove);
     window.addEventListener('mouseup', this.handleTagResizeEnd);
@@ -481,33 +529,59 @@ export class PFTimelineHeader extends BaseComponent {
     }
   };
 
+  private getPendingTagRange(): {
+    readonly tagId: string;
+    readonly target: ProjectTarget;
+    readonly expectedRevision: number;
+    readonly startFrameIndex: number;
+    readonly endFrameIndex: number;
+  } | null {
+    if (!this.resizingTagId || !this.resizingEdge || this.resizePreviewIndex === null) return null;
+    if (!this.resizeTarget) return null;
+
+    const tag = this.resizeContext.animation.tags.value.find(
+      (item) => item.id === this.resizingTagId,
+    );
+    if (!tag) return null;
+
+    const { startFrameIndex: nextStart, endFrameIndex: nextEnd } = calculateTagResizeRange(
+      tag,
+      this.resizingEdge,
+      this.resizePreviewIndex,
+    );
+    if (nextStart === tag.startFrameIndex && nextEnd === tag.endFrameIndex) return null;
+
+    return {
+      tagId: this.resizingTagId,
+      target: this.resizeTarget,
+      expectedRevision: this.resizeExpectedRevision,
+      startFrameIndex: nextStart,
+      endFrameIndex: nextEnd,
+    };
+  }
+
+  private commitTagResize(): void {
+    const range = this.getPendingTagRange();
+    if (!range) return;
+
+    void executeTimelineProjectState(this.resizeContext, {
+      kind: 'tag.range',
+      target: range.target,
+      expectedRevision: range.expectedRevision,
+      tagId: range.tagId,
+      startFrameIndex: range.startFrameIndex,
+      endFrameIndex: range.endFrameIndex,
+    });
+  }
+
   private handleTagResizeEnd = () => {
-    if (this.resizingTagId && this.resizingEdge && this.resizePreviewIndex !== null) {
-      const animation = this.resizeContext.animation;
-      const tag = animation.tags.value.find((t) => t.id === this.resizingTagId);
-      if (tag) {
-        if (this.resizingEdge === 'left') {
-          const newStart = Math.min(this.resizePreviewIndex, tag.endFrameIndex);
-          if (newStart !== tag.startFrameIndex) {
-            animation.updateFrameTag(this.resizingTagId, {
-              startFrameIndex: newStart,
-            });
-          }
-        } else {
-          const newEnd = Math.max(this.resizePreviewIndex, tag.startFrameIndex);
-          if (newEnd !== tag.endFrameIndex) {
-            animation.updateFrameTag(this.resizingTagId, {
-              endFrameIndex: newEnd,
-            });
-          }
-        }
-      }
-    }
+    this.commitTagResize();
 
     this.resizeContext.animation.setTagResizePreview(null);
     this.resizingTagId = null;
     this.resizingEdge = null;
     this.resizePreviewIndex = null;
+    this.resizeTarget = null;
 
     if (this.resizePreview) {
       this.resizePreview.tagId = null;
@@ -543,4 +617,19 @@ export class PFTimelineHeader extends BaseComponent {
       <pf-tag-preview></pf-tag-preview>
     `;
   }
+}
+
+function calculateTagResizeRange(
+  tag: FrameTag,
+  edge: 'left' | 'right',
+  previewIndex: number,
+): { readonly startFrameIndex: number; readonly endFrameIndex: number } {
+  return {
+    startFrameIndex: edge === 'left'
+      ? Math.min(previewIndex, tag.endFrameIndex)
+      : tag.startFrameIndex,
+    endFrameIndex: edge === 'right'
+      ? Math.max(previewIndex, tag.startFrameIndex)
+      : tag.endFrameIndex,
+  };
 }

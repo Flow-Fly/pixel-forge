@@ -7,52 +7,16 @@ import type { ProjectContext } from '../stores/project-context';
 import type { Cel } from '../types/animation';
 import type { Layer } from '../types/layer';
 import { isRuntimeEmptyCel, markRuntimeEmptyCanvas } from '../stores/animation/empty-cel';
+import { isRecord, type EditorError, type ProjectTarget } from './contracts';
+import {
+  CANVAS_SIZE_MAX_DIMENSION,
+} from './catalog';
 
-export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
-export const CANVAS_SIZE_MAX_DIMENSION = 2048;
-
-export const canvasSizeCatalog = Object.freeze({
-  version: '1.0',
-  command: {
-    id: CANVAS_SIZE_COMMAND_ID,
-    target: 'project',
-    requiresRevision: true,
-    request: {
-      target: { projectId: 'string' },
-      expectedRevision: 'integer >= 0',
-      width: 'integer 1..2048',
-      height: 'integer 1..2048',
-      offset: {
-        x: 'integer -2048..2048',
-        y: 'integer -2048..2048',
-      },
-    },
-    limits: {
-      dimension: { min: 1, max: CANVAS_SIZE_MAX_DIMENSION },
-      offset: { min: -CANVAS_SIZE_MAX_DIMENSION, max: CANVAS_SIZE_MAX_DIMENSION },
-    },
-    availability: {
-      guidedDrawing: 'unsupported',
-    },
-    affectedDomains: ['canvas-bounds', 'raster-content'] as const,
-    revision: 'monotonic-project-revision',
-    undo: 'one-session-history-entry',
-    confirmation: 'required-when-meaningful-content-is-cropped',
-    errors: [
-      'invalid_request',
-      'target_not_found',
-      'revision_conflict',
-      'invalid_state',
-      'limit_exceeded',
-      'unsupported',
-      'internal',
-    ] as const,
-  },
-} as const);
-
-export interface ProjectTarget {
-  readonly projectId: string;
-}
+export {
+  CANVAS_SIZE_COMMAND_ID,
+  CANVAS_SIZE_MAX_DIMENSION,
+  canvasSizeCatalog,
+} from './catalog';
 
 export interface CanvasOffset {
   readonly x: number;
@@ -81,20 +45,10 @@ export interface CanvasSizePreview {
   readonly requiresConfirmation: boolean;
 }
 
-export type CanvasSizeErrorCode =
-  | 'invalid_request'
-  | 'target_not_found'
-  | 'revision_conflict'
-  | 'invalid_state'
-  | 'limit_exceeded'
-  | 'unsupported'
-  | 'internal';
+// fallow-ignore-next-line unused-type -- Preserve the Canvas Size error type export for adapters.
+export type CanvasSizeErrorCode = import('./contracts').EditorErrorCode;
 
-export interface EditorError {
-  readonly code: CanvasSizeErrorCode;
-  readonly retryable: boolean;
-  readonly details?: Readonly<Record<string, string | number>>;
-}
+export type { EditorError, ProjectTarget } from './contracts';
 
 export interface CanvasSizeSuccess {
   readonly ok: true;
@@ -423,10 +377,6 @@ function normalizeRequest(input: unknown): CanvasSizeRequest {
     height: input.height as number,
     offset: { x: offset.x as number, y: offset.y as number },
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function validateCanvasSize(

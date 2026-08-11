@@ -3,6 +3,10 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext } from '../../stores/project-context';
 import { AddLayerCommand, RemoveLayerCommand } from '../../commands/layer-commands';
+import {
+  createLayerDirectionRequest,
+  executeTimelineProjectState,
+} from '../../editor/timeline-project-state';
 import { scrollbarStyles } from '../../styles/scrollbar-styles';
 import './pf-playback-controls';
 import './pf-onion-skin-controls';
@@ -239,7 +243,10 @@ export class PFTimeline extends BaseComponent {
     if (this.context.guidedDrawing.active) return;
     const activeId = this.context.layers.activeLayerId.value;
     if (activeId) {
-      this.context.layers.reorderLayer(activeId, direction);
+      void executeTimelineProjectState(
+        this.context,
+        createLayerDirectionRequest(this.context, activeId, direction),
+      );
     }
   }
 
