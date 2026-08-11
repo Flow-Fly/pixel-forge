@@ -6,7 +6,6 @@ import type {
 import type { ProjectContext } from '../stores/project-context';
 import type { FrameTag } from '../types/animation';
 import type { Layer } from '../types/layer';
-import { canvasSizeCatalog } from './canvas-size';
 import {
   isRecord,
   type EditorError,
@@ -14,71 +13,16 @@ import {
   type ProjectTarget,
 } from './contracts';
 
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
-export const LAYER_STATE_COMMAND_ID = 'project.layer.state';
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
-export const FRAME_TAG_COMMAND_ID = 'project.animation.frame-tag';
-
-// fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
-export const layerStateCatalog = Object.freeze({
-  id: LAYER_STATE_COMMAND_ID,
-  target: 'project',
-  requiresRevision: true,
-  operations: [
-    'visibility',
-    'lock',
-    'continuity',
-    'reorder',
-  ] as const,
-  affectedDomains: ['layer-state'] as const,
-  availability: { guidedDrawing: 'unsupported' },
-  undo: 'one-session-history-entry',
-  errors: [
-    'invalid_request',
-    'target_not_found',
-    'revision_conflict',
-    'invalid_state',
-    'unsupported',
-    'internal',
-  ] as const,
-});
-
-// fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
-export const frameTagCatalog = Object.freeze({
-  id: FRAME_TAG_COMMAND_ID,
-  target: 'project',
-  requiresRevision: true,
-  operations: [
-    'create',
-    'rename',
-    'recolor',
-    'range',
-    'collapse',
-    'remove-frame',
-    'delete',
-  ] as const,
-  affectedDomains: ['timeline'] as const,
-  availability: { guidedDrawing: 'supported' },
-  undo: 'one-session-history-entry',
-  errors: [
-    'invalid_request',
-    'target_not_found',
-    'revision_conflict',
-    'invalid_state',
-    'unsupported',
-    'internal',
-  ] as const,
-});
-
-// fallow-ignore-next-line unused-export -- Public command inventory consumed by editor tooling.
-export const editorCatalog = Object.freeze({
-  version: '1.0',
-  commands: Object.freeze([
-    canvasSizeCatalog.command,
-    layerStateCatalog,
-    frameTagCatalog,
-  ]),
-});
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { editorCatalog } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { FRAME_TAG_COMMAND_ID } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { frameTagCatalog } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { LAYER_STATE_COMMAND_ID } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { layerStateCatalog } from './catalog';
 
 export type LayerDirection = 'up' | 'down';
 
