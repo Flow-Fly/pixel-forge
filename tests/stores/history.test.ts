@@ -28,11 +28,13 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 }));
 
 import { historyStore, type Command } from '../../src/stores/history';
+import { defaultProjectContext } from '../../src/stores/project-context';
 import { userStore } from '../../src/stores/user';
 
 interface TrackedCommand extends Command {
   executeCount: number;
   undoCount: number;
+  documentValue: number;
 }
 
 function makeCommand(
@@ -46,11 +48,14 @@ function makeCommand(
     memorySize: opts.memorySize,
     executeCount: 0,
     undoCount: 0,
+    documentValue: 0,
     execute() {
       cmd.executeCount++;
+      cmd.documentValue++;
     },
     undo() {
       cmd.undoCount++;
+      cmd.documentValue--;
     },
   };
   return cmd;
@@ -102,6 +107,80 @@ describe('HistoryStore', () => {
     expect(cmd.executeCount).toBe(2);
     expect(historyStore.undoStack.value).toHaveLength(1);
     expect(historyStore.redoStack.value).toHaveLength(0);
+  });
+
+  it('preserves document and history state when initial execution fails', async () => {
+    const cmd = makeCommand('a');
+    cmd.execute = () => {
+      throw new Error('initial execution failed');
+    };
+
+    const undoStackBeforeFailure = historyStore.undoStack.value;
+    const redoStackBeforeFailure = historyStore.redoStack.value;
+    const versionBeforeFailure = historyStore.version.value;
+    const revisionBeforeFailure = defaultProjectContext.project.revision.value;
+    await expect(historyStore.execute(cmd)).rejects.toThrow('initial execution failed');
+
+    expect(historyStore.undoStack.value).toEqual(undoStackBeforeFailure);
+    expect(historyStore.redoStack.value).toEqual(redoStackBeforeFailure);
+    expect(historyStore.version.value).toBe(versionBeforeFailure);
+    expect(defaultProjectContext.project.revision.value).toBe(revisionBeforeFailure);
+    expect(cmd.documentValue).toBe(0);
+  });
+
+  it('preserves pending redo commands when replay fails', async () => {
+    const cmd = makeCommand('a');
+    const execute = cmd.execute.bind(cmd);
+    cmd.execute = () => {
+      if (cmd.executeCount > 0) throw new Error('replay failed');
+      execute();
+    };
+
+    await historyStore.execute(cmd);
+    await historyStore.undo();
+
+    const undoStackBeforeFailure = historyStore.undoStack.value;
+    const redoStackBeforeFailure = historyStore.redoStack.value;
+    const versionBeforeFailure = historyStore.version.value;
+    const revisionBeforeFailure = defaultProjectContext.project.revision.value;
+    const documentBeforeFailure = cmd.documentValue;
+    await expect(historyStore.redo()).rejects.toThrow('replay failed');
+    expect(historyStore.undoStack.value).toEqual(undoStackBeforeFailure);
+    expect(historyStore.redoStack.value).toEqual(redoStackBeforeFailure);
+    expect(historyStore.canRedo.value).toBe(true);
+    expect(historyStore.version.value).toBe(versionBeforeFailure);
+    expect(defaultProjectContext.project.revision.value).toBe(revisionBeforeFailure);
+    expect(cmd.executeCount).toBe(1);
+    expect(cmd.documentValue).toBe(documentBeforeFailure);
+  });
+
+  it('preserves both stacks when undo replay fails', async () => {
+    const cmd = makeCommand('a');
+    const undo = cmd.undo.bind(cmd);
+    cmd.undo = () => {
+      if (cmd.undoCount > 0) throw new Error('undo replay failed');
+      undo();
+    };
+
+    await historyStore.execute(cmd);
+    await historyStore.undo();
+    await historyStore.redo();
+    await historyStore.execute(makeCommand('b'));
+    await historyStore.undo();
+
+    const undoStackBeforeFailure = historyStore.undoStack.value;
+    const redoStackBeforeFailure = historyStore.redoStack.value;
+    const versionBeforeFailure = historyStore.version.value;
+    const revisionBeforeFailure = defaultProjectContext.project.revision.value;
+    const documentBeforeFailure = cmd.documentValue;
+    await expect(historyStore.undo()).rejects.toThrow('undo replay failed');
+    expect(historyStore.undoStack.value).toEqual(undoStackBeforeFailure);
+    expect(historyStore.redoStack.value).toEqual(redoStackBeforeFailure);
+    expect(historyStore.canRedo.value).toBe(true);
+    expect(historyStore.version.value).toBe(versionBeforeFailure);
+    expect(defaultProjectContext.project.revision.value).toBe(revisionBeforeFailure);
+    expect(cmd.undoCount).toBe(1);
+    expect(cmd.documentValue).toBe(documentBeforeFailure);
   });
 
   it('undo/undo/redo/redo restores order (a, b) correctly', async () => {

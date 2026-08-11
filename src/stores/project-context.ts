@@ -72,7 +72,13 @@ function createProjectContextStores(
     refs,
   });
   const colors = createColorStore(options.colorPalette ?? palette);
-  const history = createHistoryStore({ palette });
+  let advanceProjectRevision = () => {};
+  const history = createHistoryStore({
+    palette,
+    onTransition: ({ command }) => {
+      if (!command.managesProjectRevision) advanceProjectRevision();
+    },
+  });
   const project = createProjectStore({
     animation,
     dirtyRect,
@@ -83,6 +89,7 @@ function createProjectContextStores(
     refs,
     selection,
   });
+  advanceProjectRevision = () => project.advanceRevision();
   const viewport = createViewportStore(options.viewportCanvasSize ?? project);
 
   return {
@@ -118,6 +125,16 @@ export class ProjectContext {
   readonly refs: StoreRefs;
   readonly selection: ProjectSelectionStore;
   readonly viewport: ProjectViewportStore;
+
+  /** The active project's monotonic committed-document revision. */
+  get projectRevision() {
+    return this.project.revision;
+  }
+
+  /** Ordered in-process project change notifications. */
+  get projectChangeEvents() {
+    return this.project.changeEvents;
+  }
 
   private started = false;
 
