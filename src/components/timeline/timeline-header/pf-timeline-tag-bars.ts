@@ -3,6 +3,10 @@ import { customElement, property } from 'lit/decorators.js';
 import { BaseComponent } from '../../../core/base-component';
 import { defaultProjectContext } from '../../../stores/project-context';
 import type { FrameTag } from '../../../types/animation';
+import {
+  createFrameTagRequest,
+  executeTimelineProjectState,
+} from '../../../editor/timeline-project-state';
 
 const FRAME_WIDTH = 32;
 
@@ -175,7 +179,14 @@ export class PFTimelineTagBars extends BaseComponent {
     if (target.classList.contains('tag-chevron')) return;
 
     if (tag.collapsed) {
-      this.context.animation.toggleTagCollapsed(tag.id);
+      void executeTimelineProjectState(
+        this.context,
+        createFrameTagRequest(this.context, {
+          kind: 'tag.collapse',
+          tagId: tag.id,
+          collapsed: false,
+        }),
+      );
     } else {
       const currentActiveTag = this.context.animation.activeTagId.value;
       if (currentActiveTag === tag.id) {
@@ -188,7 +199,16 @@ export class PFTimelineTagBars extends BaseComponent {
 
   private handleChevronClick(tagId: string, e: MouseEvent) {
     e.stopPropagation();
-    this.context.animation.toggleTagCollapsed(tagId);
+    const tag = this.context.animation.tags.value.find((item) => item.id === tagId);
+    if (!tag) return;
+    void executeTimelineProjectState(
+      this.context,
+      createFrameTagRequest(this.context, {
+        kind: 'tag.collapse',
+        tagId,
+        collapsed: !tag.collapsed,
+      }),
+    );
   }
 
   private handleContextMenu(tagId: string, e: MouseEvent) {

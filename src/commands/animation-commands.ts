@@ -1,6 +1,6 @@
 import { type Command } from './index';
 import { getActiveProjectContext, type ProjectContext } from '../stores/project-context';
-import { type Cel, type Frame } from '../types/animation';
+import { type Cel, type Frame, type FrameTag } from '../types/animation';
 import { productTelemetry, type TelemetryClient } from '../services/telemetry';
 
 type AnimationCommandContext = Pick<ProjectContext, 'animation'>;
@@ -13,6 +13,8 @@ export class AddFrameCommand implements Command {
   private sourceFrameId?: string;
   private readonly context: AnimationCommandContext;
   private readonly telemetry: TelemetryClient;
+  private readonly tagsBefore: FrameTag[];
+  private tagsAfter: FrameTag[] | null = null;
 
   constructor(
     duplicate: boolean = true,
@@ -24,6 +26,7 @@ export class AddFrameCommand implements Command {
     this.sourceFrameId = sourceFrameId;
     this.context = context;
     this.telemetry = telemetry;
+    this.tagsBefore = context.animation.tags.value.map(cloneFrameTag);
   }
 
   execute() {
@@ -35,6 +38,10 @@ export class AddFrameCommand implements Command {
     const frames = this.context.animation.frames.value;
     if (frames.length > countBefore) {
       this.frameId = frames[frames.length - 1].id;
+      if (this.tagsAfter) {
+        restoreFrameTags(this.context, this.tagsAfter);
+      }
+      this.tagsAfter ??= cloneFrameTags(this.context.animation.tags.value);
       if (countBefore === 1 && frames.length === 2) {
         this.telemetry.record({ name: 'second_frame_created', dimensions: {} });
       }
@@ -44,6 +51,7 @@ export class AddFrameCommand implements Command {
   undo() {
     if (this.frameId) {
       this.context.animation.deleteFrame(this.frameId);
+      restoreFrameTags(this.context, this.tagsBefore);
     }
   }
 }
@@ -59,10 +67,13 @@ export class DeleteFrameCommand implements Command {
   // We need to capture all Cels associated with this frame
   private cels: Array<{ key: string; cel: Cel }> = [];
   private readonly context: AnimationCommandContext;
+  private readonly tagsBefore: FrameTag[];
+  private tagsAfter: FrameTag[] | null = null;
 
   constructor(frameId: string, context: AnimationCommandContext = getActiveProjectContext()) {
     this.frameId = frameId;
     this.context = context;
+    this.tagsBefore = context.animation.tags.value.map(cloneFrameTag);
 
     const frame = this.context.animation.frames.value.find((f) => f.id === frameId);
     if (frame) {
@@ -83,6 +94,8 @@ export class DeleteFrameCommand implements Command {
 
   execute() {
     this.context.animation.deleteFrame(this.frameId);
+    if (this.tagsAfter) restoreFrameTags(this.context, this.tagsAfter);
+    this.tagsAfter ??= cloneFrameTags(this.context.animation.tags.value);
   }
 
   undo() {
@@ -101,7 +114,20 @@ export class DeleteFrameCommand implements Command {
     this.context.animation.cels.value = storeCels;
 
     this.context.animation.goToFrame(this.frameId);
+    restoreFrameTags(this.context, this.tagsBefore);
   }
+}
+
+function cloneFrameTag(tag: FrameTag): FrameTag {
+  return { ...tag };
+}
+
+function cloneFrameTags(tags: readonly FrameTag[]): FrameTag[] {
+  return tags.map(cloneFrameTag);
+}
+
+function restoreFrameTags(context: AnimationCommandContext, tags: readonly FrameTag[]): void {
+  context.animation.tags.value = cloneFrameTags(tags);
 }
 
 export class SetFrameDurationCommand implements Command {

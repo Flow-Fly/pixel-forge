@@ -10,6 +10,10 @@ import '../ui/pf-context-menu';
 import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
+import {
+  createFrameTagRequest,
+  executeTimelineProjectState,
+} from '../../editor/timeline-project-state';
 
 type CelLinkPresentation = {
   isLinked: boolean;
@@ -212,7 +216,14 @@ export class PFTimelineGrid extends BaseComponent {
   }
 
   private handleCollapsedTagClick(tag: FrameTag) {
-    this.context.animation.toggleTagCollapsed(tag.id);
+    void executeTimelineProjectState(
+      this.context,
+      createFrameTagRequest(this.context, {
+        kind: 'tag.collapse',
+        tagId: tag.id,
+        collapsed: false,
+      }),
+    );
   }
 
   private handleCelMouseEnter(
