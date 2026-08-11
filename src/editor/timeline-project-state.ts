@@ -243,7 +243,12 @@ class TimelineProjectStateCommand implements Command {
 
   private assertStructure(expected: ProjectStructure): void {
     const current = captureProjectStructure(this.context);
-    if (!sameProjectStructure(current, expected)) {
+    const matches = this.hasExecuted
+      ? this.request.kind.startsWith('layer.')
+        ? sameLayerSemanticArrays(current.layers, expected.layers)
+        : sameTimelineStructure(current, expected)
+      : sameProjectStructure(current, expected);
+    if (!matches) {
       throw timelineError('revision_conflict', true, {
         reason: 'history_structure_changed',
       });
@@ -255,7 +260,10 @@ class TimelineProjectStateCommand implements Command {
     tags: readonly FrameTag[] | undefined,
   ): void {
     if (layers) {
-      this.context.layers.layers.value = layers.map(cloneLayer);
+      this.context.layers.layers.value = mergeLayerSemanticSnapshot(
+        this.context.layers.layers.value,
+        layers,
+      );
       this.context.dirtyRect.requestFullRedraw();
     }
     if (tags) {
@@ -830,11 +838,15 @@ function captureProjectStructureWithLayersAndTags(
   };
 }
 
-function sameProjectStructure(a: ProjectStructure, b: ProjectStructure): boolean {
-  return sameLayerArrays(a.layers, b.layers) &&
-    sameMapEntries(a.cels, b.cels) &&
-    sameFrameStructures(a.frames, b.frames) &&
-    sameTagArrays(a.tags, b.tags);
+function sameProjectStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
+  return sameLayerArrays(current.layers, expected.layers) &&
+    sameMapEntries(current.cels, expected.cels) &&
+    sameTimelineStructure(current, expected);
+}
+
+function sameTimelineStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
+  return sameFrameStructures(current.frames, expected.frames) &&
+    sameTagArrays(current.tags, expected.tags);
 }
 
 function sameMapEntries(a: ReadonlyMapSnapshot, b: ReadonlyMapSnapshot): boolean {
@@ -857,6 +869,45 @@ function sameFrameStructures(a: readonly FrameStructure[], b: readonly FrameStru
 function sameLayerArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((layer, index) => sameLayer(layer, b[index]));
+}
+
+function sameLayerSemanticArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((layer, index) => sameLayerSemantic(layer, b[index]));
+}
+
+function sameLayerSemantic(a: Layer | undefined, b: Layer | undefined): boolean {
+  if (!a || !b) return false;
+  return sameLayerIdentity(a, b) && sameLayerState(a, b);
+}
+
+function mergeLayerSemanticSnapshot(
+  currentLayers: readonly Layer[],
+  snapshot: readonly Layer[],
+): Layer[] {
+  const currentById = new Map(currentLayers.map((layer) => [layer.id, layer]));
+  if (currentById.size !== snapshot.length) {
+    throw timelineError('revision_conflict', true, { reason: 'history_structure_changed' });
+  }
+
+  return snapshot.map((nextLayer) => {
+    const currentLayer = currentById.get(nextLayer.id);
+    if (!currentLayer) {
+      throw timelineError('revision_conflict', true, { reason: 'history_structure_changed' });
+    }
+    return {
+      ...currentLayer,
+      id: nextLayer.id,
+      name: nextLayer.name,
+      type: nextLayer.type,
+      visible: nextLayer.visible,
+      locked: nextLayer.locked,
+      opacity: nextLayer.opacity,
+      blendMode: nextLayer.blendMode,
+      parentId: nextLayer.parentId,
+      continuous: nextLayer.continuous,
+    };
+  });
 }
 
 function sameLayer(a: Layer | undefined, b: Layer | undefined): boolean {

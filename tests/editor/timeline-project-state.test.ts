@@ -84,6 +84,236 @@ describe('timeline project-state transactions', () => {
     expect(context.layers.layers.value.map((layer) => layer.id)).toEqual([second.id, first.id]);
   });
 
+  it('reproduces the first Undo revision conflict after the complete layer-action sequence', async () => {
+    vi.useFakeTimers();
+    const context = createContext();
+    autoSaveService.start(context);
+    const [first, second] = context.layers.layers.value;
+    if (!first || !second) throw new Error('Expected two layers');
+    const events: unknown[] = [];
+    context.projectChangeEvents.addEventListener('project-change', (event) => {
+      events.push((event as CustomEvent).detail);
+    });
+
+    const actionFactories = [
+      () => createLayerVisibilityRequest(context, first.id, false),
+      () => createLayerLockRequest(context, first.id, true),
+      () => createLayerContinuityRequest(context, first.id, true),
+      () => createLayerDirectionRequest(context, first.id, 'up'),
+      () => createLayerDropRequest(context, second.id, first.id),
+    ];
+    for (const createAction of actionFactories) {
+      const result = await executeTimelineProjectState(context, createAction());
+      expect(result.ok).toBe(true);
+      await context.history.undo();
+      await context.history.redo();
+    }
+    expect(context.history.undoStack.value).toHaveLength(5);
+    expect(autoSaveService.isDirty(context)).toBe(true);
+    const revisionBeforeSync = context.project.revision.value;
+    const historyVersionBeforeSync = context.history.version.value;
+    const eventCountBeforeSync = events.length;
+    context.animation.syncLayerCanvases();
+    const layersAfterSync = new Map(
+      context.layers.layers.value.map((layer) => [layer.id, layer.canvas]),
+    );
+    const celsAfterSync = context.animation.cels.value;
+
+    await context.history.undo();
+    expect(context.layers.layers.value.map((layer) => layer.id)).toEqual([second.id, first.id]);
+    expect(context.layers.layers.value.find((layer) => layer.id === first.id)).toMatchObject({
+      visible: false,
+      locked: true,
+      continuous: true,
+    });
+    expect(context.history.undoStack.value).toHaveLength(4);
+    expect(context.history.redoStack.value).toHaveLength(1);
+    expect(context.history.version.value).toBe(historyVersionBeforeSync + 1);
+    expect(context.project.revision.value).toBe(revisionBeforeSync + 1);
+    expect(events).toHaveLength(eventCountBeforeSync + 1);
+    expect((events.at(-1) as { domains: string[] }).domains).toEqual(['layer-state']);
+    expect(autoSaveService.isDirty(context)).toBe(true);
+    expect(context.animation.cels.value).toBe(celsAfterSync);
+    for (const layer of context.layers.layers.value) {
+      expect(layer.canvas).toBe(layersAfterSync.get(layer.id));
+    }
+    for (const [key, cel] of celsAfterSync) {
+      expect(context.animation.cels.value.get(key)).toBe(cel);
+    }
+  });
+
+  it('allows current-frame cel materialization between a layer command and Undo', async () => {
+    const context = createContext();
+    const [first, second] = context.layers.layers.value;
+    if (!first || !second) throw new Error('Expected two layers');
+
+    const result = await executeTimelineProjectState(
+      context,
+      createLayerVisibilityRequest(context, first.id, false),
+    );
+    expect(result.ok).toBe(true);
+    const secondKey = context.animation.getCelKey(second.id, context.animation.currentFrameId.value);
+    expect(context.animation.cels.value.has(secondKey)).toBe(false);
+
+    context.animation.syncLayerCanvases();
+    const materializedCel = context.animation.cels.value.get(secondKey);
+    if (!materializedCel) throw new Error('Expected current-frame cel materialization');
+
+    await context.history.undo();
+    expect(context.layers.layers.value.find((layer) => layer.id === first.id)?.visible).toBe(true);
+    expect(context.layers.layers.value.find((layer) => layer.id === second.id)?.canvas)
+      .toBe(materializedCel.canvas);
+    expect(context.animation.cels.value.get(secondKey)).toBe(materializedCel);
+  });
+
+  it('allows current-frame cel rebinding between a layer command and Undo', async () => {
+    const context = createContext();
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a layer');
+    context.animation.syncLayerCanvases();
+    const key = context.animation.getCelKey(layer.id, context.animation.currentFrameId.value);
+    const cel = context.animation.cels.value.get(key);
+    if (!cel) throw new Error('Expected a current-frame cel');
+    const staleCanvas = document.createElement('canvas');
+    staleCanvas.width = 64;
+    staleCanvas.height = 64;
+    context.layers.updateLayer(layer.id, { canvas: staleCanvas });
+
+    const result = await executeTimelineProjectState(
+      context,
+      createLayerVisibilityRequest(context, layer.id, false),
+    );
+    expect(result.ok).toBe(true);
+    context.animation.syncLayerCanvases();
+
+    await context.history.undo();
+    expect(context.layers.layers.value.find((item) => item.id === layer.id)?.visible).toBe(true);
+    expect(context.layers.layers.value.find((item) => item.id === layer.id)?.canvas)
+      .toBe(cel.canvas);
+    expect(context.animation.cels.value.get(key)).toBe(cel);
+  });
+
+  it('rejects layer identity divergence without mutating history or revision', async () => {
+    const context = createContext();
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a layer');
+    const events: unknown[] = [];
+    context.projectChangeEvents.addEventListener('project-change', (event) => {
+      events.push((event as CustomEvent).detail);
+    });
+
+    const result = await executeTimelineProjectState(
+      context,
+      createLayerVisibilityRequest(context, layer.id, false),
+    );
+    expect(result.ok).toBe(true);
+    const undoStackBefore = context.history.undoStack.value;
+    const redoStackBefore = context.history.redoStack.value;
+    const historyVersionBefore = context.history.version.value;
+    const revisionBefore = context.project.revision.value;
+    const eventCountBefore = events.length;
+    const dirtyBefore = autoSaveService.isDirty(context);
+    context.layers.updateLayer(layer.id, { name: 'Renamed externally' });
+
+    await expect(context.history.undo()).rejects.toMatchObject({
+      editorError: {
+        code: 'revision_conflict',
+        details: { reason: 'history_structure_changed' },
+      },
+    });
+    expect(context.layers.layers.value.find((item) => item.id === layer.id)?.name)
+      .toBe('Renamed externally');
+    expect(context.history.undoStack.value).toBe(undoStackBefore);
+    expect(context.history.redoStack.value).toBe(redoStackBefore);
+    expect(context.history.version.value).toBe(historyVersionBefore);
+    expect(context.project.revision.value).toBe(revisionBefore);
+    expect(events).toHaveLength(eventCountBefore);
+    expect(autoSaveService.isDirty(context)).toBe(dirtyBefore);
+  });
+
+  it('preserves equivalent and semantic cel replacements through layer Undo', async () => {
+    const run = async (semanticChange: boolean) => {
+      const context = createContext();
+      const [first, second] = context.layers.layers.value;
+      if (!first || !second) throw new Error('Expected two layers');
+      const result = await executeTimelineProjectState(
+        context,
+        createLayerDirectionRequest(context, first.id, 'up'),
+      );
+      expect(result.ok).toBe(true);
+      expect(context.layers.layers.value.map((layer) => layer.id)).toEqual([second.id, first.id]);
+
+      const key = context.animation.getCelKey(first.id, context.animation.currentFrameId.value);
+      const cel = context.animation.cels.value.get(key);
+      if (!cel) throw new Error('Expected a cel');
+      const replacement = {
+        ...cel,
+        ...(semanticChange ? { opacity: 37 } : {}),
+      };
+      context.animation.cels.value = new Map(context.animation.cels.value).set(key, replacement);
+
+      await context.history.undo();
+      expect(context.layers.layers.value.map((layer) => layer.id)).toEqual([first.id, second.id]);
+      expect(context.animation.cels.value.get(key)).toBe(replacement);
+      expect(context.animation.cels.value.get(key)?.opacity).toBe(semanticChange ? 37 : undefined);
+    };
+
+    await run(false);
+    await run(true);
+  });
+
+  it('rejects frame and tag divergence during tag Undo without mutation', async () => {
+    const expectRejected = async (mutate: (context: ProjectContext) => void) => {
+      const context = createContext();
+      const events: unknown[] = [];
+      context.projectChangeEvents.addEventListener('project-change', (event) => {
+        events.push((event as CustomEvent).detail);
+      });
+      const result = await executeTimelineProjectState(
+        context,
+        createFrameTagRequest(context, {
+          kind: 'tag.create',
+          name: 'Replay',
+          color: '#123456',
+          startFrameIndex: 0,
+          endFrameIndex: 0,
+        }),
+      );
+      expect(result.ok).toBe(true);
+      const undoStackBefore = context.history.undoStack.value;
+      const redoStackBefore = context.history.redoStack.value;
+      const historyVersionBefore = context.history.version.value;
+      const revisionBefore = context.project.revision.value;
+      const eventCountBefore = events.length;
+      mutate(context);
+
+      await expect(context.history.undo()).rejects.toMatchObject({
+        editorError: {
+          code: 'revision_conflict',
+          details: { reason: 'history_structure_changed' },
+        },
+      });
+      expect(context.history.undoStack.value).toBe(undoStackBefore);
+      expect(context.history.redoStack.value).toBe(redoStackBefore);
+      expect(context.history.version.value).toBe(historyVersionBefore);
+      expect(context.project.revision.value).toBe(revisionBefore);
+      expect(events).toHaveLength(eventCountBefore);
+    };
+
+    await expectRejected((context) => {
+      context.animation.frames.value = context.animation.frames.value.map((frame) => ({
+        ...frame,
+        duration: frame.duration + 1,
+      }));
+    });
+    await expectRejected((context) => {
+      context.animation.tags.value = context.animation.tags.value.map((tag) => ({
+        ...tag,
+        name: 'Changed externally',
+      }));
+    });
+  });
+
   it('rejects stale, wrong-project, and unavailable requests without mutation', async () => {
     const context = createContext();
     const layer = context.layers.layers.value[0];
