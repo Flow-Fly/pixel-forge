@@ -26,7 +26,7 @@ export class AddFrameCommand implements Command {
     this.sourceFrameId = sourceFrameId;
     this.context = context;
     this.telemetry = telemetry;
-    this.tagsBefore = context.animation.tags.value.map(cloneFrameTag);
+    this.tagsBefore = cloneFrameTags(context.animation.tags?.value ?? []);
   }
 
   execute() {
@@ -41,7 +41,7 @@ export class AddFrameCommand implements Command {
       if (this.tagsAfter) {
         restoreFrameTags(this.context, this.tagsAfter);
       }
-      this.tagsAfter ??= cloneFrameTags(this.context.animation.tags.value);
+      this.tagsAfter ??= cloneFrameTags(this.context.animation.tags?.value ?? []);
       if (countBefore === 1 && frames.length === 2) {
         this.telemetry.record({ name: 'second_frame_created', dimensions: {} });
       }
@@ -73,7 +73,7 @@ export class DeleteFrameCommand implements Command {
   constructor(frameId: string, context: AnimationCommandContext = getActiveProjectContext()) {
     this.frameId = frameId;
     this.context = context;
-    this.tagsBefore = context.animation.tags.value.map(cloneFrameTag);
+    this.tagsBefore = cloneFrameTags(context.animation.tags?.value ?? []);
 
     const frame = this.context.animation.frames.value.find((f) => f.id === frameId);
     if (frame) {
@@ -95,7 +95,7 @@ export class DeleteFrameCommand implements Command {
   execute() {
     this.context.animation.deleteFrame(this.frameId);
     if (this.tagsAfter) restoreFrameTags(this.context, this.tagsAfter);
-    this.tagsAfter ??= cloneFrameTags(this.context.animation.tags.value);
+    this.tagsAfter ??= cloneFrameTags(this.context.animation.tags?.value ?? []);
   }
 
   undo() {
@@ -127,7 +127,9 @@ function cloneFrameTags(tags: readonly FrameTag[]): FrameTag[] {
 }
 
 function restoreFrameTags(context: AnimationCommandContext, tags: readonly FrameTag[]): void {
-  context.animation.tags.value = cloneFrameTags(tags);
+  if (context.animation.tags) {
+    context.animation.tags.value = cloneFrameTags(tags);
+  }
 }
 
 export class SetFrameDurationCommand implements Command {
