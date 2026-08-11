@@ -57,6 +57,9 @@ describe('Canvas Size dialog in Chromium', () => {
     await expect.element(width).toBeVisible();
     await expect.element(height).toBeVisible();
     await expect.element(page.getByRole('button', { name: 'Resize', exact: true })).toBeVisible();
+    const dialog = element.shadowRoot?.querySelector('pf-dialog');
+    const actionsSlot = dialog?.shadowRoot?.querySelector<HTMLSlotElement>('slot[name="actions"]');
+    expect(actionsSlot?.assignedElements()).toHaveLength(1);
 
     const setInput = (input: HTMLInputElement, value: string) => {
       input.value = value;

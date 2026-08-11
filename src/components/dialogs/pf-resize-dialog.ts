@@ -47,6 +47,12 @@ export class PFResizeDialog extends BaseComponent {
       border-radius: 4px;
     }
 
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
     button {
       padding: 6px 12px;
       border-radius: 4px;
@@ -115,7 +121,7 @@ export class PFResizeDialog extends BaseComponent {
 
         ${this.renderRestriction(guidedProject)}
 
-        <form @submit=${this.handleSubmit}>
+        <form id="resize-canvas-form" @submit=${this.handleSubmit}>
           ${this.renderDimensionInput(
             'Width (px)',
             'resize-canvas-width',
@@ -132,8 +138,8 @@ export class PFResizeDialog extends BaseComponent {
           )}
 
           ${this.renderMessage()}
-          ${this.renderActions(guidedProject)}
         </form>
+        ${this.renderActions(guidedProject)}
       </pf-dialog>
     `;
   }
@@ -196,6 +202,7 @@ export class PFResizeDialog extends BaseComponent {
         </button>
         <button
           class="primary"
+          form="resize-canvas-form"
           type="submit"
           ?disabled=${guidedProject || this.submitting}
         >

@@ -109,6 +109,25 @@ describe('HistoryStore', () => {
     expect(historyStore.redoStack.value).toHaveLength(0);
   });
 
+  it('preserves document and history state when initial execution fails', async () => {
+    const cmd = makeCommand('a');
+    cmd.execute = () => {
+      throw new Error('initial execution failed');
+    };
+
+    const undoStackBeforeFailure = historyStore.undoStack.value;
+    const redoStackBeforeFailure = historyStore.redoStack.value;
+    const versionBeforeFailure = historyStore.version.value;
+    const revisionBeforeFailure = defaultProjectContext.project.revision.value;
+    await expect(historyStore.execute(cmd)).rejects.toThrow('initial execution failed');
+
+    expect(historyStore.undoStack.value).toEqual(undoStackBeforeFailure);
+    expect(historyStore.redoStack.value).toEqual(redoStackBeforeFailure);
+    expect(historyStore.version.value).toBe(versionBeforeFailure);
+    expect(defaultProjectContext.project.revision.value).toBe(revisionBeforeFailure);
+    expect(cmd.documentValue).toBe(0);
+  });
+
   it('preserves pending redo commands when replay fails', async () => {
     const cmd = makeCommand('a');
     const execute = cmd.execute.bind(cmd);

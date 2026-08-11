@@ -49,7 +49,7 @@ class HistoryStore {
   canUndo = signal<boolean>(false);
   canRedo = signal<boolean>(false);
 
-  // Version signal - increments on undo/redo to trigger canvas re-render
+  // UI invalidation signal - increments after each completed history transition.
   version = signal<number>(0);
 
   // Track total memory usage

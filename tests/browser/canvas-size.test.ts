@@ -278,6 +278,27 @@ describe('Canvas Size transaction in Chromium', () => {
     expect(context.project.revision.value).toBe(0);
     expect(context.history.undoStack.value).toHaveLength(0);
 
+    const mismatchedPreview = {
+      ...preview.preview,
+      request: {
+        ...preview.preview.request,
+        target: { projectId: 'other-project' },
+        expectedRevision: preview.preview.request.expectedRevision + 1,
+      },
+    };
+    const mismatch = await executeCanvasSize(context, request, {
+      confirmed: true,
+      preview: mismatchedPreview,
+    });
+    expect(mismatch).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'preview_mismatch' } },
+    });
+    expect(context.project.width.value).toBe(4);
+    expect(context.project.height.value).toBe(4);
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+
     const committed = await executeCanvasSize(context, request, {
       confirmed: true,
       preview: preview.preview,
