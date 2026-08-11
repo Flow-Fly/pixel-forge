@@ -104,6 +104,45 @@ describe('HistoryStore', () => {
     expect(historyStore.redoStack.value).toHaveLength(0);
   });
 
+  it('clears pending redo commands when replay fails', async () => {
+    const cmd = makeCommand('a');
+    const execute = cmd.execute.bind(cmd);
+    cmd.execute = () => {
+      if (cmd.executeCount > 0) throw new Error('replay failed');
+      execute();
+    };
+
+    await historyStore.execute(cmd);
+    await historyStore.undo();
+
+    const versionBeforeFailure = historyStore.version.value;
+    await expect(historyStore.redo()).rejects.toThrow('replay failed');
+    expect(historyStore.redoStack.value).toHaveLength(0);
+    expect(historyStore.canRedo.value).toBe(false);
+    expect(historyStore.version.value).toBe(versionBeforeFailure);
+  });
+
+  it('clears pending redo commands when undo replay fails', async () => {
+    const cmd = makeCommand('a');
+    const undo = cmd.undo.bind(cmd);
+    cmd.undo = () => {
+      if (cmd.undoCount > 0) throw new Error('undo replay failed');
+      undo();
+    };
+
+    await historyStore.execute(cmd);
+    await historyStore.undo();
+    await historyStore.redo();
+    await historyStore.execute(makeCommand('b'));
+    await historyStore.undo();
+
+    const versionBeforeFailure = historyStore.version.value;
+    await expect(historyStore.undo()).rejects.toThrow('undo replay failed');
+    expect(historyStore.redoStack.value).toHaveLength(0);
+    expect(historyStore.canRedo.value).toBe(false);
+    expect(historyStore.version.value).toBe(versionBeforeFailure);
+  });
+
   it('undo/undo/redo/redo restores order (a, b) correctly', async () => {
     const a = makeCommand('a');
     const b = makeCommand('b');

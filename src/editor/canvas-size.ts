@@ -127,13 +127,24 @@ interface CanvasSizeEntry {
 interface CanvasSizeSnapshot {
   readonly width: number;
   readonly height: number;
+  readonly frameIds: readonly string[];
+  readonly frameDescriptors: readonly CanvasFrameDescriptor[];
+  readonly layerIds: readonly string[];
   readonly cels: Map<string, Cel>;
+}
+
+interface CanvasFrameDescriptor {
+  readonly order: number;
+  readonly duration: number;
 }
 
 interface ValidatedCanvasSize {
   readonly request: CanvasSizeRequest;
   readonly currentWidth: number;
   readonly currentHeight: number;
+  readonly frameIds: readonly string[];
+  readonly frameDescriptors: readonly CanvasFrameDescriptor[];
+  readonly layerIds: readonly string[];
   readonly entries: readonly CanvasSizeEntry[];
   readonly crop: CanvasCropSummary;
 }
@@ -230,7 +241,8 @@ class ResizeCanvasCommand implements Command {
   private readonly request: CanvasSizeRequest;
   private readonly before: CanvasSizeSnapshot;
   private readonly after: CanvasSizeSnapshot;
-  private expectedRevision: number;
+  private readonly initialRevision: number;
+  private hasExecuted = false;
   private applied = false;
   private _lastEvent: ProjectChangeEvent | null = null;
 
@@ -243,7 +255,7 @@ class ResizeCanvasCommand implements Command {
     this.request = request;
     this.before = prepared.before;
     this.after = prepared.after;
-    this.expectedRevision = request.expectedRevision;
+    this.initialRevision = request.expectedRevision;
     this.memorySize = estimateMemorySize(prepared.after.cels);
   }
 
@@ -256,14 +268,14 @@ class ResizeCanvasCommand implements Command {
       throw editorError('invalid_state', false, { reason: 'already_applied' });
     }
 
-    this.assertExpectedState(this.before);
+    this.assertExpectedState(this.before, !this.hasExecuted);
     this.context.project.applyCanvasSizeState(
       this.after.width,
       this.after.height,
-      this.after.cels
+      remapSnapshotCels(this.context, this.after)
     );
     this._lastEvent = this.context.project.commitChange(this.id, changedDomains());
-    this.expectedRevision = this._lastEvent.toRevision;
+    this.hasExecuted = true;
     this.applied = true;
   }
 
@@ -272,26 +284,28 @@ class ResizeCanvasCommand implements Command {
       throw editorError('invalid_state', false, { reason: 'not_applied' });
     }
 
-    this.assertExpectedState(this.after);
+    this.assertExpectedState(this.after, false);
     this.context.project.applyCanvasSizeState(
       this.before.width,
       this.before.height,
-      this.before.cels
+      remapSnapshotCels(this.context, this.before)
     );
     this._lastEvent = this.context.project.commitChange(this.id, changedDomains());
-    this.expectedRevision = this._lastEvent.toRevision;
     this.applied = false;
   }
 
-  private assertExpectedState(expected: CanvasSizeSnapshot): void {
+  private assertExpectedState(
+    expected: CanvasSizeSnapshot,
+    checkInitialRevision: boolean
+  ): void {
     const target = this.context.project.id.value;
     if (target !== this.request.target.projectId) {
       throw editorError('target_not_found', true);
     }
 
-    if (this.context.project.revision.value !== this.expectedRevision) {
+    if (checkInitialRevision && this.context.project.revision.value !== this.initialRevision) {
       throw editorError('revision_conflict', true, {
-        expectedRevision: this.expectedRevision,
+        expectedRevision: this.initialRevision,
         currentRevision: this.context.project.revision.value,
       });
     }
@@ -303,6 +317,63 @@ class ResizeCanvasCommand implements Command {
       throw editorError('revision_conflict', true, { reason: 'dimensions_changed' });
     }
   }
+}
+
+function remapSnapshotCels(
+  context: ProjectContext,
+  snapshot: CanvasSizeSnapshot
+): Map<string, Cel> {
+  const currentFrames = context.animation.frames.value;
+  const currentLayerIds = context.layers.layers.value
+    .filter((layer) => layer.type !== 'reference')
+    .map((layer) => layer.id);
+
+  if (!matchesSnapshotStructure(snapshot, currentFrames, currentLayerIds)) {
+    throw editorError('revision_conflict', true, {
+      reason: 'history_structure_changed',
+    });
+  }
+
+  const cels = new Map<string, Cel>();
+  snapshot.frameIds.forEach((snapshotFrameId, frameIndex) => {
+    const currentFrameId = currentFrames[frameIndex]?.id;
+    if (!currentFrameId) return;
+
+    snapshot.layerIds.forEach((layerId) => {
+      const sourceKey = context.animation.getCelKey(layerId, snapshotFrameId);
+      const cel = snapshot.cels.get(sourceKey);
+      if (!cel) return;
+
+      const targetKey = context.animation.getCelKey(layerId, currentFrameId);
+      cels.set(
+        targetKey,
+        cel.frameId === currentFrameId ? cel : { ...cel, frameId: currentFrameId },
+      );
+    });
+  });
+  return cels;
+}
+
+function matchesSnapshotStructure(
+  snapshot: CanvasSizeSnapshot,
+  currentFrames: readonly { id: string; order: number; duration: number }[],
+  currentLayerIds: readonly string[],
+): boolean {
+  if (snapshot.frameIds.length !== currentFrames.length ||
+      snapshot.layerIds.length !== currentLayerIds.length) {
+    return false;
+  }
+
+  if (!snapshot.layerIds.every((layerId, index) => layerId === currentLayerIds[index])) {
+    return false;
+  }
+
+  return snapshot.frameDescriptors.every((descriptor, index) => {
+    const frame = currentFrames[index];
+    return frame !== undefined &&
+      frame.order === descriptor.order &&
+      frame.duration === descriptor.duration;
+  });
 }
 
 function normalizeRequest(input: CanvasSizeRequestInput): CanvasSizeRequest {
@@ -340,13 +411,32 @@ function validateCanvasSize(
 
   const entries = collectEntries(context, currentWidth, currentHeight);
   const crop = inspectCrop(entries, currentWidth, currentHeight, request);
+  const structure = captureCanvasSizeStructure(context);
 
   return {
     request,
     currentWidth,
     currentHeight,
+    ...structure,
     entries,
     crop,
+  };
+}
+
+function captureCanvasSizeStructure(context: ProjectContext): Pick<
+  ValidatedCanvasSize,
+  'frameIds' | 'frameDescriptors' | 'layerIds'
+> {
+  const frames = context.animation.frames.value;
+  return {
+    frameIds: frames.map((frame) => frame.id),
+    frameDescriptors: frames.map((frame) => ({
+      order: frame.order,
+      duration: frame.duration,
+    })),
+    layerIds: context.layers.layers.value
+      .filter((layer) => layer.type !== 'reference')
+      .map((layer) => layer.id),
   };
 }
 
@@ -632,6 +722,9 @@ function prepareCanvasSize(validated: ValidatedCanvasSize): PreparedCanvasSize {
   const before: CanvasSizeSnapshot = {
     width: validated.currentWidth,
     height: validated.currentHeight,
+    frameIds: validated.frameIds,
+    frameDescriptors: validated.frameDescriptors,
+    layerIds: validated.layerIds,
     cels: validatedContextCels(validated),
   };
   const state: CanvasPreparationState = {
@@ -649,6 +742,9 @@ function prepareCanvasSize(validated: ValidatedCanvasSize): PreparedCanvasSize {
     after: {
       width: validated.request.width,
       height: validated.request.height,
+      frameIds: validated.frameIds,
+      frameDescriptors: validated.frameDescriptors,
+      layerIds: validated.layerIds,
       cels: afterCels,
     },
   };

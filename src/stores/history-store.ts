@@ -132,7 +132,12 @@ class HistoryStore {
     if (commandIndex === -1) return;
 
     const command = undoStack[commandIndex];
-    await command.undo();
+    try {
+      await command.undo();
+    } catch (error) {
+      this.abortReplayAfterError();
+      throw error;
+    }
 
     // Remove from undo stack
     const newUndoStack = [...undoStack];
@@ -165,7 +170,12 @@ class HistoryStore {
     if (commandIndex === -1) return;
 
     const command = redoStack[commandIndex];
-    await command.execute();
+    try {
+      await command.execute();
+    } catch (error) {
+      this.abortReplayAfterError();
+      throw error;
+    }
 
     // Remove from redo stack
     const newRedoStack = [...redoStack];
@@ -185,6 +195,11 @@ class HistoryStore {
     this.canUndo.value = this.undoStack.value.length > 0;
     this.canRedo.value = this.redoStack.value.length > 0;
     this.version.value++;
+  }
+
+  private abortReplayAfterError() {
+    this.redoStack.value = [];
+    this.canRedo.value = false;
   }
   
   clear() {
