@@ -302,4 +302,102 @@ describe('timeline project-state transactions', () => {
     await context.history.redo();
     expect(context.animation.tags.value).toEqual(deletedTags);
   });
+
+  it('duplicates a non-final frame and replays its exact identity, cels, and tags', async () => {
+    const context = createContext();
+    const firstFrameId = context.animation.currentFrameId.value;
+    context.animation.addFrame(false);
+    const middleFrameId = context.animation.currentFrameId.value;
+    context.animation.addFrame(false);
+    const finalFrameId = context.animation.currentFrameId.value;
+    context.animation.tags.value = [{
+      id: 'middle-duplicate-tag',
+      name: 'All Frames',
+      color: '#123456',
+      startFrameIndex: 0,
+      endFrameIndex: 2,
+      collapsed: false,
+    }];
+
+    const { AddFrameCommand } = await import('../../src/commands/animation-commands');
+    const add = new AddFrameCommand(true, middleFrameId, context);
+    await context.history.execute(add);
+
+    const framesAfterExecute = context.animation.frames.value;
+    expect(framesAfterExecute.map((frame) => frame.id)).toEqual([
+      firstFrameId,
+      middleFrameId,
+      expect.any(String),
+      finalFrameId,
+    ]);
+    const duplicateFrameId = framesAfterExecute[2]?.id;
+    if (!duplicateFrameId) throw new Error('Expected duplicated frame');
+    expect(duplicateFrameId).not.toBe(finalFrameId);
+    expect([...context.animation.cels.value.values()].some((cel) => cel.frameId === duplicateFrameId)).toBe(true);
+    expect(context.animation.tags.value).toEqual([expect.objectContaining({
+      id: 'middle-duplicate-tag',
+      startFrameIndex: 0,
+      endFrameIndex: 3,
+    })]);
+
+    await context.history.undo();
+    expect(context.animation.frames.value.map((frame) => frame.id)).toEqual([
+      firstFrameId,
+      middleFrameId,
+      finalFrameId,
+    ]);
+    expect([...context.animation.cels.value.values()].some((cel) => cel.frameId === duplicateFrameId)).toBe(false);
+    expect(context.animation.tags.value).toEqual([expect.objectContaining({
+      id: 'middle-duplicate-tag',
+      startFrameIndex: 0,
+      endFrameIndex: 2,
+    })]);
+
+    await context.history.redo();
+    expect(context.animation.frames.value.map((frame) => frame.id)).toEqual([
+      firstFrameId,
+      middleFrameId,
+      duplicateFrameId,
+      finalFrameId,
+    ]);
+    expect(context.animation.tags.value).toEqual([expect.objectContaining({
+      id: 'middle-duplicate-tag',
+      startFrameIndex: 0,
+      endFrameIndex: 3,
+    })]);
+  });
+
+  it('removes a final single-frame active tag without orphaning playback state', async () => {
+    const context = createContext();
+    context.animation.addFrame(false);
+    const finalFrameId = context.animation.currentFrameId.value;
+    const tag = {
+      id: 'final-frame-tag',
+      name: 'Final',
+      color: '#abcdef',
+      startFrameIndex: 1,
+      endFrameIndex: 1,
+      collapsed: false,
+    };
+    context.animation.tags.value = [tag];
+    context.animation.setPlaybackMode('tag', tag.id);
+
+    const { DeleteFrameCommand } = await import('../../src/commands/animation-commands');
+    const remove = new DeleteFrameCommand(finalFrameId, context);
+    await context.history.execute(remove);
+
+    expect(context.animation.tags.value).toEqual([]);
+    expect(context.animation.activeTagId.value).toBeNull();
+    expect(context.animation.playbackMode.value).toBe('all');
+
+    await context.history.undo();
+    expect(context.animation.tags.value).toEqual([tag]);
+    expect(context.animation.activeTagId.value).toBeNull();
+    expect(context.animation.playbackMode.value).toBe('all');
+
+    await context.history.redo();
+    expect(context.animation.tags.value).toEqual([]);
+    expect(context.animation.activeTagId.value).toBeNull();
+    expect(context.animation.playbackMode.value).toBe('all');
+  });
 });

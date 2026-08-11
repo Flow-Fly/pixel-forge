@@ -4,6 +4,7 @@ import type {
   ProjectChangeEvent,
 } from '../stores/project-store';
 import type { ProjectContext } from '../stores/project-context';
+import * as tagManager from '../stores/animation/tag-manager';
 import type { FrameTag } from '../types/animation';
 import type { Layer } from '../types/layer';
 import {
@@ -729,128 +730,65 @@ function prepareTagSnapshot(
 ): FrameTag[] {
   switch (request.kind) {
     case 'tag.create':
-      return createTagSnapshot(tags, request, frameCount);
+      return requireTagMutation(tagManager.createFrameTagSnapshot(
+        tags,
+        request.name.trim(),
+        request.color,
+        request.startFrameIndex,
+        request.endFrameIndex,
+        frameCount,
+      ));
     case 'tag.rename':
-      return updateTag(tags, request.tagId, { name: request.name.trim() });
+      return requireTagMutation(tagManager.updateFrameTagSnapshot(
+        tags,
+        request.tagId,
+        { name: request.name.trim() },
+      ));
     case 'tag.recolor':
-      return updateTag(tags, request.tagId, { color: request.color });
+      return requireTagMutation(tagManager.updateFrameTagSnapshot(
+        tags,
+        request.tagId,
+        { color: request.color },
+      ));
     case 'tag.range':
-      return resizeTagSnapshot(tags, request, frameCount);
+      return requireTagMutation(tagManager.resizeFrameTagSnapshot(
+        tags,
+        request.tagId,
+        request.startFrameIndex,
+        request.endFrameIndex,
+        frameCount,
+      ));
     case 'tag.collapse':
-      return updateTag(tags, request.tagId, { collapsed: request.collapsed });
+      return requireTagMutation(tagManager.updateFrameTagSnapshot(
+        tags,
+        request.tagId,
+        { collapsed: request.collapsed },
+      ));
     case 'tag.remove-frame':
-      return removeFrameFromTag(tags, request.tagId, request.frameIndex);
+      return requireTagMutation(tagManager.removeFrameFromTagSnapshot(
+        tags,
+        request.tagId,
+        request.frameIndex,
+      ));
     case 'tag.delete':
-      return deleteTagSnapshot(tags, request.tagId);
+      return requireTagMutation(tagManager.deleteFrameTagSnapshot(tags, request.tagId));
   }
 }
 
-function createTagSnapshot(
-  tags: readonly FrameTag[],
-  request: Extract<FrameTagRequest, { kind: 'tag.create' }>,
-  frameCount: number,
-): FrameTag[] {
-  validateTagRange(request.startFrameIndex, request.endFrameIndex, frameCount);
-  if (hasTagOverlap(tags, request.startFrameIndex, request.endFrameIndex)) {
-    throw timelineError('invalid_request', false, { reason: 'tag_overlap' });
+function requireTagMutation(result: tagManager.TagMutationResult<FrameTag[]>): FrameTag[] {
+  if (result.ok) return result.value;
+  switch (result.reason) {
+    case 'tag_not_found':
+      throw timelineError('target_not_found', true, { resource: 'tag' });
+    case 'tag_overlap':
+      throw timelineError('invalid_request', false, { reason: 'tag_overlap' });
+    case 'invalid_range':
+      throw timelineError('invalid_request', false, { reason: 'tag_range' });
+    case 'frame_not_in_tag':
+      throw timelineError('invalid_request', false, { reason: 'frame_not_in_tag' });
+    case 'frame_not_at_tag_boundary':
+      throw timelineError('invalid_request', false, { reason: 'frame_not_at_tag_boundary' });
   }
-  return [
-    ...tags.map(cloneTag),
-    {
-      id: crypto.randomUUID(),
-      name: request.name.trim(),
-      color: request.color,
-      startFrameIndex: request.startFrameIndex,
-      endFrameIndex: request.endFrameIndex,
-      collapsed: false,
-    },
-  ];
-}
-
-function resizeTagSnapshot(
-  tags: readonly FrameTag[],
-  request: Extract<FrameTagRequest, { kind: 'tag.range' }>,
-  frameCount: number,
-): FrameTag[] {
-  validateTagRange(request.startFrameIndex, request.endFrameIndex, frameCount);
-  if (hasTagOverlap(tags, request.startFrameIndex, request.endFrameIndex, request.tagId)) {
-    throw timelineError('invalid_request', false, { reason: 'tag_overlap' });
-  }
-  return updateTag(tags, request.tagId, {
-    startFrameIndex: request.startFrameIndex,
-    endFrameIndex: request.endFrameIndex,
-  });
-}
-
-function deleteTagSnapshot(tags: readonly FrameTag[], tagId: string): FrameTag[] {
-  if (!tags.some((tag) => tag.id === tagId)) {
-    throw timelineError('target_not_found', true, { resource: 'tag' });
-  }
-  return tags.filter((tag) => tag.id !== tagId).map(cloneTag);
-}
-
-function validateTagRange(start: number, end: number, frameCount: number): void {
-  if (
-    start < 0 ||
-    end < start ||
-    start >= frameCount ||
-    end >= frameCount
-  ) {
-    throw timelineError('invalid_request', false, { reason: 'tag_range' });
-  }
-}
-
-function hasTagOverlap(
-  tags: readonly FrameTag[],
-  start: number,
-  end: number,
-  excludeTagId?: string,
-): boolean {
-  return tags.some((tag) => {
-    if (excludeTagId && tag.id === excludeTagId) return false;
-    return start <= tag.endFrameIndex && end >= tag.startFrameIndex;
-  });
-}
-
-function updateTag(
-  tags: readonly FrameTag[],
-  tagId: string,
-  updates: Partial<Omit<FrameTag, 'id'>>,
-): FrameTag[] {
-  const index = tags.findIndex((tag) => tag.id === tagId);
-  if (index === -1) {
-    throw timelineError('target_not_found', true, { resource: 'tag' });
-  }
-  const next = tags.map(cloneTag);
-  next[index] = { ...next[index], ...updates };
-  return next;
-}
-
-function removeFrameFromTag(
-  tags: readonly FrameTag[],
-  tagId: string,
-  frameIndex: number,
-): FrameTag[] {
-  const tag = tags.find((item) => item.id === tagId);
-  if (!tag) {
-    throw timelineError('target_not_found', true, { resource: 'tag' });
-  }
-  if (
-    frameIndex < tag.startFrameIndex ||
-    frameIndex > tag.endFrameIndex
-  ) {
-    throw timelineError('invalid_request', false, { reason: 'frame_not_in_tag' });
-  }
-  if (tag.startFrameIndex === tag.endFrameIndex) {
-    return tags.filter((item) => item.id !== tagId).map(cloneTag);
-  }
-  if (frameIndex === tag.startFrameIndex) {
-    return updateTag(tags, tagId, { startFrameIndex: tag.startFrameIndex + 1 });
-  }
-  if (frameIndex === tag.endFrameIndex) {
-    return updateTag(tags, tagId, { endFrameIndex: tag.endFrameIndex - 1 });
-  }
-  throw timelineError('invalid_request', false, { reason: 'frame_not_at_tag_boundary' });
 }
 
 function captureProjectStructure(context: ProjectContext): ProjectStructure {

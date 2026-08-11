@@ -30,21 +30,35 @@ export class AddFrameCommand implements Command {
   }
 
   execute() {
-    // We need to capture the ID of the created frame
-    // addFrame does not return the created frame, so capture the new tail frame.
-
+    const frameIdsBefore = new Set(this.context.animation.frames.value.map((frame) => frame.id));
     const countBefore = this.context.animation.frames.value.length;
-    this.context.animation.addFrame(this.duplicate, this.sourceFrameId);
+    const createdFrameId = this.context.animation.addFrame(
+      this.duplicate,
+      this.sourceFrameId,
+      this.frameId ?? undefined,
+    );
+    const frameId = this.captureCreatedFrameId(frameIdsBefore, countBefore, createdFrameId);
+    if (!frameId) return;
+
+    this.frameId = frameId;
+    if (this.tagsAfter) restoreFrameTags(this.context, this.tagsAfter);
+    this.tagsAfter ??= cloneFrameTags(this.context.animation.tags?.value ?? []);
+    this.recordSecondFrameCreated(countBefore);
+  }
+
+  private captureCreatedFrameId(
+    frameIdsBefore: ReadonlySet<string>,
+    countBefore: number,
+    createdFrameId: string | undefined,
+  ): string | null {
     const frames = this.context.animation.frames.value;
-    if (frames.length > countBefore) {
-      this.frameId = frames[frames.length - 1].id;
-      if (this.tagsAfter) {
-        restoreFrameTags(this.context, this.tagsAfter);
-      }
-      this.tagsAfter ??= cloneFrameTags(this.context.animation.tags?.value ?? []);
-      if (countBefore === 1 && frames.length === 2) {
-        this.telemetry.record({ name: 'second_frame_created', dimensions: {} });
-      }
+    if (frames.length <= countBefore) return null;
+    return this.frameId ?? createdFrameId ?? frames.find((frame) => !frameIdsBefore.has(frame.id))?.id ?? null;
+  }
+
+  private recordSecondFrameCreated(countBefore: number): void {
+    if (countBefore === 1 && this.context.animation.frames.value.length === 2) {
+      this.telemetry.record({ name: 'second_frame_created', dimensions: {} });
     }
   }
 
