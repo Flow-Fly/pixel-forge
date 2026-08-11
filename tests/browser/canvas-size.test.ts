@@ -6,10 +6,15 @@ import {
   createCanvasSizeRequest,
   executeCanvasSize,
   previewCanvasSize,
+  type CanvasSizeRequest,
 } from '../../src/editor/canvas-size';
+import { AddFrameCommand } from '../../src/commands/animation-commands';
 import { createProjectThumbnail } from '../../src/services/project-thumbnail';
 import { autoSaveService } from '../../src/services/auto-save';
 import { compositeFrame } from '../../src/utils/canvas-utils';
+import { composeExportFrame } from '../../src/services/export-composition';
+import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
+import { renderFrameToCanvas } from '../../src/utils/preview-renderer';
 import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
 import type { Cel } from '../../src/types/animation';
 
@@ -39,6 +44,26 @@ function getCanvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Chromium did not provide a 2D canvas context');
   return context;
+}
+
+function rgbaPixels(canvas: HTMLCanvasElement): number[] {
+  return Array.from(
+    getCanvasContext(canvas).getImageData(0, 0, canvas.width, canvas.height).data,
+  );
+}
+
+function renderPreview(context: ProjectContext): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = context.project.width.value;
+  canvas.height = context.project.height.value;
+  renderFrameToCanvas(
+    getCanvasContext(canvas),
+    context.animation.currentFrameId.value,
+    context.layers.layers.value,
+    context.animation.cels.value,
+    context.animation,
+  );
+  return canvas;
 }
 
 function getCel(context: ProjectContext, layerId: string, frameId: string): Cel {
@@ -97,13 +122,19 @@ function assertResizedPayloads(
 }
 
 async function assertDurableOutputs(context: ProjectContext, layerId: string): Promise<void> {
-  const composed = document.createElement('canvas');
-  composed.width = 6;
-  composed.height = 5;
-  const composedContext = getCanvasContext(composed);
   const frameId = context.animation.currentFrameId.value;
-  compositeFrame(frameId, composedContext, { context });
-  expect(pixel(composed, 1, 1)).toEqual([255, 0, 0, 255]);
+  const preview = renderPreview(context);
+  const expectedPixels = rgbaPixels(preview);
+  const exportCanvas = composeExportFrame({
+    frameId,
+    width: context.project.width.value,
+    height: context.project.height.value,
+    scale: 1,
+    layers: context.layers.layers.value,
+    cels: context.animation.cels.value,
+    getCelKey: context.animation.getCelKey.bind(context.animation),
+  });
+  expect(rgbaPixels(exportCanvas)).toEqual(expectedPixels);
 
   const thumbnail = await createProjectThumbnail({
     compositeFrame: (previewFrameId, targetContext) =>
@@ -112,18 +143,52 @@ async function assertDurableOutputs(context: ProjectContext, layerId: string): P
     width: context.project.width.value,
     height: context.project.height.value,
   });
-  expect(thumbnail?.byteLength).toBeGreaterThan(0);
+  expect(thumbnail).toBeDefined();
+  if (!thumbnail) return;
+  const thumbnailCanvas = document.createElement('canvas');
+  thumbnailCanvas.width = context.project.width.value;
+  thumbnailCanvas.height = context.project.height.value;
+  await loadImageDataToCanvas(thumbnail, thumbnailCanvas);
+  expect(rgbaPixels(thumbnailCanvas)).toEqual(expectedPixels);
 
   const saved = await context.project.saveProject();
   await context.project.loadProject(structuredClone(saved));
-  expect(context.project.width.value).toBe(6);
-  expect(context.project.height.value).toBe(5);
+  expect(context.project.width.value).toBe(preview.width);
+  expect(context.project.height.value).toBe(preview.height);
   const reloadedCel = getCel(context, layerId, context.animation.currentFrameId.value);
-  expect(reloadedCel.canvas.width).toBe(6);
-  expect(reloadedCel.canvas.height).toBe(5);
-  expect(pixel(reloadedCel.canvas, 1, 1)).toEqual([255, 0, 0, 255]);
-  expect(reloadedCel.indexBuffer?.length).toBe(30);
-  expect(reloadedCel.indexBuffer?.[1 + 1 * 6]).toBe(2);
+  expect(reloadedCel.canvas.width).toBe(preview.width);
+  expect(reloadedCel.canvas.height).toBe(preview.height);
+  const reloadedPreview = renderPreview(context);
+  expect(rgbaPixels(reloadedPreview)).toEqual(expectedPixels);
+
+  const reloadedExport = composeExportFrame({
+    frameId: context.animation.currentFrameId.value,
+    width: context.project.width.value,
+    height: context.project.height.value,
+    scale: 1,
+    layers: context.layers.layers.value,
+    cels: context.animation.cels.value,
+    getCelKey: context.animation.getCelKey.bind(context.animation),
+  });
+  expect(rgbaPixels(reloadedExport)).toEqual(expectedPixels);
+
+  const reloadedThumbnail = await createProjectThumbnail({
+    compositeFrame: (previewFrameId, targetContext) =>
+      compositeFrame(previewFrameId, targetContext, { context }),
+    frameId: context.animation.currentFrameId.value,
+    width: context.project.width.value,
+    height: context.project.height.value,
+  });
+  expect(reloadedThumbnail).toBeDefined();
+  if (!reloadedThumbnail) return;
+  const reloadedThumbnailCanvas = document.createElement('canvas');
+  reloadedThumbnailCanvas.width = context.project.width.value;
+  reloadedThumbnailCanvas.height = context.project.height.value;
+  await loadImageDataToCanvas(reloadedThumbnail, reloadedThumbnailCanvas);
+  expect(rgbaPixels(reloadedThumbnailCanvas)).toEqual(expectedPixels);
+
+  expect(reloadedCel.indexBuffer?.length).toBe(preview.width * preview.height);
+  expect(reloadedCel.indexBuffer?.[1 + 1 * preview.width]).toBe(2);
 }
 
 describe('Canvas Size transaction in Chromium', () => {
@@ -183,8 +248,10 @@ describe('Canvas Size transaction in Chromium', () => {
     const canvasContext = cel.canvas.getContext('2d');
     if (!canvasContext) throw new Error('Chromium did not provide a 2D canvas context');
     canvasContext.fillStyle = '#00ff00';
+    canvasContext.fillRect(1, 1, 1, 1);
     canvasContext.fillRect(3, 3, 1, 1);
     const indexBuffer = new Uint8Array(16);
+    indexBuffer[5] = 2;
     indexBuffer[15] = 4;
     context.animation.updateCelIndexBuffer(cel.layerId, cel.frameId, indexBuffer);
     const request = createCanvasSizeRequest(context, 2, 2);
@@ -201,6 +268,16 @@ describe('Canvas Size transaction in Chromium', () => {
     expect(context.project.width.value).toBe(4);
     expect(context.history.undoStack.value).toHaveLength(0);
 
+    const missingPreview = await executeCanvasSize(context, request, { confirmed: true });
+    expect(missingPreview).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'preview_required' } },
+    });
+    expect(context.project.width.value).toBe(4);
+    expect(context.project.height.value).toBe(4);
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+
     const committed = await executeCanvasSize(context, request, {
       confirmed: true,
       preview: preview.preview,
@@ -210,7 +287,29 @@ describe('Canvas Size transaction in Chromium', () => {
     expect(context.project.height.value).toBe(2);
     expect(pixel(context.animation.cels.value.get(
       context.animation.getCelKey(cel.layerId, cel.frameId)
-    )!.canvas, 1, 1)).toEqual([0, 0, 0, 0]);
+    )!.canvas, 1, 1)).toEqual([255, 0, 0, 255]);
+    expect(getCel(context, cel.layerId, cel.frameId).indexBuffer?.length).toBe(4);
+    expect(getCel(context, cel.layerId, cel.frameId).indexBuffer?.[3]).toBe(2);
+    await assertDurableOutputs(context, cel.layerId);
+  });
+
+  it('advances project revision for real history transitions and rejects captured canvas requests', async () => {
+    const { context } = createContext();
+    const request = createCanvasSizeRequest(context, 6, 6);
+    const initialRevision = context.project.revision.value;
+
+    await context.history.execute(new AddFrameCommand(false, undefined, context));
+    expect(context.project.revision.value).toBe(initialRevision + 1);
+
+    const stale = await executeCanvasSize(context, request);
+    expect(stale).toMatchObject({ ok: false, error: { code: 'revision_conflict' } });
+    expect(context.project.width.value).toBe(4);
+    expect(context.history.undoStack.value).toHaveLength(1);
+
+    await context.history.undo();
+    expect(context.project.revision.value).toBe(initialRevision + 2);
+    await context.history.redo();
+    expect(context.project.revision.value).toBe(initialRevision + 3);
   });
 
   it('rejects stale, wrong-target, and guided requests without mutation', async () => {
@@ -218,6 +317,30 @@ describe('Canvas Size transaction in Chromium', () => {
     const tooLarge = await executeCanvasSize(context, createCanvasSizeRequest(context, 2049, 4));
     expect(tooLarge).toMatchObject({ ok: false, error: { code: 'limit_exceeded' } });
     expect(context.project.width.value).toBe(4);
+
+    const legacyTarget = await executeCanvasSize(context, {
+      target: context.project.id.value,
+      expectedRevision: 0,
+      width: 6,
+      height: 6,
+    } as unknown as CanvasSizeRequest);
+    expect(legacyTarget).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'target' } },
+    });
+
+    const missingOffset = await executeCanvasSize(context, {
+      target: { projectId: context.project.id.value },
+      expectedRevision: 0,
+      width: 6,
+      height: 6,
+    } as unknown as CanvasSizeRequest);
+    expect(missingOffset).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'offset' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
 
     const request = createCanvasSizeRequest(context, 6, 6);
     context.project.commitChange('unrelated', ['raster-content']);

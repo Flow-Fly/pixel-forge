@@ -72,7 +72,13 @@ function createProjectContextStores(
     refs,
   });
   const colors = createColorStore(options.colorPalette ?? palette);
-  const history = createHistoryStore({ palette });
+  let advanceProjectRevision = () => {};
+  const history = createHistoryStore({
+    palette,
+    onTransition: ({ command }) => {
+      if (!command.managesProjectRevision) advanceProjectRevision();
+    },
+  });
   const project = createProjectStore({
     animation,
     dirtyRect,
@@ -83,6 +89,7 @@ function createProjectContextStores(
     refs,
     selection,
   });
+  advanceProjectRevision = () => project.advanceRevision();
   const viewport = createViewportStore(options.viewportCanvasSize ?? project);
 
   return {

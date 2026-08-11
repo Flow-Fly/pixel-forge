@@ -187,6 +187,11 @@ class ProjectStore {
     this.revision.value = 0;
   }
 
+  /** Advance semantic document identity for a successful history transition. */
+  advanceRevision() {
+    this.revision.value += 1;
+  }
+
   commitChange(
     transactionId: string,
     domains: readonly ProjectChangeDomain[]

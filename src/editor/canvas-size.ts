@@ -17,8 +17,25 @@ export const canvasSizeCatalog = Object.freeze({
     id: CANVAS_SIZE_COMMAND_ID,
     target: 'project',
     requiresRevision: true,
-    input: ['target', 'expectedRevision', 'width', 'height', 'offset'],
+    request: {
+      target: { projectId: 'string' },
+      expectedRevision: 'integer >= 0',
+      width: 'integer 1..2048',
+      height: 'integer 1..2048',
+      offset: {
+        x: 'integer -2048..2048',
+        y: 'integer -2048..2048',
+      },
+    },
+    limits: {
+      dimension: { min: 1, max: CANVAS_SIZE_MAX_DIMENSION },
+      offset: { min: -CANVAS_SIZE_MAX_DIMENSION, max: CANVAS_SIZE_MAX_DIMENSION },
+    },
+    availability: {
+      guidedDrawing: 'unsupported',
+    },
     affectedDomains: ['canvas-bounds', 'raster-content'] as const,
+    revision: 'monotonic-project-revision',
     undo: 'one-session-history-entry',
     confirmation: 'required-when-meaningful-content-is-cropped',
     errors: [
@@ -28,6 +45,7 @@ export const canvasSizeCatalog = Object.freeze({
       'invalid_state',
       'limit_exceeded',
       'unsupported',
+      'internal',
     ] as const,
   },
 } as const);
@@ -48,13 +66,6 @@ export interface CanvasSizeRequest {
   readonly height: number;
   readonly offset: CanvasOffset;
 }
-
-export type CanvasSizeRequestInput = Omit<CanvasSizeRequest, 'target' | 'offset'> & {
-  target: ProjectTarget | string;
-  offset?: CanvasOffset;
-  offsetX?: number;
-  offsetY?: number;
-};
 
 export interface CanvasCropSummary {
   readonly rgbaPixels: number;
@@ -181,7 +192,7 @@ export function createCanvasSizeRequest(
 
 export function previewCanvasSize(
   context: ProjectContext,
-  input: CanvasSizeRequestInput
+  input: CanvasSizeRequest
 ): CanvasSizePreviewResult {
   try {
     const request = normalizeRequest(input);
@@ -203,19 +214,32 @@ export function previewCanvasSize(
 
 export async function executeCanvasSize(
   context: ProjectContext,
-  input: CanvasSizeRequestInput,
+  input: CanvasSizeRequest,
   options: CanvasSizeExecutionOptions = {}
 ): Promise<CanvasSizeResult> {
   try {
     const request = normalizeRequest(input);
     const validated = validateCanvasSize(context, request);
 
-    if (options.preview && !sameRequest(options.preview.request, request)) {
-      throw editorError('invalid_request', false, { reason: 'preview_mismatch' });
+    if (options.preview) {
+      let previewRequest: CanvasSizeRequest;
+      try {
+        previewRequest = normalizeRequest(options.preview.request);
+      } catch {
+        throw editorError('invalid_request', false, { reason: 'preview_mismatch' });
+      }
+      if (!sameRequest(previewRequest, request)) {
+        throw editorError('invalid_request', false, { reason: 'preview_mismatch' });
+      }
     }
 
-    if (hasMeaningfulCrop(validated.crop) && !options.confirmed) {
-      throw editorError('invalid_request', false, { reason: 'confirmation_required' });
+    if (hasMeaningfulCrop(validated.crop)) {
+      if (!options.preview) {
+        throw editorError('invalid_request', false, { reason: 'preview_required' });
+      }
+      if (!options.confirmed) {
+        throw editorError('invalid_request', false, { reason: 'confirmation_required' });
+      }
     }
 
     const prepared = prepareCanvasSize(validated);
@@ -236,6 +260,7 @@ export async function executeCanvasSize(
 class ResizeCanvasCommand implements Command {
   readonly id = crypto.randomUUID();
   readonly name = 'Resize Canvas';
+  readonly managesProjectRevision = true;
   readonly memorySize: number;
   private readonly context: ProjectContext;
   private readonly request: CanvasSizeRequest;
@@ -376,27 +401,32 @@ function matchesSnapshotStructure(
   });
 }
 
-function normalizeRequest(input: CanvasSizeRequestInput): CanvasSizeRequest {
-  const target =
-    typeof input.target === 'string'
-      ? { projectId: input.target }
-      : input.target;
-  const offset = input.offset ?? {
-    x: input.offsetX ?? 0,
-    y: input.offsetY ?? 0,
-  };
+function normalizeRequest(input: unknown): CanvasSizeRequest {
+  if (!isRecord(input)) {
+    throw editorError('invalid_request', false, { reason: 'request' });
+  }
 
-  if (!target || typeof target.projectId !== 'string' || target.projectId.length === 0) {
+  const target = input.target;
+  if (!isRecord(target) || typeof target.projectId !== 'string' || target.projectId.length === 0) {
     throw editorError('invalid_request', false, { reason: 'target' });
+  }
+
+  const offset = input.offset;
+  if (!isRecord(offset)) {
+    throw editorError('invalid_request', false, { reason: 'offset' });
   }
 
   return {
     target: { projectId: target.projectId },
-    expectedRevision: input.expectedRevision,
-    width: input.width,
-    height: input.height,
-    offset: { x: offset.x, y: offset.y },
+    expectedRevision: input.expectedRevision as number,
+    width: input.width as number,
+    height: input.height as number,
+    offset: { x: offset.x as number, y: offset.y as number },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function validateCanvasSize(

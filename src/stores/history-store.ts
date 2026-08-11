@@ -13,9 +13,20 @@ export interface Command {
   userId?: string;
   timestamp?: number;
   memorySize?: number; // Optional for backwards compatibility
+  /** Canvas Size owns its compact project-change event and revision. */
+  managesProjectRevision?: boolean;
   execute(): void | Promise<void>;
   undo(): void | Promise<void>;
 }
+
+type HistoryTransitionPhase = 'execute' | 'undo' | 'redo';
+
+interface HistoryTransition {
+  phase: HistoryTransitionPhase;
+  command: Command;
+}
+
+type HistoryTransitionHandler = (transition: HistoryTransition) => void;
 
 interface HistoryContext {
   undoStack: Command[];
@@ -27,6 +38,7 @@ type HistoryPaletteStore = ReturnType<typeof createPaletteStore>;
 
 export interface HistoryStoreDependencies {
   palette: HistoryPaletteStore;
+  onTransition?: HistoryTransitionHandler;
 }
 
 class HistoryStore {
@@ -43,12 +55,14 @@ class HistoryStore {
   // Track total memory usage
   private memoryUsage = 0;
   private readonly palette: HistoryPaletteStore;
+  private readonly onTransition?: HistoryTransitionHandler;
 
   // Context stack for isolated editing modes (e.g., brush editing)
   private contextStack: HistoryContext[] = [];
 
   constructor(dependencies: HistoryStoreDependencies) {
     this.palette = dependencies.palette;
+    this.onTransition = dependencies.onTransition;
   }
 
   // NOTE: persistence is intentionally NOT a concern of this store.
@@ -65,6 +79,7 @@ class HistoryStore {
     }
 
     await command.execute();
+    this.onTransition?.({ phase: 'execute', command });
 
     this.undoStack.value = [...this.undoStack.value, command];
     this.redoStack.value = []; // Clear redo stack on new action
@@ -132,12 +147,8 @@ class HistoryStore {
     if (commandIndex === -1) return;
 
     const command = undoStack[commandIndex];
-    try {
-      await command.undo();
-    } catch (error) {
-      this.abortReplayAfterError();
-      throw error;
-    }
+    await command.undo();
+    this.onTransition?.({ phase: 'undo', command });
 
     // Remove from undo stack
     const newUndoStack = [...undoStack];
@@ -170,12 +181,8 @@ class HistoryStore {
     if (commandIndex === -1) return;
 
     const command = redoStack[commandIndex];
-    try {
-      await command.execute();
-    } catch (error) {
-      this.abortReplayAfterError();
-      throw error;
-    }
+    await command.execute();
+    this.onTransition?.({ phase: 'redo', command });
 
     // Remove from redo stack
     const newRedoStack = [...redoStack];
@@ -197,11 +204,6 @@ class HistoryStore {
     this.version.value++;
   }
 
-  private abortReplayAfterError() {
-    this.redoStack.value = [];
-    this.canRedo.value = false;
-  }
-  
   clear() {
     this.undoStack.value = [];
     this.redoStack.value = [];
