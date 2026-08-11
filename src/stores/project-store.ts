@@ -39,7 +39,11 @@ import type { createLayerStore } from './layers-store';
 import type { createPaletteStore } from './palette/store';
 import type { createSelectionStore } from './selection/store';
 
-export type ProjectChangeDomain = 'canvas-bounds' | 'raster-content';
+export type ProjectChangeDomain =
+  | 'canvas-bounds'
+  | 'raster-content'
+  | 'layer-state'
+  | 'timeline';
 
 export interface ProjectChangeEvent {
   type: 'project-change';

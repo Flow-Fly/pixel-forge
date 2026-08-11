@@ -9,6 +9,14 @@ import {
 } from '../../commands/layer-commands';
 import type { Layer } from '../../types/layer';
 import type { ReferenceLayerData } from '../../types/reference';
+import {
+  createLayerContinuityRequest,
+  createLayerDropRequest,
+  createLayerLockRequest,
+  createLayerVisibilityRequest,
+  executeTimelineProjectState,
+} from '../../editor/timeline-project-state';
+import type { LayerStateRequest } from '../../editor/timeline-project-state';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 import '../ui/pf-context-menu';
@@ -236,6 +244,7 @@ export class PFTimelineLayers extends BaseComponent {
   private scrubOriginalOpacity = 0;
   private context = defaultProjectContext;
   private draggedLayerContext: ProjectContext | null = null;
+  private draggedLayerTarget: { projectId: string; expectedRevision: number } | null = null;
   private editingLayerContext: ProjectContext | null = null;
   private scrubContext = defaultProjectContext;
 
@@ -324,21 +333,31 @@ export class PFTimelineLayers extends BaseComponent {
   }
 
   private toggleVisibility(id: string, e: Event) {
-    e.stopPropagation();
-    if (this.context.guidedDrawing.active) return;
-    this.context.layers.toggleVisibility(id);
+    this.toggleLayerState(id, e, (layer) => layer.visible, createLayerVisibilityRequest);
   }
 
   private toggleLock(id: string, e: Event) {
-    e.stopPropagation();
-    if (this.context.guidedDrawing.active) return;
-    this.context.layers.toggleLock(id);
+    this.toggleLayerState(id, e, (layer) => layer.locked, createLayerLockRequest);
   }
 
   private toggleContinuous(id: string, e: Event) {
+    this.toggleLayerState(id, e, (layer) => !!layer.continuous, createLayerContinuityRequest);
+  }
+
+  private toggleLayerState(
+    id: string,
+    e: Event,
+    readValue: (layer: Layer) => boolean,
+    createRequest: (context: ProjectContext, layerId: string, value: boolean) => LayerStateRequest,
+  ) {
     e.stopPropagation();
     if (this.context.guidedDrawing.active) return;
-    this.context.layers.toggleContinuous(id);
+    const layer = this.context.layers.layers.value.find((item) => item.id === id);
+    if (!layer) return;
+    void executeTimelineProjectState(
+      this.context,
+      createRequest(this.context, id, !readValue(layer)),
+    );
   }
 
   private startRename(id: string, currentName: string, e: Event) {
@@ -459,6 +478,8 @@ export class PFTimelineLayers extends BaseComponent {
     const layerStore = context.layers;
     const layer = layerStore.layers.value.find((l) => l.id === layerId);
     if (!layer) return;
+    const layerTarget = { projectId: context.project.id.value };
+    const layerExpectedRevision = context.project.revision.value;
 
     // Store for undo/redo
     this.contextMenuOriginalOpacity = layer.opacity;
@@ -499,7 +520,14 @@ export class PFTimelineLayers extends BaseComponent {
         type: 'item',
         label: layer.continuous ? '◯ Make Non-Continuous' : '∞ Make Continuous',
         action: () => {
-          layerStore.toggleContinuous(layerId);
+          void executeTimelineProjectState(
+            context,
+            {
+              ...createLayerContinuityRequest(context, layerId, !layer.continuous),
+              target: layerTarget,
+              expectedRevision: layerExpectedRevision,
+            },
+          );
         },
       },
       { type: 'divider' },
@@ -532,6 +560,10 @@ export class PFTimelineLayers extends BaseComponent {
 
     this.draggedLayerId = id;
     this.draggedLayerContext = this.context;
+    this.draggedLayerTarget = {
+      projectId: this.context.project.id.value,
+      expectedRevision: this.context.project.revision.value,
+    };
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', id);
@@ -542,6 +574,7 @@ export class PFTimelineLayers extends BaseComponent {
     this.draggedLayerId = null;
     this.dragOverLayerId = null;
     this.draggedLayerContext = null;
+    this.draggedLayerTarget = null;
   }
 
   private handleDragOver(id: string, e: DragEvent) {
@@ -557,25 +590,23 @@ export class PFTimelineLayers extends BaseComponent {
   }
 
   private handleDrop(targetId: string, e: DragEvent) {
-    if (this.context.guidedDrawing.active) return;
     e.preventDefault();
     if (!this.draggedLayerId || this.draggedLayerId === targetId) return;
 
     const context = this.draggedLayerContext ?? this.context;
-    const layerStore = context.layers;
-    const layers = [...layerStore.layers.value];
-    const draggedIndex = layers.findIndex((l) => l.id === this.draggedLayerId);
-    const targetIndex = layers.findIndex((l) => l.id === targetId);
-
-    if (draggedIndex !== -1 && targetIndex !== -1) {
-      const [draggedLayer] = layers.splice(draggedIndex, 1);
-      layers.splice(targetIndex, 0, draggedLayer);
-      layerStore.layers.value = layers;
+    const capturedTarget = this.draggedLayerTarget;
+    if (capturedTarget) {
+      void executeTimelineProjectState(context, {
+        ...createLayerDropRequest(context, this.draggedLayerId, targetId),
+        target: capturedTarget,
+        expectedRevision: capturedTarget.expectedRevision,
+      });
     }
 
     this.draggedLayerId = null;
     this.dragOverLayerId = null;
     this.draggedLayerContext = null;
+    this.draggedLayerTarget = null;
   }
 
   // Opacity scrubbing handlers
