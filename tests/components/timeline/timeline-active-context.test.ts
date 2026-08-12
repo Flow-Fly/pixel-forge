@@ -274,6 +274,67 @@ describe('timeline active project context binding', () => {
     ]);
   });
 
+  it('exposes the active shared cel as current and cel selection as a pressed state', async () => {
+    const context = createContext('Active shared cel semantics');
+    const { layer, first, third } = createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const grid = await createTimelineGrid();
+    const activeSharedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>(
+      `.cel[aria-label="${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame."]`,
+    );
+    const inactiveSharedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>(
+      `.cel[aria-label="${layer.name}, frame 1. Shared cel — affects frames 1, 3. Edits propagate to every affected frame."]`,
+    );
+
+    expect(activeSharedCel).toBeTruthy();
+    expect(activeSharedCel?.getAttribute('aria-current')).toBe('true');
+    expect(activeSharedCel?.getAttribute('aria-pressed')).toBe('false');
+    expect(inactiveSharedCel?.hasAttribute('aria-current')).toBe(false);
+    expect(inactiveSharedCel?.getAttribute('aria-pressed')).toBe('false');
+
+    activeSharedCel?.click();
+    await waitForContextRender(grid);
+
+    const selectedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>(
+      `.cel[aria-label="${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame."]`,
+    );
+    expect(selectedCel?.getAttribute('aria-current')).toBe('true');
+    expect(selectedCel?.getAttribute('aria-pressed')).toBe('true');
+    expect(context.animation.currentFrameId.value).toBe(third.id);
+    expect(context.animation.selectedCelKeys.value.has(
+      context.animation.getCelKey(layer.id, first.id),
+    )).toBe(false);
+  });
+
+  it('keeps cel button content within phrasing content', async () => {
+    const context = createContext('Phrasing cel content');
+    createNonAdjacentHardLinkedCels(context);
+    context.animation.tags.value = [{
+      id: 'tag-1',
+      name: 'Intro',
+      color: '#3498db',
+      startFrameIndex: 0,
+      endFrameIndex: 0,
+      collapsed: false,
+    }];
+    context.animation.tagResizePreview.value = {
+      tagId: 'tag-1',
+      previewStart: 0,
+      previewEnd: 0,
+    };
+    setActiveProjectContext(context);
+
+    const grid = await createTimelineGrid();
+    const cel = grid.shadowRoot?.querySelector<HTMLButtonElement>('.cel');
+
+    expect(cel).toBeTruthy();
+    expect(cel?.querySelectorAll('div')).toHaveLength(0);
+    expect(cel?.querySelector('.tag-tint')?.tagName).toBe('SPAN');
+    expect(cel?.querySelector('.resize-preview-tint')?.tagName).toBe('SPAN');
+    expect(cel?.querySelector('.cel-content')?.tagName).toBe('SPAN');
+  });
+
   it('shows every cross-layer group member with an unambiguous affected-frame list', async () => {
     const context = createContext('Cross-layer linked cels');
     const { firstLayer, secondLayer } = createCrossLayerHardLinkedCels(context);

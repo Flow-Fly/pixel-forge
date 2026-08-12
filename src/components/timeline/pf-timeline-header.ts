@@ -669,6 +669,7 @@ export class PFTimelineHeader extends BaseComponent {
 
     const frameIndex = sharedCelFrameIndex(context.animation.frames.value, frameId);
     if (frameIndex < 0) return '';
+    const visualFrameIndex = getVisualFrameIndex(frameIndex, context.animation.tags.value);
     const unavailableReason = getCelUnlinkUnavailableReason(context);
     const unlinkLabel = unavailableReason
       ? `Unlink this cel. ${unavailableReason}`
@@ -680,7 +681,7 @@ export class PFTimelineHeader extends BaseComponent {
         data-shared-cel-context
         role="group"
         aria-label="Shared cel — affects frames ${formatAffectedFrames(sharedCel)}"
-        style="left: ${frameIndex * 32}px"
+        style="left: ${visualFrameIndex * 32}px"
       >
         <span class="link-glyph" aria-hidden="true">⛓</span>
         <span class="copy">
@@ -723,6 +724,21 @@ export class PFTimelineHeader extends BaseComponent {
       <pf-tag-preview></pf-tag-preview>
     `;
   }
+}
+
+function getVisualFrameIndex(frameIndex: number, tags: readonly FrameTag[]): number {
+  let visualOffset = 0;
+
+  for (const tag of [...tags].sort((first, second) => first.startFrameIndex - second.startFrameIndex)) {
+    if (!tag.collapsed) continue;
+    if (frameIndex < tag.startFrameIndex) break;
+    if (frameIndex <= tag.endFrameIndex) {
+      return tag.startFrameIndex + visualOffset;
+    }
+    visualOffset -= tag.endFrameIndex - tag.startFrameIndex;
+  }
+
+  return frameIndex + visualOffset;
 }
 
 function calculateTagResizeRange(

@@ -16,7 +16,7 @@ import type { Cel, Frame } from '../../src/types/animation';
 
 const contexts: ProjectContext[] = [];
 
-function createHardLinkedContext() {
+function createHardLinkedContext(withTextCelData = true) {
   const context = createProjectContext();
   contexts.push(context);
   const layer = context.layers.layers.value[0];
@@ -31,7 +31,7 @@ function createHardLinkedContext() {
   const canvas = document.createElement('canvas');
   canvas.width = 2;
   canvas.height = 2;
-  const indexBuffer = Uint8Array.from([1, 2, 3, 4]);
+  const indexBuffer = withTextCelData ? Uint8Array.from([1, 2, 3, 4]) : new Uint8Array(4);
   const linkId = 'shared-cel-group';
   const cels = new Map(context.animation.cels.value);
   for (const frame of frames) {
@@ -45,7 +45,7 @@ function createHardLinkedContext() {
       linkedCelId: linkId,
       linkType: 'hard',
       opacity: 47,
-      textCelData: { content: 'Shared note', x: 2, y: 3 },
+      ...(withTextCelData ? { textCelData: { content: 'Shared note', x: 2, y: 3 } } : {}),
     });
   }
   context.animation.cels.value = cels;
@@ -145,7 +145,9 @@ describe('timeline cel unlink transaction', () => {
         width,
         height,
       })),
-      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+      getImageData: vi.fn((_x: number, _y: number, width = 1, height = 1) => ({
+        data: new Uint8ClampedArray(width * height * 4),
+      })),
     } as unknown as CanvasRenderingContext2D);
   });
 
@@ -228,6 +230,35 @@ describe('timeline cel unlink transaction', () => {
     expect(context.animation.cels.value.get(middleKey)).toBe(unlinkedCel);
     expectRemainingGroup(context, layer.id, frames, linkId, canvas, indexBuffer);
     expect(context.history.undoStack.value).toHaveLength(1);
+  });
+
+  it('keeps unlink Undo and Redo valid after a save rebuilds index-buffer entries', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext(false);
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+    );
+
+    expect(result.ok).toBe(true);
+    const unlinkedBeforeSave = context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, middleCel.frameId),
+    );
+    await context.project.saveProject();
+    const unlinkedAfterSave = context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, middleCel.frameId),
+    );
+    expect(unlinkedAfterSave).not.toBe(unlinkedBeforeSave);
+    expect(unlinkedAfterSave?.indexBuffer).not.toBe(unlinkedBeforeSave?.indexBuffer);
+
+    await context.history.undo();
+    expect(context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, middleCel.frameId),
+    )?.linkedCelId).toBeTruthy();
+
+    await context.history.redo();
+    expect(context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, middleCel.frameId),
+    )?.linkedCelId).toBeUndefined();
   });
 
   it('unlinks a group created by Link new cels after indexed drawing', async () => {

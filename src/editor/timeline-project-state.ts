@@ -180,7 +180,7 @@ type ProjectStructure = {
   readonly tags: readonly FrameTag[];
 };
 
-type ReadonlyMapSnapshot = ReadonlyMap<string, unknown>;
+type ReadonlyMapSnapshot = ReadonlyMap<string, Cel>;
 
 type FrameStructure = {
   readonly id: string;
@@ -1085,13 +1085,13 @@ function captureProjectStructureWithLayersAndTags(
 
 function sameProjectStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
   return sameLayerArrays(current.layers, expected.layers) &&
-    sameMapEntries(current.cels, expected.cels) &&
+    sameCelMapEntries(current.cels, expected.cels) &&
     sameTimelineStructure(current, expected);
 }
 
 function sameCelUnlinkStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
   return sameLayerDocumentArrays(current.layers, expected.layers) &&
-    sameMapEntries(current.cels, expected.cels) &&
+    sameCelMapEntries(current.cels, expected.cels) &&
     sameTimelineStructure(current, expected);
 }
 
@@ -1100,12 +1100,49 @@ function sameTimelineStructure(current: ProjectStructure, expected: ProjectStruc
     sameTagArrays(current.tags, expected.tags);
 }
 
-function sameMapEntries(a: ReadonlyMapSnapshot, b: ReadonlyMapSnapshot): boolean {
+function sameCelMapEntries(a: ReadonlyMapSnapshot, b: ReadonlyMapSnapshot): boolean {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
-    if (b.get(key) !== value) return false;
+    const other = b.get(key);
+    if (!sameCelState(value, other)) return false;
   }
   return true;
+}
+
+function sameCelState(current: Cel, expected: Cel | undefined): boolean {
+  if (current === expected) return true;
+  if (!expected || current.indexBuffer === expected.indexBuffer) return false;
+
+  return sameCelIdentity(current, expected) &&
+    sameIndexBuffers(current.indexBuffer, expected.indexBuffer) &&
+    sameCelLinkState(current, expected) &&
+    sameCelMetadata(current, expected);
+}
+
+function sameCelIdentity(current: Cel, expected: Cel): boolean {
+  return current.id === expected.id &&
+    current.layerId === expected.layerId &&
+    current.frameId === expected.frameId &&
+    current.canvas === expected.canvas;
+}
+
+function sameCelLinkState(current: Cel, expected: Cel): boolean {
+  return current.linkedCelId === expected.linkedCelId &&
+    current.linkType === expected.linkType;
+}
+
+function sameCelMetadata(current: Cel, expected: Cel): boolean {
+  return current.opacity === expected.opacity &&
+    current.textCelData === expected.textCelData;
+}
+
+function sameIndexBuffers(
+  current: Uint8Array | undefined,
+  expected: Uint8Array | undefined,
+): boolean {
+  if (current === expected) return true;
+  if (!current || !expected || current.length !== expected.length) return false;
+  return current.every((value, index) => value === expected[index]);
 }
 
 function sameFrameStructures(a: readonly FrameStructure[], b: readonly FrameStructure[]): boolean {

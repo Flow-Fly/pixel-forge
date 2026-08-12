@@ -3,6 +3,10 @@ import { page, userEvent } from 'vitest/browser';
 
 import '../../src/components/timeline/pf-timeline';
 import {
+  createFrameTagRequest,
+  executeTimelineProjectState,
+} from '../../src/editor/timeline-project-state';
+import {
   createProjectContext,
   restoreDefaultProjectContext,
   setActiveProjectContext,
@@ -305,6 +309,104 @@ describe('linked cel sharing in Chromium', () => {
 
     await userEvent.click(sharedCel);
     expect(document.querySelector('dialog[open]')).toBeNull();
+  });
+
+  it('keeps the shared-cel context bar aligned with the visible frame after a tag collapses', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const tagResult = await executeTimelineProjectState(
+      context,
+      createFrameTagRequest(context, {
+        kind: 'tag.create',
+        name: 'Intro',
+        color: '#3498db',
+        startFrameIndex: 0,
+        endFrameIndex: 1,
+      }),
+    );
+    if (!tagResult.ok || !tagResult.tagId) throw new Error('Expected the frame tag');
+
+    const collapseResult = await executeTimelineProjectState(
+      context,
+      createFrameTagRequest(context, {
+        kind: 'tag.collapse',
+        tagId: tagResult.tagId,
+        collapsed: true,
+      }),
+    );
+    expect(collapseResult.ok).toBe(true);
+
+    const timeline = document.createElement('pf-timeline');
+    timeline.style.width = '600px';
+    timeline.style.height = '320px';
+    document.body.append(timeline);
+    await (timeline as import('../../src/components/timeline/pf-timeline').PFTimeline).updateComplete;
+
+    const header = timeline.shadowRoot?.querySelector<HTMLElement>('pf-timeline-header');
+    const contextBar = header?.shadowRoot?.querySelector<HTMLElement>('[data-shared-cel-context]');
+    const frameCells = header?.shadowRoot?.querySelector<HTMLElement>('pf-timeline-frame-cells');
+    await expect.poll(() => frameCells?.shadowRoot?.querySelector<HTMLElement>('.frame-cell.active')?.textContent?.trim())
+      .toBe('3');
+    const activeFrame = frameCells?.shadowRoot?.querySelector<HTMLElement>('.frame-cell.active');
+
+    expect(contextBar).toBeTruthy();
+    expect(contextBar?.getBoundingClientRect().left).toBe(
+      activeFrame?.getBoundingClientRect().left,
+    );
+    expect(contextBar?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      activeFrame?.getBoundingClientRect().top ?? 0,
+    );
+  });
+
+  it('anchors a hidden active frame to the collapsed tag representative', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const tagResult = await executeTimelineProjectState(
+      context,
+      createFrameTagRequest(context, {
+        kind: 'tag.create',
+        name: 'Outro',
+        color: '#2ecc71',
+        startFrameIndex: 1,
+        endFrameIndex: 2,
+      }),
+    );
+    if (!tagResult.ok || !tagResult.tagId) throw new Error('Expected the frame tag');
+
+    const collapseResult = await executeTimelineProjectState(
+      context,
+      createFrameTagRequest(context, {
+        kind: 'tag.collapse',
+        tagId: tagResult.tagId,
+        collapsed: true,
+      }),
+    );
+    expect(collapseResult.ok).toBe(true);
+
+    const timeline = document.createElement('pf-timeline');
+    timeline.style.width = '600px';
+    timeline.style.height = '320px';
+    document.body.append(timeline);
+    await (timeline as import('../../src/components/timeline/pf-timeline').PFTimeline).updateComplete;
+
+    const header = timeline.shadowRoot?.querySelector<HTMLElement>('pf-timeline-header');
+    const contextBar = header?.shadowRoot?.querySelector<HTMLElement>('[data-shared-cel-context]');
+    const frameCells = header?.shadowRoot?.querySelector<HTMLElement>('pf-timeline-frame-cells');
+    await expect.poll(() => frameCells?.shadowRoot?.querySelectorAll('.frame-cell').length)
+      .toBe(2);
+    const visibleFrames = [...(frameCells?.shadowRoot?.querySelectorAll<HTMLElement>('.frame-cell') ?? [])];
+
+    expect(visibleFrames.map((frame) => frame.textContent?.trim())).toEqual(['1', '2']);
+    expect(frameCells?.shadowRoot?.querySelector('.frame-cell.active')).toBeNull();
+    expect(contextBar?.getBoundingClientRect().left).toBe(
+      visibleFrames[1]?.getBoundingClientRect().left,
+    );
   });
 
   it('keeps a shared cel visibly focusable from the keyboard', async () => {

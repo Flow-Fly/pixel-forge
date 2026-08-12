@@ -1,4 +1,4 @@
-import { html, css } from 'lit';
+import { css, html, nothing } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { BaseComponent } from '../../core/base-component';
@@ -485,10 +485,14 @@ export class PFTimelineGrid extends BaseComponent {
   private renderNormalCel(layer: Layer, frame: Frame, frameIndex: number, tags: FrameTag[]) {
     const animation = this.context.animation;
     const presentation = this.getCelPresentation(layer, frame, frameIndex, tags);
+    const isActive =
+      layer.id === this.context.layers.activeLayerId.value &&
+      frame.id === animation.currentFrameId.value;
+    const isSelected = animation.selectedCelKeys.value.has(presentation.key);
     const celClasses = {
       cel: true,
-      active: layer.id === this.context.layers.activeLayerId.value && frame.id === animation.currentFrameId.value,
-      selected: animation.selectedCelKeys.value.has(presentation.key),
+      active: isActive,
+      selected: isSelected,
       'has-content': presentation.hasContent,
       linked: presentation.link.isLinked,
       'hard-linked': presentation.link.isHardLinked,
@@ -517,6 +521,8 @@ export class PFTimelineGrid extends BaseComponent {
         class=${classMap(celClasses)}
         style="${style}"
         aria-label=${accessibleName}
+        aria-current=${isActive ? 'true' : nothing}
+        aria-pressed=${String(isSelected)}
         @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
         @contextmenu=${(e: MouseEvent) => this.handleCelContextMenu(e, presentation.key)}
         @keydown=${(e: KeyboardEvent) => this.handleCelKeyDown(e, presentation.key)}
@@ -524,9 +530,9 @@ export class PFTimelineGrid extends BaseComponent {
           this.handleCelMouseEnter(e, layer.id, frame.id, layer.name, frameIndex)}
         @mouseleave=${this.handleCelMouseLeave}
       >
-        ${presentation.hasTint ? html`<div class="tag-tint"></div>` : ''}
-        ${presentation.hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ''}
-        <div class="cel-content"></div>
+        ${presentation.hasTint ? html`<span class="tag-tint"></span>` : ''}
+        ${presentation.hasResizePreview ? html`<span class="resize-preview-tint"></span>` : ''}
+        <span class="cel-content"></span>
         ${presentation.link.isHardLinked ? html`<span class="link-glyph" aria-hidden="true">⛓</span>` : ''}
       </button>
     `;
