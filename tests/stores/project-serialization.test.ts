@@ -105,6 +105,87 @@ function expectNoFrameCelsForLayer(file: ProjectFile, layerId: string): void {
   }
 }
 
+type LinkedCelPersistenceFixture = {
+  context: ReturnType<typeof createProjectContext>;
+  layerId: string;
+  middleFrameId: string;
+};
+
+async function createLinkedCelPersistenceFixture(): Promise<LinkedCelPersistenceFixture> {
+  const context = createProjectContext();
+  await context.project.newProject(16, 12);
+  const layer = context.layers.layers.value[0];
+  if (!layer) throw new Error('Expected an initial layer');
+
+  context.animation.addFrame(false);
+  context.animation.addFrame(false);
+  const [firstFrame, middleFrame, lastFrame] = context.animation.frames.value;
+  if (!firstFrame || !middleFrame || !lastFrame) {
+    throw new Error('Expected three animation frames');
+  }
+
+  const firstKey = context.animation.getCelKey(layer.id, firstFrame.id);
+  const middleKey = context.animation.getCelKey(layer.id, middleFrame.id);
+  const firstCel = context.animation.cels.value.get(firstKey);
+  const middleCel = context.animation.cels.value.get(middleKey);
+  if (!firstCel || !middleCel) throw new Error('Expected cels for the linked group');
+
+  context.animation.cels.value = new Map(context.animation.cels.value)
+    .set(firstKey, { ...firstCel, indexBuffer: Uint8Array.from([1, 2, 3, 4]) })
+    .set(middleKey, {
+      ...middleCel,
+      opacity: 47,
+      textCelData: { content: 'Keep this metadata', x: 2, y: 3 },
+    });
+  context.animation.linkCels(
+    [firstKey, middleKey, context.animation.getCelKey(layer.id, lastFrame.id)],
+    'hard'
+  );
+  context.animation.goToFrame(middleFrame.id);
+
+  return { context, layerId: layer.id, middleFrameId: middleFrame.id };
+}
+
+async function unlinkAndReload({
+  context,
+  layerId,
+  middleFrameId,
+}: LinkedCelPersistenceFixture): Promise<[ProjectFile, ProjectFile]> {
+  const drawing = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    imageSmoothingEnabled: false,
+    drawImage: vi.fn(),
+    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(16 * 12 * 4) })),
+  } as unknown as CanvasRenderingContext2D);
+  const result = await executeTimelineProjectState(
+    context,
+    createCelUnlinkRequest(context, layerId, middleFrameId)
+  );
+  drawing.mockRestore();
+  expect(result.ok).toBe(true);
+
+  const saved = await context.project.saveProject();
+  vi.useFakeTimers();
+  await context.project.loadProject(structuredClone(saved), false);
+  await vi.runAllTimersAsync();
+  vi.useRealTimers();
+
+  return [saved, await context.project.saveProject()];
+}
+
+function expectUnlinkedCelPersistence(file: ProjectFile, layerId: string): void {
+  const cels = file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === layerId));
+  expect(cels[1]).toMatchObject({
+    opacity: 47,
+    indexData: [1, 2, 3, 4],
+    textCelData: { content: 'Keep this metadata', x: 2, y: 3 },
+  });
+  expect(cels[1]?.linkedCelId).toBeUndefined();
+  expect(cels[1]?.linkType).toBeUndefined();
+  expect(cels[0]?.linkedCelId).toEqual(cels[2]?.linkedCelId);
+  expect(cels[0]?.linkType).toBe('hard');
+  expect(cels[2]?.linkType).toBe('hard');
+}
+
 describe('project save -> load -> save round-trip (structural)', () => {
   beforeEach(async () => {
     vi.useFakeTimers(); // keeps auto-save + deferred resetView from firing
@@ -407,72 +488,12 @@ describe('project save -> load -> save round-trip (structural)', () => {
   });
 
   it('persists an unlinked cel and the remaining hard-linked group through reload', async () => {
-    const context = createProjectContext();
-    await context.project.newProject(16, 12);
-    const layer = context.layers.layers.value[0];
-    if (!layer) throw new Error('Expected an initial layer');
+    const fixture = await createLinkedCelPersistenceFixture();
+    const [saved, reloaded] = await unlinkAndReload(fixture);
 
-    context.animation.addFrame(false);
-    context.animation.addFrame(false);
-    const [firstFrame, middleFrame, lastFrame] = context.animation.frames.value;
-    if (!firstFrame || !middleFrame || !lastFrame) {
-      throw new Error('Expected three animation frames');
-    }
-
-    const firstKey = context.animation.getCelKey(layer.id, firstFrame.id);
-    const middleKey = context.animation.getCelKey(layer.id, middleFrame.id);
-    const firstCel = context.animation.cels.value.get(firstKey);
-    const middleCel = context.animation.cels.value.get(middleKey);
-    if (!firstCel || !middleCel) throw new Error('Expected cels for the linked group');
-
-    context.animation.cels.value = new Map(context.animation.cels.value)
-      .set(firstKey, { ...firstCel, indexBuffer: Uint8Array.from([1, 2, 3, 4]) })
-      .set(middleKey, {
-        ...middleCel,
-        opacity: 47,
-        textCelData: { content: 'Keep this metadata', x: 2, y: 3 },
-      });
-    context.animation.linkCels(
-      [firstKey, middleKey, context.animation.getCelKey(layer.id, lastFrame.id)],
-      'hard'
-    );
-    context.animation.goToFrame(middleFrame.id);
-
-    const drawing = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-      imageSmoothingEnabled: false,
-      drawImage: vi.fn(),
-      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(16 * 12 * 4) })),
-    } as unknown as CanvasRenderingContext2D);
-
-    const result = await executeTimelineProjectState(
-      context,
-      createCelUnlinkRequest(context, layer.id, middleFrame.id)
-    );
-    drawing.mockRestore();
-    expect(result.ok).toBe(true);
-
-    const saved = await context.project.saveProject();
-    vi.useFakeTimers();
-    await context.project.loadProject(structuredClone(saved), false);
-    await vi.runAllTimersAsync();
-    vi.useRealTimers();
-    const reloaded = await context.project.saveProject();
-
-    for (const file of [saved, reloaded]) {
-      const cels = file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === layer.id));
-      expect(cels[1]).toMatchObject({
-        opacity: 47,
-        indexData: [1, 2, 3, 4],
-        textCelData: { content: 'Keep this metadata', x: 2, y: 3 },
-      });
-      expect(cels[1]?.linkedCelId).toBeUndefined();
-      expect(cels[1]?.linkType).toBeUndefined();
-      expect(cels[0]?.linkedCelId).toEqual(cels[2]?.linkedCelId);
-      expect(cels[0]?.linkType).toBe('hard');
-      expect(cels[2]?.linkType).toBe('hard');
-    }
-
-    context.dispose();
+    expectUnlinkedCelPersistence(saved, fixture.layerId);
+    expectUnlinkedCelPersistence(reloaded, fixture.layerId);
+    fixture.context.dispose();
   });
 
   it('keeps loader-created missing cels as default blanks', async () => {
