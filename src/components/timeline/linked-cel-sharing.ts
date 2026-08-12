@@ -1,8 +1,7 @@
 import type { ProjectContext } from '../../stores/project-context';
-import type { Cel, Frame } from '../../types/animation';
+import type { Frame } from '../../types/animation';
 
 export interface SharedCelPresentation {
-  readonly cel: Cel;
   readonly frameNumbers: readonly number[];
 }
 
@@ -27,7 +26,7 @@ export function getSharedCelPresentation(
   }, []);
 
   if (frameNumbers.length < 2) return null;
-  return { cel, frameNumbers };
+  return { frameNumbers };
 }
 
 export function formatAffectedFrames(frameNumbers: readonly number[]): string {

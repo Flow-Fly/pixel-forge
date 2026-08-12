@@ -18,6 +18,7 @@ import {
 import {
   getSharedCelPresentation,
   sharedCelAccessibleName,
+  type SharedCelPresentation,
 } from './linked-cel-sharing';
 
 type CelLinkPresentation = {
@@ -26,7 +27,6 @@ type CelLinkPresentation = {
   linkColor: string | null;
   continuesLeft: boolean;
   continuesRight: boolean;
-  affectedFrames: readonly number[];
 };
 
 type CelPresentation = {
@@ -36,6 +36,7 @@ type CelPresentation = {
   tagColor: string | null;
   hasResizePreview: boolean;
   resizePreviewColor: string | null;
+  sharedCel: SharedCelPresentation | null;
   link: CelLinkPresentation;
 };
 
@@ -500,7 +501,7 @@ export class PFTimelineGrid extends BaseComponent {
       presentation.resizePreviewColor
     );
 
-    const sharedCel = getSharedCelPresentation(this.context, layer.id, frame.id);
+    const sharedCel = presentation.sharedCel;
     const accessibleName = sharedCel
       ? sharedCelAccessibleName(layer.name, frameIndex + 1, sharedCel.frameNumbers)
       : `${layer.name}, frame ${frameIndex + 1}`;
@@ -538,6 +539,7 @@ export class PFTimelineGrid extends BaseComponent {
     const isRuntimeEmpty = !!cel && animation.isRuntimeEmptyCel(cel);
     const tagColor = this.getTagColorForFrame(frameIndex, tags);
     const resizePreview = this.getResizePreviewForFrame(frameIndex, tags);
+    const sharedCel = getSharedCelPresentation(this.context, layer.id, frame.id);
 
     return {
       key,
@@ -546,7 +548,14 @@ export class PFTimelineGrid extends BaseComponent {
       tagColor,
       hasResizePreview: resizePreview.inPreview,
       resizePreviewColor: resizePreview.color,
-      link: this.getCelLinkPresentation(layer.id, frameIndex, cel, isRuntimeEmpty),
+      sharedCel,
+      link: this.getCelLinkPresentation(
+        layer.id,
+        frameIndex,
+        cel,
+        isRuntimeEmpty,
+        sharedCel !== null,
+      ),
     };
   }
 
@@ -554,16 +563,11 @@ export class PFTimelineGrid extends BaseComponent {
     layerId: string,
     frameIndex: number,
     cel: Cel | undefined,
-    isRuntimeEmpty: boolean
+    isRuntimeEmpty: boolean,
+    isHardLinked: boolean,
   ): CelLinkPresentation {
     const linkedCelId = isRuntimeEmpty ? undefined : cel?.linkedCelId;
     const isLinked = linkedCelId != null;
-    const sharedCel = getSharedCelPresentation(
-      this.context,
-      layerId,
-      this.context.animation.frames.value[frameIndex]?.id ?? '',
-    );
-    const isHardLinked = sharedCel !== null;
     const continuity = this.getLinkContinuity(layerId, frameIndex, linkedCelId);
 
     return {
@@ -572,7 +576,6 @@ export class PFTimelineGrid extends BaseComponent {
       linkColor: linkedCelId != null ? this.context.animation.getLinkColor(linkedCelId) : null,
       continuesLeft: continuity.left,
       continuesRight: continuity.right,
-      affectedFrames: sharedCel?.frameNumbers ?? [],
     };
   }
 
