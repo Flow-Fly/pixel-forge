@@ -27,6 +27,11 @@ import type {
   FrameTagRequestInput,
 } from '../../editor/timeline-project-state';
 import type { ProjectTarget } from '../../editor/contracts';
+import {
+  formatAffectedFrames,
+  getSharedCelPresentation,
+  sharedCelFrameIndex,
+} from './linked-cel-sharing';
 
 const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
 const TAG_COLORS = [
@@ -53,12 +58,46 @@ export class PFTimelineHeader extends BaseComponent {
     :host {
       display: flex;
       align-items: flex-end;
-      height: 48px;
+      height: 74px;
       background-color: rgba(255, 255, 255, 0.018);
       border-bottom: 1px solid var(--pf-color-border);
       position: relative;
       text-transform: uppercase;
       letter-spacing: 0;
+    }
+
+    .linked-cel-context {
+      position: absolute;
+      top: 22px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      max-width: min(360px, calc(100vw - 230px));
+      height: 22px;
+      padding: 0 6px;
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-sm);
+      box-sizing: border-box;
+      background: var(--pf-color-bg-surface);
+      color: var(--pf-color-text-main);
+      font-size: 10px;
+      text-transform: none;
+      z-index: 6;
+    }
+
+    .linked-cel-context strong {
+      font-weight: 600;
+    }
+
+    .linked-cel-context .link-glyph {
+      flex: 0 0 auto;
+    }
+
+    .linked-cel-context .copy {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   `;
 
@@ -594,8 +633,35 @@ export class PFTimelineHeader extends BaseComponent {
     window.removeEventListener('mouseup', this.handleTagResizeEnd);
   };
 
+  private renderSharedCelContext() {
+    const layerId = this.context.layers.activeLayerId.value;
+    const frameId = this.context.animation.currentFrameId.value;
+    if (!layerId || !frameId) return '';
+
+    const sharedCel = getSharedCelPresentation(this.context, layerId, frameId);
+    if (!sharedCel) return '';
+
+    const frameIndex = sharedCelFrameIndex(this.context.animation.frames.value, frameId);
+    if (frameIndex < 0) return '';
+
+    return html`
+      <div
+        class="linked-cel-context"
+        data-shared-cel-context
+        role="status"
+        style="left: ${frameIndex * 32}px"
+      >
+        <span class="link-glyph" aria-hidden="true">⛓</span>
+        <span class="copy">
+          <strong>Shared cel</strong> — affects frames ${formatAffectedFrames(sharedCel.frameNumbers)}
+        </span>
+      </div>
+    `;
+  }
+
   render() {
     return html`
+      ${this.renderSharedCelContext()}
       <pf-timeline-tag-bars
         .resizingTagId=${this.resizingTagId}
         @tag-context-menu=${this.handleTagContextMenu}

@@ -14,6 +14,10 @@ import {
   createFrameTagRequest,
   executeTimelineProjectState,
 } from '../../editor/timeline-project-state';
+import {
+  getSharedCelPresentation,
+  sharedCelAccessibleName,
+} from './linked-cel-sharing';
 
 type CelLinkPresentation = {
   isLinked: boolean;
@@ -21,6 +25,7 @@ type CelLinkPresentation = {
   linkColor: string | null;
   continuesLeft: boolean;
   continuesRight: boolean;
+  affectedFrames: readonly number[];
 };
 
 type CelPresentation = {
@@ -51,7 +56,12 @@ export class PFTimelineGrid extends BaseComponent {
       width: 32px;
       height: 100%;
       flex-shrink: 0;
+      padding: 0;
+      border: 0;
       border-right: 1px solid var(--pf-color-border);
+      background: transparent;
+      color: inherit;
+      font: inherit;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -130,15 +140,16 @@ export class PFTimelineGrid extends BaseComponent {
       opacity: 0.6;
     }
 
-    /* Link badge (only for hard links) */
-    .link-badge {
+    /* Link pictogram (only for hard-linked shared cels) */
+    .link-glyph {
       position: absolute;
       bottom: 2px;
       right: 2px;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
+      color: var(--link-line-color, var(--pf-color-text-main));
+      font-size: 11px;
+      line-height: 1;
       z-index: 2;
+      text-shadow: 0 1px 1px var(--pf-color-bg-dark);
     }
 
     /* Soft link spanning lines */
@@ -175,6 +186,12 @@ export class PFTimelineGrid extends BaseComponent {
 
     .cel.hard-linked.link-continues-left::before {
       height: 6px;
+    }
+
+    .cel:focus-visible {
+      outline: 2px solid var(--pf-color-text-main);
+      outline-offset: -3px;
+      z-index: 4;
     }
   `;
 
@@ -458,10 +475,17 @@ export class PFTimelineGrid extends BaseComponent {
       presentation.resizePreviewColor
     );
 
+    const sharedCel = getSharedCelPresentation(this.context, layer.id, frame.id);
+    const accessibleName = sharedCel
+      ? sharedCelAccessibleName(layer.name, frameIndex + 1, sharedCel.frameNumbers)
+      : `${layer.name}, frame ${frameIndex + 1}`;
+
     return html`
-      <div
+      <button
+        type="button"
         class=${classMap(celClasses)}
         style="${style}"
+        aria-label=${accessibleName}
         @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
         @contextmenu=${(e: MouseEvent) => this.handleCelContextMenu(e, presentation.key)}
         @mouseenter=${(e: MouseEvent) =>
@@ -471,12 +495,8 @@ export class PFTimelineGrid extends BaseComponent {
         ${presentation.hasTint ? html`<div class="tag-tint"></div>` : ''}
         ${presentation.hasResizePreview ? html`<div class="resize-preview-tint"></div>` : ''}
         <div class="cel-content"></div>
-        ${
-          presentation.link.isHardLinked
-            ? html`<div class="link-badge" style="background-color: ${presentation.link.linkColor}"></div>`
-            : ''
-        }
-      </div>
+        ${presentation.link.isHardLinked ? html`<span class="link-glyph" aria-hidden="true">⛓</span>` : ''}
+      </button>
     `;
   }
 
@@ -512,7 +532,12 @@ export class PFTimelineGrid extends BaseComponent {
   ): CelLinkPresentation {
     const linkedCelId = isRuntimeEmpty ? undefined : cel?.linkedCelId;
     const isLinked = linkedCelId != null;
-    const isHardLinked = isLinked && cel?.linkType === 'hard';
+    const sharedCel = getSharedCelPresentation(
+      this.context,
+      layerId,
+      this.context.animation.frames.value[frameIndex]?.id ?? '',
+    );
+    const isHardLinked = sharedCel !== null;
     const continuity = this.getLinkContinuity(layerId, frameIndex, linkedCelId);
 
     return {
@@ -521,6 +546,7 @@ export class PFTimelineGrid extends BaseComponent {
       linkColor: linkedCelId != null ? this.context.animation.getLinkColor(linkedCelId) : null,
       continuesLeft: continuity.left,
       continuesRight: continuity.right,
+      affectedFrames: sharedCel?.frameNumbers ?? [],
     };
   }
 

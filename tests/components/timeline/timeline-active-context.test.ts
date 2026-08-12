@@ -4,11 +4,13 @@ import '../../../src/components/timeline/pf-playback-controls';
 import '../../../src/components/timeline/pf-timeline';
 import '../../../src/components/timeline/pf-timeline-layers';
 import '../../../src/components/timeline/pf-timeline-grid';
+import '../../../src/components/timeline/pf-timeline-header';
 import '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import type { PFPlaybackControls } from '../../../src/components/timeline/pf-playback-controls';
 import type { PFTimeline } from '../../../src/components/timeline/pf-timeline';
 import type { PFTimelineLayers } from '../../../src/components/timeline/pf-timeline-layers';
 import type { PFTimelineGrid } from '../../../src/components/timeline/pf-timeline-grid';
+import type { PFTimelineHeader } from '../../../src/components/timeline/pf-timeline-header';
 import type { PFTimelineFrameCells } from '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import {
   createProjectContext,
@@ -84,6 +86,13 @@ async function createTimelineGrid() {
   return element;
 }
 
+async function createTimelineHeader() {
+  const element = document.createElement('pf-timeline-header') as PFTimelineHeader;
+  document.body.append(element);
+  await element.updateComplete;
+  return element;
+}
+
 async function createFrameCells() {
   const element = document.createElement('pf-timeline-frame-cells') as PFTimelineFrameCells;
   document.body.append(element);
@@ -107,6 +116,39 @@ function frameLabels(element: PFTimelineFrameCells) {
   return [...(element.shadowRoot?.querySelectorAll('.frame-number') ?? [])].map(
     (frame) => frame.textContent?.trim() ?? ''
   );
+}
+
+function createNonAdjacentHardLinkedCels(context: ProjectContext) {
+  const layer = context.layers.layers.value[0];
+  if (!layer) throw new Error('Expected a layer');
+  const firstFrameId = context.animation.currentFrameId.value;
+  const firstKey = context.animation.getCelKey(layer.id, firstFrameId);
+  const firstCel = context.animation.cels.value.get(firstKey);
+  if (!firstCel) throw new Error('Expected an initial cel');
+  const canvas = document.createElement('canvas');
+  canvas.width = firstCel.canvas.width;
+  canvas.height = firstCel.canvas.height;
+  context.animation.cels.value = new Map(context.animation.cels.value).set(firstKey, {
+    ...firstCel,
+    canvas,
+  });
+  context.layers.updateLayer(layer.id, { canvas });
+
+  context.animation.addFrame(false);
+  context.animation.addFrame(false);
+  const frames = context.animation.frames.value;
+  const first = frames[0];
+  const third = frames[2];
+  if (!first || !third) throw new Error('Expected three frames');
+
+  const linkId = context.animation.linkCels([
+    context.animation.getCelKey(layer.id, first.id),
+    context.animation.getCelKey(layer.id, third.id),
+  ], 'hard');
+  if (!linkId) throw new Error('Expected a hard link group');
+  context.animation.goToFrame(third.id);
+
+  return { layer, first, third, linkId };
 }
 
 describe('timeline active project context binding', () => {
@@ -170,6 +212,44 @@ describe('timeline active project context binding', () => {
     expect(cels.every((cel) => !cel.classList.contains('link-continues-left'))).toBe(true);
     expect(cels.every((cel) => !cel.classList.contains('link-continues-right'))).toBe(true);
     expect(grid.shadowRoot?.querySelector('.link-badge')).toBeNull();
+  });
+
+  it('distinguishes future cel linking from the active shared-cel state', async () => {
+    const context = createContext('Linked cels');
+    const { layer, first, third, linkId } = createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const layers = await createTimelineLayers();
+    const header = await createTimelineHeader();
+    const grid = await createTimelineGrid();
+
+    const preference = layers.shadowRoot?.querySelector<HTMLButtonElement>('.link-new-cels');
+    expect(preference?.textContent).toContain('Link new cels');
+    expect(preference?.getAttribute('aria-pressed')).toBe('false');
+    expect(preference?.getAttribute('title')).toBe(
+      'Link new cels is off. Future copied or created cels stay independent. Existing cels stay unchanged.',
+    );
+
+    preference?.click();
+    await waitForContextRender(layers);
+    expect(context.layers.layers.value.find((item) => item.id === layer.id)?.continuous).toBe(true);
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, first.id))?.linkedCelId)
+      .toBe(linkId);
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, third.id))?.linkedCelId)
+      .toBe(linkId);
+
+    const contextBar = header.shadowRoot?.querySelector<HTMLElement>('[data-shared-cel-context]');
+    expect(contextBar?.textContent).toContain('Shared cel — affects frames 1, 3');
+
+    const sharedCels = [
+      ...(grid.shadowRoot?.querySelectorAll<HTMLButtonElement>('.cel.hard-linked') ?? []),
+    ];
+    expect(sharedCels).toHaveLength(2);
+    expect(sharedCels.every((cel) => cel.querySelector('.link-glyph'))).toBe(true);
+    expect(sharedCels.map((cel) => cel.getAttribute('aria-label'))).toEqual([
+      `${layer.name}, frame 1. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
+      `${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
+    ]);
   });
 
   it('records layer toolbar actions in the active context history', async () => {
