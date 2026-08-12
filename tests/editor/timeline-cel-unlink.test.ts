@@ -15,8 +15,9 @@ import {
 import type { Cel, Frame } from '../../src/types/animation';
 
 const contexts: ProjectContext[] = [];
+const canvasPixels = new WeakMap<HTMLCanvasElement, Uint8ClampedArray>();
 
-function createHardLinkedContext(withTextCelData = true) {
+function createHardLinkedContext(withTextCelData = true, withIndexBuffer = true) {
   const context = createProjectContext();
   contexts.push(context);
   const layer = context.layers.layers.value[0];
@@ -31,7 +32,10 @@ function createHardLinkedContext(withTextCelData = true) {
   const canvas = document.createElement('canvas');
   canvas.width = 2;
   canvas.height = 2;
-  const indexBuffer = withTextCelData ? Uint8Array.from([1, 2, 3, 4]) : new Uint8Array(4);
+  const indexBuffer = withIndexBuffer
+    ? withTextCelData ? Uint8Array.from([1, 2, 3, 4]) : new Uint8Array(4)
+    : undefined;
+  canvasPixels.set(canvas, new Uint8ClampedArray(16));
   const linkId = 'shared-cel-group';
   const cels = new Map(context.animation.cels.value);
   for (const frame of frames) {
@@ -41,7 +45,7 @@ function createHardLinkedContext(withTextCelData = true) {
       layerId: layer.id,
       frameId: frame.id,
       canvas,
-      indexBuffer,
+      ...(indexBuffer ? { indexBuffer } : {}),
       linkedCelId: linkId,
       linkType: 'hard',
       opacity: 47,
@@ -99,7 +103,7 @@ function expectUnlinkedCel(
   middleKey: string,
   middleCel: Cel,
   canvas: HTMLCanvasElement,
-  indexBuffer: Uint8Array,
+  indexBuffer: Uint8Array | undefined,
 ) {
   const unlinked = context.animation.cels.value.get(middleKey);
   expect(unlinked).toMatchObject({
@@ -121,7 +125,7 @@ function expectRemainingGroup(
   frames: Frame[],
   linkId: string,
   canvas: HTMLCanvasElement,
-  indexBuffer: Uint8Array,
+  indexBuffer: Uint8Array | undefined,
 ) {
   for (const frame of [frames[0], frames[2]]) {
     if (!frame) throw new Error('Expected linked frame');
@@ -134,21 +138,34 @@ function expectRemainingGroup(
 
 describe('timeline cel unlink transaction', () => {
   beforeEach(() => {
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-      imageSmoothingEnabled: false,
-      drawImage: vi.fn(),
-      clearRect: vi.fn(),
-      fillRect: vi.fn(),
-      putImageData: vi.fn(),
-      createImageData: vi.fn((width: number, height: number) => ({
-        data: new Uint8ClampedArray(width * height * 4),
-        width,
-        height,
-      })),
-      getImageData: vi.fn((_x: number, _y: number, width = 1, height = 1) => ({
-        data: new Uint8ClampedArray(width * height * 4),
-      })),
-    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      function (this: HTMLCanvasElement) {
+        return {
+          imageSmoothingEnabled: false,
+          drawImage: vi.fn((source: CanvasImageSource) => {
+            const sourcePixels = canvasPixels.get(source as HTMLCanvasElement);
+            if (sourcePixels) canvasPixels.set(this, new Uint8ClampedArray(sourcePixels));
+          }),
+          clearRect: vi.fn(),
+          fillRect: vi.fn(),
+          putImageData: vi.fn((imageData: ImageData) => {
+            canvasPixels.set(this, new Uint8ClampedArray(imageData.data));
+          }),
+          createImageData: vi.fn((width: number, height: number) => ({
+            data: new Uint8ClampedArray(width * height * 4),
+            width,
+            height,
+          })),
+          getImageData: vi.fn((_x: number, _y: number, width = this.width, height = this.height) => ({
+            data: new Uint8ClampedArray(
+              canvasPixels.get(this) ?? new Uint8ClampedArray(width * height * 4),
+            ),
+            width,
+            height,
+          })),
+        } as unknown as CanvasRenderingContext2D;
+      } as typeof HTMLCanvasElement.prototype.getContext,
+    );
   });
 
   afterEach(() => {
@@ -232,7 +249,7 @@ describe('timeline cel unlink transaction', () => {
     expect(context.history.undoStack.value).toHaveLength(1);
   });
 
-  it('keeps unlink Undo and Redo valid after a save rebuilds index-buffer entries', async () => {
+  it('accepts an equivalent save reconstruction of an indexed unlink payload', async () => {
     const { context, layer, middleCel } = createHardLinkedContext(false);
     const result = await executeTimelineProjectState(
       context,
@@ -249,6 +266,7 @@ describe('timeline cel unlink transaction', () => {
     );
     expect(unlinkedAfterSave).not.toBe(unlinkedBeforeSave);
     expect(unlinkedAfterSave?.indexBuffer).not.toBe(unlinkedBeforeSave?.indexBuffer);
+    expect(unlinkedAfterSave?.indexBuffer).toEqual(unlinkedBeforeSave?.indexBuffer);
 
     await context.history.undo();
     expect(context.animation.cels.value.get(
@@ -259,6 +277,107 @@ describe('timeline cel unlink transaction', () => {
     expect(context.animation.cels.value.get(
       context.animation.getCelKey(layer.id, middleCel.frameId),
     )?.linkedCelId).toBeUndefined();
+  });
+
+  it('keeps unlink Undo and Redo valid when save materializes an undefined index buffer', async () => {
+    const { context, layer, middleCel, canvas } = createHardLinkedContext(false, false);
+    const imageData = canvas.getContext('2d')?.getImageData(0, 0, 2, 2);
+    if (!imageData) throw new Error('Expected canvas image data');
+    imageData.data.set([255, 0, 0, 255]);
+    canvas.getContext('2d')?.putImageData(imageData, 0, 0);
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+    );
+
+    expect(result.ok).toBe(true);
+    const key = context.animation.getCelKey(layer.id, middleCel.frameId);
+    const unlinkedBeforeSave = context.animation.cels.value.get(key);
+    expect(unlinkedBeforeSave?.indexBuffer).toBeUndefined();
+
+    await context.project.saveProject();
+
+    const unlinkedAfterSave = context.animation.cels.value.get(key);
+    expect(unlinkedAfterSave).not.toBe(unlinkedBeforeSave);
+    expect(unlinkedAfterSave?.indexBuffer).toBeDefined();
+    expect(unlinkedAfterSave?.indexBuffer).toHaveLength(4);
+
+    await context.history.undo();
+    expect(context.animation.cels.value.get(key)?.linkedCelId).toBeTruthy();
+
+    await context.history.redo();
+    expect(context.animation.cels.value.get(key)?.linkedCelId).toBeUndefined();
+  });
+
+  it('rejects an in-place index-buffer mutation without changing history or revision', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext(false);
+    const events = collectProjectEvents(context);
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+    );
+    expect(result.ok).toBe(true);
+
+    const key = context.animation.getCelKey(layer.id, middleCel.frameId);
+    const unlinked = context.animation.cels.value.get(key);
+    if (!unlinked?.indexBuffer) throw new Error('Expected an indexed unlinked cel');
+    const undoStackBefore = context.history.undoStack.value;
+    const redoStackBefore = context.history.redoStack.value;
+    const historyVersionBefore = context.history.version.value;
+    const revisionBefore = context.project.revision.value;
+    const eventCountBefore = events.length;
+
+    unlinked.indexBuffer[0] = unlinked.indexBuffer[0] + 1;
+
+    await expect(context.history.undo()).rejects.toMatchObject({
+      editorError: {
+        code: 'revision_conflict',
+        details: { reason: 'history_structure_changed' },
+      },
+    });
+    expect(unlinked.indexBuffer[0]).toBe(1);
+    expect(context.history.undoStack.value).toBe(undoStackBefore);
+    expect(context.history.redoStack.value).toBe(redoStackBefore);
+    expect(context.history.version.value).toBe(historyVersionBefore);
+    expect(context.project.revision.value).toBe(revisionBefore);
+    expect(events).toHaveLength(eventCountBefore);
+  });
+
+  it('rejects an in-place RGBA canvas mutation without an index buffer', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext(false, false);
+    const events = collectProjectEvents(context);
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+    );
+    expect(result.ok).toBe(true);
+
+    const key = context.animation.getCelKey(layer.id, middleCel.frameId);
+    const unlinked = context.animation.cels.value.get(key);
+    if (!unlinked) throw new Error('Expected an unlinked cel');
+    const imageData = unlinked.canvas.getContext('2d')?.getImageData(0, 0, 2, 2);
+    if (!imageData) throw new Error('Expected canvas image data');
+    imageData.data[0] = 255;
+    unlinked.canvas.getContext('2d')?.putImageData(imageData, 0, 0);
+
+    const undoStackBefore = context.history.undoStack.value;
+    const redoStackBefore = context.history.redoStack.value;
+    const historyVersionBefore = context.history.version.value;
+    const revisionBefore = context.project.revision.value;
+    const eventCountBefore = events.length;
+
+    await expect(context.history.undo()).rejects.toMatchObject({
+      editorError: {
+        code: 'revision_conflict',
+        details: { reason: 'history_structure_changed' },
+      },
+    });
+    expect(unlinked.canvas.getContext('2d')?.getImageData(0, 0, 2, 2).data[0]).toBe(255);
+    expect(context.history.undoStack.value).toBe(undoStackBefore);
+    expect(context.history.redoStack.value).toBe(redoStackBefore);
+    expect(context.history.version.value).toBe(historyVersionBefore);
+    expect(context.project.revision.value).toBe(revisionBefore);
+    expect(events).toHaveLength(eventCountBefore);
   });
 
   it('unlinks a group created by Link new cels after indexed drawing', async () => {

@@ -178,9 +178,34 @@ type ProjectStructure = {
   readonly cels: ReadonlyMapSnapshot;
   readonly frames: readonly FrameStructure[];
   readonly tags: readonly FrameTag[];
+  readonly celPayloads?: ReadonlyMap<string, CelPayloadSnapshot>;
 };
 
 type ReadonlyMapSnapshot = ReadonlyMap<string, Cel>;
+
+type ByteFingerprint = {
+  readonly length: number;
+  readonly primary: number;
+  readonly secondary: number;
+};
+
+type CanvasPayloadSnapshot = {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: ByteFingerprint;
+};
+
+type CelPayloadSnapshot = {
+  readonly canvas: CanvasPayloadSnapshot & { readonly sharingKey: string };
+  readonly indexBuffer?: {
+    readonly sharingKey: string;
+    readonly identity: number;
+    readonly bytes: ByteFingerprint;
+  };
+};
+
+const payloadIdentities = new WeakMap<object, number>();
+let nextPayloadIdentity = 1;
 
 type FrameStructure = {
   readonly id: string;
@@ -281,7 +306,7 @@ class TimelineProjectStateCommand implements Command {
   }
 
   private assertStructure(expected: ProjectStructure): void {
-    const current = captureProjectStructure(this.context);
+    const current = captureProjectStructure(this.context, this.request.kind === 'cel.unlink');
     const matches = this.hasExecuted
       ? this.request.kind === 'cel.unlink'
         ? sameCelUnlinkStructure(current, expected)
@@ -866,8 +891,8 @@ function prepareCelUnlinkChange(
   return {
     beforeCels,
     afterCels,
-    beforeStructure: captureProjectStructure(context),
-    afterStructure: captureProjectStructureWithCels(context, afterCels),
+    beforeStructure: captureProjectStructure(context, true),
+    afterStructure: captureProjectStructureWithCels(context, afterCels, true),
     domains: ['timeline', 'raster-content'],
   };
 }
@@ -1030,11 +1055,16 @@ function requireTagMutation(result: tagManager.TagMutationResult<FrameTag[]>): F
   }
 }
 
-function captureProjectStructure(context: ProjectContext): ProjectStructure {
+function captureProjectStructure(
+  context: ProjectContext,
+  includeCelPayloads = false,
+): ProjectStructure {
   return captureProjectStructureWithLayersAndTags(
     context,
     context.layers.layers.value,
     context.animation.tags.value,
+    context.animation.cels.value,
+    includeCelPayloads,
   );
 }
 
@@ -1042,19 +1072,30 @@ function captureProjectStructureWithLayers(
   context: ProjectContext,
   layers: readonly Layer[],
 ): ProjectStructure {
-  return captureProjectStructureWithLayersAndTags(context, layers, context.animation.tags.value);
+  return captureProjectStructureWithLayersAndTags(
+    context,
+    layers,
+    context.animation.tags.value,
+    context.animation.cels.value,
+  );
 }
 
 function captureProjectStructureWithTags(
   context: ProjectContext,
   tags: readonly FrameTag[],
 ): ProjectStructure {
-  return captureProjectStructureWithLayersAndTags(context, context.layers.layers.value, tags);
+  return captureProjectStructureWithLayersAndTags(
+    context,
+    context.layers.layers.value,
+    tags,
+    context.animation.cels.value,
+  );
 }
 
 function captureProjectStructureWithCels(
   context: ProjectContext,
   cels: ReadonlyMap<string, Cel>,
+  includeCelPayloads = false,
 ): ProjectStructure {
   const currentFrameId = context.animation.currentFrameId.value;
   const layers = context.layers.layers.value.map((layer) => {
@@ -1062,7 +1103,13 @@ function captureProjectStructureWithCels(
     const cel = cels.get(context.animation.getCelKey(layer.id, currentFrameId));
     return cel ? { ...layer, canvas: cel.canvas } : cloneLayer(layer);
   });
-  return captureProjectStructureWithLayersAndTags(context, layers, context.animation.tags.value, cels);
+  return captureProjectStructureWithLayersAndTags(
+    context,
+    layers,
+    context.animation.tags.value,
+    cels,
+    includeCelPayloads,
+  );
 }
 
 function captureProjectStructureWithLayersAndTags(
@@ -1070,6 +1117,7 @@ function captureProjectStructureWithLayersAndTags(
   layers: readonly Layer[],
   tags: readonly FrameTag[],
   cels: ReadonlyMap<string, Cel> = context.animation.cels.value,
+  includeCelPayloads = false,
 ): ProjectStructure {
   return {
     layers: layers.map(cloneLayer),
@@ -1080,7 +1128,103 @@ function captureProjectStructureWithLayersAndTags(
       duration: frame.duration,
     })),
     tags: tags.map(cloneTag),
+    ...(includeCelPayloads ? { celPayloads: captureCelPayloads(cels) } : {}),
   };
+}
+
+function captureCelPayloads(
+  cels: ReadonlyMap<string, Cel>,
+): ReadonlyMap<string, CelPayloadSnapshot> {
+  const canvasSharing = new Map<HTMLCanvasElement, string>();
+  const canvasPayloads = new Map<HTMLCanvasElement, CanvasPayloadSnapshot>();
+  const indexSharing = new Map<Uint8Array, string>();
+  const indexPayloads = new Map<Uint8Array, ByteFingerprint>();
+  const snapshots = new Map<string, CelPayloadSnapshot>();
+  const entries = [...cels.entries()].sort(([firstKey], [secondKey]) =>
+    compareCelUnlinkGroupKeys(firstKey, secondKey),
+  );
+
+  for (const [key, cel] of entries) {
+    let canvasPayload = canvasPayloads.get(cel.canvas);
+    if (!canvasPayload) {
+      canvasPayload = captureCanvasPayload(cel.canvas);
+      canvasPayloads.set(cel.canvas, canvasPayload);
+    }
+
+    let canvasSharingKey = canvasSharing.get(cel.canvas);
+    if (!canvasSharingKey) {
+      canvasSharingKey = key;
+      canvasSharing.set(cel.canvas, canvasSharingKey);
+    }
+
+    let indexSnapshot: CelPayloadSnapshot['indexBuffer'];
+    if (cel.indexBuffer) {
+      let indexBytes = indexPayloads.get(cel.indexBuffer);
+      if (!indexBytes) {
+        indexBytes = fingerprintBytes(cel.indexBuffer);
+        indexPayloads.set(cel.indexBuffer, indexBytes);
+      }
+
+      let indexSharingKey = indexSharing.get(cel.indexBuffer);
+      if (!indexSharingKey) {
+        indexSharingKey = key;
+        indexSharing.set(cel.indexBuffer, indexSharingKey);
+      }
+
+      indexSnapshot = Object.freeze({
+        sharingKey: indexSharingKey,
+        identity: getPayloadIdentity(cel.indexBuffer),
+        bytes: indexBytes,
+      });
+    }
+
+    snapshots.set(key, Object.freeze({
+      canvas: Object.freeze({ ...canvasPayload, sharingKey: canvasSharingKey }),
+      ...(indexSnapshot ? { indexBuffer: indexSnapshot } : {}),
+    }));
+  }
+
+  return snapshots;
+}
+
+function captureCanvasPayload(canvas: HTMLCanvasElement): CanvasPayloadSnapshot {
+  const drawing = canvas.getContext('2d', { willReadFrequently: true });
+  if (!drawing) {
+    throw timelineError('internal', true, { reason: 'canvas_snapshot' });
+  }
+
+  const imageData = drawing.getImageData(0, 0, canvas.width, canvas.height);
+  return Object.freeze({
+    width: canvas.width,
+    height: canvas.height,
+    pixels: fingerprintBytes(imageData.data),
+  });
+}
+
+function fingerprintBytes(data: ArrayLike<number>): ByteFingerprint {
+  let primary = 2166136261;
+  let secondary = 2654435761;
+
+  for (let index = 0; index < data.length; index++) {
+    const value = data[index] ?? 0;
+    primary = Math.imul(primary ^ value, 16777619);
+    secondary = Math.imul(secondary ^ (value + index), 2246822519);
+  }
+
+  return Object.freeze({
+    length: data.length,
+    primary: primary >>> 0,
+    secondary: secondary >>> 0,
+  });
+}
+
+function getPayloadIdentity(value: object): number {
+  const existing = payloadIdentities.get(value);
+  if (existing !== undefined) return existing;
+
+  const identity = nextPayloadIdentity++;
+  payloadIdentities.set(value, identity);
+  return identity;
 }
 
 function sameProjectStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
@@ -1091,7 +1235,7 @@ function sameProjectStructure(current: ProjectStructure, expected: ProjectStruct
 
 function sameCelUnlinkStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
   return sameLayerDocumentArrays(current.layers, expected.layers) &&
-    sameCelMapEntries(current.cels, expected.cels) &&
+    sameCelMapEntries(current.cels, expected.cels, current.celPayloads, expected.celPayloads) &&
     sameTimelineStructure(current, expected);
 }
 
@@ -1100,13 +1244,67 @@ function sameTimelineStructure(current: ProjectStructure, expected: ProjectStruc
     sameTagArrays(current.tags, expected.tags);
 }
 
-function sameCelMapEntries(a: ReadonlyMapSnapshot, b: ReadonlyMapSnapshot): boolean {
+function sameCelMapEntries(
+  a: ReadonlyMapSnapshot,
+  b: ReadonlyMapSnapshot,
+  currentPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+  expectedPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+): boolean {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
-    const other = b.get(key);
-    if (!sameCelState(value, other)) return false;
+    if (!sameCelMapEntry(key, value, b, currentPayloads, expectedPayloads)) return false;
   }
   return true;
+}
+
+function sameCelMapEntry(
+  key: string,
+  current: Cel,
+  expectedCels: ReadonlyMapSnapshot,
+  currentPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+  expectedPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+): boolean {
+  const expected = expectedCels.get(key);
+  if (!currentPayloads && !expectedPayloads) return sameCelState(current, expected);
+  if (!currentPayloads || !expectedPayloads) return false;
+
+  const currentPayload = currentPayloads.get(key);
+  const expectedPayload = expectedPayloads.get(key);
+  return !!currentPayload && !!expectedPayload &&
+    sameCelPayload(currentPayload, expectedPayload) &&
+    sameCelStructuralState(current, expected);
+}
+
+function sameCelPayload(current: CelPayloadSnapshot, expected: CelPayloadSnapshot): boolean {
+  return sameCanvasPayload(current.canvas, expected.canvas) &&
+    sameIndexPayload(current.indexBuffer, expected.indexBuffer, current.canvas.sharingKey);
+}
+
+function sameCanvasPayload(
+  current: CelPayloadSnapshot['canvas'],
+  expected: CelPayloadSnapshot['canvas'],
+): boolean {
+  return current.sharingKey === expected.sharingKey &&
+    current.width === expected.width &&
+    current.height === expected.height &&
+    sameByteFingerprint(current.pixels, expected.pixels);
+}
+
+function sameIndexPayload(
+  current: CelPayloadSnapshot['indexBuffer'],
+  expected: CelPayloadSnapshot['indexBuffer'],
+  canvasSharingKey: string,
+): boolean {
+  if (!expected) return !current || current.sharingKey === canvasSharingKey;
+  if (!current || current.sharingKey !== expected.sharingKey) return !current;
+  return current.identity !== expected.identity ||
+    sameByteFingerprint(current.bytes, expected.bytes);
+}
+
+function sameByteFingerprint(current: ByteFingerprint, expected: ByteFingerprint): boolean {
+  return current.length === expected.length &&
+    current.primary === expected.primary &&
+    current.secondary === expected.secondary;
 }
 
 function sameCelState(current: Cel, expected: Cel | undefined): boolean {
@@ -1115,6 +1313,15 @@ function sameCelState(current: Cel, expected: Cel | undefined): boolean {
 
   return sameCelIdentity(current, expected) &&
     sameIndexBuffers(current.indexBuffer, expected.indexBuffer) &&
+    sameCelLinkState(current, expected) &&
+    sameCelMetadata(current, expected);
+}
+
+function sameCelStructuralState(current: Cel, expected: Cel | undefined): boolean {
+  return !!expected &&
+    current.id === expected.id &&
+    current.layerId === expected.layerId &&
+    current.frameId === expected.frameId &&
     sameCelLinkState(current, expected) &&
     sameCelMetadata(current, expected);
 }
