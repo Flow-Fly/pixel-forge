@@ -101,4 +101,53 @@ describe('linked cel sharing in Chromium', () => {
     expect(grid.shadowRoot?.activeElement).toBe(sharedCel.element());
     expect((sharedCel.element() as HTMLButtonElement).matches(':focus-visible')).toBe(true);
   });
+
+  it('unlinks the active shared cel from both UI routes and preserves the remaining group', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const layer = createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const header = document.createElement('pf-timeline-header');
+    document.body.append(header);
+    await (header as import('../../src/components/timeline/pf-timeline-header').PFTimelineHeader).updateComplete;
+
+    const contextButton = page.getByRole('button', { name: 'Unlink this cel' });
+    await userEvent.click(contextButton);
+    await expect.poll(() => context.history.undoStack.value.length).toBe(1);
+    const middleFrame = context.animation.frames.value[2];
+    if (!middleFrame) throw new Error('Expected active shared frame');
+    const middle = context.animation.cels.value.get(context.animation.getCelKey(layer.id, middleFrame.id));
+    expect(middle?.linkedCelId).toBeUndefined();
+
+    await context.history.undo();
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, middleFrame.id))?.linkedCelId)
+      .toBeTruthy();
+
+    const grid = document.createElement('pf-timeline-grid');
+    document.body.append(grid);
+    await (grid as import('../../src/components/timeline/pf-timeline-grid').PFTimelineGrid).updateComplete;
+    const sharedCel = page.getByRole('button', {
+      name: `${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
+    });
+    (sharedCel.element() as HTMLButtonElement).dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      composed: true,
+      clientX: 20,
+      clientY: 20,
+    }));
+    await Promise.resolve();
+
+    const menu = grid.shadowRoot?.querySelector<HTMLElement>('pf-context-menu');
+    const menuButton = menu?.shadowRoot?.querySelector<HTMLElement>('.menu-item:last-child');
+    expect(menuButton?.textContent).toContain('Unlink this cel');
+    menuButton?.click();
+    await expect.poll(() => context.history.undoStack.value.length).toBe(1);
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, middleFrame.id))?.linkedCelId)
+      .toBeUndefined();
+    const firstFrame = context.animation.frames.value[0];
+    if (!firstFrame) throw new Error('Expected remaining frame');
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, firstFrame.id))?.linkedCelId)
+      .toBeTruthy();
+  });
 });

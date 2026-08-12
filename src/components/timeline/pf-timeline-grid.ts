@@ -11,6 +11,7 @@ import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 import './pf-timeline-tooltip';
 import type { PFTimelineTooltip } from './pf-timeline-tooltip';
 import {
+  createCelUnlinkRequest,
   createFrameTagRequest,
   executeTimelineProjectState,
 } from '../../editor/timeline-project-state';
@@ -290,10 +291,7 @@ export class PFTimelineGrid extends BaseComponent {
     }
   }
 
-  private handleCelContextMenu(e: MouseEvent, celKey: string) {
-    e.preventDefault();
-    e.stopPropagation();
-
+  private showCelContextMenu(celKey: string, anchor: HTMLElement) {
     const context = this.context;
     const animation = context.animation;
     const cels = animation.cels.value;
@@ -330,7 +328,34 @@ export class PFTimelineGrid extends BaseComponent {
       },
     ];
 
-    this.contextMenu.show(e.clientX, e.clientY, items);
+    if (cel && getSharedCelPresentation(context, cel.layerId, cel.frameId)) {
+      const request = createCelUnlinkRequest(context, cel.layerId, cel.frameId);
+      items.push(
+        { type: 'divider' },
+        {
+          type: 'item',
+          label: 'Unlink this cel',
+          action: () => {
+            void executeTimelineProjectState(context, request);
+          },
+        },
+      );
+    }
+
+    this.contextMenu.show(anchor, items);
+  }
+
+  private handleCelContextMenu(e: MouseEvent, celKey: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.showCelContextMenu(celKey, e.currentTarget as HTMLElement);
+  }
+
+  private handleCelKeyDown(e: KeyboardEvent, celKey: string) {
+    if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.showCelContextMenu(celKey, e.currentTarget as HTMLElement);
   }
 
   /**
@@ -488,6 +513,7 @@ export class PFTimelineGrid extends BaseComponent {
         aria-label=${accessibleName}
         @click=${(e: MouseEvent) => this.selectCel(layer.id, frame.id, e)}
         @contextmenu=${(e: MouseEvent) => this.handleCelContextMenu(e, presentation.key)}
+        @keydown=${(e: KeyboardEvent) => this.handleCelKeyDown(e, presentation.key)}
         @mouseenter=${(e: MouseEvent) =>
           this.handleCelMouseEnter(e, layer.id, frame.id, layer.name, frameIndex)}
         @mouseleave=${this.handleCelMouseLeave}

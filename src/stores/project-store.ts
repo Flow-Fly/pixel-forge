@@ -230,7 +230,18 @@ class ProjectStore {
     this.width.value = width;
     this.height.value = height;
     this.animation.cels.value = cels;
+    this.syncCurrentFrameLayerCanvases(cels);
+    this.dirtyRect.requestFullRedraw();
+  }
 
+  /** Apply a prepared timeline cel snapshot without changing project bounds. */
+  applyTimelineCelState(cels: Map<string, Cel>) {
+    this.animation.cels.value = cels;
+    this.syncCurrentFrameLayerCanvases(cels);
+    this.dirtyRect.requestFullRedraw();
+  }
+
+  private syncCurrentFrameLayerCanvases(cels: Map<string, Cel>) {
     const currentFrameId = this.animation.currentFrameId.value;
     this.layers.layers.value = this.layers.layers.value.map((layer) => {
       if (layer.type === 'reference') return layer;
@@ -238,8 +249,6 @@ class ProjectStore {
       const cel = cels.get(this.animation.getCelKey(layer.id, currentFrameId));
       return cel ? { ...layer, canvas: cel.canvas } : layer;
     });
-
-    this.dirtyRect.requestFullRedraw();
   }
 
   async saveProject(): Promise<ProjectFile> {

@@ -20,6 +20,7 @@ import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 import type { PFTimelineResizePreview } from './timeline-header/pf-timeline-resize-preview';
 import type { FrameTag } from '../../types/animation';
 import {
+  createCelUnlinkRequest,
   executeTimelineProjectState,
 } from '../../editor/timeline-project-state';
 import type {
@@ -98,6 +99,22 @@ export class PFTimelineHeader extends BaseComponent {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .linked-cel-context button {
+      flex: 0 0 auto;
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-input);
+      color: inherit;
+      font: inherit;
+      padding: 2px 5px;
+      cursor: pointer;
+    }
+
+    .linked-cel-context button:focus-visible {
+      outline: 2px solid var(--pf-color-text-main);
+      outline-offset: 1px;
     }
   `;
 
@@ -633,28 +650,40 @@ export class PFTimelineHeader extends BaseComponent {
     window.removeEventListener('mouseup', this.handleTagResizeEnd);
   };
 
+  private unlinkCel(context: typeof this.context, layerId: string, frameId: string) {
+    void executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layerId, frameId),
+    );
+  }
+
   private renderSharedCelContext() {
-    const layerId = this.context.layers.activeLayerId.value;
-    const frameId = this.context.animation.currentFrameId.value;
+    const context = this.context;
+    const layerId = context.layers.activeLayerId.value;
+    const frameId = context.animation.currentFrameId.value;
     if (!layerId || !frameId) return '';
 
-    const sharedCel = getSharedCelPresentation(this.context, layerId, frameId);
+    const sharedCel = getSharedCelPresentation(context, layerId, frameId);
     if (!sharedCel) return '';
 
-    const frameIndex = sharedCelFrameIndex(this.context.animation.frames.value, frameId);
+    const frameIndex = sharedCelFrameIndex(context.animation.frames.value, frameId);
     if (frameIndex < 0) return '';
 
     return html`
       <div
         class="linked-cel-context"
         data-shared-cel-context
-        role="status"
+        role="group"
+        aria-label="Shared cel — affects frames ${formatAffectedFrames(sharedCel.frameNumbers)}"
         style="left: ${frameIndex * 32}px"
       >
         <span class="link-glyph" aria-hidden="true">⛓</span>
         <span class="copy">
           <strong>Shared cel</strong> — affects frames ${formatAffectedFrames(sharedCel.frameNumbers)}
         </span>
+        <button type="button" @click=${() => this.unlinkCel(context, layerId, frameId)}>
+          Unlink this cel
+        </button>
       </div>
     `;
   }

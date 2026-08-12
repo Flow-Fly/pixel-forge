@@ -5,7 +5,7 @@ import type {
 } from '../stores/project-store';
 import type { ProjectContext } from '../stores/project-context';
 import * as tagManager from '../stores/animation/tag-manager';
-import type { FrameTag } from '../types/animation';
+import type { Cel, FrameTag } from '../types/animation';
 import type { Layer } from '../types/layer';
 import {
   isRecord,
@@ -24,6 +24,10 @@ export { frameTagCatalog } from './catalog';
 export { LAYER_STATE_COMMAND_ID } from './catalog';
 // fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
 export { layerStateCatalog } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { CEL_UNLINK_COMMAND_ID } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { celUnlinkCatalog } from './catalog';
 
 export type LayerDirection = 'up' | 'down';
 
@@ -111,7 +115,17 @@ export type FrameTagRequest =
       readonly tagId: string;
     };
 
-export type TimelineProjectStateRequest = LayerStateRequest | FrameTagRequest;
+export type CelUnlinkRequest = {
+  readonly kind: 'cel.unlink';
+  readonly target: ProjectTarget;
+  readonly expectedRevision: number;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId: string;
+  readonly linkedCelId: string;
+};
+
+export type TimelineProjectStateRequest = LayerStateRequest | FrameTagRequest | CelUnlinkRequest;
 
 type RequestWithoutContext<T> = T extends unknown
   ? Omit<T, 'target' | 'expectedRevision'>
@@ -141,6 +155,8 @@ type PreparedChange = {
   readonly afterLayers?: readonly Layer[];
   readonly beforeTags?: readonly FrameTag[];
   readonly afterTags?: readonly FrameTag[];
+  readonly beforeCels?: ReadonlyMap<string, Cel>;
+  readonly afterCels?: ReadonlyMap<string, Cel>;
   readonly beforeStructure: ProjectStructure;
   readonly afterStructure: ProjectStructure;
   readonly domains: readonly ProjectChangeDomain[];
@@ -208,7 +224,7 @@ class TimelineProjectStateCommand implements Command {
       this.assertRevision();
     }
     this.assertStructure(this.prepared.beforeStructure);
-    this.apply(this.prepared.afterLayers, this.prepared.afterTags);
+    this.apply(this.prepared.afterLayers, this.prepared.afterTags, this.prepared.afterCels);
     this.lastEvent = this.context.project.commitChange(this.id, this.prepared.domains);
     this.hasExecuted = true;
     this.applied = true;
@@ -221,7 +237,7 @@ class TimelineProjectStateCommand implements Command {
 
     this.assertTarget();
     this.assertStructure(this.prepared.afterStructure);
-    this.apply(this.prepared.beforeLayers, this.prepared.beforeTags);
+    this.apply(this.prepared.beforeLayers, this.prepared.beforeTags, this.prepared.beforeCels);
     this.lastEvent = this.context.project.commitChange(this.id, this.prepared.domains);
     this.applied = false;
   }
@@ -246,7 +262,9 @@ class TimelineProjectStateCommand implements Command {
     const matches = this.hasExecuted
       ? this.request.kind.startsWith('layer.')
         ? sameLayerSemanticArrays(current.layers, expected.layers)
-        : sameTimelineStructure(current, expected)
+        : this.request.kind.startsWith('tag.')
+          ? sameTimelineStructure(current, expected)
+          : sameProjectStructure(current, expected)
       : sameProjectStructure(current, expected);
     if (!matches) {
       throw timelineError('revision_conflict', true, {
@@ -258,6 +276,7 @@ class TimelineProjectStateCommand implements Command {
   private apply(
     layers: readonly Layer[] | undefined,
     tags: readonly FrameTag[] | undefined,
+    cels: ReadonlyMap<string, Cel> | undefined,
   ): void {
     if (layers) {
       this.context.layers.layers.value = mergeLayerSemanticSnapshot(
@@ -269,6 +288,9 @@ class TimelineProjectStateCommand implements Command {
     if (tags) {
       this.context.animation.tags.value = tags.map(cloneTag);
       clearDeletedActiveTag(this.context);
+    }
+    if (cels) {
+      this.context.project.applyTimelineCelState(new Map(cels));
     }
   }
 }
@@ -352,6 +374,21 @@ export function createFrameTagRequest(
   return captureTimelineProjectRequest(context, request) as FrameTagRequest;
 }
 
+export function createCelUnlinkRequest(
+  context: ProjectContext,
+  layerId: string,
+  frameId: string,
+): CelUnlinkRequest {
+  const cel = context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId));
+  return captureTimelineProjectRequest(context, {
+    kind: 'cel.unlink',
+    layerId,
+    frameId,
+    celId: cel?.id ?? '',
+    linkedCelId: cel?.linkedCelId ?? '',
+  }) as CelUnlinkRequest;
+}
+
 export async function executeTimelineProjectState(
   context: ProjectContext,
   input: unknown,
@@ -390,7 +427,26 @@ function normalizeRequest(input: unknown): TimelineProjectStateRequest {
   if (input.kind.startsWith('tag.')) {
     return normalizeTagRequest(input, target, expectedRevision);
   }
+  if (input.kind === 'cel.unlink') {
+    return normalizeCelUnlinkRequest(input, target, expectedRevision);
+  }
   throw timelineError('invalid_request', false, { reason: 'kind' });
+}
+
+function normalizeCelUnlinkRequest(
+  input: Record<string, unknown>,
+  target: ProjectTarget,
+  expectedRevision: number,
+): CelUnlinkRequest {
+  return {
+    kind: 'cel.unlink',
+    target,
+    expectedRevision,
+    layerId: requiredString(input.layerId, 'layer_id'),
+    frameId: requiredString(input.frameId, 'frame_id'),
+    celId: requiredString(input.celId, 'cel_id'),
+    linkedCelId: requiredString(input.linkedCelId, 'linked_cel_id'),
+  };
 }
 
 function normalizeExpectedRevision(value: unknown): number {
@@ -597,7 +653,10 @@ function prepareChange(
   if (request.kind.startsWith('layer.')) {
     return prepareLayerChange(context, request as LayerStateRequest);
   }
-  return prepareTagChange(context, request as FrameTagRequest);
+  if (request.kind.startsWith('tag.')) {
+    return prepareTagChange(context, request as FrameTagRequest);
+  }
+  return prepareCelUnlinkChange(context, request as CelUnlinkRequest);
 }
 
 function validateTargetAndRevision(
@@ -622,7 +681,7 @@ function validateAvailability(
   context: ProjectContext,
   request: TimelineProjectStateRequest,
 ): void {
-  if (request.kind.startsWith('layer.') && context.guidedDrawing.active) {
+  if ((request.kind.startsWith('layer.') || request.kind === 'cel.unlink') && context.guidedDrawing.active) {
     throw timelineError('unsupported', false, { feature: 'guided-drawing-timeline-state' });
   }
 }
@@ -703,6 +762,71 @@ function reorderLayerSnapshot(layers: Layer[], request: Extract<LayerStateReques
     throw timelineError('invalid_state', false, { reason: 'layer_reorder' });
   }
   layers.splice(toIndex, 0, layer);
+}
+
+function prepareCelUnlinkChange(
+  context: ProjectContext,
+  request: CelUnlinkRequest,
+): PreparedChange {
+  const key = context.animation.getCelKey(request.layerId, request.frameId);
+  const cel = context.animation.cels.value.get(key);
+  if (!cel) {
+    throw timelineError('target_not_found', true, { resource: 'cel' });
+  }
+  if (cel.id !== request.celId || cel.linkedCelId !== request.linkedCelId) {
+    throw timelineError('revision_conflict', true, { reason: 'cel_changed' });
+  }
+  if (cel.linkType !== 'hard') {
+    throw timelineError('invalid_state', false, { reason: 'cel_not_hard_linked' });
+  }
+
+  const group = [...context.animation.cels.value.entries()].filter(([, candidate]) =>
+    candidate.linkedCelId === request.linkedCelId && candidate.linkType === 'hard',
+  );
+  if (group.length < 2) {
+    throw timelineError('invalid_state', false, { reason: 'cel_not_shared' });
+  }
+  if (!group.every(([, candidate]) =>
+    candidate.canvas === cel.canvas && candidate.indexBuffer === cel.indexBuffer,
+  )) {
+    throw timelineError('invalid_state', false, { reason: 'link_group_payload_changed' });
+  }
+
+  const beforeCels = new Map(context.animation.cels.value);
+  const afterCels = new Map(beforeCels);
+  afterCels.set(key, cloneUnlinkedCel(cel));
+
+  return {
+    beforeCels,
+    afterCels,
+    beforeStructure: captureProjectStructure(context),
+    afterStructure: captureProjectStructureWithCels(context, afterCels),
+    domains: ['timeline', 'raster-content'],
+  };
+}
+
+function cloneUnlinkedCel(cel: Cel): Cel {
+  const canvas = document.createElement('canvas');
+  canvas.width = cel.canvas.width;
+  canvas.height = cel.canvas.height;
+  const drawing = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!drawing) {
+    throw timelineError('internal', true, { reason: 'canvas_allocation' });
+  }
+
+  try {
+    drawing.imageSmoothingEnabled = false;
+    drawing.drawImage(cel.canvas, 0, 0);
+    return {
+      ...cel,
+      canvas,
+      ...(cel.indexBuffer ? { indexBuffer: new Uint8Array(cel.indexBuffer) } : {}),
+      linkedCelId: undefined,
+      linkType: undefined,
+    };
+  } catch {
+    throw timelineError('internal', true, { reason: 'cel_payload_clone' });
+  }
 }
 
 function prepareTagChange(
@@ -821,14 +945,28 @@ function captureProjectStructureWithTags(
   return captureProjectStructureWithLayersAndTags(context, context.layers.layers.value, tags);
 }
 
+function captureProjectStructureWithCels(
+  context: ProjectContext,
+  cels: ReadonlyMap<string, Cel>,
+): ProjectStructure {
+  const currentFrameId = context.animation.currentFrameId.value;
+  const layers = context.layers.layers.value.map((layer) => {
+    if (layer.type === 'reference') return cloneLayer(layer);
+    const cel = cels.get(context.animation.getCelKey(layer.id, currentFrameId));
+    return cel ? { ...layer, canvas: cel.canvas } : cloneLayer(layer);
+  });
+  return captureProjectStructureWithLayersAndTags(context, layers, context.animation.tags.value, cels);
+}
+
 function captureProjectStructureWithLayersAndTags(
   context: ProjectContext,
   layers: readonly Layer[],
   tags: readonly FrameTag[],
+  cels: ReadonlyMap<string, Cel> = context.animation.cels.value,
 ): ProjectStructure {
   return {
     layers: layers.map(cloneLayer),
-    cels: new Map(context.animation.cels.value),
+    cels: new Map(cels),
     frames: context.animation.frames.value.map((frame) => ({
       id: frame.id,
       order: frame.order,
