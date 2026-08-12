@@ -5,7 +5,13 @@ import {
   executeTimelineProjectState,
 } from '../../src/editor/timeline-project-state';
 import { autoSaveService } from '../../src/services/auto-save';
-import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
+import {
+  createProjectContext,
+  getActiveProjectContext,
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../../src/stores/project-context';
 import type { Cel, Frame } from '../../src/types/animation';
 
 const contexts: ProjectContext[] = [];
@@ -56,8 +62,36 @@ function snapshot(context: ProjectContext) {
   return {
     cels: context.animation.cels.value,
     history: context.history.undoStack.value,
+    redo: context.history.redoStack.value,
     revision: context.project.revision.value,
+    dirty: autoSaveService.isDirty(context),
   };
+}
+
+function collectProjectEvents(context: ProjectContext): unknown[] {
+  const events: unknown[] = [];
+  context.projectChangeEvents.addEventListener('project-change', (event) => {
+    events.push((event as CustomEvent).detail);
+  });
+  return events;
+}
+
+function startGuidedSession(context: ProjectContext): void {
+  context.guidedDrawing.start({
+    version: 1,
+    width: 1,
+    height: 1,
+    target: Uint8Array.from([1]),
+    guideColorCount: 1,
+    settings: {
+      longSide: 1,
+      paletteSource: 'generated',
+      maxColors: 1,
+      mapping: 'color',
+      simplifyIsolatedPixels: false,
+    },
+    createdAt: 1,
+  });
 }
 
 function expectUnlinkedCel(
@@ -105,12 +139,19 @@ describe('timeline cel unlink transaction', () => {
       drawImage: vi.fn(),
       clearRect: vi.fn(),
       fillRect: vi.fn(),
+      putImageData: vi.fn(),
+      createImageData: vi.fn((width: number, height: number) => ({
+        data: new Uint8ClampedArray(width * height * 4),
+        width,
+        height,
+      })),
       getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
     } as unknown as CanvasRenderingContext2D);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    restoreDefaultProjectContext();
     for (const context of contexts.splice(0)) {
       autoSaveService.stop(context);
       context.dispose();
@@ -126,10 +167,16 @@ describe('timeline cel unlink transaction', () => {
     context.projectChangeEvents.addEventListener('project-change', (event) => {
       events.push((event as CustomEvent).detail);
     });
+    const request = createCelUnlinkRequest(context, layer.id, middleCel.frameId);
+    expect(request.linkGroup).toHaveLength(3);
+    expect(request.linkGroup.map(({ key }) => key)).toEqual(
+      [...request.linkGroup].map(({ key }) => key).sort(),
+    );
+    expect(structuredClone(request)).toEqual(request);
 
     const result = await executeTimelineProjectState(
       context,
-      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+      request,
     );
 
     expect(result).toMatchObject({ ok: true, revision: 1 });
@@ -155,8 +202,51 @@ describe('timeline cel unlink transaction', () => {
     vi.useRealTimers();
   });
 
+  it('unlinks a group created by Link new cels after indexed drawing', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a layer');
+
+    context.layers.updateLayer(layer.id, { continuous: true });
+    const sourceFrameId = context.animation.currentFrameId.value;
+    const sourceCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, sourceFrameId),
+    );
+    if (!sourceCel) throw new Error('Expected a source cel');
+
+    const indexBuffer = context.animation.ensureCelIndexBuffer(layer.id, sourceFrameId);
+    indexBuffer[0] = 1;
+    context.animation.updateCelIndexBuffer(layer.id, sourceFrameId, indexBuffer);
+    const targetFrameId = context.animation.addFrame(false);
+    const targetCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, targetFrameId),
+    );
+    if (!targetCel) throw new Error('Expected a target cel');
+    const linkedSourceCel = context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, sourceFrameId),
+    );
+    if (!linkedSourceCel) throw new Error('Expected the indexed source cel');
+
+    expect(linkedSourceCel.canvas).toBe(targetCel.canvas);
+    expect(linkedSourceCel.indexBuffer).toBeDefined();
+    expect(targetCel.indexBuffer).toBe(linkedSourceCel.indexBuffer);
+    expect(targetCel.linkType).toBe('hard');
+
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, targetFrameId),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, targetFrameId),
+    )?.linkedCelId).toBeUndefined();
+  });
+
   it('leaves the project untouched when cloning the active cel cannot allocate a canvas context', async () => {
     const { context, layer, middleCel } = createHardLinkedContext();
+    const events = collectProjectEvents(context);
     const before = snapshot(context);
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 
@@ -170,12 +260,141 @@ describe('timeline cel unlink transaction', () => {
       error: { code: 'internal', retryable: true, details: { reason: 'canvas_allocation' } },
     });
     expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
+  });
+
+  it('rejects unlink during Guided Drawing without changing project state', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext();
+    startGuidedSession(context);
+    const events = collectProjectEvents(context);
+    const before = snapshot(context);
+
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'unsupported',
+        retryable: false,
+        details: { feature: 'guided-drawing-timeline-state' },
+      },
+    });
+    expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
+  });
+
+  it('rejects a request for another project without changing project state', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext();
+    const events = collectProjectEvents(context);
+    const request = createCelUnlinkRequest(context, layer.id, middleCel.frameId);
+    const before = snapshot(context);
+
+    const result = await executeTimelineProjectState(context, {
+      ...request,
+      target: { projectId: 'missing-project' },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'target_not_found', retryable: true },
+    });
+    expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
+  });
+
+  it('rejects a missing cel without changing project state', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext();
+    const events = collectProjectEvents(context);
+    const request = createCelUnlinkRequest(context, layer.id, middleCel.frameId);
+    const before = snapshot(context);
+
+    const result = await executeTimelineProjectState(context, {
+      ...request,
+      frameId: 'missing-frame',
+      celId: 'missing-cel',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'target_not_found',
+        retryable: true,
+        details: { resource: 'cel' },
+      },
+    });
+    expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
+  });
+
+  it('rejects an already-independent cel without changing project state', async () => {
+    const { context, layer, middleCel } = createHardLinkedContext();
+    const request = createCelUnlinkRequest(context, layer.id, middleCel.frameId);
+    const key = context.animation.getCelKey(layer.id, middleCel.frameId);
+    const current = context.animation.cels.value.get(key);
+    if (!current) throw new Error('Expected the active cel');
+    context.animation.cels.value = new Map(context.animation.cels.value).set(key, {
+      ...current,
+      linkType: undefined,
+    });
+    const events = collectProjectEvents(context);
+    const before = snapshot(context);
+
+    const result = await executeTimelineProjectState(context, request);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'cel_not_hard_linked' },
+      },
+    });
+    expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
+  });
+
+  it('rejects a changed group payload without changing project state', async () => {
+    const { context, layer, frames, middleCel } = createHardLinkedContext();
+    const request = createCelUnlinkRequest(context, layer.id, middleCel.frameId);
+    const firstFrame = frames[0];
+    if (!firstFrame) throw new Error('Expected a first frame');
+    const firstKey = context.animation.getCelKey(layer.id, firstFrame.id);
+    const firstCel = context.animation.cels.value.get(firstKey);
+    if (!firstCel) throw new Error('Expected a first cel');
+    const changedCanvas = document.createElement('canvas');
+    changedCanvas.width = firstCel.canvas.width;
+    changedCanvas.height = firstCel.canvas.height;
+    context.animation.cels.value = new Map(context.animation.cels.value).set(firstKey, {
+      ...firstCel,
+      canvas: changedCanvas,
+    });
+    const events = collectProjectEvents(context);
+    const before = snapshot(context);
+
+    const result = await executeTimelineProjectState(context, request);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'link_group_payload_changed' },
+      },
+    });
+    expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
   });
 
   it('keeps a captured project target isolated after the active project changes', async () => {
     const source = createHardLinkedContext();
     const other = createHardLinkedContext();
+    setActiveProjectContext(source.context);
     const request = createCelUnlinkRequest(source.context, source.layer.id, source.middleCel.frameId);
+    setActiveProjectContext(other.context);
+    expect(getActiveProjectContext()).toBe(other.context);
     const otherBefore = snapshot(other.context);
 
     const result = await executeTimelineProjectState(source.context, request);
@@ -202,5 +421,35 @@ describe('timeline cel unlink transaction', () => {
       },
     });
     expect(snapshot(context)).toEqual(before);
+  });
+
+  it('rejects a changed non-active group member without a revision change', async () => {
+    const { context, layer, frames, middleCel } = createHardLinkedContext();
+    const request = createCelUnlinkRequest(context, layer.id, middleCel.frameId);
+    const firstFrame = frames[0];
+    if (!firstFrame) throw new Error('Expected a first frame');
+    const firstKey = context.animation.getCelKey(layer.id, firstFrame.id);
+    const firstCel = context.animation.cels.value.get(firstKey);
+    if (!firstCel) throw new Error('Expected a first cel');
+
+    context.animation.cels.value = new Map(context.animation.cels.value).set(firstKey, {
+      ...firstCel,
+      id: 'changed-without-revision',
+    });
+    const events = collectProjectEvents(context);
+    const before = snapshot(context);
+
+    const result = await executeTimelineProjectState(context, request);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'revision_conflict',
+        retryable: true,
+        details: { reason: 'link_group_changed' },
+      },
+    });
+    expect(snapshot(context)).toEqual(before);
+    expect(events).toHaveLength(0);
   });
 });

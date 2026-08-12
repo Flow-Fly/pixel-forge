@@ -115,6 +115,15 @@ export type FrameTagRequest =
       readonly tagId: string;
     };
 
+export type CelUnlinkGroupMember = {
+  readonly key: string;
+  readonly celId: string;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly linkedCelId: string;
+  readonly linkType: 'hard';
+};
+
 export type CelUnlinkRequest = {
   readonly kind: 'cel.unlink';
   readonly target: ProjectTarget;
@@ -123,6 +132,7 @@ export type CelUnlinkRequest = {
   readonly frameId: string;
   readonly celId: string;
   readonly linkedCelId: string;
+  readonly linkGroup: readonly CelUnlinkGroupMember[];
 };
 
 export type TimelineProjectStateRequest = LayerStateRequest | FrameTagRequest | CelUnlinkRequest;
@@ -222,6 +232,7 @@ class TimelineProjectStateCommand implements Command {
     this.assertTarget();
     if (!this.hasExecuted) {
       this.assertRevision();
+      this.assertCelUnlinkGroup();
     }
     this.assertStructure(this.prepared.beforeStructure);
     this.apply(this.prepared.afterLayers, this.prepared.afterTags, this.prepared.afterCels);
@@ -254,6 +265,18 @@ class TimelineProjectStateCommand implements Command {
         expectedRevision: this.request.expectedRevision,
         currentRevision: this.context.project.revision.value,
       });
+    }
+  }
+
+  private assertCelUnlinkGroup(): void {
+    if (this.request.kind !== 'cel.unlink') return;
+
+    const currentGroup = captureCelUnlinkGroup(
+      this.context.animation.cels.value,
+      this.request.linkedCelId,
+    );
+    if (!sameCelUnlinkGroup(currentGroup, this.request.linkGroup)) {
+      throw timelineError('revision_conflict', true, { reason: 'link_group_changed' });
     }
   }
 
@@ -386,6 +409,7 @@ export function createCelUnlinkRequest(
     frameId,
     celId: cel?.id ?? '',
     linkedCelId: cel?.linkedCelId ?? '',
+    linkGroup: captureCelUnlinkGroup(context.animation.cels.value, cel?.linkedCelId ?? ''),
   }) as CelUnlinkRequest;
 }
 
@@ -446,7 +470,44 @@ function normalizeCelUnlinkRequest(
     frameId: requiredString(input.frameId, 'frame_id'),
     celId: requiredString(input.celId, 'cel_id'),
     linkedCelId: requiredString(input.linkedCelId, 'linked_cel_id'),
+    linkGroup: normalizeCelUnlinkGroup(input.linkGroup),
   };
+}
+
+function normalizeCelUnlinkGroup(value: unknown): CelUnlinkGroupMember[] {
+  if (!Array.isArray(value)) {
+    throw timelineError('invalid_request', false, { reason: 'link_group' });
+  }
+
+  const members = value.map((member) => {
+    if (!isRecord(member)) {
+      throw timelineError('invalid_request', false, { reason: 'link_group' });
+    }
+
+    const linkType = member.linkType;
+    if (linkType !== 'hard') {
+      throw timelineError('invalid_request', false, { reason: 'link_group' });
+    }
+
+    return {
+      key: requiredString(member.key, 'link_group'),
+      celId: requiredString(member.celId, 'link_group'),
+      layerId: requiredString(member.layerId, 'link_group'),
+      frameId: requiredString(member.frameId, 'link_group'),
+      linkedCelId: requiredString(member.linkedCelId, 'link_group'),
+      linkType,
+    } satisfies CelUnlinkGroupMember;
+  });
+
+  const keys = new Set<string>();
+  for (const member of members) {
+    if (keys.has(member.key)) {
+      throw timelineError('invalid_request', false, { reason: 'link_group' });
+    }
+    keys.add(member.key);
+  }
+
+  return members.sort((a, b) => compareCelUnlinkGroupKeys(a.key, b.key));
 }
 
 function normalizeExpectedRevision(value: unknown): number {
@@ -780,13 +841,17 @@ function prepareCelUnlinkChange(
     throw timelineError('invalid_state', false, { reason: 'cel_not_hard_linked' });
   }
 
-  const group = [...context.animation.cels.value.entries()].filter(([, candidate]) =>
+  const groupEntries = [...context.animation.cels.value.entries()].filter(([, candidate]) =>
     candidate.linkedCelId === request.linkedCelId && candidate.linkType === 'hard',
   );
+  const group = captureCelUnlinkGroup(context.animation.cels.value, request.linkedCelId);
   if (group.length < 2) {
     throw timelineError('invalid_state', false, { reason: 'cel_not_shared' });
   }
-  if (!group.every(([, candidate]) =>
+  if (!sameCelUnlinkGroup(group, request.linkGroup)) {
+    throw timelineError('revision_conflict', true, { reason: 'link_group_changed' });
+  }
+  if (!groupEntries.every(([, candidate]) =>
     candidate.canvas === cel.canvas && candidate.indexBuffer === cel.indexBuffer,
   )) {
     throw timelineError('invalid_state', false, { reason: 'link_group_payload_changed' });
@@ -803,6 +868,46 @@ function prepareCelUnlinkChange(
     afterStructure: captureProjectStructureWithCels(context, afterCels),
     domains: ['timeline', 'raster-content'],
   };
+}
+
+function captureCelUnlinkGroup(
+  cels: ReadonlyMap<string, Cel>,
+  linkedCelId: string,
+): CelUnlinkGroupMember[] {
+  return [...cels.entries()]
+    .filter(([, cel]) => cel.linkedCelId === linkedCelId && cel.linkType === 'hard')
+    .sort(([firstKey], [secondKey]) => compareCelUnlinkGroupKeys(firstKey, secondKey))
+    .map(([key, cel]) => ({
+      key,
+      celId: cel.id,
+      layerId: cel.layerId,
+      frameId: cel.frameId,
+      linkedCelId: cel.linkedCelId as string,
+      linkType: 'hard',
+    }));
+}
+
+function compareCelUnlinkGroupKeys(first: string, second: string): number {
+  if (first < second) return -1;
+  if (first > second) return 1;
+  return 0;
+}
+
+function sameCelUnlinkGroup(
+  current: readonly CelUnlinkGroupMember[],
+  expected: readonly CelUnlinkGroupMember[],
+): boolean {
+  if (current.length !== expected.length) return false;
+  return current.every((member, index) => {
+    const other = expected[index];
+    return other !== undefined &&
+      member.key === other.key &&
+      member.celId === other.celId &&
+      member.layerId === other.layerId &&
+      member.frameId === other.frameId &&
+      member.linkedCelId === other.linkedCelId &&
+      member.linkType === other.linkType;
+  });
 }
 
 function cloneUnlinkedCel(cel: Cel): Cel {

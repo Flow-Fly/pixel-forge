@@ -363,6 +363,7 @@ class AnimationStore {
       layerId: layer.id,
       frameId: targetFrameId,
       canvas: sourceCel.canvas,
+      indexBuffer: sourceCel.indexBuffer,
       linkedCelId,
       linkType,
       opacity: sourceCel.opacity,

@@ -8,6 +8,7 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from '../../src/stores/project-context';
+import { OptimizedDrawingCommand } from '../../src/commands/optimized-drawing-command';
 
 const contexts: ProjectContext[] = [];
 
@@ -26,6 +27,9 @@ function createNonAdjacentHardLinkedCels(context: ProjectContext) {
     canvas,
   });
   context.layers.updateLayer(layer.id, { canvas });
+  const indexBuffer = context.animation.ensureCelIndexBuffer(layer.id, firstFrameId);
+  indexBuffer[0] = 1;
+  context.animation.updateCelIndexBuffer(layer.id, firstFrameId, indexBuffer);
 
   context.animation.addFrame(false);
   context.animation.addFrame(false);
@@ -38,6 +42,200 @@ function createNonAdjacentHardLinkedCels(context: ProjectContext) {
   ], 'hard');
   context.animation.goToFrame(third.id);
   return layer;
+}
+
+async function drawPixel(
+  context: ProjectContext,
+  layerId: string,
+  frameId: string,
+  x: number,
+  paletteIndex: number,
+): Promise<void> {
+  const cel = context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId));
+  if (!cel?.indexBuffer) throw new Error('Expected an indexed cel');
+  const previousIndex = cel.indexBuffer[x] ?? 0;
+  const command = new OptimizedDrawingCommand(
+    layerId,
+    { x, y: 0, width: 1, height: 1 },
+    new Uint8ClampedArray([0, 0, 0, 0]),
+    new Uint8ClampedArray([255, 0, 0, 255]),
+    'Chromium linked-cel drawing',
+    {
+      frameId,
+      canvasWidth: cel.canvas.width,
+      previousIndexData: Uint8Array.of(previousIndex),
+      newIndexData: Uint8Array.of(paletteIndex),
+    },
+    context,
+  );
+  await context.history.execute(command);
+}
+
+type TimelineHarness = HTMLElement & { updateComplete: Promise<unknown> };
+
+type LinkedCelJourney = {
+  context: ProjectContext;
+  layerId: string;
+  layerName: string;
+  firstFrameId: string;
+  activeFrameId: string;
+  sharedCanvas: HTMLCanvasElement;
+  sharedIndexBuffer: Uint8Array;
+  header: TimelineHarness;
+  grid: TimelineHarness;
+};
+
+function requiredCel(context: ProjectContext, layerId: string, frameId: string) {
+  const cel = context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId));
+  if (!cel) throw new Error(`Expected cel ${layerId}:${frameId}`);
+  return cel;
+}
+
+function shadowQuery<T extends Element = HTMLElement>(element: HTMLElement, selector: string): T | null {
+  const root = element.shadowRoot;
+  if (!root) throw new Error(`Expected shadow root for ${element.localName}`);
+  return root.querySelector<T>(selector);
+}
+
+function requiredShadowQuery<T extends Element = HTMLElement>(element: HTMLElement, selector: string): T {
+  const result = shadowQuery<T>(element, selector);
+  if (!result) throw new Error(`Expected ${selector} in ${element.localName}`);
+  return result;
+}
+
+function shadowQueryAll(element: HTMLElement, selector: string): NodeListOf<Element> {
+  const root = element.shadowRoot;
+  if (!root) throw new Error(`Expected shadow root for ${element.localName}`);
+  return root.querySelectorAll(selector);
+}
+
+async function waitForJourneyRender(journey: LinkedCelJourney): Promise<void> {
+  await journey.header.updateComplete;
+  await journey.grid.updateComplete;
+}
+
+function expectSharedPresentation(journey: LinkedCelJourney): void {
+  expect(requiredShadowQuery(journey.header, '[data-shared-cel-context]')).toHaveTextContent(
+    'Shared cel — affects frames 1, 3',
+  );
+  expect(shadowQueryAll(journey.grid, '.link-glyph')).toHaveLength(2);
+}
+
+function expectIndependentPresentation(journey: LinkedCelJourney): void {
+  expect(shadowQuery(journey.header, '[data-shared-cel-context]')).toBeNull();
+  expect(shadowQueryAll(journey.grid, '.link-glyph')).toHaveLength(0);
+}
+
+function expectRemainingGroup(journey: LinkedCelJourney): void {
+  expect(requiredCel(journey.context, journey.layerId, journey.firstFrameId).linkedCelId)
+    .toBeTruthy();
+}
+
+async function createLinkedCelJourney(): Promise<LinkedCelJourney> {
+  const context = createProjectContext();
+  contexts.push(context);
+  const layer = createNonAdjacentHardLinkedCels(context);
+  setActiveProjectContext(context);
+  const firstFrame = context.animation.frames.value[0];
+  const activeFrame = context.animation.frames.value[2];
+  if (!firstFrame || !activeFrame) throw new Error('Expected linked frames');
+
+  await drawPixel(context, layer.id, activeFrame.id, 0, 2);
+  const sharedCel = requiredCel(context, layer.id, activeFrame.id);
+  const firstCel = requiredCel(context, layer.id, firstFrame.id);
+  if (!sharedCel.indexBuffer || !firstCel.indexBuffer) {
+    throw new Error('Expected shared indexed cels');
+  }
+  expect(sharedCel.canvas).toBe(firstCel.canvas);
+  expect(sharedCel.indexBuffer).toBe(firstCel.indexBuffer);
+  expect(sharedCel.indexBuffer[0]).toBe(2);
+
+  const header = document.createElement('pf-timeline-header') as TimelineHarness;
+  const grid = document.createElement('pf-timeline-grid') as TimelineHarness;
+  document.body.append(header, grid);
+  const journey = {
+    context,
+    layerId: layer.id,
+    layerName: layer.name,
+    firstFrameId: firstFrame.id,
+    activeFrameId: activeFrame.id,
+    sharedCanvas: sharedCel.canvas,
+    sharedIndexBuffer: sharedCel.indexBuffer,
+    header,
+    grid,
+  };
+  await waitForJourneyRender(journey);
+  expectSharedPresentation(journey);
+  return journey;
+}
+
+async function unlinkFromContextBar(journey: LinkedCelJourney): Promise<void> {
+  await userEvent.click(page.getByRole('button', { name: 'Unlink this cel' }));
+  await expect.poll(() => journey.context.history.undoStack.value.length).toBe(2);
+  await waitForJourneyRender(journey);
+  const activeCel = requiredCel(journey.context, journey.layerId, journey.activeFrameId);
+  expect(activeCel.linkedCelId).toBeUndefined();
+  expect(activeCel.indexBuffer).not.toBe(journey.sharedIndexBuffer);
+  expect(activeCel.indexBuffer).toEqual(journey.sharedIndexBuffer);
+  expectRemainingGroup(journey);
+  expectIndependentPresentation(journey);
+}
+
+async function undoUnlink(journey: LinkedCelJourney): Promise<void> {
+  await journey.context.history.undo();
+  await waitForJourneyRender(journey);
+  const activeCel = requiredCel(journey.context, journey.layerId, journey.activeFrameId);
+  expect(activeCel.linkedCelId).toBeTruthy();
+  expect(activeCel.canvas).toBe(journey.sharedCanvas);
+  expect(activeCel.indexBuffer).toBe(journey.sharedIndexBuffer);
+  expectSharedPresentation(journey);
+}
+
+async function redoUnlink(journey: LinkedCelJourney): Promise<void> {
+  await journey.context.history.redo();
+  await waitForJourneyRender(journey);
+  expect(requiredCel(journey.context, journey.layerId, journey.activeFrameId).linkedCelId)
+    .toBeUndefined();
+  expectIndependentPresentation(journey);
+}
+
+async function unlinkFromContextMenu(journey: LinkedCelJourney): Promise<void> {
+  const sharedCel = page.getByRole('button', {
+    name: `${journey.layerName}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
+  });
+  (sharedCel.element() as HTMLButtonElement).dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true,
+    composed: true,
+    clientX: 20,
+    clientY: 20,
+  }));
+
+  const menu = requiredShadowQuery<HTMLElement>(journey.grid, 'pf-context-menu');
+  await expect.poll(() => menu.hasAttribute('open')).toBe(true);
+  const menuButton = requiredShadowQuery<HTMLElement>(menu, '.menu-item:last-child');
+  expect(menuButton).toHaveTextContent('Unlink this cel');
+  await userEvent.keyboard('{ArrowDown}');
+  expect(menuButton).toHaveClass('focused');
+  await userEvent.keyboard('{Enter}');
+  await expect.poll(() => journey.context.history.undoStack.value.length).toBe(2);
+  await waitForJourneyRender(journey);
+  expect(requiredCel(journey.context, journey.layerId, journey.activeFrameId).linkedCelId)
+    .toBeUndefined();
+  expectRemainingGroup(journey);
+  expectIndependentPresentation(journey);
+}
+
+async function drawIndependentlyAfterUnlink(journey: LinkedCelJourney): Promise<void> {
+  await drawPixel(journey.context, journey.layerId, journey.activeFrameId, 1, 3);
+  const independent = requiredCel(journey.context, journey.layerId, journey.activeFrameId);
+  const remaining = requiredCel(journey.context, journey.layerId, journey.firstFrameId);
+  if (!independent.indexBuffer || !remaining.indexBuffer) {
+    throw new Error('Expected indexed cels after unlink');
+  }
+  expect(independent.canvas).not.toBe(remaining.canvas);
+  expect(independent.indexBuffer).not.toBe(remaining.indexBuffer);
+  expect(independent.indexBuffer[1]).toBe(3);
+  expect(remaining.indexBuffer[1]).toBe(0);
 }
 
 afterEach(() => {
@@ -103,51 +301,14 @@ describe('linked cel sharing in Chromium', () => {
   });
 
   it('unlinks the active shared cel from both UI routes and preserves the remaining group', async () => {
-    const context = createProjectContext();
-    contexts.push(context);
-    const layer = createNonAdjacentHardLinkedCels(context);
-    setActiveProjectContext(context);
-
-    const header = document.createElement('pf-timeline-header');
-    document.body.append(header);
-    await (header as import('../../src/components/timeline/pf-timeline-header').PFTimelineHeader).updateComplete;
-
-    const contextButton = page.getByRole('button', { name: 'Unlink this cel' });
-    await userEvent.click(contextButton);
-    await expect.poll(() => context.history.undoStack.value.length).toBe(1);
-    const middleFrame = context.animation.frames.value[2];
-    if (!middleFrame) throw new Error('Expected active shared frame');
-    const middle = context.animation.cels.value.get(context.animation.getCelKey(layer.id, middleFrame.id));
-    expect(middle?.linkedCelId).toBeUndefined();
-
-    await context.history.undo();
-    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, middleFrame.id))?.linkedCelId)
-      .toBeTruthy();
-
-    const grid = document.createElement('pf-timeline-grid');
-    document.body.append(grid);
-    await (grid as import('../../src/components/timeline/pf-timeline-grid').PFTimelineGrid).updateComplete;
-    const sharedCel = page.getByRole('button', {
-      name: `${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
-    });
-    (sharedCel.element() as HTMLButtonElement).dispatchEvent(new MouseEvent('contextmenu', {
-      bubbles: true,
-      composed: true,
-      clientX: 20,
-      clientY: 20,
-    }));
-    await Promise.resolve();
-
-    const menu = grid.shadowRoot?.querySelector<HTMLElement>('pf-context-menu');
-    const menuButton = menu?.shadowRoot?.querySelector<HTMLElement>('.menu-item:last-child');
-    expect(menuButton?.textContent).toContain('Unlink this cel');
-    menuButton?.click();
-    await expect.poll(() => context.history.undoStack.value.length).toBe(1);
-    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, middleFrame.id))?.linkedCelId)
-      .toBeUndefined();
-    const firstFrame = context.animation.frames.value[0];
-    if (!firstFrame) throw new Error('Expected remaining frame');
-    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, firstFrame.id))?.linkedCelId)
-      .toBeTruthy();
+    const journey = await createLinkedCelJourney();
+    await unlinkFromContextBar(journey);
+    await undoUnlink(journey);
+    await redoUnlink(journey);
+    await undoUnlink(journey);
+    await unlinkFromContextMenu(journey);
+    await undoUnlink(journey);
+    await redoUnlink(journey);
+    await drawIndependentlyAfterUnlink(journey);
   });
 });
