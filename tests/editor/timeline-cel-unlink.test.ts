@@ -202,6 +202,34 @@ describe('timeline cel unlink transaction', () => {
     vi.useRealTimers();
   });
 
+  it('restores the exact group when Undo and Redo cross frame navigation', async () => {
+    const { context, layer, frames, canvas, indexBuffer, linkId, middleCel } =
+      createHardLinkedContext();
+    const middleKey = context.animation.getCelKey(layer.id, middleCel.frameId);
+    const result = await executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layer.id, middleCel.frameId),
+    );
+
+    expect(result.ok).toBe(true);
+    const unlinkedCel = context.animation.cels.value.get(middleKey);
+    if (!unlinkedCel) throw new Error('Expected the cloned cel');
+    context.animation.goToFrame(frames[0]!.id);
+
+    await context.history.undo();
+
+    expect(context.animation.cels.value.get(middleKey)).toBe(middleCel);
+    expect(context.animation.cels.value.get(middleKey)?.canvas).toBe(canvas);
+    expect(context.history.redoStack.value).toHaveLength(1);
+
+    context.animation.goToFrame(frames[2]!.id);
+    await context.history.redo();
+
+    expect(context.animation.cels.value.get(middleKey)).toBe(unlinkedCel);
+    expectRemainingGroup(context, layer.id, frames, linkId, canvas, indexBuffer);
+    expect(context.history.undoStack.value).toHaveLength(1);
+  });
+
   it('unlinks a group created by Link new cels after indexed drawing', async () => {
     const context = createProjectContext();
     contexts.push(context);

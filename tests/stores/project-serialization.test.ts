@@ -6,8 +6,9 @@ import pako from 'pako';
 const canvasBytes = vi.hoisted(() => new WeakMap<HTMLCanvasElement, Uint8Array>());
 
 // happy-dom has neither IndexedDB nor canvas encoding — mock the boundaries.
-// The canvas codec mock preserves loaded bytes through the writer, proving the
-// file boundary without claiming that happy-dom rendered the PNG pixels.
+// The canvas codec mock preserves loaded bytes through the writer, and the
+// drawImage stub copies them for cloneUnlinkedCel. This proves the file
+// boundary without claiming that happy-dom rendered the PNG pixels.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
   projectRepository: {
     list: vi.fn(async () => []),
@@ -53,6 +54,7 @@ import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
 
 const PALETTE = ['#000000', '#ff0000', '#00ff00', '#0000ff', '#ffffff'];
+const LINKED_CANVAS_BYTES = Uint8Array.from([17, 34, 51, 68]);
 const mockedLoadImageDataToCanvas = vi.mocked(loadImageDataToCanvas);
 
 async function readCompressedProjectFixture(filename: string): Promise<ProjectFileInput> {
@@ -141,6 +143,9 @@ async function createLinkedCelPersistenceFixture(): Promise<LinkedCelPersistence
     [firstKey, middleKey, context.animation.getCelKey(layer.id, lastFrame.id)],
     'hard'
   );
+  const linkedCel = context.animation.cels.value.get(middleKey);
+  if (!linkedCel) throw new Error('Expected the linked cel after linking');
+  canvasBytes.set(linkedCel.canvas, new Uint8Array(LINKED_CANVAS_BYTES));
   context.animation.goToFrame(middleFrame.id);
 
   return { context, layerId: layer.id, middleFrameId: middleFrame.id };
@@ -151,11 +156,18 @@ async function unlinkAndReload({
   layerId,
   middleFrameId,
 }: LinkedCelPersistenceFixture): Promise<[ProjectFile, ProjectFile]> {
-  const drawing = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-    imageSmoothingEnabled: false,
-    drawImage: vi.fn(),
-    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(16 * 12 * 4) })),
-  } as unknown as CanvasRenderingContext2D);
+  const drawing = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+    function (this: HTMLCanvasElement) {
+      return {
+        imageSmoothingEnabled: false,
+        drawImage: vi.fn((source: HTMLCanvasElement) => {
+          const sourceBytes = canvasBytes.get(source);
+          if (sourceBytes) canvasBytes.set(this, new Uint8Array(sourceBytes));
+        }),
+        getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(16 * 12 * 4) })),
+      } as unknown as CanvasRenderingContext2D;
+    }
+  );
   const result = await executeTimelineProjectState(
     context,
     createCelUnlinkRequest(context, layerId, middleFrameId)
@@ -184,6 +196,17 @@ function expectUnlinkedCelPersistence(file: ProjectFile, layerId: string): void 
   expect(cels[0]?.linkedCelId).toEqual(cels[2]?.linkedCelId);
   expect(cels[0]?.linkType).toBe('hard');
   expect(cels[2]?.linkType).toBe('hard');
+}
+
+function expectLinkedCelCanvasBytes(file: ProjectFile, layerId: string): void {
+  expect(file.frames.map((frame) => {
+    const cel = frame.cels.find((candidate) => candidate.layerId === layerId);
+    return Array.from(cel?.data ?? []);
+  })).toEqual([
+    Array.from(LINKED_CANVAS_BYTES),
+    Array.from(LINKED_CANVAS_BYTES),
+    Array.from(LINKED_CANVAS_BYTES),
+  ]);
 }
 
 describe('project save -> load -> save round-trip (structural)', () => {
@@ -493,6 +516,8 @@ describe('project save -> load -> save round-trip (structural)', () => {
 
     expectUnlinkedCelPersistence(saved, fixture.layerId);
     expectUnlinkedCelPersistence(reloaded, fixture.layerId);
+    expectLinkedCelCanvasBytes(saved, fixture.layerId);
+    expectLinkedCelCanvasBytes(reloaded, fixture.layerId);
     fixture.context.dispose();
   });
 

@@ -79,11 +79,18 @@ type LinkedCelJourney = {
   layerName: string;
   firstFrameId: string;
   activeFrameId: string;
+  sharedPixel: readonly number[];
   sharedCanvas: HTMLCanvasElement;
   sharedIndexBuffer: Uint8Array;
   header: TimelineHarness;
   grid: TimelineHarness;
 };
+
+function readCanvasPixel(canvas: HTMLCanvasElement, x = 0, y = 0): number[] {
+  const drawing = canvas.getContext('2d', { willReadFrequently: true });
+  if (!drawing) throw new Error('Expected a readable canvas context');
+  return Array.from(drawing.getImageData(x, y, 1, 1).data);
+}
 
 function requiredCel(context: ProjectContext, layerId: string, frameId: string) {
   const cel = context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId));
@@ -146,6 +153,9 @@ async function createLinkedCelJourney(): Promise<LinkedCelJourney> {
   if (!sharedCel.indexBuffer || !firstCel.indexBuffer) {
     throw new Error('Expected shared indexed cels');
   }
+  const sharedPixel = readCanvasPixel(sharedCel.canvas);
+  expect(sharedPixel).toEqual([255, 0, 0, 255]);
+  expect(readCanvasPixel(firstCel.canvas)).toEqual(sharedPixel);
   expect(sharedCel.canvas).toBe(firstCel.canvas);
   expect(sharedCel.indexBuffer).toBe(firstCel.indexBuffer);
   expect(sharedCel.indexBuffer[0]).toBe(2);
@@ -159,6 +169,7 @@ async function createLinkedCelJourney(): Promise<LinkedCelJourney> {
     layerName: layer.name,
     firstFrameId: firstFrame.id,
     activeFrameId: activeFrame.id,
+    sharedPixel,
     sharedCanvas: sharedCel.canvas,
     sharedIndexBuffer: sharedCel.indexBuffer,
     header,
@@ -177,6 +188,9 @@ async function unlinkFromContextBar(journey: LinkedCelJourney): Promise<void> {
   expect(activeCel.linkedCelId).toBeUndefined();
   expect(activeCel.indexBuffer).not.toBe(journey.sharedIndexBuffer);
   expect(activeCel.indexBuffer).toEqual(journey.sharedIndexBuffer);
+  expect(readCanvasPixel(activeCel.canvas)).toEqual(journey.sharedPixel);
+  expect(readCanvasPixel(requiredCel(journey.context, journey.layerId, journey.firstFrameId).canvas))
+    .toEqual(journey.sharedPixel);
   expectRemainingGroup(journey);
   expectIndependentPresentation(journey);
 }
@@ -188,14 +202,18 @@ async function undoUnlink(journey: LinkedCelJourney): Promise<void> {
   expect(activeCel.linkedCelId).toBeTruthy();
   expect(activeCel.canvas).toBe(journey.sharedCanvas);
   expect(activeCel.indexBuffer).toBe(journey.sharedIndexBuffer);
+  expect(readCanvasPixel(activeCel.canvas)).toEqual(journey.sharedPixel);
   expectSharedPresentation(journey);
 }
 
 async function redoUnlink(journey: LinkedCelJourney): Promise<void> {
   await journey.context.history.redo();
   await waitForJourneyRender(journey);
-  expect(requiredCel(journey.context, journey.layerId, journey.activeFrameId).linkedCelId)
-    .toBeUndefined();
+  const activeCel = requiredCel(journey.context, journey.layerId, journey.activeFrameId);
+  expect(activeCel.linkedCelId).toBeUndefined();
+  expect(readCanvasPixel(activeCel.canvas)).toEqual(journey.sharedPixel);
+  expect(readCanvasPixel(requiredCel(journey.context, journey.layerId, journey.firstFrameId).canvas))
+    .toEqual(journey.sharedPixel);
   expectIndependentPresentation(journey);
 }
 
@@ -219,8 +237,11 @@ async function unlinkFromContextMenu(journey: LinkedCelJourney): Promise<void> {
   await userEvent.keyboard('{Enter}');
   await expect.poll(() => journey.context.history.undoStack.value.length).toBe(2);
   await waitForJourneyRender(journey);
-  expect(requiredCel(journey.context, journey.layerId, journey.activeFrameId).linkedCelId)
-    .toBeUndefined();
+  const activeCel = requiredCel(journey.context, journey.layerId, journey.activeFrameId);
+  expect(activeCel.linkedCelId).toBeUndefined();
+  expect(readCanvasPixel(activeCel.canvas)).toEqual(journey.sharedPixel);
+  expect(readCanvasPixel(requiredCel(journey.context, journey.layerId, journey.firstFrameId).canvas))
+    .toEqual(journey.sharedPixel);
   expectRemainingGroup(journey);
   expectIndependentPresentation(journey);
 }
@@ -234,6 +255,10 @@ async function drawIndependentlyAfterUnlink(journey: LinkedCelJourney): Promise<
   }
   expect(independent.canvas).not.toBe(remaining.canvas);
   expect(independent.indexBuffer).not.toBe(remaining.indexBuffer);
+  expect(readCanvasPixel(independent.canvas)).toEqual(journey.sharedPixel);
+  expect(readCanvasPixel(independent.canvas, 1)).toEqual([255, 0, 0, 255]);
+  expect(readCanvasPixel(remaining.canvas)).toEqual(journey.sharedPixel);
+  expect(readCanvasPixel(remaining.canvas, 1)).toEqual([0, 0, 0, 0]);
   expect(independent.indexBuffer[1]).toBe(3);
   expect(remaining.indexBuffer[1]).toBe(0);
 }
@@ -303,7 +328,11 @@ describe('linked cel sharing in Chromium', () => {
   it('unlinks the active shared cel from both UI routes and preserves the remaining group', async () => {
     const journey = await createLinkedCelJourney();
     await unlinkFromContextBar(journey);
+    journey.context.animation.goToFrame(journey.firstFrameId);
+    await waitForJourneyRender(journey);
     await undoUnlink(journey);
+    journey.context.animation.goToFrame(journey.activeFrameId);
+    await waitForJourneyRender(journey);
     await redoUnlink(journey);
     await undoUnlink(journey);
     await unlinkFromContextMenu(journey);

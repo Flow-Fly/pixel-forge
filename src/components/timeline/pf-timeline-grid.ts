@@ -16,6 +16,7 @@ import {
   executeTimelineProjectState,
 } from '../../editor/timeline-project-state';
 import {
+  getCelUnlinkUnavailableReason,
   getSharedCelPresentation,
   sharedCelAccessibleName,
   type SharedCelPresentation,
@@ -331,11 +332,15 @@ export class PFTimelineGrid extends BaseComponent {
 
     if (cel && getSharedCelPresentation(context, cel.layerId, cel.frameId)) {
       const request = createCelUnlinkRequest(context, cel.layerId, cel.frameId);
+      const unavailableReason = getCelUnlinkUnavailableReason(context);
       items.push(
         { type: 'divider' },
         {
           type: 'item',
-          label: 'Unlink this cel',
+          label: unavailableReason
+            ? `Unlink this cel (${unavailableReason})`
+            : 'Unlink this cel',
+          disabled: unavailableReason !== null,
           action: () => {
             void executeTimelineProjectState(context, request);
           },
@@ -503,7 +508,7 @@ export class PFTimelineGrid extends BaseComponent {
 
     const sharedCel = presentation.sharedCel;
     const accessibleName = sharedCel
-      ? sharedCelAccessibleName(layer.name, frameIndex + 1, sharedCel.frameNumbers)
+      ? sharedCelAccessibleName(layer.name, frameIndex + 1, sharedCel)
       : `${layer.name}, frame ${frameIndex + 1}`;
 
     return html`

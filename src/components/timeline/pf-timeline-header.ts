@@ -30,6 +30,7 @@ import type {
 import type { ProjectTarget } from '../../editor/contracts';
 import {
   formatAffectedFrames,
+  getCelUnlinkUnavailableReason,
   getSharedCelPresentation,
   sharedCelFrameIndex,
 } from './linked-cel-sharing';
@@ -668,20 +669,30 @@ export class PFTimelineHeader extends BaseComponent {
 
     const frameIndex = sharedCelFrameIndex(context.animation.frames.value, frameId);
     if (frameIndex < 0) return '';
+    const unavailableReason = getCelUnlinkUnavailableReason(context);
+    const unlinkLabel = unavailableReason
+      ? `Unlink this cel. ${unavailableReason}`
+      : 'Unlink this cel';
 
     return html`
       <div
         class="linked-cel-context"
         data-shared-cel-context
         role="group"
-        aria-label="Shared cel — affects frames ${formatAffectedFrames(sharedCel.frameNumbers)}"
+        aria-label="Shared cel — affects frames ${formatAffectedFrames(sharedCel)}"
         style="left: ${frameIndex * 32}px"
       >
         <span class="link-glyph" aria-hidden="true">⛓</span>
         <span class="copy">
-          <strong>Shared cel</strong> — affects frames ${formatAffectedFrames(sharedCel.frameNumbers)}
+          <strong>Shared cel</strong> — affects frames ${formatAffectedFrames(sharedCel)}
         </span>
-        <button type="button" @click=${() => this.unlinkCel(context, layerId, frameId)}>
+        <button
+          type="button"
+          ?disabled=${unavailableReason !== null}
+          title=${unavailableReason ?? 'Unlink this cel'}
+          aria-label=${unlinkLabel}
+          @click=${() => this.unlinkCel(context, layerId, frameId)}
+        >
           Unlink this cel
         </button>
       </div>

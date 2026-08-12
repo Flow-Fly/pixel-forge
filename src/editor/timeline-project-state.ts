@@ -283,7 +283,9 @@ class TimelineProjectStateCommand implements Command {
   private assertStructure(expected: ProjectStructure): void {
     const current = captureProjectStructure(this.context);
     const matches = this.hasExecuted
-      ? this.request.kind.startsWith('layer.')
+      ? this.request.kind === 'cel.unlink'
+        ? sameCelUnlinkStructure(current, expected)
+        : this.request.kind.startsWith('layer.')
         ? sameLayerSemanticArrays(current.layers, expected.layers)
         : this.request.kind.startsWith('tag.')
           ? sameTimelineStructure(current, expected)
@@ -1087,6 +1089,12 @@ function sameProjectStructure(current: ProjectStructure, expected: ProjectStruct
     sameTimelineStructure(current, expected);
 }
 
+function sameCelUnlinkStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
+  return sameLayerDocumentArrays(current.layers, expected.layers) &&
+    sameMapEntries(current.cels, expected.cels) &&
+    sameTimelineStructure(current, expected);
+}
+
 function sameTimelineStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
   return sameFrameStructures(current.frames, expected.frames) &&
     sameTagArrays(current.tags, expected.tags);
@@ -1112,6 +1120,19 @@ function sameFrameStructures(a: readonly FrameStructure[], b: readonly FrameStru
 function sameLayerArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((layer, index) => sameLayer(layer, b[index]));
+}
+
+function sameLayerDocumentArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((layer, index) => sameLayerDocumentState(layer, b[index]));
+}
+
+function sameLayerDocumentState(a: Layer | undefined, b: Layer | undefined): boolean {
+  if (!a || !b) return false;
+  return sameLayerIdentity(a, b) &&
+    sameLayerState(a, b) &&
+    a.textData === b.textData &&
+    a.referenceData === b.referenceData;
 }
 
 function sameLayerSemanticArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
