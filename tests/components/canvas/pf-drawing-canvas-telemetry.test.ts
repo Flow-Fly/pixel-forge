@@ -55,7 +55,7 @@ function createDrawingContext(
   };
   const context = {
     animation: {
-      cels: { value: new Map() },
+      cels: { value: new Map([[`${layer.id}:frame-1`, { id: 'cel-1', canvas }]]) },
       currentFrameId: { value: 'frame-1' },
       ensureCelIndexBuffer: vi.fn(() => null),
       ensureUnlinkedForEdit: vi.fn(() => false),
@@ -71,6 +71,10 @@ function createDrawingContext(
     layers: {
       activeLayerId: { value: layer.id },
       layers: { value: [layer] },
+    },
+    project: {
+      id: { value: 'project-1' },
+      revision: { value: 0 },
     },
   } as unknown as ProjectContext;
 
@@ -211,5 +215,52 @@ describe('pf-drawing-canvas first drawing telemetry', () => {
     internals.strokeContext = origin.context;
     element.disconnectedCallback();
     expect(element.toolController.onCancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('substitutes and clears only the captured local preview layer', async () => {
+    const origin = createDrawingContext();
+    const element = await createDrawingCanvas(origin.context);
+    const storedCanvas = document.createElement('canvas');
+    const previewCanvas = document.createElement('canvas');
+    const otherCanvas = document.createElement('canvas');
+    const internals = element as unknown as {
+      drawingPreview: unknown;
+      setToolPreview: (preview: unknown) => void;
+      applyToolPreview: (plan: unknown, context: ProjectContext, frameId: string) => {
+        steps: Array<{ layerId: string; canvas?: HTMLCanvasElement }>;
+      };
+    };
+    const plan = {
+      frameId: 'frame-1',
+      steps: [
+        { kind: 'image', layerId: 'layer-1', canvas: storedCanvas, alpha: 1, compositeOperation: 'source-over' },
+        { kind: 'image', layerId: 'other', canvas: otherCanvas, alpha: 1, compositeOperation: 'source-over' },
+      ],
+    };
+
+    internals.setToolPreview({
+      projectId: 'project-1',
+      expectedRevision: 0,
+      layerId: 'layer-1',
+      frameId: 'frame-1',
+      celId: 'cel-1',
+      canvas: previewCanvas,
+    });
+    const substituted = internals.applyToolPreview(plan, origin.context, 'frame-1');
+    expect(substituted.steps[0]?.canvas).toBe(previewCanvas);
+    expect(substituted.steps[1]?.canvas).toBe(otherCanvas);
+
+    origin.context.project.revision.value = 1;
+    const staleRevision = internals.applyToolPreview(plan, origin.context, 'frame-1');
+    expect(staleRevision.steps[0]?.canvas).toBe(storedCanvas);
+    origin.context.project.revision.value = 0;
+    origin.context.animation.cels.value = new Map([
+      [`layer-1:frame-1`, { id: 'replacement-cel', canvas: storedCanvas }],
+    ]);
+    const staleCel = internals.applyToolPreview(plan, origin.context, 'frame-1');
+    expect(staleCel.steps[0]?.canvas).toBe(storedCanvas);
+
+    internals.setToolPreview(null);
+    expect(internals.drawingPreview).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import type { ModifierKeys, BaseTool, Point } from "./base-tool";
+import type { ModifierKeys, BaseTool, Point, ToolPreviewPresenter } from "./base-tool";
 import type { ProjectContext } from "../stores/project-context";
 import type { ToolType } from "../stores/tools";
 import { log } from "../utils/log";
@@ -44,6 +44,7 @@ export class ToolController {
   private activeToolName: ToolType | null = null;
   private readonly fallbackContext: CanvasRenderingContext2D;
   private readonly toolLoaders: ToolLoaderMap;
+  private previewPresenter: ToolPreviewPresenter | null = null;
 
   constructor(
     fallbackContext: CanvasRenderingContext2D,
@@ -86,8 +87,14 @@ export class ToolController {
     }
 
     this.activeTool = new ToolClass(this.fallbackContext);
+    this.activeTool.setPreviewPresenter(this.previewPresenter);
     this.activeToolName = toolName;
     return true;
+  }
+
+  setPreviewPresenter(presenter: ToolPreviewPresenter | null): void {
+    this.previewPresenter = presenter;
+    this.activeTool?.setPreviewPresenter(presenter);
   }
 
   private async loadToolClass(

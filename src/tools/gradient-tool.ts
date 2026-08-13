@@ -13,7 +13,7 @@ interface GradientGesture {
   readonly request: GradientRequest;
   readonly beforePixels: Uint8ClampedArray;
   readonly beforeIndices?: Uint8Array;
-  readonly previewPixels: Uint8ClampedArray | null;
+  readonly previewCanvas: HTMLCanvasElement;
 }
 
 export class GradientTool extends BaseTool {
@@ -26,6 +26,8 @@ export class GradientTool extends BaseTool {
 
   onDown(x: number, y: number, modifiers?: ModifierKeys) {
     if (!this.ctx) return;
+
+    this.presentPreview(null);
 
     const layerId = this.projectContext.layers.activeLayerId.value;
     if (!layerId) return;
@@ -44,11 +46,17 @@ export class GradientTool extends BaseTool {
     };
 
     const indexBuffer = this.projectContext.animation.getCelIndexBuffer(layerId, frameId);
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = this.ctx.canvas.width;
+    previewCanvas.height = this.ctx.canvas.height;
+    const previewContext = previewCanvas.getContext('2d');
+    if (!previewContext) return;
+    previewContext.putImageData(createRasterImageData(imageData.data, previewCanvas.width, previewCanvas.height), 0, 0);
     this.gesture = {
       request,
       beforePixels: new Uint8ClampedArray(imageData.data),
       beforeIndices: indexBuffer ? new Uint8Array(indexBuffer) : undefined,
-      previewPixels: null,
+      previewCanvas,
     };
     this.isDrawing = true;
   }
@@ -69,40 +77,32 @@ export class GradientTool extends BaseTool {
     const capturedGesture = this.gesture;
     const request = this.withEndPoint(capturedGesture.request, x, y);
     const isZeroLength = this.isZeroLength(request);
-    const previewPixels = isZeroLength ? null : this.drawPreview(request);
-    const gesture = previewPixels
-      ? { ...capturedGesture, previewPixels }
-      : capturedGesture;
+    const didRenderPreview = isZeroLength || this.drawPreview(request);
+    this.presentPreview(null);
     this.isDrawing = false;
     this.gesture = null;
 
     // A failed preview cannot safely describe the transient canvas state. Do
     // not start a transaction from it, but keep the gesture failure local.
-    if (!isZeroLength && !previewPixels) {
-      this.restoreCapturedPixelsIfCurrent(gesture);
-      return;
-    }
+    if (!didRenderPreview) return;
 
     const projectContext = this.projectContext;
     void executeGradient(projectContext, request, {
       canvas: this.ctx.canvas,
-      beforePixels: gesture.beforePixels,
-      beforeIndices: gesture.beforeIndices,
-      ...(previewPixels ? { expectedPixels: previewPixels } : {}),
+      beforePixels: capturedGesture.beforePixels,
+      beforeIndices: capturedGesture.beforeIndices,
     }).then((result) => {
-      if (!result.ok) this.restoreCapturedPixelsIfCurrent(gesture);
-      else {
-        productTelemetry.record({
-          name: 'first_drawing_action',
-          dimensions: { tool: 'other' },
-        });
-      }
+      if (!result.ok) return;
+      productTelemetry.record({
+        name: 'first_drawing_action',
+        dimensions: { tool: 'other' },
+      });
     });
   }
 
   onCancel(): void {
     if (!this.isDrawing || !this.gesture) return;
-    this.restoreCapturedPixelsIfCurrent(this.gesture);
+    this.presentPreview(null);
     this.isDrawing = false;
     this.gesture = null;
   }
@@ -115,56 +115,42 @@ export class GradientTool extends BaseTool {
     };
   }
 
-  private drawPreview(request: GradientRequest): Uint8ClampedArray | null {
-    if (!this.ctx) return null;
+  private drawPreview(request: GradientRequest): boolean {
+    const gesture = this.gesture;
+    if (!gesture) return false;
+    const previewContext = gesture.previewCanvas.getContext('2d');
+    if (!previewContext) return false;
 
     try {
       const render = renderGradientPreview(
         this.projectContext,
         request,
-        this.ctx.canvas.width,
-        this.ctx.canvas.height,
+        gesture.previewCanvas.width,
+        gesture.previewCanvas.height,
       );
-      this.ctx.putImageData(createRasterImageData(render.pixels, this.ctx.canvas.width, this.ctx.canvas.height), 0, 0);
-      this.markPreviewDirty(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
-      if (this.gesture) {
-        this.gesture = { ...this.gesture, previewPixels: new Uint8ClampedArray(render.pixels) };
-      }
-      return render.pixels;
+      previewContext.putImageData(
+        createRasterImageData(render.pixels, gesture.previewCanvas.width, gesture.previewCanvas.height),
+        0,
+        0,
+      );
+      this.presentPreview({
+        projectId: request.target.projectId,
+        expectedRevision: request.expectedRevision,
+        layerId: request.layerId,
+        frameId: request.frameId,
+        ...(request.celId ? { celId: request.celId } : {}),
+        canvas: gesture.previewCanvas,
+      });
+      this.markPreviewDirty(0, 0, gesture.previewCanvas.width, gesture.previewCanvas.height);
+      return true;
     } catch {
-      return null;
+      this.presentPreview(null);
+      return false;
     }
   }
 
   private isZeroLength(request: GradientRequest): boolean {
     return request.startX === request.endX && request.startY === request.endY;
-  }
-
-  private restorePixels(pixels: Uint8ClampedArray): void {
-    if (!this.ctx) return;
-    this.ctx.putImageData(createRasterImageData(pixels, this.ctx.canvas.width, this.ctx.canvas.height), 0, 0);
-  }
-
-  private restoreCapturedPixelsIfCurrent(gesture: GradientGesture): void {
-    const previewPixels = gesture.previewPixels;
-    if (!this.ctx || !previewPixels || !this.isCurrentGestureTarget(gesture.request)) return;
-
-    const currentPixels = this.ctx.getImageData(0, 0, this.ctx.canvas.width, this.ctx.canvas.height).data;
-    const matchesPreview = currentPixels.length === previewPixels.length &&
-      currentPixels.every((pixel, index) => pixel === previewPixels[index]);
-    if (!matchesPreview) return;
-    this.restorePixels(gesture.beforePixels);
-  }
-
-  private isCurrentGestureTarget(request: GradientRequest): boolean {
-    if (this.projectContext.project.id.value !== request.target.projectId ||
-        this.projectContext.project.revision.value !== request.expectedRevision) {
-      return false;
-    }
-
-    const key = this.projectContext.animation.getCelKey(request.layerId, request.frameId);
-    const cel = this.projectContext.animation.cels.value.get(key);
-    return !!cel && cel.canvas === this.ctx?.canvas && (!request.celId || cel.id === request.celId);
   }
 
   private markPreviewDirty(x: number, y: number, width: number, height: number): void {

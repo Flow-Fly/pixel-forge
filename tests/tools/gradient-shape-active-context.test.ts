@@ -54,6 +54,20 @@ function createContext(primary: string, secondary: string): ProjectContext {
   return context;
 }
 
+function stubPreviewCanvas(): { canvas: HTMLCanvasElement; context: FakeCanvasContext } {
+  const context = new FakeCanvasContext();
+  const canvas = {
+    width: 4,
+    height: 4,
+    getContext: vi.fn(() => context),
+  } as unknown as HTMLCanvasElement;
+  const createElement = document.createElement.bind(document);
+  vi.spyOn(document, 'createElement').mockImplementation((tagName: string) =>
+    tagName === 'canvas' ? canvas : createElement(tagName)
+  );
+  return { canvas, context };
+}
+
 describe('gradient and shape active project context', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -71,7 +85,7 @@ describe('gradient and shape active project context', () => {
     vi.restoreAllMocks();
   });
 
-  it('draws a gradient with colors from the initiating project', () => {
+  it('draws a gradient with colors from the initiating project', async () => {
     const projectA = createContext('#123456', '#654321');
     const projectB = createContext('#abcdef', '#fedcba');
     projectA.palette.mainColors.value = ['#123456', '#654321'];
@@ -81,26 +95,34 @@ describe('gradient and shape active project context', () => {
       secondary: defaultProjectContext.colors.secondaryColor.value,
     };
     const canvas = new FakeCanvasContext();
+    const preview = stubPreviewCanvas();
+    const presentPreview = vi.fn();
     const tool = new GradientTool();
     tool.setContext(canvas as unknown as CanvasRenderingContext2D);
     tool.setProjectContext(projectA);
+    tool.setPreviewPresenter(presentPreview);
 
     tool.onDown(0, 0);
     tool.onUp(3, 3);
 
     expect(canvas.colorStops).not.toHaveBeenCalled();
-    expect(canvas.putImageData).toHaveBeenCalled();
+    expect(canvas.putImageData).not.toHaveBeenCalled();
+    expect(preview.context.putImageData).toHaveBeenCalled();
+    await Promise.resolve();
+    expect(presentPreview).toHaveBeenLastCalledWith(null);
     expect(projectB.colors.primaryColor.value).toBe('#abcdef');
     expect(projectB.colors.secondaryColor.value).toBe('#fedcba');
     expect(defaultProjectContext.colors.primaryColor.value).toBe(defaultColors.primary);
     expect(defaultProjectContext.colors.secondaryColor.value).toBe(defaultColors.secondary);
   });
 
-  it('restores a deterministic preview when a Gradient gesture is cancelled', () => {
+  it('clears the presented Gradient preview when a gesture is cancelled', () => {
     const project = createContext('#123456', '#654321');
     project.palette.mainColors.value = ['#123456', '#654321'];
     project.palette.rebuildColorMap();
     const canvas = new FakeCanvasContext();
+    const preview = stubPreviewCanvas();
+    const presentPreview = vi.fn();
     const layerId = project.layers.activeLayerId.value;
     const frameId = project.animation.currentFrameId.value;
     if (!layerId) throw new Error('Expected an active layer');
@@ -113,13 +135,15 @@ describe('gradient and shape active project context', () => {
     const tool = new GradientTool();
     tool.setContext(canvas as unknown as CanvasRenderingContext2D);
     tool.setProjectContext(project);
+    tool.setPreviewPresenter(presentPreview);
 
     tool.onDown(0, 0);
     tool.onDrag(3, 3);
-    const previewCalls = canvas.putImageData.mock.calls.length;
+    const previewCalls = preview.context.putImageData.mock.calls.length;
     tool.onCancel();
 
-    expect(canvas.putImageData).toHaveBeenCalledTimes(previewCalls + 1);
+    expect(preview.context.putImageData).toHaveBeenCalledTimes(previewCalls);
+    expect(presentPreview).toHaveBeenLastCalledWith(null);
     expect(project.project.revision.value).toBe(0);
     expect(project.history.undoStack.value).toHaveLength(0);
   });

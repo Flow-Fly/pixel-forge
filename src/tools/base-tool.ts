@@ -13,6 +13,17 @@ export interface ModifierKeys {
   button: number; // 0 = left, 1 = middle, 2 = right
 }
 
+export interface ToolPreview {
+  readonly projectId: string;
+  readonly expectedRevision: number;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId?: string;
+  readonly canvas: HTMLCanvasElement;
+}
+
+export type ToolPreviewPresenter = (preview: ToolPreview | null) => void;
+
 export abstract class BaseTool {
   abstract name: string;
   abstract cursor: string;
@@ -43,6 +54,7 @@ export abstract class BaseTool {
 
   protected context: CanvasRenderingContext2D | null = null;
   protected projectContext: ProjectContext = defaultProjectContext;
+  private previewPresenter: ToolPreviewPresenter | null = null;
 
   setContext(ctx: CanvasRenderingContext2D) {
     this.context = ctx;
@@ -52,8 +64,16 @@ export abstract class BaseTool {
     this.projectContext = context;
   }
 
+  setPreviewPresenter(presenter: ToolPreviewPresenter | null) {
+    this.previewPresenter = presenter;
+  }
+
   get ctx(): CanvasRenderingContext2D | null {
     return this.context;
+  }
+
+  protected presentPreview(preview: ToolPreview | null): void {
+    this.previewPresenter?.(preview);
   }
 
   /**

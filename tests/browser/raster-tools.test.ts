@@ -68,6 +68,33 @@ function rgbaPixels(canvas: HTMLCanvasElement): number[] {
   return Array.from(canvasContext.getImageData(0, 0, canvas.width, canvas.height).data);
 }
 
+function expectIndexedPixels(
+  context: ProjectContext,
+  canvas: HTMLCanvasElement,
+  layerId: string,
+  frameId: string,
+): void {
+  const pixels = rgbaPixels(canvas);
+  const indices = getCelIndices(context, layerId, frameId);
+  for (let pixelIndex = 0; pixelIndex < indices.length; pixelIndex++) {
+    const paletteIndex = indices[pixelIndex];
+    const offset = pixelIndex * 4;
+    if (paletteIndex === 0) {
+      expect(pixels.slice(offset, offset + 4)).toEqual([0, 0, 0, 0]);
+      continue;
+    }
+    const color = context.palette.getColorByIndex(paletteIndex);
+    expect(color).not.toBeNull();
+    if (!color) continue;
+    expect(pixels.slice(offset, offset + 4)).toEqual([
+      Number.parseInt(color.slice(1, 3), 16),
+      Number.parseInt(color.slice(3, 5), 16),
+      Number.parseInt(color.slice(5, 7), 16),
+      255,
+    ]);
+  }
+}
+
 describe('Fill and Gradient project transactions in Chromium', () => {
   afterEach(() => {
     for (const context of contexts.splice(0)) {
@@ -332,12 +359,33 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     const tool = new GradientTool();
     tool.setContext(canvasContext);
     tool.setProjectContext(context);
+    autoSaveService.start(context);
+    let presentedPreview: HTMLCanvasElement | null = null;
+    tool.setPreviewPresenter((preview) => {
+      presentedPreview = preview?.canvas ?? null;
+    });
     const beforePixels = rgbaPixels(canvas);
     const beforeIndices = getCelIndices(context, layerId, frameId);
+    const beforePalette = [...context.palette.mainColors.value];
+    const beforeRevision = context.project.revision.value;
+    const beforeHistory = context.history.undoStack.value.length;
+    const beforeDirty = autoSaveService.isDirty(context);
+    const beforeLastSaved = context.project.lastSaved.value;
 
     tool.onDown(0, 0);
     tool.onDrag(3, 0);
+    expect(presentedPreview).not.toBeNull();
+    if (!presentedPreview) return;
+    expect(rgbaPixels(presentedPreview)).not.toEqual(beforePixels);
+    expect(rgbaPixels(canvas)).toEqual(beforePixels);
+    expect(getCelIndices(context, layerId, frameId)).toEqual(beforeIndices);
+    expect(context.palette.mainColors.value).toEqual(beforePalette);
+    expect(context.project.revision.value).toBe(beforeRevision);
+    expect(context.history.undoStack.value).toHaveLength(beforeHistory);
+    expect(autoSaveService.isDirty(context)).toBe(beforeDirty);
+    expect(context.project.lastSaved.value).toBe(beforeLastSaved);
     tool.onUp(3, 0);
+    expect(presentedPreview).toBeNull();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -400,9 +448,22 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     pointerUp.context.colors.setPrimaryColor('#ff0000');
     pointerUp.context.colors.setSecondaryColor('#0000ff');
     autoSaveService.start(pointerUp.context);
+    const pointerBeforePixels = rgbaPixels(pointerUp.canvas);
+    const pointerBeforeIndices = getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId);
+    const pointerBeforePalette = [...pointerUp.context.palette.mainColors.value];
+    const pointerBeforeRevision = pointerUp.context.project.revision.value;
     pointerTool.onDown(0, 0);
     pointerTool.onDrag(3, 1);
+    expect(rgbaPixels(pointerUp.canvas)).toEqual(pointerBeforePixels);
+    expect(getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId))
+      .toEqual(pointerBeforeIndices);
+    expect(pointerUp.context.palette.mainColors.value).toEqual(pointerBeforePalette);
+    expect(pointerUp.context.project.revision.value).toBe(pointerBeforeRevision);
 
+    const beforeFillPixels = rgbaPixels(pointerUp.canvas);
+    const beforeFillIndices = getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId);
+    expect(beforeFillPixels).toEqual(pointerBeforePixels);
+    expect(beforeFillIndices).toEqual(pointerBeforeIndices);
     const fill = await executeFill(pointerUp.context, {
       ...captureRasterTarget(pointerUp.context, pointerUp.layerId, pointerUp.frameId),
       startX: 0,
@@ -411,6 +472,9 @@ describe('Fill and Gradient project transactions in Chromium', () => {
       contiguous: true,
     });
     expect(fill.ok).toBe(true);
+    expect(getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId))
+      .not.toEqual(pointerBeforeIndices);
+    expectIndexedPixels(pointerUp.context, pointerUp.canvas, pointerUp.layerId, pointerUp.frameId);
     const pixelsAfterFill = rgbaPixels(pointerUp.canvas);
     const indicesAfterFill = getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId);
     const paletteAfterFill = [...pointerUp.context.palette.mainColors.value];
@@ -439,8 +503,16 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     cancel.context.colors.setPrimaryColor('#ff0000');
     cancel.context.colors.setSecondaryColor('#0000ff');
     autoSaveService.start(cancel.context);
+    const cancelBeforePixels = rgbaPixels(cancel.canvas);
+    const cancelBeforeIndices = getCelIndices(cancel.context, cancel.layerId, cancel.frameId);
     cancelTool.onDown(0, 0);
     cancelTool.onDrag(3, 1);
+    expect(rgbaPixels(cancel.canvas)).toEqual(cancelBeforePixels);
+    expect(getCelIndices(cancel.context, cancel.layerId, cancel.frameId)).toEqual(cancelBeforeIndices);
+    const cancelBeforeFillPixels = rgbaPixels(cancel.canvas);
+    const cancelBeforeFillIndices = getCelIndices(cancel.context, cancel.layerId, cancel.frameId);
+    expect(cancelBeforeFillPixels).toEqual(cancelBeforePixels);
+    expect(cancelBeforeFillIndices).toEqual(cancelBeforeIndices);
     const cancelFill = await executeFill(cancel.context, {
       ...captureRasterTarget(cancel.context, cancel.layerId, cancel.frameId),
       startX: 0,
