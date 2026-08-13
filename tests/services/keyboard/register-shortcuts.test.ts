@@ -297,11 +297,11 @@ describe('registerShortcuts', () => {
     const calls = keyboardServiceMock.register.mock.calls as RegisterCall[];
     const descriptionsByCombo = new Map(calls.map((call) => [comboFromCall(call), call[3]]));
 
-    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(82);
+    expect(keyboardServiceMock.register).toHaveBeenCalledTimes(81);
     expect(descriptionsByCombo.get('Alt')).toBe('Quick eyedropper');
     expect(descriptionsByCombo.get('0')).toBe('Fit to window');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+0`)).toBe('Opacity 100%');
-    expect(descriptionsByCombo.get('shift+g')).toBe('Toggle guides');
+    expect(descriptionsByCombo.get('shift+g')).toBe('Gradient tool');
     expect(descriptionsByCombo.get(`${MOD_PRIMARY}+z`)).toBe('Undo');
     expect(descriptionsByCombo.get('ctrl+y')).toBe('Redo');
     expect(descriptionsByCombo.get('ctrl+n')).toBe('New project');
@@ -362,7 +362,7 @@ describe('registerShortcuts', () => {
     expect(workspaceStoreMock.activatePrevious).toHaveBeenCalledTimes(1);
   });
 
-  it('routes project-scoped view, color, guide, history, and selection shortcuts to the active context', async () => {
+  it('routes project-scoped view, color, history, and selection shortcuts to the active context', async () => {
     const context = createProjectContext();
     setActiveProjectContext(context);
     context.project.width.value = 17;
@@ -372,8 +372,6 @@ describe('registerShortcuts', () => {
     const defaultReset = vi.spyOn(defaultProjectContext.viewport, 'resetView');
     const activeSwap = vi.spyOn(context.colors, 'swapColors');
     const defaultSwap = vi.spyOn(defaultProjectContext.colors, 'swapColors');
-    const activeGuides = vi.spyOn(context.guides, 'toggleVisibility');
-    const defaultGuides = vi.spyOn(defaultProjectContext.guides, 'toggleVisibility');
     const activeUndo = vi.spyOn(context.history, 'undo');
     const defaultUndo = vi.spyOn(defaultProjectContext.history, 'undo');
 
@@ -382,14 +380,12 @@ describe('registerShortcuts', () => {
 
       shortcutAction('0')?.();
       shortcutAction('x')?.();
-      shortcutActionByDescription('shift+g', 'Toggle guides')?.();
       shortcutAction(`${MOD_PRIMARY}+z`)?.();
       shortcutAction(`${MOD_PRIMARY}+a`)?.();
       await Promise.resolve();
 
       expect(activeReset).toHaveBeenCalledOnce();
       expect(activeSwap).toHaveBeenCalledOnce();
-      expect(activeGuides).toHaveBeenCalledOnce();
       expect(activeUndo).toHaveBeenCalledOnce();
       expect(context.selection.state.value).toMatchObject({
         type: 'selected',
@@ -398,7 +394,6 @@ describe('registerShortcuts', () => {
 
       expect(defaultReset).not.toHaveBeenCalled();
       expect(defaultSwap).not.toHaveBeenCalled();
-      expect(defaultGuides).not.toHaveBeenCalled();
       expect(defaultUndo).not.toHaveBeenCalled();
       expect(defaultProjectContext.selection.state.value.type).toBe('none');
     } finally {

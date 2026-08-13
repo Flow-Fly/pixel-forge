@@ -257,6 +257,7 @@ function commitSelectionShortcut() {
 
 function cancelSelection() {
   const context = getActiveProjectContext();
+  window.dispatchEvent(new Event('pf-cancel-active-stroke'));
   const state = context.selection.state.value;
   if (state.type === 'floating') {
     context.history.undo();
@@ -673,12 +674,6 @@ const brushSizeAndPanelShortcuts: ShortcutGroup = [
     modifiers: [],
     action: () => setToolSizeBy(1),
     description: 'Increase brush size',
-  },
-  {
-    key: 'g',
-    modifiers: ['shift'],
-    action: () => getActiveProjectContext().guides.toggleVisibility(),
-    description: 'Toggle guides',
   },
 ];
 

@@ -151,9 +151,11 @@ export class PFDrawingCanvas extends BaseComponent {
   private boundDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
   private isStrokeActive = false;
   private drawingPreview: ToolPreview | null = null;
+  private readonly handleCancelActiveStrokeEvent = () => this.cancelActiveStroke();
 
   connectedCallback() {
     super.connectedCallback();
+    window.addEventListener('pf-cancel-active-stroke', this.handleCancelActiveStrokeEvent);
     this.subscribeToActiveProjectContext((context) => {
       if (this.isStrokeActive && this.strokeContext !== context) {
         this.cancelActiveStroke();
@@ -578,6 +580,7 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   disconnectedCallback() {
+    window.removeEventListener('pf-cancel-active-stroke', this.handleCancelActiveStrokeEvent);
     this.cancelActiveStroke();
     this.clearToolPreview();
     super.disconnectedCallback();

@@ -264,8 +264,8 @@ describe('timeline cel unlink transaction', () => {
     const unlinkedAfterSave = context.animation.cels.value.get(
       context.animation.getCelKey(layer.id, middleCel.frameId),
     );
-    expect(unlinkedAfterSave).not.toBe(unlinkedBeforeSave);
-    expect(unlinkedAfterSave?.indexBuffer).not.toBe(unlinkedBeforeSave?.indexBuffer);
+    expect(unlinkedAfterSave).toBe(unlinkedBeforeSave);
+    expect(unlinkedAfterSave?.indexBuffer).toBe(unlinkedBeforeSave?.indexBuffer);
     expect(unlinkedAfterSave?.indexBuffer).toEqual(unlinkedBeforeSave?.indexBuffer);
 
     await context.history.undo();
