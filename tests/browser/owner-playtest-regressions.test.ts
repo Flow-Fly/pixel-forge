@@ -141,6 +141,7 @@ describe('owner playtest regressions', () => {
       height: number;
       canvas: HTMLCanvasElement;
       drawingPreview: unknown;
+      toolController: { activeName: string | null };
     };
     drawing.width = canvas.width;
     drawing.height = canvas.height;
@@ -148,6 +149,7 @@ describe('owner playtest regressions', () => {
     document.body.append(viewport);
     await settleComponent(viewport);
     await settleComponent(drawing);
+    await expect.poll(() => drawing.toolController?.activeName ?? null).toBe('gradient');
 
     const beforePixels = rgbaPixels(canvas);
     const beforeIndices = celIndices(context, layerId, frameId);
