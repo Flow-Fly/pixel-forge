@@ -658,20 +658,33 @@ function capturePalette(context: ProjectContext): PaletteSnapshot {
   };
 }
 
-function paletteSnapshotsEqual(a: PaletteSnapshot, b: PaletteSnapshot): boolean {
-  const actualFlags = new Set([...a.newColorFlags].map((color) => normalizeHex(color)));
-  const expectedFlags = new Set([...b.newColorFlags].map((color) => normalizeHex(color)));
-  if (a.colors.length !== b.colors.length || a.isDirty !== b.isDirty ||
-      actualFlags.size !== expectedFlags.size) {
-    return false;
-  }
-  for (let index = 0; index < a.colors.length; index += 1) {
-    if (normalizeHex(a.colors[index] ?? '') !== normalizeHex(b.colors[index] ?? '')) return false;
-  }
-  for (const color of actualFlags) {
-    if (!expectedFlags.has(color)) return false;
+function normalizedColorArraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (normalizeHex(a[index] ?? '') !== normalizeHex(b[index] ?? '')) return false;
   }
   return true;
+}
+
+function normalizedFlagSetsEqual(
+  actual: ReadonlySet<string>,
+  expected: ReadonlySet<string>,
+): boolean {
+  const actualNormalized = new Set([...actual].map((color) => normalizeHex(color)));
+  const expectedNormalized = new Set([...expected].map((color) => normalizeHex(color)));
+  if (actualNormalized.size !== expectedNormalized.size) return false;
+  for (const color of actualNormalized) {
+    if (!expectedNormalized.has(color)) return false;
+  }
+  return true;
+}
+
+function paletteSnapshotsEqual(a: PaletteSnapshot, b: PaletteSnapshot): boolean {
+  if (a.isDirty !== b.isDirty) return false;
+  if (!normalizedColorArraysEqual(a.colors, b.colors)) {
+    return false;
+  }
+  return normalizedFlagSetsEqual(a.newColorFlags, b.newColorFlags);
 }
 
 function applyPalette(context: ProjectContext, snapshot: PaletteSnapshot): void {
