@@ -71,6 +71,10 @@ export class ToolController {
     return this.activeTool !== null;
   }
 
+  get ownsProjectTransaction(): boolean {
+    return this.activeTool?.ownsProjectTransaction ?? false;
+  }
+
   isActive(toolName: ToolType): boolean {
     return this.activeToolName === toolName;
   }

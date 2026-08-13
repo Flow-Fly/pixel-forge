@@ -605,7 +605,9 @@ export class PFDrawingCanvas extends BaseComponent {
 
     this.strokeContext = context;
     this.strokeTool = currentTool;
-    this.captureStrokeSnapshot(target, currentTool, context);
+    if (!this.toolController.ownsProjectTransaction) {
+      this.captureStrokeSnapshot(target, currentTool, context);
+    }
     context.dirtyRect.resetStroke();
     this.toolController.onDown(target.context, context, point, modifiers);
     this.attachDocumentListeners();
@@ -727,6 +729,8 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private commitStrokeIfChanged(strokeBounds: Rect | null, context: ProjectContext) {
+    if (this.toolController.ownsProjectTransaction) return;
+
     const bounds = this.getUsableStrokeBounds(strokeBounds);
     if (!bounds) return;
 

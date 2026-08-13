@@ -17,6 +17,9 @@ export abstract class BaseTool {
   abstract name: string;
   abstract cursor: string;
 
+  /** Tools that commit through their own project transaction seam. */
+  readonly ownsProjectTransaction: boolean = false;
+
   // Called when mouse/pen goes down
   abstract onDown(x: number, y: number, modifiers?: ModifierKeys): void;
 
