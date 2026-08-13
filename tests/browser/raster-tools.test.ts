@@ -137,6 +137,58 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     expect(getCelIndices(context, layerId, frameId)).toEqual(beforePreviewIndices);
     expect(rgbaPixels(canvas)).toEqual(beforePreviewPixels);
 
+    const comparison = createRasterContext();
+    comparison.context.palette.setPalette([
+      '#ff0000',
+      '#bf0040',
+      '#800080',
+      '#4000bf',
+      '#0000ff',
+    ]);
+    const linear = renderGradientPreview(comparison.context, {
+      ...gradientRequest,
+      ...captureRasterTarget(comparison.context, comparison.layerId, comparison.frameId),
+      startX: 0,
+      startY: 0,
+      endX: 3,
+      endY: 1,
+      type: 'linear',
+      shift: false,
+    }, comparison.canvas.width, comparison.canvas.height);
+    const radial = renderGradientPreview(comparison.context, {
+      ...gradientRequest,
+      ...captureRasterTarget(comparison.context, comparison.layerId, comparison.frameId),
+      startX: 0,
+      startY: 0,
+      endX: 3,
+      endY: 1,
+      type: 'radial',
+      shift: false,
+    }, comparison.canvas.width, comparison.canvas.height);
+    expect(Array.from(linear.pixels)).not.toEqual(Array.from(radial.pixels));
+
+    const constrained = renderGradientPreview(comparison.context, {
+      ...gradientRequest,
+      ...captureRasterTarget(comparison.context, comparison.layerId, comparison.frameId),
+      startX: 0,
+      startY: 0,
+      endX: 4,
+      endY: 3,
+      type: 'linear',
+      shift: true,
+    }, comparison.canvas.width, comparison.canvas.height);
+    const unconstrained = renderGradientPreview(comparison.context, {
+      ...gradientRequest,
+      ...captureRasterTarget(comparison.context, comparison.layerId, comparison.frameId),
+      startX: 0,
+      startY: 0,
+      endX: 4,
+      endY: 3,
+      type: 'linear',
+      shift: false,
+    }, comparison.canvas.width, comparison.canvas.height);
+    expect(constrained.effectiveEnd).not.toEqual(unconstrained.effectiveEnd);
+
     const result = await executeGradient(context, gradientRequest);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -177,12 +229,41 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     const wrongProject = await executeFill(second.context, request);
     expect(wrongProject).toMatchObject({ ok: false, error: { code: 'target_not_found' } });
     expect(rgbaPixels(second.canvas)).toEqual(beforeWrongProject);
+
+    const gradientPreviewRequest: GradientRequest = {
+      ...captureRasterTarget(first.context, first.layerId, first.frameId),
+      startX: 0,
+      startY: 0,
+      endX: 3,
+      endY: 1,
+      primaryHex: '#ff0000',
+      secondaryHex: '#0000ff',
+      type: 'linear',
+      shift: false,
+    };
+    const secondPalette = [...second.context.palette.mainColors.value];
+    expect(() => renderGradientPreview(
+      second.context,
+      gradientPreviewRequest,
+      second.canvas.width,
+      second.canvas.height,
+    )).toThrow('target_not_found');
+    expect(second.context.palette.mainColors.value).toEqual(secondPalette);
+
     first.context.project.commitChange('external-change', ['raster-content']);
     const beforeStale = rgbaPixels(first.canvas);
     const stale = await executeFill(first.context, request);
     expect(stale).toMatchObject({ ok: false, error: { code: 'revision_conflict' } });
     expect(rgbaPixels(first.canvas)).toEqual(beforeStale);
     expect(first.context.history.undoStack.value).toHaveLength(0);
+    const firstPalette = [...first.context.palette.mainColors.value];
+    expect(() => renderGradientPreview(
+      first.context,
+      gradientPreviewRequest,
+      first.canvas.width,
+      first.canvas.height,
+    )).toThrow('revision_conflict');
+    expect(first.context.palette.mainColors.value).toEqual(firstPalette);
 
     const fresh = createRasterContext();
     const committed = await executeFill(fresh.context, {
@@ -197,5 +278,101 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     await fresh.context.project.loadProject(structuredClone(saved));
     expect(getCelIndices(fresh.context, fresh.layerId, fresh.context.animation.currentFrameId.value))
       .toEqual([3, 3, 3, 3, 3, 3, 3, 3]);
+  });
+
+  it('rejects zero-length gradients and indexed writes beyond 255 atomically', async () => {
+    const { context, layerId, frameId, canvas } = createRasterContext();
+    setCelIndices(context, layerId, frameId, [1, 1, 1, 1, 1, 1, 1, 1]);
+    const beforePixels = rgbaPixels(canvas);
+    const beforeIndices = getCelIndices(context, layerId, frameId);
+    const zeroLength = await executeGradient(context, {
+      ...captureRasterTarget(context, layerId, frameId),
+      startX: 1,
+      startY: 1,
+      endX: 1,
+      endY: 1,
+      primaryHex: '#ff0000',
+      secondaryHex: '#0000ff',
+      type: 'linear',
+      shift: false,
+    });
+    expect(zeroLength).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(rgbaPixels(canvas)).toEqual(beforePixels);
+    expect(getCelIndices(context, layerId, frameId)).toEqual(beforeIndices);
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+
+    const capacityPalette = Array.from({ length: 256 }, (_, index) =>
+      `#${index.toString(16).padStart(2, '0')}${((index * 13) % 256).toString(16).padStart(2, '0')}${((index * 29) % 256).toString(16).padStart(2, '0')}`
+    );
+    capacityPalette[255] = '#ffffff';
+    context.palette.setPalette(capacityPalette);
+    const beforeCapacityPalette = [...context.palette.mainColors.value];
+    const fillAtCapacity = await executeFill(context, {
+      ...captureRasterTarget(context, layerId, frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#010101',
+      contiguous: true,
+    });
+    expect(fillAtCapacity).toMatchObject({ ok: false, error: { code: 'limit_exceeded' } });
+    expect(context.palette.mainColors.value).toEqual(beforeCapacityPalette);
+    expect(context.project.revision.value).toBe(0);
+
+    const gradientAtCapacity = await executeGradient(context, {
+      ...captureRasterTarget(context, layerId, frameId),
+      startX: 0,
+      startY: 0,
+      endX: 3,
+      endY: 1,
+      primaryHex: '#ffffff',
+      secondaryHex: '#ffffff',
+      type: 'linear',
+      shift: false,
+    });
+    expect(gradientAtCapacity).toMatchObject({ ok: false, error: { code: 'limit_exceeded' } });
+    expect(context.palette.mainColors.value).toEqual(beforeCapacityPalette);
+    expect(context.project.revision.value).toBe(0);
+  });
+
+  it('keeps hard-linked canvas and index payloads coherent through Fill undo/redo and palette restoration', async () => {
+    const { context, layerId, frameId, canvas } = createRasterContext();
+    setCelIndices(context, layerId, frameId, [1, 1, 1, 1, 1, 1, 1, 1]);
+    const firstKey = context.animation.getCelKey(layerId, frameId);
+    context.animation.addFrame(false);
+    const frames = context.animation.frames.value;
+    const lastFrame = frames[frames.length - 1];
+    if (!lastFrame) throw new Error('Expected a linked target frame');
+    const lastKey = context.animation.getCelKey(layerId, lastFrame.id);
+    context.animation.linkCels([firstKey, lastKey], 'hard');
+    context.animation.goToFrame(frameId);
+    const linkedCel = context.animation.cels.value.get(lastKey);
+    const firstCel = context.animation.cels.value.get(firstKey);
+    if (!linkedCel || !firstCel?.indexBuffer) throw new Error('Expected hard-linked cels');
+    const paletteBefore = [...context.palette.mainColors.value];
+
+    const result = await executeFill(context, {
+      ...captureRasterTarget(context, layerId, frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#ffff00',
+      contiguous: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(firstCel.canvas).toBe(linkedCel.canvas);
+    expect(firstCel.indexBuffer).toBe(linkedCel.indexBuffer);
+    expect(getCelIndices(context, layerId, frameId)).toEqual([5, 5, 5, 5, 5, 5, 5, 5]);
+    expect(getCelIndices(context, layerId, lastFrame.id)).toEqual([5, 5, 5, 5, 5, 5, 5, 5]);
+    expect(context.palette.mainColors.value).toEqual([...paletteBefore, '#ffff00']);
+
+    await context.history.undo();
+    expect(getCelIndices(context, layerId, frameId)).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
+    expect(getCelIndices(context, layerId, lastFrame.id)).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
+    expect(context.palette.mainColors.value).toEqual(paletteBefore);
+    expect(rgbaPixels(canvas).slice(0, 4)).toEqual([0, 0, 0, 255]);
+
+    await context.history.redo();
+    expect(getCelIndices(context, layerId, frameId)).toEqual([5, 5, 5, 5, 5, 5, 5, 5]);
+    expect(context.palette.mainColors.value).toEqual([...paletteBefore, '#ffff00']);
   });
 });

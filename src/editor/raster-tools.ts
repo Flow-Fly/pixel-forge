@@ -39,6 +39,10 @@ export {
 // fallow-ignore-next-line unused-export -- The effective policy is part of the local command result contract.
 export const EXISTING_PALETTE_GRADIENT_POLICY = 'existing-palette' as const;
 
+// Uint8Array index 0 is transparent, so indexed raster writes can address at
+// most 255 palette entries even though the palette store allows 256 colors.
+const MAX_INDEXED_PALETTE_ENTRIES = 255;
+
 type RasterDomain = Extract<ProjectChangeDomain, 'raster-content'>;
 
 export interface RasterTarget {
@@ -237,6 +241,7 @@ export async function executeGradient(
 ): Promise<GradientResult> {
   try {
     const request = normalizeGradientRequest(input);
+    rejectZeroLengthGradient(request);
     if (context.guidedDrawing.active) {
       throw editorError('unsupported', false, { feature: 'guided-drawing-gradient' });
     }
@@ -291,7 +296,10 @@ export function renderGradientPreview(
   width: number,
   height: number,
 ): GradientRender {
-  return renderGradientPixels(request, width, height, context.palette.mainColors.value);
+  const normalized = normalizeGradientRequest(request);
+  validateTargetAndRevision(context, normalized);
+  rejectZeroLengthGradient(normalized);
+  return renderGradientPixels(normalized, width, height, context.palette.mainColors.value);
 }
 
 // fallow-ignore-next-line complexity -- Fill preparation keeps palette planning, indexed buffers, and guided regions atomic.
@@ -417,6 +425,8 @@ function renderGradientPixels(
     : { x: request.endX, y: request.endY };
   const startIndex = findClosestColorIndex(request.primaryHex, [...paletteColors]);
   const endIndex = findClosestColorIndex(request.secondaryHex, [...paletteColors]);
+  assertIndexedPaletteIndex(startIndex);
+  assertIndexedPaletteIndex(endIndex);
   const colors = [...paletteColors];
   const startColor = paletteColors[startIndex - 1] ?? paletteColors[0];
   const endColor = paletteColors[endIndex - 1] ?? paletteColors[paletteColors.length - 1];
@@ -442,6 +452,7 @@ function renderGradientPixels(
         primary.b + (secondary.b - primary.b) * t,
       );
       const paletteIndex = findClosestColorIndex(rawColor, colors);
+      assertIndexedPaletteIndex(paletteIndex);
       const paletteColor = colors[paletteIndex - 1] ?? startColor;
       const rgb = hexToRgb(paletteColor) ?? primary;
       const pixelIndex = y * width + x;
@@ -606,7 +617,7 @@ function planPaletteColor(
   if (existing > 0) {
     return { index: existing, colors: before.colors, newColorFlags: before.newColorFlags };
   }
-  if (before.colors.length >= MAX_PALETTE_SIZE) {
+  if (before.colors.length >= MAX_INDEXED_PALETTE_ENTRIES || before.colors.length >= MAX_PALETTE_SIZE) {
     throw editorError('limit_exceeded', false, { limitId: 'palette-colors' });
   }
   const colors = [...before.colors, normalized];
@@ -616,10 +627,23 @@ function planPaletteColor(
 }
 
 function paletteFillColor(index: number, colors: readonly string[]): FloodFillColor {
+  assertIndexedPaletteIndex(index);
   const hex = colors[index - 1];
   const rgb = hexToRgb(hex ?? '');
   if (!rgb) throw editorError('invalid_state', false, { reason: 'palette_color' });
   return { r: rgb.r, g: rgb.g, b: rgb.b, a: 255, paletteIndex: index };
+}
+
+function assertIndexedPaletteIndex(index: number): void {
+  if (index < 1 || index > MAX_INDEXED_PALETTE_ENTRIES) {
+    throw editorError('limit_exceeded', false, { limitId: 'indexed-palette-entry' });
+  }
+}
+
+function rejectZeroLengthGradient(request: GradientRequest): void {
+  if (request.startX === request.endX && request.startY === request.endY) {
+    throw editorError('invalid_request', false, { reason: 'no_op' });
+  }
 }
 
 function capturePalette(context: ProjectContext): PaletteSnapshot {

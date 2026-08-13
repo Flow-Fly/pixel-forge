@@ -153,6 +153,9 @@ export class PFDrawingCanvas extends BaseComponent {
   connectedCallback() {
     super.connectedCallback();
     this.subscribeToActiveProjectContext((context) => {
+      if (this.isStrokeActive && this.strokeContext !== context) {
+        this.cancelActiveStroke();
+      }
       this.context = context;
       if (!this.isStrokeActive) {
         this.strokeContext = null;
@@ -204,6 +207,9 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private async loadTool(toolName: ToolType) {
+    if (this.isStrokeActive && !this.toolController.isActive(toolName)) {
+      this.cancelActiveStroke();
+    }
     this.commitFloatingSelectionForDrawingTool(toolName);
 
     const didLoadTool = await this.toolController.load(toolName);
@@ -516,7 +522,19 @@ export class PFDrawingCanvas extends BaseComponent {
     this.isStrokeActive = false;
   }
 
+  private cancelActiveStroke() {
+    if (!this.isStrokeActive) return;
+
+    const context = this.strokeContext ?? this.context;
+    this.toolController.onCancel();
+    this.cleanupDocumentListeners();
+    context.dirtyRect.resetStroke();
+    context.dirtyRect.requestFullRedraw();
+    this.clearStrokeSnapshots();
+  }
+
   disconnectedCallback() {
+    this.cancelActiveStroke();
     super.disconnectedCallback();
     // Clean up any active document listeners when component is destroyed
     this.cleanupDocumentListeners();

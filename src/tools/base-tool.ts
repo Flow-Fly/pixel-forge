@@ -29,6 +29,9 @@ export abstract class BaseTool {
   // Called when mouse/pen goes up
   abstract onUp(x: number, y: number, modifiers?: ModifierKeys): void;
 
+  // Called when an active stroke is abandoned before mouse/pen up.
+  onCancel(): void {}
+
   // Called when mouse moves without being down (for hover effects)
   onMove(_x: number, _y: number, _modifiers?: ModifierKeys): void {}
 

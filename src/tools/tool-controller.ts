@@ -123,6 +123,10 @@ export class ToolController {
     this.activeTool?.onUp(point.x, point.y, modifiers);
   }
 
+  onCancel(): void {
+    this.activeTool?.onCancel();
+  }
+
   onMove(point: Point, modifiers?: ModifierKeys): void {
     this.activeTool?.onMove(point.x, point.y, modifiers);
   }

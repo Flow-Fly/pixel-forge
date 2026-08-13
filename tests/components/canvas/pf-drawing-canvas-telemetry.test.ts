@@ -25,6 +25,7 @@ interface DrawingCanvasHarness extends HTMLElement {
     hasActiveTool: boolean;
     onDown: ReturnType<typeof vi.fn>;
     onUp: ReturnType<typeof vi.fn>;
+    onCancel: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -85,6 +86,7 @@ async function createDrawingCanvas(context: ProjectContext): Promise<DrawingCanv
     hasActiveTool: true,
     onDown: vi.fn(),
     onUp: vi.fn(),
+    onCancel: vi.fn(),
   };
   (
     element as unknown as { getCanvasCoordinates: () => { x: number; y: number } }
@@ -162,5 +164,52 @@ describe('pf-drawing-canvas first drawing telemetry', () => {
       });
     });
     expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the active stroke without committing when the canvas lifecycle changes', async () => {
+    const origin = createDrawingContext();
+    const element = await createDrawingCanvas(origin.context);
+    const internals = element as unknown as {
+      isStrokeActive: boolean;
+      strokeContext: ProjectContext;
+      cancelActiveStroke: () => void;
+    };
+    internals.isStrokeActive = true;
+    internals.strokeContext = origin.context;
+
+    internals.cancelActiveStroke();
+
+    expect(element.toolController.onCancel).toHaveBeenCalledOnce();
+    expect(origin.context.dirtyRect.resetStroke).toHaveBeenCalledOnce();
+    expect(origin.execute).not.toHaveBeenCalled();
+  });
+
+  it('cancels before loading a replacement tool and when disconnected', async () => {
+    const origin = createDrawingContext();
+    const element = await createDrawingCanvas(origin.context);
+    const internals = element as unknown as {
+      isStrokeActive: boolean;
+      strokeContext: ProjectContext;
+      cancelActiveStroke: () => void;
+      loadTool: (tool: ToolType) => Promise<void>;
+      toolController: {
+        isActive: ReturnType<typeof vi.fn>;
+        load: ReturnType<typeof vi.fn>;
+        cursor: string;
+      };
+    };
+    internals.toolController.isActive = vi.fn(() => false);
+    internals.toolController.load = vi.fn(async () => true);
+    internals.toolController.cursor = 'default';
+    internals.isStrokeActive = true;
+    internals.strokeContext = origin.context;
+
+    await internals.loadTool('zoom');
+    expect(element.toolController.onCancel).toHaveBeenCalledOnce();
+
+    internals.isStrokeActive = true;
+    internals.strokeContext = origin.context;
+    element.disconnectedCallback();
+    expect(element.toolController.onCancel).toHaveBeenCalledTimes(2);
   });
 });

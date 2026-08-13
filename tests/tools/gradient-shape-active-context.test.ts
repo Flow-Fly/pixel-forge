@@ -71,6 +71,8 @@ describe('gradient and shape active project context', () => {
   it('draws a gradient with colors from the initiating project', () => {
     const projectA = createContext('#123456', '#654321');
     const projectB = createContext('#abcdef', '#fedcba');
+    projectA.palette.mainColors.value = ['#123456', '#654321'];
+    projectA.palette.rebuildColorMap();
     const defaultColors = {
       primary: defaultProjectContext.colors.primaryColor.value,
       secondary: defaultProjectContext.colors.secondaryColor.value,
@@ -83,14 +85,31 @@ describe('gradient and shape active project context', () => {
     tool.onDown(0, 0);
     tool.onUp(3, 3);
 
-    expect(canvas.colorStops.mock.calls).toEqual([
-      [0, '#123456'],
-      [1, '#654321'],
-    ]);
+    expect(canvas.colorStops).not.toHaveBeenCalled();
+    expect(canvas.putImageData).toHaveBeenCalled();
     expect(projectB.colors.primaryColor.value).toBe('#abcdef');
     expect(projectB.colors.secondaryColor.value).toBe('#fedcba');
     expect(defaultProjectContext.colors.primaryColor.value).toBe(defaultColors.primary);
     expect(defaultProjectContext.colors.secondaryColor.value).toBe(defaultColors.secondary);
+  });
+
+  it('restores a deterministic preview when a Gradient gesture is cancelled', () => {
+    const project = createContext('#123456', '#654321');
+    project.palette.mainColors.value = ['#123456', '#654321'];
+    project.palette.rebuildColorMap();
+    const canvas = new FakeCanvasContext();
+    const tool = new GradientTool();
+    tool.setContext(canvas as unknown as CanvasRenderingContext2D);
+    tool.setProjectContext(project);
+
+    tool.onDown(0, 0);
+    tool.onDrag(3, 3);
+    const previewCalls = canvas.putImageData.mock.calls.length;
+    tool.onCancel();
+
+    expect(canvas.putImageData).toHaveBeenCalledTimes(previewCalls + 1);
+    expect(project.project.revision.value).toBe(0);
+    expect(project.history.undoStack.value).toHaveLength(0);
   });
 
   it('fills a shape with the initiating project background color', () => {

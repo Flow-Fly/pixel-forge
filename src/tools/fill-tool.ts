@@ -2,6 +2,7 @@ import { BaseTool } from './base-tool';
 import { captureRasterTarget, executeFill, type FillRequest } from '../editor/raster-tools';
 import { fillSettings } from '../stores/tool-settings';
 import { isPaintableLayer } from '../utils/layer-capabilities';
+import { productTelemetry } from '../services/telemetry';
 
 export class FillTool extends BaseTool {
   name = 'fill';
@@ -27,7 +28,13 @@ export class FillTool extends BaseTool {
     // HistoryStore executes the command synchronously before its promise
     // settles, so the canvas reflects the completed click immediately while
     // the host keeps the transaction's asynchronous boundary.
-    void executeFill(this.projectContext, request, { canvas: this.ctx.canvas });
+    void executeFill(this.projectContext, request, { canvas: this.ctx.canvas }).then((result) => {
+      if (!result.ok) return;
+      productTelemetry.record({
+        name: 'first_drawing_action',
+        dimensions: { tool: 'fill' },
+      });
+    });
   }
 
   onMove(_x: number, _y: number) {}

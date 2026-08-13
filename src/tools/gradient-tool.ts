@@ -6,8 +6,8 @@ import {
   renderGradientPreview,
   type GradientRequest,
 } from '../editor/raster-tools';
-import { constrainWithStickyAngles } from '../services/drawing/algorithms';
 import { gradientSettings } from '../stores/tool-settings';
+import { productTelemetry } from '../services/telemetry';
 
 interface GradientGesture {
   readonly request: GradientRequest;
@@ -57,6 +57,7 @@ export class GradientTool extends BaseTool {
     if (!this.isDrawing || !this.ctx || !this.gesture) return;
 
     const request = this.withEndPoint(this.gesture.request, x, y);
+    if (this.isZeroLength(request)) return;
     this.drawPreview(request);
   }
 
@@ -65,7 +66,9 @@ export class GradientTool extends BaseTool {
 
     const gesture = this.gesture;
     const request = this.withEndPoint(gesture.request, x, y);
-    this.drawPreview(request);
+    if (!this.isZeroLength(request)) {
+      this.drawPreview(request);
+    }
 
     // Preview pixels live in the cel canvas only to make the drag visible.
     // Restore the captured bytes before the transaction validates its revision
@@ -74,13 +77,27 @@ export class GradientTool extends BaseTool {
     this.isDrawing = false;
     this.gesture = null;
 
-    void executeGradient(this.projectContext, request, {
+    const projectContext = this.projectContext;
+    void executeGradient(projectContext, request, {
       canvas: this.ctx.canvas,
       beforePixels: gesture.beforePixels,
       beforeIndices: gesture.beforeIndices,
     }).then((result) => {
       if (!result.ok) this.restorePixels(gesture.beforePixels);
+      else {
+        productTelemetry.record({
+          name: 'first_drawing_action',
+          dimensions: { tool: 'other' },
+        });
+      }
     });
+  }
+
+  onCancel(): void {
+    if (!this.isDrawing || !this.gesture) return;
+    this.restorePixels(this.gesture.beforePixels);
+    this.isDrawing = false;
+    this.gesture = null;
   }
 
   private withEndPoint(request: GradientRequest, x: number, y: number): GradientRequest {
@@ -94,7 +111,6 @@ export class GradientTool extends BaseTool {
   private drawPreview(request: GradientRequest): void {
     if (!this.ctx) return;
 
-    this.drawCanvasGradientPreview(request);
     const render = renderGradientPreview(
       this.projectContext,
       request,
@@ -105,36 +121,8 @@ export class GradientTool extends BaseTool {
     this.markPreviewDirty(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
   }
 
-  /**
-   * Keep the browser-native Canvas gradient in the preview path. The final
-   * transaction writes deterministic existing-palette samples over it.
-   */
-  private drawCanvasGradientPreview(request: GradientRequest): void {
-    if (!this.ctx) return;
-
-    const effectiveEnd = request.shift
-      ? constrainWithStickyAngles(request.startX, request.startY, request.endX, request.endY)
-      : { x: request.endX, y: request.endY };
-
-    const gradient = request.type === 'radial' && 'createRadialGradient' in this.ctx
-      ? this.ctx.createRadialGradient(
-        request.startX,
-        request.startY,
-        0,
-        request.startX,
-        request.startY,
-        Math.hypot(effectiveEnd.x - request.startX, effectiveEnd.y - request.startY),
-      )
-      : this.ctx.createLinearGradient(
-        request.startX,
-        request.startY,
-        effectiveEnd.x,
-        effectiveEnd.y,
-      );
-    gradient.addColorStop(0, request.primaryHex);
-    gradient.addColorStop(1, request.secondaryHex);
-    this.ctx.fillStyle = gradient;
-    this.ctx.fillRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+  private isZeroLength(request: GradientRequest): boolean {
+    return request.startX === request.endX && request.startY === request.endY;
   }
 
   private restorePixels(pixels: Uint8ClampedArray): void {

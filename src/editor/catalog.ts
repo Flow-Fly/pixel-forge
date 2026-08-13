@@ -140,7 +140,6 @@ export const celUnlinkCatalog = Object.freeze({
   ] as const,
 });
 
-// fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
 export const rasterFillCatalog = Object.freeze({
   id: FILL_COMMAND_ID,
   target: 'project',
@@ -150,8 +149,9 @@ export const rasterFillCatalog = Object.freeze({
     expectedRevision: 'integer >= 0',
     layerId: 'string',
     frameId: 'string',
-    celId: 'captured cel identity',
-    start: { x: 'integer', y: 'integer' },
+    celId: 'optional captured cel identity',
+    startX: 'integer',
+    startY: 'integer',
     hex: 'six-digit hex color',
     contiguous: 'boolean',
   },
@@ -169,7 +169,6 @@ export const rasterFillCatalog = Object.freeze({
   ] as const,
 });
 
-// fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
 export const rasterGradientCatalog = Object.freeze({
   id: GRADIENT_COMMAND_ID,
   target: 'project',
@@ -179,13 +178,23 @@ export const rasterGradientCatalog = Object.freeze({
     expectedRevision: 'integer >= 0',
     layerId: 'string',
     frameId: 'string',
-    celId: 'captured cel identity',
-    start: { x: 'integer', y: 'integer' },
-    end: { x: 'integer', y: 'integer' },
-    colors: { primaryHex: 'six-digit hex color', secondaryHex: 'six-digit hex color' },
-    type: ['linear', 'radial'] as const,
+    celId: 'optional captured cel identity',
+    startX: 'integer',
+    startY: 'integer',
+    endX: 'integer',
+    endY: 'integer',
+    primaryHex: 'six-digit hex color',
+    secondaryHex: 'six-digit hex color',
+    type: 'linear | radial',
     shift: 'boolean; existing 15-degree sticky snapping',
-    palettePolicy: 'existing-palette; constant nearest mapping; no dithering',
+  },
+  result: {
+    effectivePalettePolicy: 'existing-palette',
+    endpoints: {
+      start: { index: 'integer 1..255', color: 'six-digit hex color' },
+      end: { index: 'integer 1..255', color: 'six-digit hex color' },
+    },
+    effectiveEnd: { x: 'integer', y: 'integer' },
   },
   limits: { paletteGrowth: 'none', dithering: 'none' },
   availability: { guidedDrawing: 'unsupported' },
