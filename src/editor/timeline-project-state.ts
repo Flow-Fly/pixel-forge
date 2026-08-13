@@ -5,7 +5,7 @@ import type {
 } from '../stores/project-store';
 import type { ProjectContext } from '../stores/project-context';
 import * as tagManager from '../stores/animation/tag-manager';
-import type { FrameTag } from '../types/animation';
+import type { Cel, FrameTag } from '../types/animation';
 import type { Layer } from '../types/layer';
 import {
   isRecord,
@@ -24,6 +24,10 @@ export { frameTagCatalog } from './catalog';
 export { LAYER_STATE_COMMAND_ID } from './catalog';
 // fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
 export { layerStateCatalog } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { CEL_UNLINK_COMMAND_ID } from './catalog';
+// fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
+export { celUnlinkCatalog } from './catalog';
 
 export type LayerDirection = 'up' | 'down';
 
@@ -111,7 +115,27 @@ export type FrameTagRequest =
       readonly tagId: string;
     };
 
-export type TimelineProjectStateRequest = LayerStateRequest | FrameTagRequest;
+export type CelUnlinkGroupMember = {
+  readonly key: string;
+  readonly celId: string;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly linkedCelId: string;
+  readonly linkType: 'hard';
+};
+
+export type CelUnlinkRequest = {
+  readonly kind: 'cel.unlink';
+  readonly target: ProjectTarget;
+  readonly expectedRevision: number;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId: string;
+  readonly linkedCelId: string;
+  readonly linkGroup: readonly CelUnlinkGroupMember[];
+};
+
+export type TimelineProjectStateRequest = LayerStateRequest | FrameTagRequest | CelUnlinkRequest;
 
 type RequestWithoutContext<T> = T extends unknown
   ? Omit<T, 'target' | 'expectedRevision'>
@@ -141,6 +165,8 @@ type PreparedChange = {
   readonly afterLayers?: readonly Layer[];
   readonly beforeTags?: readonly FrameTag[];
   readonly afterTags?: readonly FrameTag[];
+  readonly beforeCels?: ReadonlyMap<string, Cel>;
+  readonly afterCels?: ReadonlyMap<string, Cel>;
   readonly beforeStructure: ProjectStructure;
   readonly afterStructure: ProjectStructure;
   readonly domains: readonly ProjectChangeDomain[];
@@ -152,9 +178,34 @@ type ProjectStructure = {
   readonly cels: ReadonlyMapSnapshot;
   readonly frames: readonly FrameStructure[];
   readonly tags: readonly FrameTag[];
+  readonly celPayloads?: ReadonlyMap<string, CelPayloadSnapshot>;
 };
 
-type ReadonlyMapSnapshot = ReadonlyMap<string, unknown>;
+type ReadonlyMapSnapshot = ReadonlyMap<string, Cel>;
+
+type ByteFingerprint = {
+  readonly length: number;
+  readonly primary: number;
+  readonly secondary: number;
+};
+
+type CanvasPayloadSnapshot = {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: ByteFingerprint;
+};
+
+type CelPayloadSnapshot = {
+  readonly canvas: CanvasPayloadSnapshot & { readonly sharingKey: string };
+  readonly indexBuffer?: {
+    readonly sharingKey: string;
+    readonly identity: number;
+    readonly bytes: ByteFingerprint;
+  };
+};
+
+const payloadIdentities = new WeakMap<object, number>();
+let nextPayloadIdentity = 1;
 
 type FrameStructure = {
   readonly id: string;
@@ -206,9 +257,10 @@ class TimelineProjectStateCommand implements Command {
     this.assertTarget();
     if (!this.hasExecuted) {
       this.assertRevision();
+      this.assertCelUnlinkGroup();
     }
     this.assertStructure(this.prepared.beforeStructure);
-    this.apply(this.prepared.afterLayers, this.prepared.afterTags);
+    this.apply(this.prepared.afterLayers, this.prepared.afterTags, this.prepared.afterCels);
     this.lastEvent = this.context.project.commitChange(this.id, this.prepared.domains);
     this.hasExecuted = true;
     this.applied = true;
@@ -221,7 +273,7 @@ class TimelineProjectStateCommand implements Command {
 
     this.assertTarget();
     this.assertStructure(this.prepared.afterStructure);
-    this.apply(this.prepared.beforeLayers, this.prepared.beforeTags);
+    this.apply(this.prepared.beforeLayers, this.prepared.beforeTags, this.prepared.beforeCels);
     this.lastEvent = this.context.project.commitChange(this.id, this.prepared.domains);
     this.applied = false;
   }
@@ -241,12 +293,28 @@ class TimelineProjectStateCommand implements Command {
     }
   }
 
+  private assertCelUnlinkGroup(): void {
+    if (this.request.kind !== 'cel.unlink') return;
+
+    const currentGroup = captureCelUnlinkGroup(
+      this.context.animation.cels.value,
+      this.request.linkedCelId,
+    );
+    if (!sameCelUnlinkGroup(currentGroup, this.request.linkGroup)) {
+      throw timelineError('revision_conflict', true, { reason: 'link_group_changed' });
+    }
+  }
+
   private assertStructure(expected: ProjectStructure): void {
-    const current = captureProjectStructure(this.context);
+    const current = captureProjectStructure(this.context, this.request.kind === 'cel.unlink');
     const matches = this.hasExecuted
-      ? this.request.kind.startsWith('layer.')
+      ? this.request.kind === 'cel.unlink'
+        ? sameCelUnlinkStructure(current, expected)
+        : this.request.kind.startsWith('layer.')
         ? sameLayerSemanticArrays(current.layers, expected.layers)
-        : sameTimelineStructure(current, expected)
+        : this.request.kind.startsWith('tag.')
+          ? sameTimelineStructure(current, expected)
+          : sameProjectStructure(current, expected)
       : sameProjectStructure(current, expected);
     if (!matches) {
       throw timelineError('revision_conflict', true, {
@@ -258,6 +326,7 @@ class TimelineProjectStateCommand implements Command {
   private apply(
     layers: readonly Layer[] | undefined,
     tags: readonly FrameTag[] | undefined,
+    cels: ReadonlyMap<string, Cel> | undefined,
   ): void {
     if (layers) {
       this.context.layers.layers.value = mergeLayerSemanticSnapshot(
@@ -269,6 +338,9 @@ class TimelineProjectStateCommand implements Command {
     if (tags) {
       this.context.animation.tags.value = tags.map(cloneTag);
       clearDeletedActiveTag(this.context);
+    }
+    if (cels) {
+      this.context.project.applyTimelineCelState(new Map(cels));
     }
   }
 }
@@ -352,6 +424,22 @@ export function createFrameTagRequest(
   return captureTimelineProjectRequest(context, request) as FrameTagRequest;
 }
 
+export function createCelUnlinkRequest(
+  context: ProjectContext,
+  layerId: string,
+  frameId: string,
+): CelUnlinkRequest {
+  const cel = context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId));
+  return captureTimelineProjectRequest(context, {
+    kind: 'cel.unlink',
+    layerId,
+    frameId,
+    celId: cel?.id ?? '',
+    linkedCelId: cel?.linkedCelId ?? '',
+    linkGroup: captureCelUnlinkGroup(context.animation.cels.value, cel?.linkedCelId ?? ''),
+  }) as CelUnlinkRequest;
+}
+
 export async function executeTimelineProjectState(
   context: ProjectContext,
   input: unknown,
@@ -390,7 +478,63 @@ function normalizeRequest(input: unknown): TimelineProjectStateRequest {
   if (input.kind.startsWith('tag.')) {
     return normalizeTagRequest(input, target, expectedRevision);
   }
+  if (input.kind === 'cel.unlink') {
+    return normalizeCelUnlinkRequest(input, target, expectedRevision);
+  }
   throw timelineError('invalid_request', false, { reason: 'kind' });
+}
+
+function normalizeCelUnlinkRequest(
+  input: Record<string, unknown>,
+  target: ProjectTarget,
+  expectedRevision: number,
+): CelUnlinkRequest {
+  return {
+    kind: 'cel.unlink',
+    target,
+    expectedRevision,
+    layerId: requiredString(input.layerId, 'layer_id'),
+    frameId: requiredString(input.frameId, 'frame_id'),
+    celId: requiredString(input.celId, 'cel_id'),
+    linkedCelId: requiredString(input.linkedCelId, 'linked_cel_id'),
+    linkGroup: normalizeCelUnlinkGroup(input.linkGroup),
+  };
+}
+
+function normalizeCelUnlinkGroup(value: unknown): CelUnlinkGroupMember[] {
+  if (!Array.isArray(value)) {
+    throw timelineError('invalid_request', false, { reason: 'link_group' });
+  }
+
+  const members = value.map((member) => {
+    if (!isRecord(member)) {
+      throw timelineError('invalid_request', false, { reason: 'link_group' });
+    }
+
+    const linkType = member.linkType;
+    if (linkType !== 'hard') {
+      throw timelineError('invalid_request', false, { reason: 'link_group' });
+    }
+
+    return {
+      key: requiredString(member.key, 'link_group'),
+      celId: requiredString(member.celId, 'link_group'),
+      layerId: requiredString(member.layerId, 'link_group'),
+      frameId: requiredString(member.frameId, 'link_group'),
+      linkedCelId: requiredString(member.linkedCelId, 'link_group'),
+      linkType,
+    } satisfies CelUnlinkGroupMember;
+  });
+
+  const keys = new Set<string>();
+  for (const member of members) {
+    if (keys.has(member.key)) {
+      throw timelineError('invalid_request', false, { reason: 'link_group' });
+    }
+    keys.add(member.key);
+  }
+
+  return members.sort((a, b) => compareCelUnlinkGroupKeys(a.key, b.key));
 }
 
 function normalizeExpectedRevision(value: unknown): number {
@@ -597,7 +741,10 @@ function prepareChange(
   if (request.kind.startsWith('layer.')) {
     return prepareLayerChange(context, request as LayerStateRequest);
   }
-  return prepareTagChange(context, request as FrameTagRequest);
+  if (request.kind.startsWith('tag.')) {
+    return prepareTagChange(context, request as FrameTagRequest);
+  }
+  return prepareCelUnlinkChange(context, request as CelUnlinkRequest);
 }
 
 function validateTargetAndRevision(
@@ -622,7 +769,7 @@ function validateAvailability(
   context: ProjectContext,
   request: TimelineProjectStateRequest,
 ): void {
-  if (request.kind.startsWith('layer.') && context.guidedDrawing.active) {
+  if ((request.kind.startsWith('layer.') || request.kind === 'cel.unlink') && context.guidedDrawing.active) {
     throw timelineError('unsupported', false, { feature: 'guided-drawing-timeline-state' });
   }
 }
@@ -703,6 +850,115 @@ function reorderLayerSnapshot(layers: Layer[], request: Extract<LayerStateReques
     throw timelineError('invalid_state', false, { reason: 'layer_reorder' });
   }
   layers.splice(toIndex, 0, layer);
+}
+
+function prepareCelUnlinkChange(
+  context: ProjectContext,
+  request: CelUnlinkRequest,
+): PreparedChange {
+  const key = context.animation.getCelKey(request.layerId, request.frameId);
+  const cel = context.animation.cels.value.get(key);
+  if (!cel) {
+    throw timelineError('target_not_found', true, { resource: 'cel' });
+  }
+  if (cel.id !== request.celId || cel.linkedCelId !== request.linkedCelId) {
+    throw timelineError('revision_conflict', true, { reason: 'cel_changed' });
+  }
+  if (cel.linkType !== 'hard') {
+    throw timelineError('invalid_state', false, { reason: 'cel_not_hard_linked' });
+  }
+
+  const groupEntries = [...context.animation.cels.value.entries()].filter(([, candidate]) =>
+    candidate.linkedCelId === request.linkedCelId && candidate.linkType === 'hard',
+  );
+  const group = captureCelUnlinkGroup(context.animation.cels.value, request.linkedCelId);
+  if (group.length < 2) {
+    throw timelineError('invalid_state', false, { reason: 'cel_not_shared' });
+  }
+  if (!sameCelUnlinkGroup(group, request.linkGroup)) {
+    throw timelineError('revision_conflict', true, { reason: 'link_group_changed' });
+  }
+  if (!groupEntries.every(([, candidate]) =>
+    candidate.canvas === cel.canvas && candidate.indexBuffer === cel.indexBuffer,
+  )) {
+    throw timelineError('invalid_state', false, { reason: 'link_group_payload_changed' });
+  }
+
+  const beforeCels = new Map(context.animation.cels.value);
+  const afterCels = new Map(beforeCels);
+  afterCels.set(key, cloneUnlinkedCel(cel));
+
+  return {
+    beforeCels,
+    afterCels,
+    beforeStructure: captureProjectStructure(context, true),
+    afterStructure: captureProjectStructureWithCels(context, afterCels, true),
+    domains: ['timeline', 'raster-content'],
+  };
+}
+
+function captureCelUnlinkGroup(
+  cels: ReadonlyMap<string, Cel>,
+  linkedCelId: string,
+): CelUnlinkGroupMember[] {
+  return [...cels.entries()]
+    .filter(([, cel]) => cel.linkedCelId === linkedCelId && cel.linkType === 'hard')
+    .sort(([firstKey], [secondKey]) => compareCelUnlinkGroupKeys(firstKey, secondKey))
+    .map(([key, cel]) => ({
+      key,
+      celId: cel.id,
+      layerId: cel.layerId,
+      frameId: cel.frameId,
+      linkedCelId: cel.linkedCelId as string,
+      linkType: 'hard',
+    }));
+}
+
+function compareCelUnlinkGroupKeys(first: string, second: string): number {
+  if (first < second) return -1;
+  if (first > second) return 1;
+  return 0;
+}
+
+function sameCelUnlinkGroup(
+  current: readonly CelUnlinkGroupMember[],
+  expected: readonly CelUnlinkGroupMember[],
+): boolean {
+  if (current.length !== expected.length) return false;
+  return current.every((member, index) => {
+    const other = expected[index];
+    return other !== undefined &&
+      member.key === other.key &&
+      member.celId === other.celId &&
+      member.layerId === other.layerId &&
+      member.frameId === other.frameId &&
+      member.linkedCelId === other.linkedCelId &&
+      member.linkType === other.linkType;
+  });
+}
+
+function cloneUnlinkedCel(cel: Cel): Cel {
+  const canvas = document.createElement('canvas');
+  canvas.width = cel.canvas.width;
+  canvas.height = cel.canvas.height;
+  const drawing = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!drawing) {
+    throw timelineError('internal', true, { reason: 'canvas_allocation' });
+  }
+
+  try {
+    drawing.imageSmoothingEnabled = false;
+    drawing.drawImage(cel.canvas, 0, 0);
+    return {
+      ...cel,
+      canvas,
+      ...(cel.indexBuffer ? { indexBuffer: new Uint8Array(cel.indexBuffer) } : {}),
+      linkedCelId: undefined,
+      linkType: undefined,
+    };
+  } catch {
+    throw timelineError('internal', true, { reason: 'cel_payload_clone' });
+  }
 }
 
 function prepareTagChange(
@@ -799,11 +1055,16 @@ function requireTagMutation(result: tagManager.TagMutationResult<FrameTag[]>): F
   }
 }
 
-function captureProjectStructure(context: ProjectContext): ProjectStructure {
+function captureProjectStructure(
+  context: ProjectContext,
+  includeCelPayloads = false,
+): ProjectStructure {
   return captureProjectStructureWithLayersAndTags(
     context,
     context.layers.layers.value,
     context.animation.tags.value,
+    context.animation.cels.value,
+    includeCelPayloads,
   );
 }
 
@@ -811,36 +1072,170 @@ function captureProjectStructureWithLayers(
   context: ProjectContext,
   layers: readonly Layer[],
 ): ProjectStructure {
-  return captureProjectStructureWithLayersAndTags(context, layers, context.animation.tags.value);
+  return captureProjectStructureWithLayersAndTags(
+    context,
+    layers,
+    context.animation.tags.value,
+    context.animation.cels.value,
+  );
 }
 
 function captureProjectStructureWithTags(
   context: ProjectContext,
   tags: readonly FrameTag[],
 ): ProjectStructure {
-  return captureProjectStructureWithLayersAndTags(context, context.layers.layers.value, tags);
+  return captureProjectStructureWithLayersAndTags(
+    context,
+    context.layers.layers.value,
+    tags,
+    context.animation.cels.value,
+  );
+}
+
+function captureProjectStructureWithCels(
+  context: ProjectContext,
+  cels: ReadonlyMap<string, Cel>,
+  includeCelPayloads = false,
+): ProjectStructure {
+  const currentFrameId = context.animation.currentFrameId.value;
+  const layers = context.layers.layers.value.map((layer) => {
+    if (layer.type === 'reference') return cloneLayer(layer);
+    const cel = cels.get(context.animation.getCelKey(layer.id, currentFrameId));
+    return cel ? { ...layer, canvas: cel.canvas } : cloneLayer(layer);
+  });
+  return captureProjectStructureWithLayersAndTags(
+    context,
+    layers,
+    context.animation.tags.value,
+    cels,
+    includeCelPayloads,
+  );
 }
 
 function captureProjectStructureWithLayersAndTags(
   context: ProjectContext,
   layers: readonly Layer[],
   tags: readonly FrameTag[],
+  cels: ReadonlyMap<string, Cel> = context.animation.cels.value,
+  includeCelPayloads = false,
 ): ProjectStructure {
   return {
     layers: layers.map(cloneLayer),
-    cels: new Map(context.animation.cels.value),
+    cels: new Map(cels),
     frames: context.animation.frames.value.map((frame) => ({
       id: frame.id,
       order: frame.order,
       duration: frame.duration,
     })),
     tags: tags.map(cloneTag),
+    ...(includeCelPayloads ? { celPayloads: captureCelPayloads(cels) } : {}),
   };
+}
+
+function captureCelPayloads(
+  cels: ReadonlyMap<string, Cel>,
+): ReadonlyMap<string, CelPayloadSnapshot> {
+  const canvasSharing = new Map<HTMLCanvasElement, string>();
+  const canvasPayloads = new Map<HTMLCanvasElement, CanvasPayloadSnapshot>();
+  const indexSharing = new Map<Uint8Array, string>();
+  const indexPayloads = new Map<Uint8Array, ByteFingerprint>();
+  const snapshots = new Map<string, CelPayloadSnapshot>();
+  const entries = [...cels.entries()].sort(([firstKey], [secondKey]) =>
+    compareCelUnlinkGroupKeys(firstKey, secondKey),
+  );
+
+  for (const [key, cel] of entries) {
+    let canvasPayload = canvasPayloads.get(cel.canvas);
+    if (!canvasPayload) {
+      canvasPayload = captureCanvasPayload(cel.canvas);
+      canvasPayloads.set(cel.canvas, canvasPayload);
+    }
+
+    let canvasSharingKey = canvasSharing.get(cel.canvas);
+    if (!canvasSharingKey) {
+      canvasSharingKey = key;
+      canvasSharing.set(cel.canvas, canvasSharingKey);
+    }
+
+    let indexSnapshot: CelPayloadSnapshot['indexBuffer'];
+    if (cel.indexBuffer) {
+      let indexBytes = indexPayloads.get(cel.indexBuffer);
+      if (!indexBytes) {
+        indexBytes = fingerprintBytes(cel.indexBuffer);
+        indexPayloads.set(cel.indexBuffer, indexBytes);
+      }
+
+      let indexSharingKey = indexSharing.get(cel.indexBuffer);
+      if (!indexSharingKey) {
+        indexSharingKey = key;
+        indexSharing.set(cel.indexBuffer, indexSharingKey);
+      }
+
+      indexSnapshot = Object.freeze({
+        sharingKey: indexSharingKey,
+        identity: getPayloadIdentity(cel.indexBuffer),
+        bytes: indexBytes,
+      });
+    }
+
+    snapshots.set(key, Object.freeze({
+      canvas: Object.freeze({ ...canvasPayload, sharingKey: canvasSharingKey }),
+      ...(indexSnapshot ? { indexBuffer: indexSnapshot } : {}),
+    }));
+  }
+
+  return snapshots;
+}
+
+function captureCanvasPayload(canvas: HTMLCanvasElement): CanvasPayloadSnapshot {
+  const drawing = canvas.getContext('2d', { willReadFrequently: true });
+  if (!drawing) {
+    throw timelineError('internal', true, { reason: 'canvas_snapshot' });
+  }
+
+  const imageData = drawing.getImageData(0, 0, canvas.width, canvas.height);
+  return Object.freeze({
+    width: canvas.width,
+    height: canvas.height,
+    pixels: fingerprintBytes(imageData.data),
+  });
+}
+
+function fingerprintBytes(data: ArrayLike<number>): ByteFingerprint {
+  let primary = 2166136261;
+  let secondary = 2654435761;
+
+  for (let index = 0; index < data.length; index++) {
+    const value = data[index] ?? 0;
+    primary = Math.imul(primary ^ value, 16777619);
+    secondary = Math.imul(secondary ^ (value + index), 2246822519);
+  }
+
+  return Object.freeze({
+    length: data.length,
+    primary: primary >>> 0,
+    secondary: secondary >>> 0,
+  });
+}
+
+function getPayloadIdentity(value: object): number {
+  const existing = payloadIdentities.get(value);
+  if (existing !== undefined) return existing;
+
+  const identity = nextPayloadIdentity++;
+  payloadIdentities.set(value, identity);
+  return identity;
 }
 
 function sameProjectStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
   return sameLayerArrays(current.layers, expected.layers) &&
-    sameMapEntries(current.cels, expected.cels) &&
+    sameCelMapEntries(current.cels, expected.cels) &&
+    sameTimelineStructure(current, expected);
+}
+
+function sameCelUnlinkStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
+  return sameLayerDocumentArrays(current.layers, expected.layers) &&
+    sameCelMapEntries(current.cels, expected.cels, current.celPayloads, expected.celPayloads) &&
     sameTimelineStructure(current, expected);
 }
 
@@ -849,12 +1244,112 @@ function sameTimelineStructure(current: ProjectStructure, expected: ProjectStruc
     sameTagArrays(current.tags, expected.tags);
 }
 
-function sameMapEntries(a: ReadonlyMapSnapshot, b: ReadonlyMapSnapshot): boolean {
+function sameCelMapEntries(
+  a: ReadonlyMapSnapshot,
+  b: ReadonlyMapSnapshot,
+  currentPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+  expectedPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+): boolean {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
-    if (b.get(key) !== value) return false;
+    if (!sameCelMapEntry(key, value, b, currentPayloads, expectedPayloads)) return false;
   }
   return true;
+}
+
+function sameCelMapEntry(
+  key: string,
+  current: Cel,
+  expectedCels: ReadonlyMapSnapshot,
+  currentPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+  expectedPayloads?: ReadonlyMap<string, CelPayloadSnapshot>,
+): boolean {
+  const expected = expectedCels.get(key);
+  if (!currentPayloads && !expectedPayloads) return sameCelState(current, expected);
+  if (!currentPayloads || !expectedPayloads) return false;
+
+  const currentPayload = currentPayloads.get(key);
+  const expectedPayload = expectedPayloads.get(key);
+  return !!currentPayload && !!expectedPayload &&
+    sameCelPayload(currentPayload, expectedPayload) &&
+    sameCelStructuralState(current, expected);
+}
+
+function sameCelPayload(current: CelPayloadSnapshot, expected: CelPayloadSnapshot): boolean {
+  return sameCanvasPayload(current.canvas, expected.canvas) &&
+    sameIndexPayload(current.indexBuffer, expected.indexBuffer, current.canvas.sharingKey);
+}
+
+function sameCanvasPayload(
+  current: CelPayloadSnapshot['canvas'],
+  expected: CelPayloadSnapshot['canvas'],
+): boolean {
+  return current.sharingKey === expected.sharingKey &&
+    current.width === expected.width &&
+    current.height === expected.height &&
+    sameByteFingerprint(current.pixels, expected.pixels);
+}
+
+function sameIndexPayload(
+  current: CelPayloadSnapshot['indexBuffer'],
+  expected: CelPayloadSnapshot['indexBuffer'],
+  canvasSharingKey: string,
+): boolean {
+  if (!expected) return !current || current.sharingKey === canvasSharingKey;
+  if (!current || current.sharingKey !== expected.sharingKey) return !current;
+  return current.identity !== expected.identity ||
+    sameByteFingerprint(current.bytes, expected.bytes);
+}
+
+function sameByteFingerprint(current: ByteFingerprint, expected: ByteFingerprint): boolean {
+  return current.length === expected.length &&
+    current.primary === expected.primary &&
+    current.secondary === expected.secondary;
+}
+
+function sameCelState(current: Cel, expected: Cel | undefined): boolean {
+  if (current === expected) return true;
+  if (!expected || current.indexBuffer === expected.indexBuffer) return false;
+
+  return sameCelIdentity(current, expected) &&
+    sameIndexBuffers(current.indexBuffer, expected.indexBuffer) &&
+    sameCelLinkState(current, expected) &&
+    sameCelMetadata(current, expected);
+}
+
+function sameCelStructuralState(current: Cel, expected: Cel | undefined): boolean {
+  return !!expected &&
+    current.id === expected.id &&
+    current.layerId === expected.layerId &&
+    current.frameId === expected.frameId &&
+    sameCelLinkState(current, expected) &&
+    sameCelMetadata(current, expected);
+}
+
+function sameCelIdentity(current: Cel, expected: Cel): boolean {
+  return current.id === expected.id &&
+    current.layerId === expected.layerId &&
+    current.frameId === expected.frameId &&
+    current.canvas === expected.canvas;
+}
+
+function sameCelLinkState(current: Cel, expected: Cel): boolean {
+  return current.linkedCelId === expected.linkedCelId &&
+    current.linkType === expected.linkType;
+}
+
+function sameCelMetadata(current: Cel, expected: Cel): boolean {
+  return current.opacity === expected.opacity &&
+    current.textCelData === expected.textCelData;
+}
+
+function sameIndexBuffers(
+  current: Uint8Array | undefined,
+  expected: Uint8Array | undefined,
+): boolean {
+  if (current === expected) return true;
+  if (!current || !expected || current.length !== expected.length) return false;
+  return current.every((value, index) => value === expected[index]);
 }
 
 function sameFrameStructures(a: readonly FrameStructure[], b: readonly FrameStructure[]): boolean {
@@ -869,6 +1364,19 @@ function sameFrameStructures(a: readonly FrameStructure[], b: readonly FrameStru
 function sameLayerArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((layer, index) => sameLayer(layer, b[index]));
+}
+
+function sameLayerDocumentArrays(a: readonly Layer[], b: readonly Layer[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((layer, index) => sameLayerDocumentState(layer, b[index]));
+}
+
+function sameLayerDocumentState(a: Layer | undefined, b: Layer | undefined): boolean {
+  if (!a || !b) return false;
+  return sameLayerIdentity(a, b) &&
+    sameLayerState(a, b) &&
+    a.textData === b.textData &&
+    a.referenceData === b.referenceData;
 }
 
 function sameLayerSemanticArrays(a: readonly Layer[], b: readonly Layer[]): boolean {

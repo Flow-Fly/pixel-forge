@@ -22,7 +22,12 @@ export type ProjectLoadStores = {
     cels: WritableSignal<Map<string, Cel>>;
     fps: WritableSignal<number>;
     tags: WritableSignal<FrameTag[]>;
-    addFrame: (duplicate?: boolean) => void;
+    addFrame: (
+      duplicate?: boolean,
+      sourceFrameId?: string,
+      frameId?: string,
+      applyLayerLinkPreference?: boolean,
+    ) => void;
     deleteFrame: (frameId: string) => void;
     getCelCanvas: (frameId: string, layerId: string) => HTMLCanvasElement | undefined;
     getCelKey: (layerId: string, frameId: string) => string;
@@ -275,7 +280,9 @@ function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
 function addLoadedFrame(stores: ProjectLoadStores, frameFile: ProjectFrameFile): Frame {
   const { animation } = stores;
 
-  animation.addFrame(false);
+  // Loaded cels restore their persisted link groups after every frame exists.
+  // The layer preference applies only to future user-created cels.
+  animation.addFrame(false, undefined, undefined, false);
   const frame = animation.frames.value[animation.frames.value.length - 1];
   animation.setFrameDuration(frame.id, frameFile.duration);
   return frame;

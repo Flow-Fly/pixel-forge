@@ -111,6 +111,22 @@ export class PFTimelineLayers extends BaseComponent {
       opacity: 0.3;
     }
 
+    .link-new-cels {
+      width: auto;
+      gap: 3px;
+      padding: 2px 4px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .link-new-cels .label {
+      display: none;
+    }
+
+    .layer-row.active .link-new-cels .label {
+      display: inline;
+    }
+
     .layer-name {
       flex: 1;
       overflow: hidden;
@@ -324,8 +340,8 @@ export class PFTimelineLayers extends BaseComponent {
   private layerContinuityTitle(layer: Layer, guidedProject: boolean): string {
     if (guidedProject) return 'Guided projects keep one fixed frame';
     return layer.continuous
-      ? 'Continuous (linked new cels)'
-      : 'Non-continuous (empty new cels)';
+      ? 'Link new cels. Future copied or created cels share artwork. Existing cels stay unchanged.'
+      : 'Link new cels is off. Future copied or created cels stay independent. Existing cels stay unchanged.';
   }
 
   private selectLayer(id: string) {
@@ -518,7 +534,7 @@ export class PFTimelineLayers extends BaseComponent {
       ...this.createReferenceDisplayItems(layer, context),
       {
         type: 'item',
-        label: layer.continuous ? '◯ Make Non-Continuous' : '∞ Make Continuous',
+        label: layer.continuous ? 'Stop linking new cels' : 'Link new cels',
         action: () => {
           void executeTimelineProjectState(
             context,
@@ -756,13 +772,19 @@ export class PFTimelineLayers extends BaseComponent {
         ${layer.locked ? '🔒' : '🔓'}
       </button>
       <button
-        class="icon-btn ${layer.continuous ? 'continuous-layer' : 'not-continuous'}"
+        class="icon-btn link-new-cels ${layer.continuous ? 'continuous-layer' : 'not-continuous'}"
         @click=${(event: Event) => this.toggleContinuous(layer.id, event)}
         title=${this.layerContinuityTitle(layer, guidedProject)}
+        aria-pressed=${String(!!layer.continuous)}
+        aria-describedby="continuity-help-${layer.id}"
         ?disabled=${guidedProject}
       >
-        ∞
+        <span aria-hidden="true">∞</span>
+        <span class="label">Link new cels</span>
       </button>
+      <span id="continuity-help-${layer.id}" class="visually-hidden">
+        Future copied or created cels are affected. Existing cels stay unchanged.
+      </span>
     `;
   }
 

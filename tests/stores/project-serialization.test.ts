@@ -6,8 +6,9 @@ import pako from 'pako';
 const canvasBytes = vi.hoisted(() => new WeakMap<HTMLCanvasElement, Uint8Array>());
 
 // happy-dom has neither IndexedDB nor canvas encoding — mock the boundaries.
-// The canvas codec mock preserves loaded bytes through the writer, proving the
-// file boundary without claiming that happy-dom rendered the PNG pixels.
+// The canvas codec mock preserves loaded bytes through the writer, and the
+// drawImage stub copies them for cloneUnlinkedCel. This proves the file
+// boundary without claiming that happy-dom rendered the PNG pixels.
 vi.mock('../../src/services/persistence/indexed-db', () => ({
   projectRepository: {
     list: vi.fn(async () => []),
@@ -43,11 +44,17 @@ import { layerStore } from '../../src/stores/layers';
 import { animationStore } from '../../src/stores/animation';
 import { paletteStore } from '../../src/stores/palette';
 import { guidedDrawingStore } from '../../src/stores/guided-drawing';
+import {
+  createCelUnlinkRequest,
+  executeTimelineProjectState,
+} from '../../src/editor/timeline-project-state';
+import { createProjectContext } from '../../src/stores/project-context';
 import { PROJECT_VERSION, decodeProjectFileWithDiagnostics } from '../../src/types/project';
 import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
 import { loadImageDataToCanvas } from '../../src/utils/canvas-binary';
 
 const PALETTE = ['#000000', '#ff0000', '#00ff00', '#0000ff', '#ffffff'];
+const LINKED_CANVAS_BYTES = Uint8Array.from([17, 34, 51, 68]);
 const mockedLoadImageDataToCanvas = vi.mocked(loadImageDataToCanvas);
 
 async function readCompressedProjectFixture(filename: string): Promise<ProjectFileInput> {
@@ -98,6 +105,112 @@ function expectNoFrameCelsForLayer(file: ProjectFile, layerId: string): void {
   for (const frame of file.frames) {
     expect(frame.cels.some((cel) => cel.layerId === layerId)).toBe(false);
   }
+}
+
+type LinkedCelPersistenceFixture = {
+  context: ReturnType<typeof createProjectContext>;
+  layerId: string;
+  middleFrameId: string;
+};
+
+async function createLinkedCelPersistenceFixture(): Promise<LinkedCelPersistenceFixture> {
+  const context = createProjectContext();
+  await context.project.newProject(16, 12);
+  const layer = context.layers.layers.value[0];
+  if (!layer) throw new Error('Expected an initial layer');
+
+  context.animation.addFrame(false);
+  context.animation.addFrame(false);
+  const [firstFrame, middleFrame, lastFrame] = context.animation.frames.value;
+  if (!firstFrame || !middleFrame || !lastFrame) {
+    throw new Error('Expected three animation frames');
+  }
+
+  const firstKey = context.animation.getCelKey(layer.id, firstFrame.id);
+  const middleKey = context.animation.getCelKey(layer.id, middleFrame.id);
+  const firstCel = context.animation.cels.value.get(firstKey);
+  const middleCel = context.animation.cels.value.get(middleKey);
+  if (!firstCel || !middleCel) throw new Error('Expected cels for the linked group');
+
+  context.animation.cels.value = new Map(context.animation.cels.value)
+    .set(firstKey, { ...firstCel, indexBuffer: Uint8Array.from([1, 2, 3, 4]) })
+    .set(middleKey, {
+      ...middleCel,
+      opacity: 47,
+      textCelData: { content: 'Keep this metadata', x: 2, y: 3 },
+    });
+  context.animation.linkCels(
+    [firstKey, middleKey, context.animation.getCelKey(layer.id, lastFrame.id)],
+    'hard'
+  );
+  const linkedCel = context.animation.cels.value.get(middleKey);
+  if (!linkedCel) throw new Error('Expected the linked cel after linking');
+  canvasBytes.set(linkedCel.canvas, new Uint8Array(LINKED_CANVAS_BYTES));
+  context.animation.goToFrame(middleFrame.id);
+
+  return { context, layerId: layer.id, middleFrameId: middleFrame.id };
+}
+
+function mockCanvasCloning() {
+  return vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+    function (this: HTMLCanvasElement) {
+      return {
+        imageSmoothingEnabled: false,
+        drawImage: vi.fn((source: HTMLCanvasElement) => {
+          const sourceBytes = canvasBytes.get(source);
+          if (sourceBytes) canvasBytes.set(this, new Uint8Array(sourceBytes));
+        }),
+        getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(16 * 12 * 4) })),
+      } as unknown as CanvasRenderingContext2D;
+    }
+  );
+}
+
+async function unlinkAndReload({
+  context,
+  layerId,
+  middleFrameId,
+}: LinkedCelPersistenceFixture): Promise<[ProjectFile, ProjectFile]> {
+  const drawing = mockCanvasCloning();
+  const result = await executeTimelineProjectState(
+    context,
+    createCelUnlinkRequest(context, layerId, middleFrameId)
+  );
+  drawing.mockRestore();
+  expect(result.ok).toBe(true);
+
+  const saved = await context.project.saveProject();
+  vi.useFakeTimers();
+  await context.project.loadProject(structuredClone(saved), false);
+  await vi.runAllTimersAsync();
+  vi.useRealTimers();
+
+  return [saved, await context.project.saveProject()];
+}
+
+function expectUnlinkedCelPersistence(file: ProjectFile, layerId: string): void {
+  const cels = file.frames.map((frame) => frame.cels.find((cel) => cel.layerId === layerId));
+  expect(cels[1]).toMatchObject({
+    opacity: 47,
+    indexData: [1, 2, 3, 4],
+    textCelData: { content: 'Keep this metadata', x: 2, y: 3 },
+  });
+  expect(cels[1]?.linkedCelId).toBeUndefined();
+  expect(cels[1]?.linkType).toBeUndefined();
+  expect(cels[0]?.linkedCelId).toEqual(cels[2]?.linkedCelId);
+  expect(cels[0]?.linkType).toBe('hard');
+  expect(cels[2]?.linkType).toBe('hard');
+}
+
+function expectLinkedCelCanvasBytes(file: ProjectFile, layerId: string): void {
+  expect(file.frames.map((frame) => {
+    const cel = frame.cels.find((candidate) => candidate.layerId === layerId);
+    return Array.from(cel?.data ?? []);
+  })).toEqual([
+    Array.from(LINKED_CANVAS_BYTES),
+    Array.from(LINKED_CANVAS_BYTES),
+    Array.from(LINKED_CANVAS_BYTES),
+  ]);
 }
 
 describe('project save -> load -> save round-trip (structural)', () => {
@@ -399,6 +512,60 @@ describe('project save -> load -> save round-trip (structural)', () => {
         cels[0]?.linkedCelId,
       ]);
     }
+  });
+
+  it('persists an unlinked cel and the remaining hard-linked group through reload', async () => {
+    const fixture = await createLinkedCelPersistenceFixture();
+    const [saved, reloaded] = await unlinkAndReload(fixture);
+
+    expectUnlinkedCelPersistence(saved, fixture.layerId);
+    expectUnlinkedCelPersistence(reloaded, fixture.layerId);
+    expectLinkedCelCanvasBytes(saved, fixture.layerId);
+    expectLinkedCelCanvasBytes(reloaded, fixture.layerId);
+
+    const remainingSharedFrame = fixture.context.animation.frames.value[0];
+    if (!remainingSharedFrame) throw new Error('Expected a remaining shared frame');
+    const drawing = mockCanvasCloning();
+    const result = await executeTimelineProjectState(
+      fixture.context,
+      createCelUnlinkRequest(fixture.context, fixture.layerId, remainingSharedFrame.id),
+    );
+    drawing.mockRestore();
+    expect(result.ok).toBe(true);
+    fixture.context.dispose();
+  });
+
+  it('does not relink existing independent cels when Link new cels survives reload', async () => {
+    const context = createProjectContext();
+    await context.project.newProject(16, 12);
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected an initial layer');
+
+    context.layers.updateLayer(layer.id, { continuous: false });
+    context.animation.addFrame(false);
+    context.animation.addFrame(false);
+    for (const [index, frame] of context.animation.frames.value.entries()) {
+      const indexBuffer = context.animation.ensureCelIndexBuffer(layer.id, frame.id);
+      indexBuffer[0] = index + 1;
+      context.animation.updateCelIndexBuffer(layer.id, frame.id, indexBuffer);
+    }
+    context.layers.updateLayer(layer.id, { continuous: true });
+
+    const saved = await context.project.saveProject();
+    expect(saved.frames.map((frame) => frame.cels[0]?.linkedCelId))
+      .toEqual([undefined, undefined, undefined]);
+    vi.useFakeTimers();
+    await context.project.loadProject(structuredClone(saved), false);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    const reloadedLinkIds = context.animation.frames.value.map((frame) =>
+      context.animation.cels.value.get(
+        context.animation.getCelKey(layer.id, frame.id),
+      )?.linkedCelId,
+    );
+    expect(reloadedLinkIds).toEqual([undefined, undefined, undefined]);
+    context.dispose();
   });
 
   it('keeps loader-created missing cels as default blanks', async () => {

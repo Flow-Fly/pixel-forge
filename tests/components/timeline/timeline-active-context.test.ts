@@ -4,11 +4,13 @@ import '../../../src/components/timeline/pf-playback-controls';
 import '../../../src/components/timeline/pf-timeline';
 import '../../../src/components/timeline/pf-timeline-layers';
 import '../../../src/components/timeline/pf-timeline-grid';
+import '../../../src/components/timeline/pf-timeline-header';
 import '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import type { PFPlaybackControls } from '../../../src/components/timeline/pf-playback-controls';
 import type { PFTimeline } from '../../../src/components/timeline/pf-timeline';
 import type { PFTimelineLayers } from '../../../src/components/timeline/pf-timeline-layers';
 import type { PFTimelineGrid } from '../../../src/components/timeline/pf-timeline-grid';
+import type { PFTimelineHeader } from '../../../src/components/timeline/pf-timeline-header';
 import type { PFTimelineFrameCells } from '../../../src/components/timeline/timeline-header/pf-timeline-frame-cells';
 import {
   createProjectContext,
@@ -84,6 +86,13 @@ async function createTimelineGrid() {
   return element;
 }
 
+async function createTimelineHeader() {
+  const element = document.createElement('pf-timeline-header') as PFTimelineHeader;
+  document.body.append(element);
+  await element.updateComplete;
+  return element;
+}
+
 async function createFrameCells() {
   const element = document.createElement('pf-timeline-frame-cells') as PFTimelineFrameCells;
   document.body.append(element);
@@ -107,6 +116,61 @@ function frameLabels(element: PFTimelineFrameCells) {
   return [...(element.shadowRoot?.querySelectorAll('.frame-number') ?? [])].map(
     (frame) => frame.textContent?.trim() ?? ''
   );
+}
+
+function createNonAdjacentHardLinkedCels(context: ProjectContext) {
+  const layer = context.layers.layers.value[0];
+  if (!layer) throw new Error('Expected a layer');
+  const firstFrameId = context.animation.currentFrameId.value;
+  const firstKey = context.animation.getCelKey(layer.id, firstFrameId);
+  const firstCel = context.animation.cels.value.get(firstKey);
+  if (!firstCel) throw new Error('Expected an initial cel');
+  const canvas = document.createElement('canvas');
+  canvas.width = firstCel.canvas.width;
+  canvas.height = firstCel.canvas.height;
+  context.animation.cels.value = new Map(context.animation.cels.value).set(firstKey, {
+    ...firstCel,
+    canvas,
+  });
+  context.layers.updateLayer(layer.id, { canvas });
+
+  context.animation.addFrame(false);
+  context.animation.addFrame(false);
+  const frames = context.animation.frames.value;
+  const first = frames[0];
+  const third = frames[2];
+  if (!first || !third) throw new Error('Expected three frames');
+
+  const linkId = context.animation.linkCels([
+    context.animation.getCelKey(layer.id, first.id),
+    context.animation.getCelKey(layer.id, third.id),
+  ], 'hard');
+  if (!linkId) throw new Error('Expected a hard link group');
+  context.animation.goToFrame(third.id);
+
+  return { layer, first, third, linkId };
+}
+
+function createCrossLayerHardLinkedCels(context: ProjectContext) {
+  const firstLayer = context.layers.layers.value[0];
+  if (!firstLayer) throw new Error('Expected an initial layer');
+  const secondLayer = context.layers.addLayer('Shading');
+  context.animation.syncLayerCanvases();
+  context.animation.addFrame(false);
+
+  const [first, second] = context.animation.frames.value;
+  if (!first || !second) throw new Error('Expected two frames');
+
+  const linkId = context.animation.linkCels([
+    context.animation.getCelKey(firstLayer.id, first.id),
+    context.animation.getCelKey(secondLayer.id, first.id),
+    context.animation.getCelKey(secondLayer.id, second.id),
+  ], 'hard');
+  if (!linkId) throw new Error('Expected a cross-layer hard link group');
+
+  context.layers.setActiveLayer(secondLayer.id);
+  context.animation.goToFrame(first.id);
+  return { firstLayer, secondLayer, first, second, linkId };
 }
 
 describe('timeline active project context binding', () => {
@@ -170,6 +234,178 @@ describe('timeline active project context binding', () => {
     expect(cels.every((cel) => !cel.classList.contains('link-continues-left'))).toBe(true);
     expect(cels.every((cel) => !cel.classList.contains('link-continues-right'))).toBe(true);
     expect(grid.shadowRoot?.querySelector('.link-badge')).toBeNull();
+  });
+
+  it('distinguishes future cel linking from the active shared-cel state', async () => {
+    const context = createContext('Linked cels');
+    const { layer, first, third, linkId } = createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const layers = await createTimelineLayers();
+    const header = await createTimelineHeader();
+    const grid = await createTimelineGrid();
+
+    const preference = layers.shadowRoot?.querySelector<HTMLButtonElement>('.link-new-cels');
+    expect(preference?.textContent).toContain('Link new cels');
+    expect(preference?.getAttribute('aria-pressed')).toBe('false');
+    expect(preference?.getAttribute('title')).toBe(
+      'Link new cels is off. Future copied or created cels stay independent. Existing cels stay unchanged.',
+    );
+
+    preference?.click();
+    await waitForContextRender(layers);
+    expect(context.layers.layers.value.find((item) => item.id === layer.id)?.continuous).toBe(true);
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, first.id))?.linkedCelId)
+      .toBe(linkId);
+    expect(context.animation.cels.value.get(context.animation.getCelKey(layer.id, third.id))?.linkedCelId)
+      .toBe(linkId);
+
+    const contextBar = header.shadowRoot?.querySelector<HTMLElement>('[data-shared-cel-context]');
+    expect(contextBar?.textContent).toContain('Shared cel — affects frames 1, 3');
+
+    const sharedCels = [
+      ...(grid.shadowRoot?.querySelectorAll<HTMLButtonElement>('.cel.hard-linked') ?? []),
+    ];
+    expect(sharedCels).toHaveLength(2);
+    expect(sharedCels.every((cel) => cel.querySelector('.link-glyph'))).toBe(true);
+    expect(sharedCels.map((cel) => cel.getAttribute('aria-label'))).toEqual([
+      `${layer.name}, frame 1. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
+      `${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame.`,
+    ]);
+  });
+
+  it('exposes the active shared cel as current and cel selection as a pressed state', async () => {
+    const context = createContext('Active shared cel semantics');
+    const { layer, first, third } = createNonAdjacentHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const grid = await createTimelineGrid();
+    const activeSharedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>(
+      `.cel[aria-label="${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame."]`,
+    );
+    const inactiveSharedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>(
+      `.cel[aria-label="${layer.name}, frame 1. Shared cel — affects frames 1, 3. Edits propagate to every affected frame."]`,
+    );
+
+    expect(activeSharedCel).toBeTruthy();
+    expect(activeSharedCel?.getAttribute('aria-current')).toBe('true');
+    expect(activeSharedCel?.getAttribute('aria-pressed')).toBe('false');
+    expect(inactiveSharedCel?.hasAttribute('aria-current')).toBe(false);
+    expect(inactiveSharedCel?.getAttribute('aria-pressed')).toBe('false');
+
+    activeSharedCel?.click();
+    await waitForContextRender(grid);
+
+    const selectedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>(
+      `.cel[aria-label="${layer.name}, frame 3. Shared cel — affects frames 1, 3. Edits propagate to every affected frame."]`,
+    );
+    expect(selectedCel?.getAttribute('aria-current')).toBe('true');
+    expect(selectedCel?.getAttribute('aria-pressed')).toBe('true');
+    expect(context.animation.currentFrameId.value).toBe(third.id);
+    expect(context.animation.selectedCelKeys.value.has(
+      context.animation.getCelKey(layer.id, first.id),
+    )).toBe(false);
+  });
+
+  it('keeps cel button content within phrasing content', async () => {
+    const context = createContext('Phrasing cel content');
+    createNonAdjacentHardLinkedCels(context);
+    context.animation.tags.value = [{
+      id: 'tag-1',
+      name: 'Intro',
+      color: '#3498db',
+      startFrameIndex: 0,
+      endFrameIndex: 0,
+      collapsed: false,
+    }];
+    context.animation.tagResizePreview.value = {
+      tagId: 'tag-1',
+      previewStart: 0,
+      previewEnd: 0,
+    };
+    setActiveProjectContext(context);
+
+    const grid = await createTimelineGrid();
+    const cel = grid.shadowRoot?.querySelector<HTMLButtonElement>('.cel');
+
+    expect(cel).toBeTruthy();
+    expect(cel?.querySelectorAll('div')).toHaveLength(0);
+    expect(cel?.querySelector('.tag-tint')?.tagName).toBe('SPAN');
+    expect(cel?.querySelector('.resize-preview-tint')?.tagName).toBe('SPAN');
+    expect(cel?.querySelector('.cel-content')?.tagName).toBe('SPAN');
+  });
+
+  it('shows every cross-layer group member with an unambiguous affected-frame list', async () => {
+    const context = createContext('Cross-layer linked cels');
+    const { firstLayer, secondLayer } = createCrossLayerHardLinkedCels(context);
+    setActiveProjectContext(context);
+
+    const header = await createTimelineHeader();
+    const grid = await createTimelineGrid();
+    const affectedFrames = `1 (${firstLayer.name}), 1 (${secondLayer.name}), 2 (${secondLayer.name})`;
+    const contextBar = header.shadowRoot?.querySelector<HTMLElement>('[data-shared-cel-context]');
+
+    expect(contextBar?.textContent).toContain(`Shared cel — affects frames ${affectedFrames}`);
+
+    const sharedCels = [
+      ...(grid.shadowRoot?.querySelectorAll<HTMLButtonElement>('.cel.hard-linked') ?? []),
+    ];
+    expect(sharedCels).toHaveLength(3);
+    expect(sharedCels.map((cel) => cel.getAttribute('aria-label'))).toEqual([
+      `${secondLayer.name}, frame 1. Shared cel — affects frames ${affectedFrames}. Edits propagate to every affected frame.`,
+      `${secondLayer.name}, frame 2. Shared cel — affects frames ${affectedFrames}. Edits propagate to every affected frame.`,
+      `${firstLayer.name}, frame 1. Shared cel — affects frames ${affectedFrames}. Edits propagate to every affected frame.`,
+    ]);
+    expect(sharedCels.every((cel) => cel.querySelector('.link-glyph'))).toBe(true);
+  });
+
+  it('explains and disables both unlink routes during Guided Drawing', async () => {
+    const context = createContext('Guided linked cels');
+    const { layer, third } = createNonAdjacentHardLinkedCels(context);
+    startGuidedSession(context);
+    setActiveProjectContext(context);
+
+    const header = await createTimelineHeader();
+    const grid = await createTimelineGrid();
+    const headerButton = header.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[data-shared-cel-context] button',
+    );
+    expect(headerButton?.disabled).toBe(true);
+    expect(headerButton?.getAttribute('title')).toBe('Unavailable during Guided Drawing.');
+    expect(headerButton?.getAttribute('aria-label')).toBe(
+      'Unlink this cel. Unavailable during Guided Drawing.',
+    );
+
+    const sharedCel = grid.shadowRoot?.querySelector<HTMLButtonElement>('.cel.hard-linked');
+    expect(sharedCel).toBeTruthy();
+    sharedCel?.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      composed: true,
+      clientX: 20,
+      clientY: 20,
+    }));
+
+    const menu = grid.shadowRoot?.querySelector<HTMLElement>('pf-context-menu') as
+      | (HTMLElement & {
+        items: Array<{ label?: string; disabled?: boolean }>;
+        updateComplete: Promise<unknown>;
+      })
+      | null;
+    if (!menu) throw new Error('Expected the cel context menu');
+    await menu.updateComplete;
+    const unlinkItem = menu?.items.find((item) => item.label?.startsWith('Unlink this cel'));
+    expect(unlinkItem).toMatchObject({
+      label: 'Unlink this cel (Unavailable during Guided Drawing.)',
+      disabled: true,
+    });
+    const menuItem = menu?.shadowRoot?.querySelector<HTMLElement>('.menu-item.disabled');
+    expect(menuItem?.textContent).toContain('Unavailable during Guided Drawing.');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, third.id),
+    )?.linkedCelId).toBeTruthy();
   });
 
   it('records layer toolbar actions in the active context history', async () => {

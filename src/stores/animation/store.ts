@@ -245,7 +245,12 @@ class AnimationStore {
     }
   }
 
-  addFrame(duplicate: boolean = true, sourceFrameId?: string, frameId?: string) {
+  addFrame(
+    duplicate: boolean = true,
+    sourceFrameId?: string,
+    frameId?: string,
+    applyLayerLinkPreference = true,
+  ) {
     this.syncLayerCanvases();
 
     const frames = this.frames.value;
@@ -288,7 +293,7 @@ class AnimationStore {
           frameIdToUse,
           newFrame.id,
           sourceFrameIndex,
-          duplicate || layer.continuous === true,
+          duplicate || (applyLayerLinkPreference && layer.continuous === true),
           sharedCanvas
         )
       );
@@ -363,6 +368,7 @@ class AnimationStore {
       layerId: layer.id,
       frameId: targetFrameId,
       canvas: sourceCel.canvas,
+      indexBuffer: sourceCel.indexBuffer,
       linkedCelId,
       linkType,
       opacity: sourceCel.opacity,

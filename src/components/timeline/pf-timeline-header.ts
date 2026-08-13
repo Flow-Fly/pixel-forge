@@ -20,6 +20,7 @@ import type { PFContextMenu, ContextMenuItem } from '../ui/pf-context-menu';
 import type { PFTimelineResizePreview } from './timeline-header/pf-timeline-resize-preview';
 import type { FrameTag } from '../../types/animation';
 import {
+  createCelUnlinkRequest,
   executeTimelineProjectState,
 } from '../../editor/timeline-project-state';
 import type {
@@ -27,6 +28,12 @@ import type {
   FrameTagRequestInput,
 } from '../../editor/timeline-project-state';
 import type { ProjectTarget } from '../../editor/contracts';
+import {
+  formatAffectedFrames,
+  getCelUnlinkUnavailableReason,
+  getSharedCelPresentation,
+  sharedCelFrameIndex,
+} from './linked-cel-sharing';
 
 const DURATION_UNIT_KEY = 'pf-timeline-duration-unit';
 const TAG_COLORS = [
@@ -53,12 +60,62 @@ export class PFTimelineHeader extends BaseComponent {
     :host {
       display: flex;
       align-items: flex-end;
-      height: 48px;
+      height: 74px;
       background-color: rgba(255, 255, 255, 0.018);
       border-bottom: 1px solid var(--pf-color-border);
       position: relative;
       text-transform: uppercase;
       letter-spacing: 0;
+    }
+
+    .linked-cel-context {
+      position: absolute;
+      top: 22px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      max-width: min(360px, calc(100vw - 230px));
+      height: 22px;
+      padding: 0 6px;
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-sm);
+      box-sizing: border-box;
+      background: var(--pf-color-bg-surface);
+      color: var(--pf-color-text-main);
+      font-size: 10px;
+      text-transform: none;
+      z-index: 6;
+    }
+
+    .linked-cel-context strong {
+      font-weight: 600;
+    }
+
+    .linked-cel-context .link-glyph {
+      flex: 0 0 auto;
+    }
+
+    .linked-cel-context .copy {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .linked-cel-context button {
+      flex: 0 0 auto;
+      border: 1px solid var(--pf-color-border-strong);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-color-bg-input);
+      color: inherit;
+      font: inherit;
+      padding: 2px 5px;
+      cursor: pointer;
+    }
+
+    .linked-cel-context button:focus-visible {
+      outline: 2px solid var(--pf-color-text-main);
+      outline-offset: 1px;
     }
   `;
 
@@ -594,8 +651,58 @@ export class PFTimelineHeader extends BaseComponent {
     window.removeEventListener('mouseup', this.handleTagResizeEnd);
   };
 
+  private unlinkCel(context: typeof this.context, layerId: string, frameId: string) {
+    void executeTimelineProjectState(
+      context,
+      createCelUnlinkRequest(context, layerId, frameId),
+    );
+  }
+
+  private renderSharedCelContext() {
+    const context = this.context;
+    const layerId = context.layers.activeLayerId.value;
+    const frameId = context.animation.currentFrameId.value;
+    if (!layerId || !frameId) return '';
+
+    const sharedCel = getSharedCelPresentation(context, layerId, frameId);
+    if (!sharedCel) return '';
+
+    const frameIndex = sharedCelFrameIndex(context.animation.frames.value, frameId);
+    if (frameIndex < 0) return '';
+    const visualFrameIndex = getVisualFrameIndex(frameIndex, context.animation.tags.value);
+    const unavailableReason = getCelUnlinkUnavailableReason(context);
+    const unlinkLabel = unavailableReason
+      ? `Unlink this cel. ${unavailableReason}`
+      : 'Unlink this cel';
+
+    return html`
+      <div
+        class="linked-cel-context"
+        data-shared-cel-context
+        role="group"
+        aria-label="Shared cel — affects frames ${formatAffectedFrames(sharedCel)}"
+        style="left: ${visualFrameIndex * 32}px"
+      >
+        <span class="link-glyph" aria-hidden="true">⛓</span>
+        <span class="copy">
+          <strong>Shared cel</strong> — affects frames ${formatAffectedFrames(sharedCel)}
+        </span>
+        <button
+          type="button"
+          ?disabled=${unavailableReason !== null}
+          title=${unavailableReason ?? 'Unlink this cel'}
+          aria-label=${unlinkLabel}
+          @click=${() => this.unlinkCel(context, layerId, frameId)}
+        >
+          Unlink this cel
+        </button>
+      </div>
+    `;
+  }
+
   render() {
     return html`
+      ${this.renderSharedCelContext()}
       <pf-timeline-tag-bars
         .resizingTagId=${this.resizingTagId}
         @tag-context-menu=${this.handleTagContextMenu}
@@ -617,6 +724,21 @@ export class PFTimelineHeader extends BaseComponent {
       <pf-tag-preview></pf-tag-preview>
     `;
   }
+}
+
+function getVisualFrameIndex(frameIndex: number, tags: readonly FrameTag[]): number {
+  let visualOffset = 0;
+
+  for (const tag of [...tags].sort((first, second) => first.startFrameIndex - second.startFrameIndex)) {
+    if (!tag.collapsed) continue;
+    if (frameIndex < tag.startFrameIndex) break;
+    if (frameIndex <= tag.endFrameIndex) {
+      return tag.startFrameIndex + visualOffset;
+    }
+    visualOffset -= tag.endFrameIndex - tag.startFrameIndex;
+  }
+
+  return frameIndex + visualOffset;
 }
 
 function calculateTagResizeRange(

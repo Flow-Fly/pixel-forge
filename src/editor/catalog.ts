@@ -52,6 +52,8 @@ export const canvasSizeCatalog = Object.freeze({
 export const LAYER_STATE_COMMAND_ID = 'project.layer.state';
 // fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const FRAME_TAG_COMMAND_ID = 'project.animation.frame-tag';
+// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
+export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
 
 // fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
 export const layerStateCatalog = Object.freeze({
@@ -99,6 +101,41 @@ export const frameTagCatalog = Object.freeze({
   ] as const,
 });
 
+// fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
+export const celUnlinkCatalog = Object.freeze({
+  id: CEL_UNLINK_COMMAND_ID,
+  target: 'project',
+  requiresRevision: true,
+  operation: 'unlink-active-hard-linked-cel',
+  request: {
+    target: { projectId: 'string' },
+    expectedRevision: 'integer >= 0',
+    layerId: 'string',
+    frameId: 'string',
+    celId: 'string',
+    linkedCelId: 'string',
+    linkGroup: [{
+      key: 'string',
+      celId: 'string',
+      layerId: 'string',
+      frameId: 'string',
+      linkedCelId: 'string',
+      linkType: 'hard',
+    }],
+  },
+  affectedDomains: ['timeline', 'raster-content'] as const,
+  availability: { guidedDrawing: 'unsupported' },
+  undo: 'one-session-history-entry',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
 // fallow-ignore-next-line unused-export -- Public command inventory consumed by editor tooling.
 export const editorCatalog = Object.freeze({
   version: '1.0',
@@ -106,5 +143,6 @@ export const editorCatalog = Object.freeze({
     canvasSizeCatalog.command,
     layerStateCatalog,
     frameTagCatalog,
+    celUnlinkCatalog,
   ]),
 });
