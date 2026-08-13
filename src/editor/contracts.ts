@@ -9,6 +9,36 @@ export interface ProjectTarget {
   readonly projectId: string;
 }
 
+/** Stable categories exposed by the local project save boundary. */
+export type ProjectSaveFailureCategory =
+  | 'storage_unavailable'
+  | 'quota_exceeded'
+  | 'serialization_failed'
+  | 'write_failed'
+  | 'internal';
+
+export type ProjectSaveSafetyStatus = 'dirty' | 'saving' | 'saved' | 'failed';
+
+export interface ProjectSaveSafetyFailure {
+  readonly category: ProjectSaveFailureCategory;
+  readonly action: 'retry_latest';
+}
+
+/**
+ * Transport-neutral observation of the durability of one project revision.
+ * It intentionally contains no project bytes, names, or raw errors.
+ */
+export interface ProjectSaveSafetyState {
+  readonly type: 'project.save-safety';
+  readonly target: ProjectTarget;
+  readonly currentRevision: number;
+  readonly persistedRevision: number;
+  readonly status: ProjectSaveSafetyStatus;
+  readonly failure?: ProjectSaveSafetyFailure;
+}
+
+export type ProjectSaveSafetyObservation = ProjectSaveSafetyState;
+
 export type EditorErrorCode =
   | 'invalid_request'
   | 'target_not_found'

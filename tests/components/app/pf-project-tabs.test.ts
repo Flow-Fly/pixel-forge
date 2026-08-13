@@ -23,6 +23,11 @@ const workspaceStoreMock = vi.hoisted(() => ({
 const autoSaveServiceMock = vi.hoisted(() => ({
   dirtyContexts: new Set<TestProjectContext>(),
   isDirty: vi.fn((context: TestProjectContext) => autoSaveServiceMock.dirtyContexts.has(context)),
+  saveSafetyStates: new Map<TestProjectContext, { status: string }>(),
+  getSaveSafetyState: vi.fn((context: TestProjectContext) =>
+    autoSaveServiceMock.saveSafetyStates.get(context)
+  ),
+  retryLatest: vi.fn(async () => {}),
 }));
 
 vi.mock('../../../src/stores/workspace', () => ({
@@ -88,13 +93,16 @@ describe('pf-project-tabs', () => {
     });
     autoSaveServiceMock.dirtyContexts.clear();
     autoSaveServiceMock.isDirty.mockClear();
+    autoSaveServiceMock.saveSafetyStates.clear();
+    autoSaveServiceMock.getSaveSafetyState.mockClear();
+    autoSaveServiceMock.retryLatest.mockClear();
   });
 
   it('renders workspace items with the active project marked', async () => {
     const element = await createTabs();
 
-    const activeButton = buttonWithLabel(element.shadowRoot!, 'Project A');
-    const inactiveButton = buttonWithLabel(element.shadowRoot!, 'Project B');
+    const activeButton = buttonWithLabel(element.shadowRoot!, 'Project A, saved');
+    const inactiveButton = buttonWithLabel(element.shadowRoot!, 'Project B, saved');
 
     expect(activeButton?.getAttribute('aria-current')).toBe('page');
     expect(inactiveButton?.getAttribute('aria-current')).toBe('false');
@@ -116,10 +124,28 @@ describe('pf-project-tabs', () => {
     expect(buttonWithLabel(element.shadowRoot!, 'Project B, unsaved changes')).toBeTruthy();
   });
 
+  it('exposes a persistent, semantic retry for the active failed project', async () => {
+    autoSaveServiceMock.saveSafetyStates.set(projectA.context, { status: 'failed' });
+
+    const element = await createTabs();
+
+    expect(buttonWithLabel(element.shadowRoot!, 'Project A, not safely saved')).toBeTruthy();
+    const retry = element.shadowRoot?.querySelector<HTMLButtonElement>(
+      '[aria-label="Retry saving Project A"]'
+    );
+    expect(retry).toBeTruthy();
+    retry?.focus();
+    expect(element.shadowRoot?.activeElement).toBe(retry);
+
+    retry?.click();
+    await settle(element);
+    expect(autoSaveServiceMock.retryLatest).toHaveBeenCalledWith(projectA.context);
+  });
+
   it('activates a clicked tab', async () => {
     const element = await createTabs();
 
-    buttonWithLabel(element.shadowRoot!, 'Project B')?.click();
+    buttonWithLabel(element.shadowRoot!, 'Project B, saved')?.click();
     await settle(element);
 
     expect(workspaceStoreMock.activate).toHaveBeenCalledWith('project-b');
@@ -153,7 +179,7 @@ describe('pf-project-tabs', () => {
 
   it('closes a tab through the same path on middle click', async () => {
     const element = await createTabs();
-    const tabButton = buttonWithLabel(element.shadowRoot!, 'Project A');
+    const tabButton = buttonWithLabel(element.shadowRoot!, 'Project A, saved');
 
     tabButton?.dispatchEvent(
       new MouseEvent('auxclick', {

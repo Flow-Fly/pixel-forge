@@ -8,6 +8,7 @@
 
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
+export const PROJECT_SAVE_SAFETY_OBSERVATION_ID = 'project.save-safety';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
 export const FILL_COMMAND_ID = 'project.raster.fill';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
@@ -211,9 +212,34 @@ export const rasterGradientCatalog = Object.freeze({
   ] as const,
 });
 
+// fallow-ignore-next-line unused-export -- Public observation catalog consumed by editor tooling.
+export const projectSaveSafetyCatalog = Object.freeze({
+  id: PROJECT_SAVE_SAFETY_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  fields: {
+    target: { projectId: 'string' },
+    currentRevision: 'integer >= 0',
+    persistedRevision: 'integer >= 0',
+    status: ['dirty', 'saving', 'saved', 'failed'] as const,
+    failure: {
+      category: [
+        'storage_unavailable',
+        'quota_exceeded',
+        'serialization_failed',
+        'write_failed',
+        'internal',
+      ] as const,
+      action: ['retry_latest'] as const,
+    },
+  },
+  privacy: 'no project content or raw errors',
+});
+
 // fallow-ignore-next-line unused-export -- Public command inventory consumed by editor tooling.
 export const editorCatalog = Object.freeze({
   version: '1.0',
+  observations: Object.freeze([projectSaveSafetyCatalog]),
   commands: Object.freeze([
     canvasSizeCatalog.command,
     layerStateCatalog,

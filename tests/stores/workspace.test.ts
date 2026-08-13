@@ -296,6 +296,26 @@ describe("WorkspaceStore", () => {
     expect(workspace.items.value.map((item) => item.id)).toEqual(["project-a"]);
   });
 
+  it("keeps a project open when close cannot save its latest revision", async () => {
+    const contextA = createTestContext("Project A");
+    const contextB = createTestContext("Project B");
+    contextB.project.id.value = "project-b";
+    const autoSave = createAutoSaveMock();
+    autoSave.saveNow.mockRejectedValueOnce(new Error("save failed"));
+    const workspace = new WorkspaceStore({
+      initialContext: contextA,
+      initialItemId: "project-a",
+      autoSave,
+    });
+    workspace.addContext(contextB, { id: "project-b", activate: false });
+
+    await expect(workspace.closeProject("project-b")).rejects.toThrow("save failed");
+
+    expect(workspace.getProjectItem("project-b")?.context).toBe(contextB);
+    expect(workspace.items.value).toHaveLength(2);
+    expect(autoSave.stop).not.toHaveBeenCalledWith(contextB);
+  });
+
   it("refuses to close the last workspace item", () => {
     const context = createTestContext("Only Project");
     const workspace = new WorkspaceStore({

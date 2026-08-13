@@ -32,7 +32,7 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 }));
 
 import { projectRepository } from '../../src/services/persistence/indexed-db';
-import { autoSaveService } from '../../src/services/auto-save';
+import { autoSaveService, ProjectSaveError } from '../../src/services/auto-save';
 import { createProjectThumbnail } from '../../src/services/project-thumbnail';
 import { productTelemetry } from '../../src/services/telemetry';
 import { historyStore, type Command } from '../../src/stores/history';
@@ -213,6 +213,43 @@ describe('AutoSaveService', () => {
     expect(autoSaveService.isDirty(context)).toBe(false);
   });
 
+  it('keeps save safety dirty when an older write completes after a newer edit', async () => {
+    const context = createContext('save-safety-order-project', 'First state');
+    const firstWrite = deferred<void>();
+    vi.mocked(projectRepository.save)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockResolvedValueOnce();
+
+    autoSaveService.start(context);
+    const firstSave = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saving');
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Newer state';
+      })
+    );
+    await Promise.resolve();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('dirty');
+    const secondSave = autoSaveService.saveNow(context);
+    firstWrite.resolve();
+    await firstSave;
+
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      currentRevision: 1,
+      persistedRevision: 0,
+      status: 'saving',
+    });
+
+    await secondSave;
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      currentRevision: 1,
+      persistedRevision: 1,
+      status: 'saved',
+    });
+  });
+
   it('rejects a forced save queued after pause and never writes it', async () => {
     const context = createContext('deleted-project', 'Deleted project');
     autoSaveService.start(context);
@@ -382,7 +419,8 @@ describe('AutoSaveService', () => {
     const newerSave = autoSaveService.saveNow(context);
     firstWrite.reject(new Error('older write failed'));
 
-    await expect(olderSave).rejects.toThrow('older write failed');
+    await expect(olderSave).rejects.toBeInstanceOf(ProjectSaveError);
+    await expect(olderSave).rejects.toMatchObject({ category: 'write_failed' });
     await newerSave;
 
     expect(projectRepository.save).toHaveBeenCalledTimes(2);
@@ -407,5 +445,91 @@ describe('AutoSaveService', () => {
 
     writeA.resolve();
     await saveA;
+  });
+
+  it('publishes one revision-aware save safety state through dirty, saving, and saved', async () => {
+    const context = createContext('save-safety-project', 'Save safety');
+    const write = deferred<void>();
+    vi.mocked(projectRepository.save).mockImplementationOnce(() => write.promise);
+
+    autoSaveService.start(context);
+    await context.history.execute(makeCommand());
+    await Promise.resolve();
+
+    expect(autoSaveService.getSaveSafetyObservation(context)).toMatchObject({
+      type: 'project.save-safety',
+      target: { projectId: 'save-safety-project' },
+      currentRevision: 1,
+      persistedRevision: 0,
+      status: 'dirty',
+    });
+
+    const saving = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saving');
+
+    write.resolve();
+    await saving;
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      currentRevision: 1,
+      persistedRevision: 1,
+      status: 'saved',
+    });
+  });
+
+  it('keeps a failed write bounded and retries the newest dirty revision', async () => {
+    const context = createContext('retry-latest-project', 'First state');
+    vi.mocked(projectRepository.save)
+      .mockRejectedValueOnce(Object.assign(new Error('disk full'), { name: 'QuotaExceededError' }))
+      .mockResolvedValueOnce();
+
+    await expect(autoSaveService.saveNow(context)).rejects.toMatchObject({
+      category: 'quota_exceeded',
+      action: 'retry_latest',
+    });
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      status: 'failed',
+      failure: { category: 'quota_exceeded', action: 'retry_latest' },
+    });
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Newest state';
+      })
+    );
+    await Promise.resolve();
+
+    await autoSaveService.retryLatest(context);
+    expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Newest state');
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saved');
+  });
+
+  it('treats thumbnail generation as derived and preserves the previous thumbnail', async () => {
+    const context = createContext('thumbnail-failure-project', 'Thumbnail failure');
+    vi.mocked(createProjectThumbnail).mockRejectedValueOnce(new Error('canvas failed'));
+
+    await autoSaveService.saveNow(context);
+
+    expect(projectRepository.save).toHaveBeenCalledWith(
+      'thumbnail-failure-project',
+      expect.any(Object),
+      { thumbnail: undefined }
+    );
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saved');
+  });
+
+  it('maps serialization failure without exposing the original exception', async () => {
+    const context = createContext('serialization-failure-project', 'Serialization failure');
+    vi.spyOn(context.project, 'saveProject').mockRejectedValueOnce(
+      new Error('private project bytes should not escape')
+    );
+
+    await expect(autoSaveService.saveNow(context)).rejects.toMatchObject({
+      category: 'serialization_failed',
+      action: 'retry_latest',
+    });
+    const state = autoSaveService.getSaveSafetyState(context);
+    expect(state.status).toBe('failed');
+    expect(JSON.stringify(state)).not.toContain('private project bytes');
   });
 });
