@@ -58,6 +58,11 @@ export interface RasterExecutionOptions {
   readonly canvas?: HTMLCanvasElement;
   readonly beforePixels?: Uint8ClampedArray;
   readonly beforeIndices?: Uint8Array;
+  /**
+   * Transient pixels already painted for a preview. The transaction validates
+   * these bytes before it commits while retaining beforePixels for Undo.
+   */
+  readonly expectedPixels?: Uint8ClampedArray;
 }
 
 export interface FillRequest extends RasterTarget {
@@ -134,6 +139,7 @@ interface PreparedRasterChange {
   readonly canvas: HTMLCanvasElement;
   readonly context: CanvasRenderingContext2D;
   readonly beforePixels: Uint8ClampedArray;
+  readonly expectedPixels: Uint8ClampedArray;
   readonly afterPixels: Uint8ClampedArray;
   readonly beforeIndices: Uint8Array;
   readonly afterIndices: Uint8Array;
@@ -248,7 +254,7 @@ export async function executeGradient(
 
     const state = resolveRasterState(context, request, options.canvas);
     const paletteBefore = capturePalette(context);
-    const { beforePixels, beforeIndices } = captureRasterBuffers(state, options);
+    const { beforePixels, expectedPixels, beforeIndices } = captureRasterBuffers(state, options);
 
     const render = renderGradientPixels(request, state.canvas.width, state.canvas.height, paletteBefore.colors);
     if (arraysEqual(beforePixels, render.pixels) && arraysEqual(beforeIndices, render.indices)) {
@@ -262,6 +268,7 @@ export async function executeGradient(
       canvas: state.canvas,
       context: state.context,
       beforePixels,
+      expectedPixels,
       afterPixels: render.pixels,
       beforeIndices,
       afterIndices: render.indices,
@@ -315,7 +322,7 @@ function prepareFillChange(
   const state = resolveRasterState(context, request, options.canvas);
   const paletteBefore = capturePalette(context);
   const palettePlan = planPaletteColor(context, request.hex, paletteBefore);
-  const { beforePixels, beforeIndices } = captureRasterBuffers(state, options);
+  const { beforePixels, expectedPixels, beforeIndices } = captureRasterBuffers(state, options);
 
   const afterPixels = new Uint8ClampedArray(beforePixels);
   const afterIndices = new Uint8Array(beforeIndices);
@@ -361,6 +368,7 @@ function prepareFillChange(
     canvas: state.canvas,
     context: state.context,
     beforePixels,
+    expectedPixels,
     afterPixels,
     beforeIndices,
     afterIndices,
@@ -730,9 +738,10 @@ class RasterToolCommand implements Command {
     if (this.change.originalIndexBuffer && cel.indexBuffer !== this.change.originalIndexBuffer) {
       throw editorError('revision_conflict', true, { reason: 'index_buffer_changed' });
     }
-    if (arraysEqual(readPixels(this.change.context, this.change.canvas), phase === 'undo' || phase === 'redo'
+    const expectedPixels = phase === 'undo' || phase === 'redo'
       ? (phase === 'undo' ? this.change.afterPixels : this.change.beforePixels)
-      : this.change.beforePixels) === false) {
+      : this.change.expectedPixels;
+    if (!arraysEqual(readPixels(this.change.context, this.change.canvas), expectedPixels)) {
       throw editorError('revision_conflict', true, { reason: 'pixels_changed' });
     }
   }
@@ -824,15 +833,20 @@ export function createRasterImageData(data: Uint8ClampedArray, width: number, he
 function captureRasterBuffers(
   state: RasterState,
   options: RasterExecutionOptions,
-): { beforePixels: Uint8ClampedArray; beforeIndices: Uint8Array } {
+): { beforePixels: Uint8ClampedArray; expectedPixels: Uint8ClampedArray; beforeIndices: Uint8Array } {
+  const expectedPixels = readPixels(state.context, state.canvas);
+  if (options.expectedPixels && !arraysEqual(expectedPixels, options.expectedPixels)) {
+    throw editorError('revision_conflict', true, { reason: 'preview_changed' });
+  }
   const beforePixels = options.beforePixels
     ? new Uint8ClampedArray(options.beforePixels)
-    : readPixels(state.context, state.canvas);
+    : new Uint8ClampedArray(expectedPixels);
   const beforeIndices = options.beforeIndices
     ? new Uint8Array(options.beforeIndices)
     : new Uint8Array(state.indexBuffer);
   validateBufferLengths(state.canvas, beforePixels, beforeIndices);
-  return { beforePixels, beforeIndices };
+  if (options.expectedPixels) validateBufferLengths(state.canvas, options.expectedPixels, beforeIndices);
+  return { beforePixels, expectedPixels, beforeIndices };
 }
 
 function validateBufferLengths(

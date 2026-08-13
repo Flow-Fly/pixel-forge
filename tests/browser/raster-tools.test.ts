@@ -9,6 +9,7 @@ import {
 } from '../../src/editor/raster-tools';
 import { autoSaveService } from '../../src/services/auto-save';
 import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
+import { GradientTool } from '../../src/tools/gradient-tool';
 
 const contexts: ProjectContext[] = [];
 
@@ -249,6 +250,9 @@ describe('Fill and Gradient project transactions in Chromium', () => {
       second.canvas.height,
     )).toThrow('target_not_found');
     expect(second.context.palette.mainColors.value).toEqual(secondPalette);
+    const wrongGradient = await executeGradient(second.context, gradientPreviewRequest);
+    expect(wrongGradient).toMatchObject({ ok: false, error: { code: 'target_not_found' } });
+    expect(second.context.palette.mainColors.value).toEqual(secondPalette);
 
     first.context.project.commitChange('external-change', ['raster-content']);
     const beforeStale = rgbaPixels(first.canvas);
@@ -265,6 +269,12 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     )).toThrow('revision_conflict');
     expect(first.context.palette.mainColors.value).toEqual(firstPalette);
 
+    const staleGradient = await executeGradient(first.context, gradientPreviewRequest);
+    expect(staleGradient).toMatchObject({ ok: false, error: { code: 'revision_conflict' } });
+    expect(rgbaPixels(first.canvas)).toEqual(beforeStale);
+    expect(first.context.palette.mainColors.value).toEqual(firstPalette);
+    expect(first.context.history.undoStack.value).toHaveLength(0);
+
     const fresh = createRasterContext();
     const committed = await executeFill(fresh.context, {
       ...captureRasterTarget(fresh.context, fresh.layerId, fresh.frameId),
@@ -278,6 +288,182 @@ describe('Fill and Gradient project transactions in Chromium', () => {
     await fresh.context.project.loadProject(structuredClone(saved));
     expect(getCelIndices(fresh.context, fresh.layerId, fresh.context.animation.currentFrameId.value))
       .toEqual([3, 3, 3, 3, 3, 3, 3, 3]);
+  });
+
+  it('commits linear Gradient pixels and indices through exact Undo/Redo', async () => {
+    const { context, layerId, frameId, canvas } = createRasterContext();
+    setCelIndices(context, layerId, frameId, [1, 1, 1, 1, 1, 1, 1, 1]);
+    const beforePixels = rgbaPixels(canvas);
+    const beforeIndices = getCelIndices(context, layerId, frameId);
+    const result = await executeGradient(context, {
+      ...captureRasterTarget(context, layerId, frameId),
+      startX: 0,
+      startY: 0,
+      endX: 3,
+      endY: 0,
+      primaryHex: '#ff0000',
+      secondaryHex: '#0000ff',
+      type: 'linear',
+      shift: false,
+    });
+
+    expect(result.ok).toBe(true);
+    const afterPixels = rgbaPixels(canvas);
+    const afterIndices = getCelIndices(context, layerId, frameId);
+    expect(afterPixels).not.toEqual(beforePixels);
+    expect(afterIndices).not.toEqual(beforeIndices);
+
+    await context.history.undo();
+    expect(rgbaPixels(canvas)).toEqual(beforePixels);
+    expect(getCelIndices(context, layerId, frameId)).toEqual(beforeIndices);
+
+    await context.history.redo();
+    expect(rgbaPixels(canvas)).toEqual(afterPixels);
+    expect(getCelIndices(context, layerId, frameId)).toEqual(afterIndices);
+  });
+
+  it('commits the GradientTool preview without restoring over its indexed transaction', async () => {
+    const { context, layerId, frameId, canvas } = createRasterContext();
+    setCelIndices(context, layerId, frameId, [1, 1, 1, 1, 1, 1, 1, 1]);
+    context.colors.setPrimaryColor('#ff0000');
+    context.colors.setSecondaryColor('#0000ff');
+    const canvasContext = canvas.getContext('2d');
+    if (!canvasContext) throw new Error('Expected Chromium 2D context');
+    const tool = new GradientTool();
+    tool.setContext(canvasContext);
+    tool.setProjectContext(context);
+    const beforePixels = rgbaPixels(canvas);
+    const beforeIndices = getCelIndices(context, layerId, frameId);
+
+    tool.onDown(0, 0);
+    tool.onDrag(3, 0);
+    tool.onUp(3, 0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(context.history.undoStack.value).toHaveLength(1);
+    const afterPixels = rgbaPixels(canvas);
+    const afterIndices = getCelIndices(context, layerId, frameId);
+    expect(afterPixels).not.toEqual(beforePixels);
+    expect(afterIndices).not.toEqual(beforeIndices);
+
+    await context.history.undo();
+    expect(rgbaPixels(canvas)).toEqual(beforePixels);
+    expect(getCelIndices(context, layerId, frameId)).toEqual(beforeIndices);
+    await context.history.redo();
+    expect(rgbaPixels(canvas)).toEqual(afterPixels);
+    expect(getCelIndices(context, layerId, frameId)).toEqual(afterIndices);
+  });
+
+  it('persists a committed Gradient through project save and load', async () => {
+    const { context, layerId, frameId } = createRasterContext();
+    const result = await executeGradient(context, {
+      ...captureRasterTarget(context, layerId, frameId),
+      startX: 0,
+      startY: 0,
+      endX: 3,
+      endY: 1,
+      primaryHex: '#ff0000',
+      secondaryHex: '#0000ff',
+      type: 'linear',
+      shift: false,
+    });
+    expect(result.ok).toBe(true);
+    const celBeforeLoad = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, frameId),
+    );
+    if (!celBeforeLoad) throw new Error('Expected committed Gradient cel');
+    const pixelsBeforeLoad = rgbaPixels(celBeforeLoad.canvas);
+    const indicesBeforeLoad = getCelIndices(context, layerId, frameId);
+    const paletteBeforeLoad = [...context.palette.mainColors.value];
+
+    const saved = await context.project.saveProject();
+    await context.project.loadProject(structuredClone(saved));
+
+    const celAfterLoad = context.animation.cels.value.get(
+      context.animation.getCelKey(layerId, context.animation.currentFrameId.value),
+    );
+    if (!celAfterLoad) throw new Error('Expected reloaded Gradient cel');
+    expect(rgbaPixels(celAfterLoad.canvas)).toEqual(pixelsBeforeLoad);
+    expect(getCelIndices(context, layerId, context.animation.currentFrameId.value))
+      .toEqual(indicesBeforeLoad);
+    expect(context.palette.mainColors.value).toEqual(paletteBeforeLoad);
+  });
+
+  it('does not overwrite a newer Fill when a Gradient preview goes stale on pointer-up or cancel', async () => {
+    const pointerUp = createRasterContext();
+    const pointerTool = new GradientTool();
+    const pointerContext = pointerUp.canvas.getContext('2d');
+    if (!pointerContext) throw new Error('Expected Chromium 2D context');
+    pointerTool.setContext(pointerContext);
+    pointerTool.setProjectContext(pointerUp.context);
+    pointerUp.context.colors.setPrimaryColor('#ff0000');
+    pointerUp.context.colors.setSecondaryColor('#0000ff');
+    autoSaveService.start(pointerUp.context);
+    pointerTool.onDown(0, 0);
+    pointerTool.onDrag(3, 1);
+
+    const fill = await executeFill(pointerUp.context, {
+      ...captureRasterTarget(pointerUp.context, pointerUp.layerId, pointerUp.frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#ffff00',
+      contiguous: true,
+    });
+    expect(fill.ok).toBe(true);
+    const pixelsAfterFill = rgbaPixels(pointerUp.canvas);
+    const indicesAfterFill = getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId);
+    const paletteAfterFill = [...pointerUp.context.palette.mainColors.value];
+    const revisionAfterFill = pointerUp.context.project.revision.value;
+    const historyAfterFill = pointerUp.context.history.undoStack.value.length;
+    const dirtyAfterFill = autoSaveService.isDirty(pointerUp.context);
+    const lastSavedAfterFill = pointerUp.context.project.lastSaved.value;
+
+    expect(() => pointerTool.onUp(3, 1)).not.toThrow();
+    await Promise.resolve();
+    expect(rgbaPixels(pointerUp.canvas)).toEqual(pixelsAfterFill);
+    expect(getCelIndices(pointerUp.context, pointerUp.layerId, pointerUp.frameId))
+      .toEqual(indicesAfterFill);
+    expect(pointerUp.context.palette.mainColors.value).toEqual(paletteAfterFill);
+    expect(pointerUp.context.project.revision.value).toBe(revisionAfterFill);
+    expect(pointerUp.context.history.undoStack.value).toHaveLength(historyAfterFill);
+    expect(autoSaveService.isDirty(pointerUp.context)).toBe(dirtyAfterFill);
+    expect(pointerUp.context.project.lastSaved.value).toBe(lastSavedAfterFill);
+
+    const cancel = createRasterContext();
+    const cancelTool = new GradientTool();
+    const cancelContext = cancel.canvas.getContext('2d');
+    if (!cancelContext) throw new Error('Expected Chromium 2D context');
+    cancelTool.setContext(cancelContext);
+    cancelTool.setProjectContext(cancel.context);
+    cancel.context.colors.setPrimaryColor('#ff0000');
+    cancel.context.colors.setSecondaryColor('#0000ff');
+    autoSaveService.start(cancel.context);
+    cancelTool.onDown(0, 0);
+    cancelTool.onDrag(3, 1);
+    const cancelFill = await executeFill(cancel.context, {
+      ...captureRasterTarget(cancel.context, cancel.layerId, cancel.frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#ffff00',
+      contiguous: true,
+    });
+    expect(cancelFill.ok).toBe(true);
+    const cancelPixels = rgbaPixels(cancel.canvas);
+    const cancelIndices = getCelIndices(cancel.context, cancel.layerId, cancel.frameId);
+    const cancelPalette = [...cancel.context.palette.mainColors.value];
+    const cancelRevision = cancel.context.project.revision.value;
+    const cancelHistory = cancel.context.history.undoStack.value.length;
+    const cancelDirty = autoSaveService.isDirty(cancel.context);
+    const cancelLastSaved = cancel.context.project.lastSaved.value;
+    cancelTool.onCancel();
+    expect(rgbaPixels(cancel.canvas)).toEqual(cancelPixels);
+    expect(getCelIndices(cancel.context, cancel.layerId, cancel.frameId)).toEqual(cancelIndices);
+    expect(cancel.context.palette.mainColors.value).toEqual(cancelPalette);
+    expect(cancel.context.project.revision.value).toBe(cancelRevision);
+    expect(cancel.context.history.undoStack.value).toHaveLength(cancelHistory);
+    expect(autoSaveService.isDirty(cancel.context)).toBe(cancelDirty);
+    expect(cancel.context.project.lastSaved.value).toBe(cancelLastSaved);
   });
 
   it('rejects zero-length gradients and indexed writes beyond 255 atomically', async () => {

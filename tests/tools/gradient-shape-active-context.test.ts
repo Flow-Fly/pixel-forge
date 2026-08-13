@@ -26,12 +26,15 @@ class FakeCanvasContext {
   readonly createLinearGradient = vi.fn(() => ({
     addColorStop: this.colorStops,
   }));
+  private pixels = new Uint8ClampedArray(4 * 4 * 4);
   readonly getImageData = vi.fn(() => ({
-    data: new Uint8ClampedArray(4 * 4 * 4),
+    data: new Uint8ClampedArray(this.pixels),
     width: 4,
     height: 4,
   }) as ImageData);
-  readonly putImageData = vi.fn();
+  readonly putImageData = vi.fn((imageData: ImageData) => {
+    this.pixels = new Uint8ClampedArray(imageData.data);
+  });
   readonly fillColors: string[] = [];
   readonly fillRect = vi.fn(() => {
     this.fillColors.push(String(this.fillStyle));
@@ -98,6 +101,15 @@ describe('gradient and shape active project context', () => {
     project.palette.mainColors.value = ['#123456', '#654321'];
     project.palette.rebuildColorMap();
     const canvas = new FakeCanvasContext();
+    const layerId = project.layers.activeLayerId.value;
+    const frameId = project.animation.currentFrameId.value;
+    if (!layerId) throw new Error('Expected an active layer');
+    const celKey = project.animation.getCelKey(layerId, frameId);
+    const cel = project.animation.cels.value.get(celKey);
+    if (!cel) throw new Error('Expected an active cel');
+    project.animation.cels.value = new Map([
+      [celKey, { ...cel, canvas: canvas.canvas }],
+    ]);
     const tool = new GradientTool();
     tool.setContext(canvas as unknown as CanvasRenderingContext2D);
     tool.setProjectContext(project);
