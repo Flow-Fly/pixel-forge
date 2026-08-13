@@ -1,6 +1,7 @@
 import { effect, signal } from '../core/signal';
 import type {
   ProjectSaveFailureCategory,
+  ProjectSaveSafetyObservation,
   ProjectSaveSafetyState,
   ProjectSaveSafetyStatus,
 } from '../editor/contracts';
@@ -42,6 +43,7 @@ const SAVE_FAILURE_MESSAGES: Record<ProjectSaveFailureCategory, string> = {
 /** A public save rejection contains only the stable category. */
 export class ProjectSaveError extends Error {
   readonly category: ProjectSaveFailureCategory;
+  // fallow-ignore-next-line unused-class-member -- Public retry guidance is part of the bounded error contract.
   readonly action = 'retry_latest' as const;
 
   constructor(category: ProjectSaveFailureCategory) {
@@ -208,7 +210,9 @@ class AutoSaveService {
     return this.saveSafetyStates.value.get(context) ?? this.createSaveSafetyState(context, state);
   }
 
-  getSaveSafetyObservation(context: ProjectContext = defaultProjectContext) {
+  getSaveSafetyObservation(
+    context: ProjectContext = defaultProjectContext
+  ): ProjectSaveSafetyObservation {
     return this.getSaveSafetyState(context);
   }
 
@@ -270,6 +274,7 @@ class AutoSaveService {
     await save;
   }
 
+  // fallow-ignore-next-line complexity -- Save sequencing keeps serialization, thumbnail derivation, persistence, and stale-request guards atomic.
   private async writeProject(
     context: ProjectContext,
     state: AutoSaveContextState,
@@ -374,6 +379,7 @@ class AutoSaveService {
     }
   }
 
+  // fallow-ignore-next-line complexity -- Failure handling must distinguish stale, retargeted, and current requests before publishing state.
   private finishFailedSave(
     context: ProjectContext,
     state: AutoSaveContextState,
@@ -546,6 +552,7 @@ class AutoSaveService {
     };
   }
 
+  // fallow-ignore-next-line complexity -- State publication compares every public field to avoid redundant signal notifications.
   private publishSaveSafetyState(context: ProjectContext, state: AutoSaveContextState) {
     const nextState = this.createSaveSafetyState(context, state);
     const previous = this.saveSafetyStates.value.get(context);
@@ -585,6 +592,7 @@ async function createThumbnailSafely(context: ProjectContext): Promise<Uint8Arra
   }
 }
 
+// fallow-ignore-next-line complexity -- IndexedDB surfaces several stable browser failure names and messages that map to one public category.
 function classifyRepositoryFailure(error: unknown): ProjectSaveFailureCategory {
   const name = typeof DOMException !== 'undefined' && error instanceof DOMException
     ? error.name
