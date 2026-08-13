@@ -317,6 +317,64 @@ describe('Fill and Gradient project transactions in Chromium', () => {
       .toEqual([3, 3, 3, 3, 3, 3, 3, 3]);
   });
 
+  it('rejects external raster, index, and palette mutations during Undo', async () => {
+    const pixelsMutation = createRasterContext();
+    const pixelsFill = await executeFill(pixelsMutation.context, {
+      ...captureRasterTarget(pixelsMutation.context, pixelsMutation.layerId, pixelsMutation.frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#ffff00',
+      contiguous: true,
+    });
+    expect(pixelsFill.ok).toBe(true);
+    const pixelsContext = pixelsMutation.canvas.getContext('2d');
+    if (!pixelsContext) throw new Error('Expected Chromium 2D context');
+    const pixelsData = pixelsContext.getImageData(0, 0, 1, 1);
+    pixelsData.data[0] = 254;
+    pixelsContext.putImageData(pixelsData, 0, 0);
+    await expect(pixelsMutation.context.history.undo()).rejects.toMatchObject({
+      editorError: { code: 'revision_conflict', details: { reason: 'pixels_changed' } },
+    });
+
+    const indexMutation = createRasterContext();
+    const indexFill = await executeFill(indexMutation.context, {
+      ...captureRasterTarget(indexMutation.context, indexMutation.layerId, indexMutation.frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#ffff00',
+      contiguous: true,
+    });
+    expect(indexFill.ok).toBe(true);
+    const indexBuffer = indexMutation.context.animation.getCelIndexBuffer(
+      indexMutation.layerId,
+      indexMutation.frameId,
+    );
+    if (!indexBuffer) throw new Error('Expected indexed cel data');
+    indexBuffer[0] = 1;
+    await expect(indexMutation.context.history.undo()).rejects.toMatchObject({
+      editorError: { code: 'revision_conflict', details: { reason: 'index_buffer_changed' } },
+    });
+
+    const paletteMutation = createRasterContext();
+    const paletteFill = await executeFill(paletteMutation.context, {
+      ...captureRasterTarget(paletteMutation.context, paletteMutation.layerId, paletteMutation.frameId),
+      startX: 0,
+      startY: 0,
+      hex: '#ffff00',
+      contiguous: true,
+    });
+    expect(paletteFill.ok).toBe(true);
+    paletteMutation.context.palette.mainColors.value = [
+      ...paletteMutation.context.palette.mainColors.value,
+      '#123456',
+    ];
+    paletteMutation.context.palette.newColorFlags.value = new Set(['#123456']);
+    paletteMutation.context.palette.isDirty.value = false;
+    await expect(paletteMutation.context.history.undo()).rejects.toMatchObject({
+      editorError: { code: 'revision_conflict', details: { reason: 'palette_changed' } },
+    });
+  });
+
   it('commits linear Gradient pixels and indices through exact Undo/Redo', async () => {
     const { context, layerId, frameId, canvas } = createRasterContext();
     setCelIndices(context, layerId, frameId, [1, 1, 1, 1, 1, 1, 1, 1]);

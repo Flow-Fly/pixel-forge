@@ -57,6 +57,14 @@ function celIndices(context: ProjectContext, layerId: string, frameId: string): 
   return Array.from(indices);
 }
 
+function paletteState(context: ProjectContext) {
+  return {
+    colors: [...context.palette.mainColors.value],
+    newColorFlags: [...context.palette.newColorFlags.value].sort(),
+    isDirty: context.palette.isDirty.value,
+  };
+}
+
 async function nextFrame(): Promise<void> {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
@@ -78,6 +86,60 @@ afterEach(() => {
 });
 
 describe('owner playtest regressions', () => {
+  it.each([false, true] as const)(
+    'replays Fill A/B through Undo/Redo %s autosave',
+    async (withAutosave) => {
+      const sequence = createRasterContext();
+      const { context, layerId, frameId, canvas } = sequence;
+      const initialPixels = rgbaPixels(canvas);
+      const initialIndices = celIndices(context, layerId, frameId);
+      const initialPalette = paletteState(context);
+      if (withAutosave) autoSaveService.start(context);
+
+      const fill = async (hex: string) => {
+        const result = await executeFill(context, {
+          ...captureRasterTarget(context, layerId, frameId),
+          startX: 0,
+          startY: 0,
+          hex,
+          contiguous: true,
+        });
+        expect(result).toMatchObject({ ok: true });
+      };
+      const save = async () => {
+        if (withAutosave) await autoSaveService.saveUntilClean(context);
+      };
+
+      await fill('#ffff00');
+      await context.history.undo();
+      await context.history.redo();
+      await save();
+      const afterA = {
+        pixels: rgbaPixels(canvas),
+        indices: celIndices(context, layerId, frameId),
+        palette: paletteState(context),
+      };
+
+      await fill('#00ffff');
+      await save();
+      await context.history.undo();
+      await context.history.redo();
+      await save();
+      await context.history.undo();
+      expect(rgbaPixels(canvas)).toEqual(afterA.pixels);
+      expect(celIndices(context, layerId, frameId)).toEqual(afterA.indices);
+      expect(paletteState(context)).toEqual(afterA.palette);
+
+      // This is the owner regression: A must still undo after B's transitions.
+      await context.history.undo();
+      expect(rgbaPixels(canvas)).toEqual(initialPixels);
+      expect(celIndices(context, layerId, frameId)).toEqual(initialIndices);
+      expect(paletteState(context)).toEqual(initialPalette);
+      expect(context.history.undoStack.value).toHaveLength(0);
+      expect(context.history.redoStack.value).toHaveLength(2);
+    },
+  );
+
   it.each(['fill', 'gradient'] as const)(
     'keeps %s Undo/Redo available after real autosave completes',
     async (operation) => {

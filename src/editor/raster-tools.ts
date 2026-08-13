@@ -522,14 +522,18 @@ function resolveRasterState(
 }
 
 function validateTargetAndRevision(context: ProjectContext, request: RasterTarget): void {
-  if (context.project.id.value !== request.target.projectId) {
-    throw editorError('target_not_found', true);
-  }
+  validateProjectTarget(context, request.target);
   if (context.project.revision.value !== request.expectedRevision) {
     throw editorError('revision_conflict', true, {
       expectedRevision: request.expectedRevision,
       currentRevision: context.project.revision.value,
     });
+  }
+}
+
+function validateProjectTarget(context: ProjectContext, target: ProjectTarget): void {
+  if (context.project.id.value !== target.projectId) {
+    throw editorError('target_not_found', true);
   }
 }
 
@@ -654,6 +658,22 @@ function capturePalette(context: ProjectContext): PaletteSnapshot {
   };
 }
 
+function paletteSnapshotsEqual(a: PaletteSnapshot, b: PaletteSnapshot): boolean {
+  const actualFlags = new Set([...a.newColorFlags].map((color) => normalizeHex(color)));
+  const expectedFlags = new Set([...b.newColorFlags].map((color) => normalizeHex(color)));
+  if (a.colors.length !== b.colors.length || a.isDirty !== b.isDirty ||
+      actualFlags.size !== expectedFlags.size) {
+    return false;
+  }
+  for (let index = 0; index < a.colors.length; index += 1) {
+    if (normalizeHex(a.colors[index] ?? '') !== normalizeHex(b.colors[index] ?? '')) return false;
+  }
+  for (const color of actualFlags) {
+    if (!expectedFlags.has(color)) return false;
+  }
+  return true;
+}
+
 function applyPalette(context: ProjectContext, snapshot: PaletteSnapshot): void {
   context.palette.mainColors.value = [...snapshot.colors];
   context.palette.newColorFlags.value = new Set(snapshot.newColorFlags);
@@ -671,14 +691,12 @@ class RasterToolCommand implements Command {
   readonly name: string;
   private applied = false;
   private hasExecuted = false;
-  private lastRevision: number;
   private _lastEvent: ProjectChangeEvent | null = null;
 
   constructor(context: ProjectContext, change: PreparedRasterChange, name: string) {
     this.context = context;
     this.change = change;
     this.name = name;
-    this.lastRevision = change.request.expectedRevision;
     this.memorySize = change.beforePixels.byteLength + change.afterPixels.byteLength +
       change.beforeIndices.byteLength + change.afterIndices.byteLength + 256;
   }
@@ -702,13 +720,11 @@ class RasterToolCommand implements Command {
 
   // fallow-ignore-next-line complexity -- History transitions must validate every captured target and payload invariant.
   private assertState(phase: 'initial' | 'undo' | 'redo'): void {
-    const expectedRevision = phase === 'initial' ? this.change.request.expectedRevision : this.lastRevision;
-    validateTargetAndRevision(this.context, {
-      target: this.change.request.target,
-      expectedRevision,
-      layerId: this.change.layerId,
-      frameId: this.change.frameId,
-    });
+    if (phase === 'initial') {
+      validateTargetAndRevision(this.context, this.change.request);
+    } else {
+      validateProjectTarget(this.context, this.change.request.target);
+    }
     if (phase === 'initial' && this.hasExecuted) {
       throw editorError('invalid_state', false, { reason: 'already_executed' });
     }
@@ -730,10 +746,17 @@ class RasterToolCommand implements Command {
     if (this.change.originalIndexBuffer && cel.indexBuffer !== this.change.originalIndexBuffer) {
       throw editorError('revision_conflict', true, { reason: 'index_buffer_changed' });
     }
-    if (!arraysEqual(readPixels(this.change.context, this.change.canvas), phase === 'undo' || phase === 'redo'
-      ? (phase === 'undo' ? this.change.afterPixels : this.change.beforePixels)
-      : this.change.beforePixels)) {
+    const expectedPalette = phase === 'undo' ? this.change.paletteAfter : this.change.paletteBefore;
+    if (!paletteSnapshotsEqual(capturePalette(this.context), expectedPalette)) {
+      throw editorError('revision_conflict', true, { reason: 'palette_changed' });
+    }
+    const expectedPixels = phase === 'undo' ? this.change.afterPixels : this.change.beforePixels;
+    if (!arraysEqual(readPixels(this.change.context, this.change.canvas), expectedPixels)) {
       throw editorError('revision_conflict', true, { reason: 'pixels_changed' });
+    }
+    const expectedIndices = phase === 'undo' ? this.change.afterIndices : this.change.beforeIndices;
+    if (!arraysEqual(this.readCurrentIndices(), expectedIndices)) {
+      throw editorError('revision_conflict', true, { reason: 'index_buffer_changed' });
     }
   }
 
@@ -755,7 +778,6 @@ class RasterToolCommand implements Command {
       this.context.dirtyRect.markDirty(this.change.bounds);
       const event = this.context.project.commitChange(this.id, ['raster-content'] satisfies readonly RasterDomain[]);
       this._lastEvent = event;
-      this.lastRevision = event.toRevision;
     } catch (error) {
       try {
         applyPalette(this.context, previousPalette);
@@ -771,7 +793,8 @@ class RasterToolCommand implements Command {
   private readCurrentIndices(): Uint8Array {
     const key = this.context.animation.getCelKey(this.change.layerId, this.change.frameId);
     const current = this.context.animation.cels.value.get(key)?.indexBuffer;
-    return new Uint8Array(current ?? this.change.indexBuffer);
+    if (current) return new Uint8Array(current);
+    return buildIndexBufferFromCanvas(this.change.canvas, this.context.palette, false);
   }
 
   // fallow-ignore-next-line complexity -- Shared cels need one identity-preserving index-buffer swap for commit and undo.
