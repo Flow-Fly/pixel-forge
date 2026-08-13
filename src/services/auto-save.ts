@@ -18,6 +18,7 @@ interface AutoSaveContextState {
   changeRevision: number;
   persistedChangeRevision: number;
   persistedProjectRevision: number;
+  lifecycleGeneration: number;
   targetId: string;
   status: ProjectSaveSafetyStatus;
   failure: ProjectSaveSafetyState['failure'];
@@ -29,6 +30,7 @@ interface AutoSaveContextState {
     changeRevision: number;
     projectRevision: number;
     projectId: string;
+    generation: number;
   } | null;
 }
 
@@ -89,8 +91,13 @@ class AutoSaveService {
           firstRun = false;
           return;
         }
+        const observedGeneration = state.lifecycleGeneration;
         queueMicrotask(() => {
-          if (this.contextState.get(context) === state && state.dispose) {
+          if (
+            this.contextState.get(context) === state
+            && state.dispose
+            && state.lifecycleGeneration === observedGeneration
+          ) {
             this.markDirty(context);
           }
         });
@@ -168,18 +175,10 @@ class AutoSaveService {
     await this.performSave(context, { rethrow: true });
   }
 
-  /** Compatibility name for callers that describe the action simply as retry. */
-  retry(context: ProjectContext = defaultProjectContext) {
-    return this.retryLatest(context);
-  }
-
   /** Mark a context saved after a load or workspace restore. */
   markLoaded(context: ProjectContext = defaultProjectContext) {
     const state = this.getState(context);
-    // A load invalidates any older completion still waiting on the repository.
-    // The repository write is allowed to finish, but it must not update this
-    // newly loaded context's save state.
-    state.inFlight = null;
+    this.invalidatePendingSaves(context, state);
     state.targetId = context.project.id.value;
     state.changeRevision = 0;
     state.persistedChangeRevision = 0;
@@ -222,14 +221,17 @@ class AutoSaveService {
     context: ProjectContext = defaultProjectContext
   ): Promise<T> {
     const state = this.getState(context);
+    this.invalidatePendingSaves(context, state);
     state.suppressSaveCount++;
+    let completed = false;
     try {
       const result = await work();
       await Promise.resolve();
+      completed = true;
       return result;
     } finally {
       state.suppressSaveCount--;
-      if (!state.inFlight) this.markLoaded(context);
+      if (completed) this.markLoaded(context);
     }
   }
 
@@ -262,11 +264,20 @@ class AutoSaveService {
     const projectId = context.project.id.value;
     const requestedRevision = state.changeRevision;
     const requestedProjectRevision = context.project.revision.value;
+    const requestedGeneration = state.lifecycleGeneration;
     const save = state.saveQueue.then(() =>
-      this.writeProject(context, state, projectId, requestedRevision, requestedProjectRevision, {
-        ...options,
-        recordMilestone: hadUnsavedChanges,
-      })
+      this.writeProject(
+        context,
+        state,
+        projectId,
+        requestedRevision,
+        requestedProjectRevision,
+        requestedGeneration,
+        {
+          ...options,
+          recordMilestone: hadUnsavedChanges,
+        }
+      )
     );
 
     // A failed save must not prevent the next queued request from running.
@@ -281,13 +292,20 @@ class AutoSaveService {
     projectId: string,
     requestedRevision: number,
     requestedProjectRevision: number,
+    requestedGeneration: number,
     options: { force?: boolean; rethrow?: boolean; recordMilestone: boolean }
   ): Promise<void> {
-    if (requestedRevision <= state.persistedChangeRevision) return;
+    if (
+      requestedRevision <= state.persistedChangeRevision
+      || requestedGeneration !== state.lifecycleGeneration
+      || this.contextState.get(context) !== state
+    ) return;
 
     this.assertSaveAllowed(context);
     const isCurrentRequest = () =>
-      state.targetId === projectId
+      requestedGeneration === state.lifecycleGeneration
+      && this.contextState.get(context) === state
+      && state.targetId === projectId
       && context.project.id.value === projectId
       && state.changeRevision === requestedRevision
       && context.project.revision.value === requestedProjectRevision;
@@ -297,6 +315,7 @@ class AutoSaveService {
         changeRevision: requestedRevision,
         projectRevision: requestedProjectRevision,
         projectId,
+        generation: requestedGeneration,
       };
       state.status = 'saving';
       this.publishSaveSafetyState(context, state);
@@ -312,6 +331,7 @@ class AutoSaveService {
         projectId,
         requestedRevision,
         requestedProjectRevision,
+        requestedGeneration,
         'serialization_failed',
         options.rethrow
       );
@@ -322,7 +342,11 @@ class AutoSaveService {
 
     // A context may have been loaded with another project while this request
     // was serializing. The old snapshot must not overwrite the new target.
-    if (state.targetId !== projectId) {
+    if (
+      requestedGeneration !== state.lifecycleGeneration
+      || this.contextState.get(context) !== state
+      || state.targetId !== projectId
+    ) {
       return;
     }
 
@@ -338,14 +362,20 @@ class AutoSaveService {
         projectId,
         requestedRevision,
         requestedProjectRevision,
+        requestedGeneration,
         category,
         options.rethrow
       );
     }
 
-    const ownsRequest = state.inFlight?.changeRevision === requestedRevision
-      && state.inFlight.projectRevision === requestedProjectRevision
-      && state.inFlight.projectId === projectId;
+    const ownsRequest = this.ownsSaveRequest(
+      context,
+      state,
+      projectId,
+      requestedRevision,
+      requestedProjectRevision,
+      requestedGeneration
+    );
     if (!ownsRequest || context.project.id.value !== projectId || state.targetId !== projectId) {
       if (ownsRequest) state.inFlight = null;
       return;
@@ -386,12 +416,18 @@ class AutoSaveService {
     projectId: string,
     requestedRevision: number,
     requestedProjectRevision: number,
+    requestedGeneration: number,
     category: ProjectSaveFailureCategory,
     rethrow = false
   ): void {
-    const ownsRequest = state.inFlight?.changeRevision === requestedRevision
-      && state.inFlight.projectRevision === requestedProjectRevision
-      && state.inFlight.projectId === projectId;
+    const ownsRequest = this.ownsSaveRequest(
+      context,
+      state,
+      projectId,
+      requestedRevision,
+      requestedProjectRevision,
+      requestedGeneration
+    );
     if (!ownsRequest) {
       if (rethrow) throw new ProjectSaveError(category);
       return;
@@ -433,6 +469,7 @@ class AutoSaveService {
       changeRevision: 0,
       persistedChangeRevision: 0,
       persistedProjectRevision: context.project.revision.value,
+      lifecycleGeneration: 0,
       targetId: context.project.id.value,
       status: 'saved',
       failure: undefined,
@@ -451,6 +488,7 @@ class AutoSaveService {
     const state = this.contextState.get(context);
     if (!state) return;
 
+    this.invalidatePendingSaves(context, state);
     state.dispose?.();
     state.dispose = null;
     this.clearSaveTimeout(state);
@@ -488,6 +526,32 @@ class AutoSaveService {
     if (!state.saveTimeout) return;
     clearTimeout(state.saveTimeout);
     state.saveTimeout = null;
+  }
+
+  private ownsSaveRequest(
+    context: ProjectContext,
+    state: AutoSaveContextState,
+    projectId: string,
+    requestedRevision: number,
+    requestedProjectRevision: number,
+    requestedGeneration: number
+  ) {
+    return state.inFlight?.changeRevision === requestedRevision
+      && state.inFlight.projectRevision === requestedProjectRevision
+      && state.inFlight.projectId === projectId
+      && state.inFlight.generation === requestedGeneration
+      && requestedGeneration === state.lifecycleGeneration
+      && this.contextState.get(context) === state;
+  }
+
+  private invalidatePendingSaves(context: ProjectContext, state: AutoSaveContextState) {
+    state.lifecycleGeneration++;
+    state.inFlight = null;
+    this.clearSaveTimeout(state);
+    if (state.status === 'saving') {
+      state.status = state.isDirty ? 'dirty' : 'saved';
+    }
+    this.publishSaveSafetyState(context, state);
   }
 
   private scheduleSave(context: ProjectContext, state: AutoSaveContextState) {

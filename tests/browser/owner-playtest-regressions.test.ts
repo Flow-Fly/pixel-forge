@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   captureRasterTarget,
   executeFill,
   executeGradient,
 } from '../../src/editor/raster-tools';
 import { autoSaveService } from '../../src/services/auto-save';
+import { projectRepository } from '../../src/services/persistence/indexed-db';
 import { registerShortcuts } from '../../src/services/keyboard/register-shortcuts';
 import {
   createProjectContext,
@@ -12,9 +13,11 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from '../../src/stores/project-context';
+import { workspaceStore } from '../../src/stores/workspace';
 import { toolStore } from '../../src/stores/tools';
 import '../../src/components/canvas/pf-drawing-canvas';
 import '../../src/components/canvas/pf-canvas-viewport';
+import '../../src/components/app/pf-project-tabs';
 
 const contexts: ProjectContext[] = [];
 
@@ -86,6 +89,68 @@ afterEach(() => {
 });
 
 describe('owner playtest regressions', () => {
+  it('keeps the failed active-project cue and restores focus after retry in Chromium', async () => {
+    const previousItems = workspaceStore.items.value;
+    const previousActiveItemId = workspaceStore.activeItemId.value;
+    const context = createProjectContext();
+    contexts.push(context);
+    context.project.id.value = 'browser-save-failure';
+    context.project.name.value = 'Browser save failure';
+    workspaceStore.items.value = [{ id: 'browser-save-failure', context }];
+    workspaceStore.activeItemId.value = 'browser-save-failure';
+    setActiveProjectContext(context);
+    autoSaveService.start(context);
+
+    const save = vi.spyOn(projectRepository, 'save')
+      .mockRejectedValueOnce(new Error('browser write failed'));
+    save.mockResolvedValue(undefined);
+
+    try {
+      await expect(autoSaveService.saveNow(context)).rejects.toMatchObject({
+        category: 'write_failed',
+        action: 'retry_latest',
+      });
+
+      const tabs = document.createElement('pf-project-tabs');
+      document.body.append(tabs);
+      await settleComponent(tabs);
+
+      const failedTab = tabs.shadowRoot?.querySelector<HTMLButtonElement>(
+        '[aria-label="Browser save failure, not safely saved"]'
+      );
+      const alert = tabs.shadowRoot?.querySelector('[role="alert"]');
+      const retry = tabs.shadowRoot?.querySelector<HTMLButtonElement>(
+        '[aria-label="Retry saving Browser save failure"]'
+      );
+      expect(failedTab).toBeTruthy();
+      expect(alert?.textContent).toContain('not safely saved');
+      expect(retry).toBeTruthy();
+
+      retry?.focus();
+      expect(tabs.shadowRoot?.activeElement).toBe(retry);
+      retry?.click();
+      await expect.poll(() => autoSaveService.getSaveSafetyState(context).status).toBe('saved');
+      await settleComponent(tabs);
+
+      expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+        target: { projectId: 'browser-save-failure' },
+        currentRevision: 0,
+        persistedRevision: 0,
+        status: 'saved',
+      });
+      const savedTab = tabs.shadowRoot?.querySelector<HTMLButtonElement>(
+        '[aria-label="Browser save failure, saved"]'
+      );
+      expect(savedTab).toBeTruthy();
+      expect(tabs.shadowRoot?.activeElement).toBe(savedTab);
+    } finally {
+      save.mockRestore();
+      workspaceStore.items.value = previousItems;
+      workspaceStore.activeItemId.value = previousActiveItemId;
+      setActiveProjectContext(previousItems[0]?.context ?? context);
+    }
+  });
+
   it.each([false, true] as const)(
     'replays Fill A/B through Undo/Redo %s autosave',
     async (withAutosave) => {

@@ -34,6 +34,7 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 import { projectRepository } from '../../src/services/persistence/indexed-db';
 import { autoSaveService, ProjectSaveError } from '../../src/services/auto-save';
 import { createProjectThumbnail } from '../../src/services/project-thumbnail';
+import { projectLibrary } from '../../src/services/project-library';
 import { productTelemetry } from '../../src/services/telemetry';
 import { historyStore, type Command } from '../../src/stores/history';
 import {
@@ -415,7 +416,11 @@ describe('AutoSaveService', () => {
     const olderSave = autoSaveService.saveNow(context);
     await settleSaveQueue();
 
-    context.project.name.value = 'Newer state';
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Newer state';
+      })
+    );
     const newerSave = autoSaveService.saveNow(context);
     firstWrite.reject(new Error('older write failed'));
 
@@ -426,6 +431,13 @@ describe('AutoSaveService', () => {
     expect(projectRepository.save).toHaveBeenCalledTimes(2);
     expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Newer state');
     expect(autoSaveService.isDirty(context)).toBe(false);
+    expect(autoSaveService.getSaveSafetyObservation(context)).toEqual({
+      type: 'project.save-safety',
+      target: { projectId: 'failure-order-project' },
+      currentRevision: 1,
+      persistedRevision: 1,
+      status: 'saved',
+    });
   });
 
   it('allows separate contexts to save independently', async () => {
@@ -531,5 +543,91 @@ describe('AutoSaveService', () => {
     const state = autoSaveService.getSaveSafetyState(context);
     expect(state.status).toBe('failed');
     expect(JSON.stringify(state)).not.toContain('private project bytes');
+  });
+
+  it('post-review regression: invalidates an in-flight save when a same-context replacement succeeds', async () => {
+    const context = createContext('replacement-project', 'Before replacement');
+    const oldSnapshot = await context.project.saveProject();
+    const serialization = deferred<typeof oldSnapshot>();
+    vi.spyOn(context.project, 'saveProject').mockReturnValueOnce(serialization.promise);
+
+    autoSaveService.start(context);
+    const save = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+
+    const loadedSnapshot = structuredClone(oldSnapshot);
+    loadedSnapshot.name = 'Loaded replacement';
+    await autoSaveService.runWithoutSaving(
+      () => context.project.loadProject(loadedSnapshot),
+      context
+    );
+    expect(context.project.name.value).toBe('Loaded replacement');
+
+    serialization.resolve(oldSnapshot);
+    await save;
+
+    expect(projectRepository.save).not.toHaveBeenCalled();
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      target: { projectId: 'replacement-project' },
+      status: 'saved',
+    });
+  });
+
+  it('post-review regression: does not republish save state after a context is stopped', async () => {
+    const context = createContext('stopped-project', 'Stopped project');
+    const write = deferred<void>();
+    vi.mocked(projectRepository.save).mockImplementationOnce(() => write.promise);
+
+    autoSaveService.start(context);
+    const save = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saving');
+
+    autoSaveService.stop(context);
+    write.resolve();
+    await save;
+
+    expect(autoSaveService.saveSafetyStates.value.has(context)).toBe(false);
+    expect(autoSaveService.dirtyContexts.value.has(context)).toBe(false);
+  });
+
+  it('post-review regression: preserves dirty state when a load operation fails', async () => {
+    const context = createContext('failed-load-project', 'Failed load project');
+    autoSaveService.start(context);
+    await context.history.execute(makeCommand());
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('dirty');
+
+    await expect(
+      autoSaveService.runWithoutSaving(async () => {
+        throw new Error('load failed');
+      }, context)
+    ).rejects.toThrow('load failed');
+
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      status: 'dirty',
+    });
+    expect(autoSaveService.isDirty(context)).toBe(true);
+  });
+
+  it('post-review regression: keeps an active autosave context saved after a successful load', async () => {
+    const context = createContext('loaded-project', 'Before load');
+    const loadedSnapshot = await context.project.saveProject();
+    loadedSnapshot.name = 'Loaded project';
+    vi.mocked(projectRepository.load).mockResolvedValueOnce(loadedSnapshot);
+
+    autoSaveService.start(context);
+    await projectLibrary.openProject('loaded-project', {
+      context,
+      saveCurrent: false,
+    });
+    await settleSaveQueue();
+
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      target: { projectId: 'loaded-project' },
+      status: 'saved',
+    });
+    expect(autoSaveService.isDirty(context)).toBe(false);
+    expect(projectRepository.save).not.toHaveBeenCalled();
   });
 });

@@ -322,12 +322,19 @@ export class PFProjectTabs extends BaseComponent {
   }
 
   private async retryFailedProject(context: WorkspaceItem['context']) {
-    const retryLatest = autoSaveService.retryLatest;
-    if (!retryLatest) return;
+    const retryButton = this.shadowRoot?.activeElement;
+    const shouldRestoreFocus = retryButton instanceof HTMLButtonElement
+      && retryButton.getAttribute('aria-label')?.startsWith('Retry saving ');
 
     try {
-      await retryLatest.call(autoSaveService, context);
+      await autoSaveService.retryLatest(context);
       this.dismissFeedback();
+      if (shouldRestoreFocus) {
+        await this.updateComplete;
+        this.shadowRoot?.querySelector<HTMLButtonElement>(
+          '.tab-button[aria-current="page"]'
+        )?.focus();
+      }
     } catch {
       this.showFeedback('Retry could not save this project.');
     }
