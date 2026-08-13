@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { floodFill, type FloodFillColor } from '../../../src/services/drawing/algorithms';
+import {
+  fillAllMatchingPixels,
+  floodFill,
+  type FloodFillColor,
+} from '../../../src/services/drawing/algorithms';
 
 const FILL: FloodFillColor = { r: 255, g: 0, b: 0, a: 255, paletteIndex: 2 };
 
@@ -84,5 +88,36 @@ describe('floodFill (indexed mode)', () => {
     const indexBuffer = new Uint8Array([2]);
     expect(floodFill(data, width, height, 0, 0, FILL, indexBuffer)).toBeNull();
     expect(colorAt(data, width, 0, 0)).toEqual(W);
+  });
+});
+
+describe('fillAllMatchingPixels', () => {
+  it('fills disconnected matching palette-index pixels without touching a different index', () => {
+    const data = new Uint8ClampedArray([
+      0, 0, 0, 255,
+      0, 0, 0, 255,
+      255, 255, 255, 255,
+      0, 0, 0, 255,
+    ]);
+    const indexBuffer = Uint8Array.from([1, 1, 2, 1]);
+
+    const bounds = fillAllMatchingPixels(
+      data,
+      4,
+      1,
+      0,
+      0,
+      { r: 255, g: 0, b: 0, a: 255, paletteIndex: 3 },
+      indexBuffer,
+    );
+
+    expect(bounds).toEqual({ x: 0, y: 0, width: 4, height: 1 });
+    expect(Array.from(indexBuffer)).toEqual([3, 3, 2, 3]);
+    expect(Array.from(data)).toEqual([
+      255, 0, 0, 255,
+      255, 0, 0, 255,
+      255, 255, 255, 255,
+      255, 0, 0, 255,
+    ]);
   });
 });

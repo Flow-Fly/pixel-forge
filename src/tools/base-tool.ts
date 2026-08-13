@@ -13,9 +13,23 @@ export interface ModifierKeys {
   button: number; // 0 = left, 1 = middle, 2 = right
 }
 
+export interface ToolPreview {
+  readonly projectId: string;
+  readonly expectedRevision: number;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId?: string;
+  readonly canvas: HTMLCanvasElement;
+}
+
+export type ToolPreviewPresenter = (preview: ToolPreview | null) => void;
+
 export abstract class BaseTool {
   abstract name: string;
   abstract cursor: string;
+
+  /** Tools that commit through their own project transaction seam. */
+  readonly ownsProjectTransaction: boolean = false;
 
   // Called when mouse/pen goes down
   abstract onDown(x: number, y: number, modifiers?: ModifierKeys): void;
@@ -25,6 +39,9 @@ export abstract class BaseTool {
 
   // Called when mouse/pen goes up
   abstract onUp(x: number, y: number, modifiers?: ModifierKeys): void;
+
+  // Called when an active stroke is abandoned before mouse/pen up.
+  onCancel(): void {}
 
   // Called when mouse moves without being down (for hover effects)
   onMove(_x: number, _y: number, _modifiers?: ModifierKeys): void {}
@@ -37,6 +54,7 @@ export abstract class BaseTool {
 
   protected context: CanvasRenderingContext2D | null = null;
   protected projectContext: ProjectContext = defaultProjectContext;
+  private previewPresenter: ToolPreviewPresenter | null = null;
 
   setContext(ctx: CanvasRenderingContext2D) {
     this.context = ctx;
@@ -46,8 +64,16 @@ export abstract class BaseTool {
     this.projectContext = context;
   }
 
+  setPreviewPresenter(presenter: ToolPreviewPresenter | null) {
+    this.previewPresenter = presenter;
+  }
+
   get ctx(): CanvasRenderingContext2D | null {
     return this.context;
+  }
+
+  protected presentPreview(preview: ToolPreview | null): void {
+    this.previewPresenter?.(preview);
   }
 
   /**

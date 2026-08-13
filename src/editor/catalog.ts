@@ -8,6 +8,10 @@
 
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
+// fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
+export const FILL_COMMAND_ID = 'project.raster.fill';
+// fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
+export const GRADIENT_COMMAND_ID = 'project.raster.gradient';
 
 export const canvasSizeCatalog = Object.freeze({
   version: '1.0',
@@ -136,6 +140,77 @@ export const celUnlinkCatalog = Object.freeze({
   ] as const,
 });
 
+export const rasterFillCatalog = Object.freeze({
+  id: FILL_COMMAND_ID,
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'string' },
+    expectedRevision: 'integer >= 0',
+    layerId: 'string',
+    frameId: 'string',
+    celId: 'optional captured cel identity',
+    startX: 'integer',
+    startY: 'integer',
+    hex: 'six-digit hex color',
+    contiguous: 'boolean',
+  },
+  affectedDomains: ['raster-content'] as const,
+  availability: { guidedDrawing: 'supported' },
+  undo: 'one-session-history-entry',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'limit_exceeded',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
+export const rasterGradientCatalog = Object.freeze({
+  id: GRADIENT_COMMAND_ID,
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'string' },
+    expectedRevision: 'integer >= 0',
+    layerId: 'string',
+    frameId: 'string',
+    celId: 'optional captured cel identity',
+    startX: 'integer',
+    startY: 'integer',
+    endX: 'integer',
+    endY: 'integer',
+    primaryHex: 'six-digit hex color',
+    secondaryHex: 'six-digit hex color',
+    type: 'linear | radial',
+    shift: 'boolean; existing 15-degree sticky snapping',
+  },
+  result: {
+    effectivePalettePolicy: 'existing-palette',
+    endpoints: {
+      start: { index: 'integer 1..255', color: 'six-digit hex color' },
+      end: { index: 'integer 1..255', color: 'six-digit hex color' },
+    },
+    effectiveEnd: { x: 'integer', y: 'integer' },
+  },
+  limits: { paletteGrowth: 'none', dithering: 'none' },
+  availability: { guidedDrawing: 'unsupported' },
+  affectedDomains: ['raster-content'] as const,
+  undo: 'one-session-history-entry',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'limit_exceeded',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
 // fallow-ignore-next-line unused-export -- Public command inventory consumed by editor tooling.
 export const editorCatalog = Object.freeze({
   version: '1.0',
@@ -144,5 +219,7 @@ export const editorCatalog = Object.freeze({
     layerStateCatalog,
     frameTagCatalog,
     celUnlinkCatalog,
+    rasterFillCatalog,
+    rasterGradientCatalog,
   ]),
 });

@@ -25,6 +25,7 @@ interface DrawingCanvasHarness extends HTMLElement {
     hasActiveTool: boolean;
     onDown: ReturnType<typeof vi.fn>;
     onUp: ReturnType<typeof vi.fn>;
+    onCancel: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -54,7 +55,7 @@ function createDrawingContext(
   };
   const context = {
     animation: {
-      cels: { value: new Map() },
+      cels: { value: new Map([[`${layer.id}:frame-1`, { id: 'cel-1', canvas }]]) },
       currentFrameId: { value: 'frame-1' },
       ensureCelIndexBuffer: vi.fn(() => null),
       ensureUnlinkedForEdit: vi.fn(() => false),
@@ -71,6 +72,10 @@ function createDrawingContext(
       activeLayerId: { value: layer.id },
       layers: { value: [layer] },
     },
+    project: {
+      id: { value: 'project-1' },
+      revision: { value: 0 },
+    },
   } as unknown as ProjectContext;
 
   return { context, execute, pixels };
@@ -85,6 +90,7 @@ async function createDrawingCanvas(context: ProjectContext): Promise<DrawingCanv
     hasActiveTool: true,
     onDown: vi.fn(),
     onUp: vi.fn(),
+    onCancel: vi.fn(),
   };
   (
     element as unknown as { getCanvasCoordinates: () => { x: number; y: number } }
@@ -162,5 +168,99 @@ describe('pf-drawing-canvas first drawing telemetry', () => {
       });
     });
     expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the active stroke without committing when the canvas lifecycle changes', async () => {
+    const origin = createDrawingContext();
+    const element = await createDrawingCanvas(origin.context);
+    const internals = element as unknown as {
+      isStrokeActive: boolean;
+      strokeContext: ProjectContext;
+      cancelActiveStroke: () => void;
+    };
+    internals.isStrokeActive = true;
+    internals.strokeContext = origin.context;
+
+    internals.cancelActiveStroke();
+
+    expect(element.toolController.onCancel).toHaveBeenCalledOnce();
+    expect(origin.context.dirtyRect.resetStroke).toHaveBeenCalledOnce();
+    expect(origin.execute).not.toHaveBeenCalled();
+  });
+
+  it('cancels before loading a replacement tool and when disconnected', async () => {
+    const origin = createDrawingContext();
+    const element = await createDrawingCanvas(origin.context);
+    const internals = element as unknown as {
+      isStrokeActive: boolean;
+      strokeContext: ProjectContext;
+      cancelActiveStroke: () => void;
+      loadTool: (tool: ToolType) => Promise<void>;
+      toolController: {
+        isActive: ReturnType<typeof vi.fn>;
+        load: ReturnType<typeof vi.fn>;
+        cursor: string;
+      };
+    };
+    internals.toolController.isActive = vi.fn(() => false);
+    internals.toolController.load = vi.fn(async () => true);
+    internals.toolController.cursor = 'default';
+    internals.isStrokeActive = true;
+    internals.strokeContext = origin.context;
+
+    await internals.loadTool('zoom');
+    expect(element.toolController.onCancel).toHaveBeenCalledOnce();
+
+    internals.isStrokeActive = true;
+    internals.strokeContext = origin.context;
+    element.disconnectedCallback();
+    expect(element.toolController.onCancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('substitutes and clears only the captured local preview layer', async () => {
+    const origin = createDrawingContext();
+    const element = await createDrawingCanvas(origin.context);
+    const storedCanvas = document.createElement('canvas');
+    const previewCanvas = document.createElement('canvas');
+    const otherCanvas = document.createElement('canvas');
+    const internals = element as unknown as {
+      drawingPreview: unknown;
+      setToolPreview: (preview: unknown) => void;
+      applyToolPreview: (plan: unknown, context: ProjectContext, frameId: string) => {
+        steps: Array<{ layerId: string; canvas?: HTMLCanvasElement }>;
+      };
+    };
+    const plan = {
+      frameId: 'frame-1',
+      steps: [
+        { kind: 'image', layerId: 'layer-1', canvas: storedCanvas, alpha: 1, compositeOperation: 'source-over' },
+        { kind: 'image', layerId: 'other', canvas: otherCanvas, alpha: 1, compositeOperation: 'source-over' },
+      ],
+    };
+
+    internals.setToolPreview({
+      projectId: 'project-1',
+      expectedRevision: 0,
+      layerId: 'layer-1',
+      frameId: 'frame-1',
+      celId: 'cel-1',
+      canvas: previewCanvas,
+    });
+    const substituted = internals.applyToolPreview(plan, origin.context, 'frame-1');
+    expect(substituted.steps[0]?.canvas).toBe(previewCanvas);
+    expect(substituted.steps[1]?.canvas).toBe(otherCanvas);
+
+    origin.context.project.revision.value = 1;
+    const staleRevision = internals.applyToolPreview(plan, origin.context, 'frame-1');
+    expect(staleRevision.steps[0]?.canvas).toBe(storedCanvas);
+    origin.context.project.revision.value = 0;
+    origin.context.animation.cels.value = new Map([
+      [`layer-1:frame-1`, { id: 'replacement-cel', canvas: storedCanvas }],
+    ]);
+    const staleCel = internals.applyToolPreview(plan, origin.context, 'frame-1');
+    expect(staleCel.steps[0]?.canvas).toBe(storedCanvas);
+
+    internals.setToolPreview(null);
+    expect(internals.drawingPreview).toBeNull();
   });
 });

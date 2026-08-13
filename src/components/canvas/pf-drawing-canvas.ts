@@ -15,9 +15,10 @@ import { ReferenceViewportRenderer } from '../../services/reference-viewport-ren
 import {
   createArtworkCompositionPlan,
   drawArtworkComposition,
+  type ArtworkCompositionPlan,
 } from '../../services/export-composition';
 import { OptimizedDrawingCommand } from '../../commands/optimized-drawing-command';
-import type { ModifierKeys, Point } from '../../tools/base-tool';
+import type { ModifierKeys, Point, ToolPreview } from '../../tools/base-tool';
 import { ToolController } from '../../tools/tool-controller';
 import { rectClamp, type Rect } from '../../types/geometry';
 import type { Layer } from '../../types/layer';
@@ -149,10 +150,16 @@ export class PFDrawingCanvas extends BaseComponent {
   private boundDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
   private isStrokeActive = false;
+  private drawingPreview: ToolPreview | null = null;
+  private readonly handleCancelActiveStrokeEvent = () => this.cancelActiveStroke();
 
   connectedCallback() {
     super.connectedCallback();
+    window.addEventListener('pf-cancel-active-stroke', this.handleCancelActiveStrokeEvent);
     this.subscribeToActiveProjectContext((context) => {
+      if (this.isStrokeActive && this.strokeContext !== context) {
+        this.cancelActiveStroke();
+      }
       this.context = context;
       if (!this.isStrokeActive) {
         this.strokeContext = null;
@@ -177,6 +184,7 @@ export class PFDrawingCanvas extends BaseComponent {
     // Explicit setting for pixel art - critical for crisp rendering
     this.ctx.imageSmoothingEnabled = false;
     this.toolController = new ToolController(this.ctx);
+    this.toolController.setPreviewPresenter((preview) => this.setToolPreview(preview));
 
     // Initial tool load
     this.loadTool(toolStore.activeTool.value);
@@ -204,6 +212,9 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private async loadTool(toolName: ToolType) {
+    if (this.isStrokeActive && !this.toolController.isActive(toolName)) {
+      this.cancelActiveStroke();
+    }
     this.commitFloatingSelectionForDrawingTool(toolName);
 
     const didLoadTool = await this.toolController.load(toolName);
@@ -332,7 +343,7 @@ export class PFDrawingCanvas extends BaseComponent {
       getCelKey: context.animation.getCelKey,
     });
 
-    drawArtworkComposition(this.ctx, plan);
+    drawArtworkComposition(this.ctx, this.applyToolPreview(plan, context, currentFrameId));
     this.renderTextCursor(currentFrameId, context);
   }
 
@@ -363,6 +374,29 @@ export class PFDrawingCanvas extends BaseComponent {
     this.ctx.globalCompositeOperation = 'source-over';
     renderCursor(this.ctx, cursorX, y, font.charHeight, color);
     this.ctx.restore();
+  }
+
+  private applyToolPreview(
+    plan: ArtworkCompositionPlan,
+    context: ProjectContext,
+    frameId: string,
+  ): ArtworkCompositionPlan {
+    const preview = this.drawingPreview;
+    if (!preview || preview.projectId !== context.project.id.value ||
+        preview.expectedRevision !== context.project.revision.value || preview.frameId !== frameId) {
+      return plan;
+    }
+    const cel = context.animation.cels.value.get(context.animation.getCelKey(preview.layerId, frameId));
+    if (!cel || (preview.celId && cel.id !== preview.celId)) return plan;
+    return {
+      ...plan,
+      steps: plan.steps.map((step) => {
+        if ((step.kind === 'image' || step.kind === 'group-cel') && step.layerId === preview.layerId) {
+          return { ...step, canvas: preview.canvas };
+        }
+        return step;
+      }),
+    };
   }
 
   private drawOnionSkins(context: ProjectContext) {
@@ -516,7 +550,39 @@ export class PFDrawingCanvas extends BaseComponent {
     this.isStrokeActive = false;
   }
 
+  private cancelActiveStroke() {
+    if (!this.isStrokeActive) return;
+
+    const context = this.strokeContext ?? this.context;
+    this.toolController.onCancel();
+    this.clearToolPreview();
+    this.cleanupDocumentListeners();
+    context.dirtyRect.resetStroke();
+    context.dirtyRect.requestFullRedraw();
+    this.clearStrokeSnapshots();
+  }
+
+  private setToolPreview(preview: ToolPreview | null) {
+    if (preview && preview.projectId !== this.context.project.id.value) {
+      this.clearToolPreview();
+      return;
+    }
+    this.drawingPreview = preview;
+    this.context.dirtyRect.requestFullRedraw();
+    this.scheduleCanvasRender(this.context);
+  }
+
+  private clearToolPreview() {
+    if (!this.drawingPreview) return;
+    this.drawingPreview = null;
+    this.context.dirtyRect.requestFullRedraw();
+    this.scheduleCanvasRender(this.context);
+  }
+
   disconnectedCallback() {
+    window.removeEventListener('pf-cancel-active-stroke', this.handleCancelActiveStrokeEvent);
+    this.cancelActiveStroke();
+    this.clearToolPreview();
     super.disconnectedCallback();
     // Clean up any active document listeners when component is destroyed
     this.cleanupDocumentListeners();
@@ -605,7 +671,9 @@ export class PFDrawingCanvas extends BaseComponent {
 
     this.strokeContext = context;
     this.strokeTool = currentTool;
-    this.captureStrokeSnapshot(target, currentTool, context);
+    if (!this.toolController.ownsProjectTransaction) {
+      this.captureStrokeSnapshot(target, currentTool, context);
+    }
     context.dirtyRect.resetStroke();
     this.toolController.onDown(target.context, context, point, modifiers);
     this.attachDocumentListeners();
@@ -699,6 +767,7 @@ export class PFDrawingCanvas extends BaseComponent {
     this.cleanupDocumentListeners();
 
     if (!this.toolController.hasActiveTool) {
+      this.clearToolPreview();
       this.clearStrokeSnapshots();
       return;
     }
@@ -727,6 +796,8 @@ export class PFDrawingCanvas extends BaseComponent {
   }
 
   private commitStrokeIfChanged(strokeBounds: Rect | null, context: ProjectContext) {
+    if (this.toolController.ownsProjectTransaction) return;
+
     const bounds = this.getUsableStrokeBounds(strokeBounds);
     if (!bounds) return;
 

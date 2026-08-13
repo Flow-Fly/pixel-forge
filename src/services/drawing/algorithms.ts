@@ -177,6 +177,56 @@ export function floodFill(
 }
 
 /**
+ * Fill every pixel that matches the starting pixel, regardless of whether it
+ * is connected to that pixel.  Indexed projects match by palette index; plain
+ * RGBA projects match by the exact source bytes.
+ */
+export function fillAllMatchingPixels(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  startX: number,
+  startY: number,
+  fill: FloodFillColor,
+  indexBuffer?: Uint8Array
+): { x: number; y: number; width: number; height: number } | null {
+  if (startX < 0 || startX >= width || startY < 0 || startY >= height) {
+    return null;
+  }
+
+  const matches = makeTargetMatcher(data, startX, startY, width, fill, indexBuffer);
+  if (!matches) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (let pixelIndex = 0; pixelIndex < width * height; pixelIndex++) {
+    if (!matches(pixelIndex)) continue;
+
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    const pos = pixelIndex * 4;
+    data[pos] = fill.r;
+    data[pos + 1] = fill.g;
+    data[pos + 2] = fill.b;
+    data[pos + 3] = fill.a;
+    if (indexBuffer) {
+      indexBuffer[pixelIndex] = fill.paletteIndex;
+    }
+
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+
+  if (minX === Infinity) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+/**
  * Build a predicate matching the fill region's target color (palette index
  * in indexed mode, exact RGBA otherwise). Returns null when the target
  * already has the fill color.

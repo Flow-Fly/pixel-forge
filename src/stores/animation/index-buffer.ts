@@ -147,6 +147,7 @@ export function rebuildAllIndexBuffers(
 ): Map<string, Cel> {
   const newCels = new Map(cels);
   const rebuiltBuffers = new Map<HTMLCanvasElement, Uint8Array>();
+  let changed = false;
 
   for (const [key, cel] of newCels) {
     if (!cel.canvas) continue;
@@ -154,17 +155,28 @@ export function rebuildAllIndexBuffers(
 
     let newIndexBuffer = rebuiltBuffers.get(cel.canvas);
     if (!newIndexBuffer) {
-      newIndexBuffer = buildIndexBufferFromCanvas(
+      const rebuiltIndexBuffer = buildIndexBufferFromCanvas(
         cel.canvas,
         palette,
         addMissingColors
       );
+      const existingIndexBuffer = cel.indexBuffer;
+      if (existingIndexBuffer && existingIndexBuffer.length === rebuiltIndexBuffer.length) {
+        existingIndexBuffer.set(rebuiltIndexBuffer);
+        newIndexBuffer = existingIndexBuffer;
+      } else {
+        newIndexBuffer = rebuiltIndexBuffer;
+      }
       rebuiltBuffers.set(cel.canvas, newIndexBuffer);
     }
-    newCels.set(key, { ...cel, indexBuffer: newIndexBuffer });
+
+    if (cel.indexBuffer !== newIndexBuffer) {
+      newCels.set(key, { ...cel, indexBuffer: newIndexBuffer });
+      changed = true;
+    }
   }
 
-  return newCels;
+  return changed ? newCels : cels;
 }
 
 /**
