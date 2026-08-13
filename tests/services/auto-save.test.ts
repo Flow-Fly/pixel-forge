@@ -32,8 +32,9 @@ vi.mock('../../src/utils/canvas-binary', () => ({
 }));
 
 import { projectRepository } from '../../src/services/persistence/indexed-db';
-import { autoSaveService } from '../../src/services/auto-save';
+import { autoSaveService, ProjectSaveError } from '../../src/services/auto-save';
 import { createProjectThumbnail } from '../../src/services/project-thumbnail';
+import { projectLibrary } from '../../src/services/project-library';
 import { productTelemetry } from '../../src/services/telemetry';
 import { historyStore, type Command } from '../../src/stores/history';
 import {
@@ -213,6 +214,43 @@ describe('AutoSaveService', () => {
     expect(autoSaveService.isDirty(context)).toBe(false);
   });
 
+  it('keeps save safety dirty when an older write completes after a newer edit', async () => {
+    const context = createContext('save-safety-order-project', 'First state');
+    const firstWrite = deferred<void>();
+    vi.mocked(projectRepository.save)
+      .mockImplementationOnce(() => firstWrite.promise)
+      .mockResolvedValueOnce();
+
+    autoSaveService.start(context);
+    const firstSave = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saving');
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Newer state';
+      })
+    );
+    await Promise.resolve();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('dirty');
+    const secondSave = autoSaveService.saveNow(context);
+    firstWrite.resolve();
+    await firstSave;
+
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      currentRevision: 1,
+      persistedRevision: 0,
+      status: 'saving',
+    });
+
+    await secondSave;
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      currentRevision: 1,
+      persistedRevision: 1,
+      status: 'saved',
+    });
+  });
+
   it('rejects a forced save queued after pause and never writes it', async () => {
     const context = createContext('deleted-project', 'Deleted project');
     autoSaveService.start(context);
@@ -378,16 +416,28 @@ describe('AutoSaveService', () => {
     const olderSave = autoSaveService.saveNow(context);
     await settleSaveQueue();
 
-    context.project.name.value = 'Newer state';
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Newer state';
+      })
+    );
     const newerSave = autoSaveService.saveNow(context);
     firstWrite.reject(new Error('older write failed'));
 
-    await expect(olderSave).rejects.toThrow('older write failed');
+    await expect(olderSave).rejects.toBeInstanceOf(ProjectSaveError);
+    await expect(olderSave).rejects.toMatchObject({ category: 'write_failed' });
     await newerSave;
 
     expect(projectRepository.save).toHaveBeenCalledTimes(2);
     expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Newer state');
     expect(autoSaveService.isDirty(context)).toBe(false);
+    expect(autoSaveService.getSaveSafetyObservation(context)).toEqual({
+      type: 'project.save-safety',
+      target: { projectId: 'failure-order-project' },
+      currentRevision: 1,
+      persistedRevision: 1,
+      status: 'saved',
+    });
   });
 
   it('allows separate contexts to save independently', async () => {
@@ -407,5 +457,177 @@ describe('AutoSaveService', () => {
 
     writeA.resolve();
     await saveA;
+  });
+
+  it('publishes one revision-aware save safety state through dirty, saving, and saved', async () => {
+    const context = createContext('save-safety-project', 'Save safety');
+    const write = deferred<void>();
+    vi.mocked(projectRepository.save).mockImplementationOnce(() => write.promise);
+
+    autoSaveService.start(context);
+    await context.history.execute(makeCommand());
+    await Promise.resolve();
+
+    expect(autoSaveService.getSaveSafetyObservation(context)).toMatchObject({
+      type: 'project.save-safety',
+      target: { projectId: 'save-safety-project' },
+      currentRevision: 1,
+      persistedRevision: 0,
+      status: 'dirty',
+    });
+
+    const saving = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saving');
+
+    write.resolve();
+    await saving;
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      currentRevision: 1,
+      persistedRevision: 1,
+      status: 'saved',
+    });
+  });
+
+  it('keeps a failed write bounded and retries the newest dirty revision', async () => {
+    const context = createContext('retry-latest-project', 'First state');
+    vi.mocked(projectRepository.save)
+      .mockRejectedValueOnce(Object.assign(new Error('disk full'), { name: 'QuotaExceededError' }))
+      .mockResolvedValueOnce();
+
+    await expect(autoSaveService.saveNow(context)).rejects.toMatchObject({
+      category: 'quota_exceeded',
+      action: 'retry_latest',
+    });
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      status: 'failed',
+      failure: { category: 'quota_exceeded', action: 'retry_latest' },
+    });
+
+    await context.history.execute(
+      makeCommand(() => {
+        context.project.name.value = 'Newest state';
+      })
+    );
+    await Promise.resolve();
+
+    await autoSaveService.retryLatest(context);
+    expect(vi.mocked(projectRepository.save).mock.calls[1][1].name).toBe('Newest state');
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saved');
+  });
+
+  it('treats thumbnail generation as derived and preserves the previous thumbnail', async () => {
+    const context = createContext('thumbnail-failure-project', 'Thumbnail failure');
+    vi.mocked(createProjectThumbnail).mockRejectedValueOnce(new Error('canvas failed'));
+
+    await autoSaveService.saveNow(context);
+
+    expect(projectRepository.save).toHaveBeenCalledWith(
+      'thumbnail-failure-project',
+      expect.any(Object),
+      { thumbnail: undefined }
+    );
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saved');
+  });
+
+  it('maps serialization failure without exposing the original exception', async () => {
+    const context = createContext('serialization-failure-project', 'Serialization failure');
+    vi.spyOn(context.project, 'saveProject').mockRejectedValueOnce(
+      new Error('private project bytes should not escape')
+    );
+
+    await expect(autoSaveService.saveNow(context)).rejects.toMatchObject({
+      category: 'serialization_failed',
+      action: 'retry_latest',
+    });
+    const state = autoSaveService.getSaveSafetyState(context);
+    expect(state.status).toBe('failed');
+    expect(JSON.stringify(state)).not.toContain('private project bytes');
+  });
+
+  it('post-review regression: invalidates an in-flight save when a same-context replacement succeeds', async () => {
+    const context = createContext('replacement-project', 'Before replacement');
+    const oldSnapshot = await context.project.saveProject();
+    const serialization = deferred<typeof oldSnapshot>();
+    vi.spyOn(context.project, 'saveProject').mockReturnValueOnce(serialization.promise);
+
+    autoSaveService.start(context);
+    const save = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+
+    const loadedSnapshot = structuredClone(oldSnapshot);
+    loadedSnapshot.name = 'Loaded replacement';
+    await autoSaveService.runWithoutSaving(
+      () => context.project.loadProject(loadedSnapshot),
+      context
+    );
+    expect(context.project.name.value).toBe('Loaded replacement');
+
+    serialization.resolve(oldSnapshot);
+    await save;
+
+    expect(projectRepository.save).not.toHaveBeenCalled();
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      target: { projectId: 'replacement-project' },
+      status: 'saved',
+    });
+  });
+
+  it('post-review regression: does not republish save state after a context is stopped', async () => {
+    const context = createContext('stopped-project', 'Stopped project');
+    const write = deferred<void>();
+    vi.mocked(projectRepository.save).mockImplementationOnce(() => write.promise);
+
+    autoSaveService.start(context);
+    const save = autoSaveService.saveNow(context);
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('saving');
+
+    autoSaveService.stop(context);
+    write.resolve();
+    await save;
+
+    expect(autoSaveService.saveSafetyStates.value.has(context)).toBe(false);
+    expect(autoSaveService.dirtyContexts.value.has(context)).toBe(false);
+  });
+
+  it('post-review regression: preserves dirty state when a load operation fails', async () => {
+    const context = createContext('failed-load-project', 'Failed load project');
+    autoSaveService.start(context);
+    await context.history.execute(makeCommand());
+    await settleSaveQueue();
+    expect(autoSaveService.getSaveSafetyState(context).status).toBe('dirty');
+
+    await expect(
+      autoSaveService.runWithoutSaving(async () => {
+        throw new Error('load failed');
+      }, context)
+    ).rejects.toThrow('load failed');
+
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      status: 'dirty',
+    });
+    expect(autoSaveService.isDirty(context)).toBe(true);
+  });
+
+  it('post-review regression: keeps an active autosave context saved after a successful load', async () => {
+    const context = createContext('loaded-project', 'Before load');
+    const loadedSnapshot = await context.project.saveProject();
+    loadedSnapshot.name = 'Loaded project';
+    vi.mocked(projectRepository.load).mockResolvedValueOnce(loadedSnapshot);
+
+    autoSaveService.start(context);
+    await projectLibrary.openProject('loaded-project', {
+      context,
+      saveCurrent: false,
+    });
+    await settleSaveQueue();
+
+    expect(autoSaveService.getSaveSafetyState(context)).toMatchObject({
+      target: { projectId: 'loaded-project' },
+      status: 'saved',
+    });
+    expect(autoSaveService.isDirty(context)).toBe(false);
+    expect(projectRepository.save).not.toHaveBeenCalled();
   });
 });

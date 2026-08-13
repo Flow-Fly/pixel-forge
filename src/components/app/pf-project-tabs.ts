@@ -109,6 +109,22 @@ export class PFProjectTabs extends BaseComponent {
       box-shadow: 0 0 8px rgba(99, 179, 237, 0.5);
     }
 
+    .save-safety-mark {
+      display: inline-grid;
+      place-items: center;
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .save-safety-mark.failed {
+      border: 1px solid currentColor;
+      border-radius: 50%;
+    }
+
     .close-button,
     .active-close-button,
     .add-button {
@@ -165,6 +181,37 @@ export class PFProjectTabs extends BaseComponent {
       padding: 2px 6px;
       border: 1px solid currentColor;
       border-radius: var(--pf-radius-sm);
+    }
+
+    .save-safety-error {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px 9px;
+      border-top: 1px solid var(--pf-color-border);
+      color: #f0aaa2;
+      font-size: 12px;
+    }
+
+    .save-safety-error .cue {
+      display: inline-grid;
+      place-items: center;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      font-weight: 700;
+    }
+
+    .save-safety-error button {
+      margin-inline-start: auto;
+      padding: 3px 8px;
+      border: 1px solid currentColor;
+      border-radius: var(--pf-radius-sm);
+      color: inherit;
+      background: transparent;
+      font: inherit;
     }
 
     .visually-hidden {
@@ -254,8 +301,43 @@ export class PFProjectTabs extends BaseComponent {
     return item.context.project.name.value || 'Untitled';
   }
 
-  private tabLabel(name: string, isDirty: boolean) {
-    return isDirty ? `${name}, unsaved changes` : name;
+  private saveSafetyStatus(item: WorkspaceItem): 'dirty' | 'saving' | 'saved' | 'failed' {
+    const getState = autoSaveService.getSaveSafetyState;
+    const state = getState?.call(autoSaveService, item.context);
+    if (state) return state.status;
+    return autoSaveService.isDirty(item.context) ? 'dirty' : 'saved';
+  }
+
+  private tabLabel(name: string, status: 'dirty' | 'saving' | 'saved' | 'failed') {
+    switch (status) {
+      case 'dirty':
+        return `${name}, unsaved changes`;
+      case 'saving':
+        return `${name}, saving`;
+      case 'failed':
+        return `${name}, not safely saved`;
+      default:
+        return `${name}, saved`;
+    }
+  }
+
+  private async retryFailedProject(context: WorkspaceItem['context']) {
+    const retryButton = this.shadowRoot?.activeElement;
+    const shouldRestoreFocus = retryButton instanceof HTMLButtonElement
+      && retryButton.getAttribute('aria-label')?.startsWith('Retry saving ');
+
+    try {
+      await autoSaveService.retryLatest(context);
+      this.dismissFeedback();
+      if (shouldRestoreFocus) {
+        await this.updateComplete;
+        this.shadowRoot?.querySelector<HTMLButtonElement>(
+          '.tab-button[aria-current="page"]'
+        )?.focus();
+      }
+    } catch {
+      this.showFeedback('Retry could not save this project.');
+    }
   }
 
   render() {
@@ -271,7 +353,7 @@ export class PFProjectTabs extends BaseComponent {
         <ul class="tab-list" data-scrollbar="horizontal">
           ${items.map((item) => {
             const isActive = item.id === activeItemId;
-            const isDirty = autoSaveService.isDirty(item.context);
+            const status = this.saveSafetyStatus(item);
             const name = this.projectName(item);
 
             return html`
@@ -280,12 +362,18 @@ export class PFProjectTabs extends BaseComponent {
                   class="tab-button"
                   type="button"
                   aria-current=${isActive ? 'page' : 'false'}
-                  aria-label=${this.tabLabel(name, isDirty)}
+                  aria-label=${this.tabLabel(name, status)}
                   @click=${() => this.activateItem(item.id)}
                   @mousedown=${this.preventMiddleMouseDefault}
                   @auxclick=${(event: MouseEvent) => this.closeItemOnMiddleClick(event, item.id)}
                 >
-                  ${isDirty ? html`<span class="dirty-dot" aria-hidden="true"></span>` : ''}
+                  ${status === 'dirty'
+                    ? html`<span class="dirty-dot" aria-hidden="true"></span>`
+                    : status === 'saving'
+                      ? html`<span class="save-safety-mark" aria-hidden="true">…</span>`
+                      : status === 'failed'
+                        ? html`<span class="save-safety-mark failed" aria-hidden="true">!</span>`
+                        : ''}
                   <span class="tab-name">${name}</span>
                 </button>
                 <button
@@ -327,6 +415,23 @@ export class PFProjectTabs extends BaseComponent {
           +
         </button>
       </nav>
+      ${
+        activeItem && this.saveSafetyStatus(activeItem) === 'failed'
+          ? html`
+              <div class="save-safety-error" role="alert">
+                <span class="cue" aria-hidden="true">!</span>
+                <span>This project is not safely saved.</span>
+                <button
+                  type="button"
+                  aria-label=${`Retry saving ${this.projectName(activeItem)}`}
+                  @click=${() => this.retryFailedProject(activeItem.context)}
+                >
+                  Retry
+                </button>
+              </div>
+            `
+          : ''
+      }
       <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"
         >${this.errorMessage}</span
       >

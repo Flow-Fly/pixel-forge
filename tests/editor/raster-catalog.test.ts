@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { rasterFillCatalog, rasterGradientCatalog } from '../../src/editor/catalog';
+import {
+  editorCatalog,
+  projectSaveSafetyCatalog,
+  rasterFillCatalog,
+  rasterGradientCatalog,
+} from '../../src/editor/catalog';
 
 describe('raster editor catalog contracts', () => {
   it('describes the flat Fill and Gradient request keys and local result metadata', () => {
@@ -38,5 +43,20 @@ describe('raster editor catalog contracts', () => {
       },
       effectiveEnd: { x: 'integer', y: 'integer' },
     });
+  });
+
+  it('publishes save safety as one transport-neutral project observation', () => {
+    expect(projectSaveSafetyCatalog).toMatchObject({
+      id: 'project.save-safety',
+      kind: 'observation',
+      target: 'project',
+      fields: {
+        target: { projectId: 'string' },
+        currentRevision: 'integer >= 0',
+        persistedRevision: 'integer >= 0',
+        status: ['dirty', 'saving', 'saved', 'failed'],
+      },
+    });
+    expect(editorCatalog.observations).toEqual([projectSaveSafetyCatalog]);
   });
 });
