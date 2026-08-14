@@ -472,6 +472,11 @@ function pasteSelection() {
     currentOffset: { x: 0, y: 0 },
     mask: data.mask,
     indexedPaste: pasteData.indexedPaste,
+    targetLayerId: layer.id,
+    targetFrameId: context.animation.currentFrameId.value,
+    targetCelId: context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, context.animation.currentFrameId.value),
+    )?.id,
   };
 }
 

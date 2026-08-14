@@ -10,6 +10,12 @@ export interface FloatingIndexedPaste {
   };
 }
 
+export interface SelectionTargetIdentity {
+  layerId: string;
+  frameId: string;
+  celId?: string;
+}
+
 export type SelectionState =
   | { type: 'none' }
   | {
@@ -38,6 +44,9 @@ export type SelectionState =
       shape: SelectionShape;
       mask?: Uint8Array;
       indexedPaste?: FloatingIndexedPaste;
+      targetLayerId?: string;
+      targetFrameId?: string;
+      targetCelId?: string;
     }
   | {
       type: 'transforming';

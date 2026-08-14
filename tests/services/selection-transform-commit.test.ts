@@ -240,4 +240,205 @@ describe('selection transform transaction', () => {
     expect(canvas.readPixels().slice(0, 4)).toEqual([255, 0, 0, 255]);
     expect(context.selection.state.value).toMatchObject({ type: 'selected', bounds: { x: 0, y: 0, width: 1, height: 1 } });
   });
+
+  it('does not restore over a newer edit when Apply detects a stale revision', async () => {
+    const { context, canvas, indices } = createFixture();
+    fixtures.push(context);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    expect(beginSelectionTransform(context)).toMatchObject({ ok: true });
+    context.selection.moveTransform(1, 0);
+
+    canvas.setPixel(0, 0, [0, 0, 255, 255]);
+    indices[0] = 2;
+    context.project.revision.value = 1;
+
+    const result = await commitSelectionTransform(context);
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'revision_conflict' } });
+    expect(canvas.readPixels().slice(0, 4)).toEqual([0, 0, 255, 255]);
+    expect(indices[0]).toBe(2);
+    expect(context.history.undoStack.value).toHaveLength(0);
+  });
+
+  it('does not restore over a newer edit when Cancel follows an intervening change', () => {
+    const { context, canvas, indices } = createFixture();
+    fixtures.push(context);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    expect(beginSelectionTransform(context)).toMatchObject({ ok: true });
+
+    canvas.setPixel(0, 0, [0, 0, 255, 255]);
+    indices[0] = 2;
+
+    expect(cancelSelectionTransform(context)).toMatchObject({ ok: true });
+    expect(canvas.readPixels().slice(0, 4)).toEqual([0, 0, 255, 255]);
+    expect(indices[0]).toBe(2);
+  });
+
+  it('keeps two project contexts isolated through one transform commit', async () => {
+    const first = createFixture();
+    const second = createFixture();
+    fixtures.push(first.context, second.context);
+    first.context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    second.context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+
+    expect(beginSelectionTransform(first.context)).toMatchObject({ ok: true });
+    first.context.selection.moveTransform(1, 0);
+    await expect(commitSelectionTransform(first.context)).resolves.toMatchObject({ ok: true });
+
+    expect(first.context.history.undoStack.value).toHaveLength(1);
+    expect(first.context.project.revision.value).toBe(1);
+    expect(second.context.history.undoStack.value).toHaveLength(0);
+    expect(second.context.project.revision.value).toBe(0);
+    expect(second.context.selection.state.value.type).toBe('selected');
+  });
+
+  it('keeps repeated Apply attempts to one history transition', async () => {
+    const { context } = createFixture();
+    fixtures.push(context);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    expect(beginSelectionTransform(context)).toMatchObject({ ok: true });
+    context.selection.moveTransform(1, 0);
+
+    const results = await Promise.all([
+      commitSelectionTransform(context),
+      commitSelectionTransform(context),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(context.history.undoStack.value).toHaveLength(1);
+    expect(context.project.revision.value).toBe(1);
+  });
+
+  it('rejects a transform that would land completely outside the canvas', async () => {
+    const { context, canvas, indices } = createFixture();
+    fixtures.push(context);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    expect(beginSelectionTransform(context)).toMatchObject({ ok: true });
+    context.selection.moveTransform(-5, 0);
+
+    const result = await commitSelectionTransform(context);
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'limit_exceeded' } });
+    expect(canvas.readPixels().slice(0, 4)).toEqual([255, 0, 0, 255]);
+    expect(indices[0]).toBe(1);
+    expect(context.history.undoStack.value).toHaveLength(0);
+  });
+
+  it('returns a stable public failure when begin cannot obtain an editable cel', () => {
+    const { context } = createFixture();
+    fixtures.push(context);
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    context.animation.getEditableCelCanvas = () => {
+      throw new Error('disposed target');
+    };
+
+    expect(() => beginSelectionTransform(context)).not.toThrow();
+    expect(beginSelectionTransform(context)).toMatchObject({
+      ok: false,
+      error: { code: expect.any(String) },
+    });
+  });
+
+  it('does not start a floating Pending Edit against a different active target', () => {
+    const { context, canvas } = createFixture();
+    fixtures.push(context);
+    const secondCanvas = createCanvas(4, 2);
+    secondCanvas.setPixel(0, 0, [0, 0, 255, 255]);
+    const secondKey = context.animation.getCelKey('layer-2', 'frame-1');
+    const secondCel = {
+      id: 'cel-2',
+      layerId: 'layer-2',
+      frameId: 'frame-1',
+      canvas: secondCanvas.canvas,
+      indexBuffer: new Uint8Array([2, 0, 0, 0, 0, 0, 0, 0]),
+    };
+    context.animation.cels.value = new Map([
+      ...context.animation.cels.value,
+      [secondKey, secondCel],
+    ]);
+    context.layers.layers.value = [
+      ...context.layers.layers.value,
+      { id: 'layer-2', type: 'paint', canvas: secondCanvas.canvas, locked: false, visible: true },
+    ];
+    context.animation.getEditableCelCanvas = (layerId: string, frameId: string) =>
+      context.animation.cels.value.get(context.animation.getCelKey(layerId, frameId))?.canvas;
+    context.selection.setFloating(
+      new ImageData(new Uint8ClampedArray([255, 0, 0, 255]), 1, 1),
+      { x: 0, y: 0, width: 1, height: 1 },
+      'rectangle',
+    );
+    context.layers.activeLayerId.value = 'layer-2';
+
+    const result = beginSelectionTransform(context);
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'target_not_found' } });
+    expect(canvas.readPixels().slice(0, 4)).toEqual([255, 0, 0, 255]);
+    expect(secondCanvas.readPixels().slice(0, 4)).toEqual([0, 0, 255, 255]);
+  });
+
+  it('keeps linked cel identity, palette, and bytes unchanged through begin and Cancel', () => {
+    const { context, canvas, indices } = createFixture();
+    fixtures.push(context);
+    const targetKey = context.animation.getCelKey('layer-1', 'frame-1');
+    const targetBefore = context.animation.cels.value.get(targetKey);
+    if (!targetBefore) throw new Error('Expected target cel');
+    const linkedCanvas = createCanvas(4, 2);
+    linkedCanvas.pixels.set(canvas.pixels);
+    const linkedTarget = {
+      ...targetBefore,
+      canvas: linkedCanvas.canvas,
+      linkedCelId: 'link-1',
+      linkType: 'soft' as const,
+    };
+    context.animation.cels.value = new Map([
+      [targetKey, linkedTarget],
+      ['layer-2:frame-1', {
+        ...linkedTarget,
+        id: 'cel-2',
+        layerId: 'layer-2',
+      }],
+    ]);
+    context.layers.layers.value = [
+      ...context.layers.layers.value,
+      { id: 'layer-2', type: 'paint', canvas: linkedCanvas.canvas, locked: false, visible: true },
+    ];
+    const originalGetEditable = context.animation.getEditableCelCanvas;
+    context.animation.getEditableCelCanvas = (layerId: string, frameId: string) => {
+      const key = context.animation.getCelKey(layerId, frameId);
+      const cel = context.animation.cels.value.get(key);
+      if (key === targetKey && cel?.canvas === linkedCanvas.canvas) {
+        const clone = createCanvas(4, 2);
+        clone.pixels.set(linkedCanvas.pixels);
+        context.animation.cels.value = new Map(context.animation.cels.value).set(key, {
+          ...cel,
+          canvas: clone.canvas,
+          linkedCelId: undefined,
+          linkType: undefined,
+          indexBuffer: new Uint8Array(cel.indexBuffer ?? []),
+        });
+        return clone.canvas;
+      }
+      return originalGetEditable.call(context.animation, layerId, frameId);
+    };
+    const colors = ['#ff0000'];
+    const flags = new Set(['#ff0000']);
+    (context.palette as unknown as { newColorFlags: { value: Set<string> } }).newColorFlags = { value: flags };
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+
+    const beforeRevision = context.project.revision.value;
+    const beforeCanvas = context.animation.cels.value.get(targetKey)?.canvas;
+    expect(beginSelectionTransform(context)).toMatchObject({ ok: true });
+    expect(cancelSelectionTransform(context)).toMatchObject({ ok: true });
+
+    const restored = context.animation.cels.value.get(targetKey);
+    expect(restored?.canvas).toBe(beforeCanvas);
+    expect(restored?.linkedCelId).toBe('link-1');
+    expect(restored?.linkType).toBe('soft');
+    expect(restored?.indexBuffer).toBe(targetBefore.indexBuffer);
+    expect([...restored!.indexBuffer!]).toEqual([...indices]);
+    expect(context.palette.mainColors.value).toEqual(colors);
+    expect((context.palette as unknown as { newColorFlags: { value: Set<string> } }).newColorFlags.value).toEqual(flags);
+    expect(context.project.revision.value).toBe(beforeRevision);
+    expect(context.history.undoStack.value).toHaveLength(0);
+  });
 });

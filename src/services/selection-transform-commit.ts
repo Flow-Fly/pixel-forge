@@ -1,5 +1,6 @@
 import { CutToFloatCommand } from '../commands/selection-commands';
 import {
+  captureSelectionTransformIndexEntries,
   cloneImageData,
   cloneSelectionState,
   restoreSelectionState,
@@ -11,6 +12,7 @@ import { type ProjectContext } from '../stores/project-context';
 import { findClosestColorIndex } from '../stores/palette/indexed-color';
 import { hexToRgb, rgbToHex } from '../stores/palette/color-utils';
 import type { Rect } from '../types/geometry';
+import type { Cel } from '../types/animation';
 import type { SelectionShape, SelectionState } from '../types/selection';
 
 export type SelectionTransformErrorCode =
@@ -43,7 +45,21 @@ interface TransformSession {
   readonly initialPixels: ImageData;
   readonly beforeIndices: readonly SelectionTransformIndexEntry[];
   readonly beforeSelection: SelectionState;
+  readonly beforeCels: CelSnapshot;
+  readonly previewCels: CelSnapshot;
+  readonly beforePalette: PaletteSnapshot;
+  readonly previewPalette: PaletteSnapshot;
   readonly cutCommand?: CutToFloatCommand;
+}
+
+interface CelSnapshot {
+  readonly cels: ReadonlyMap<string, Cel>;
+  readonly indexBytes: ReadonlyMap<string, Uint8Array | undefined>;
+}
+
+interface PaletteSnapshot {
+  readonly colors: readonly string[];
+  readonly newColorFlags: ReadonlySet<string>;
 }
 
 const sessions = new WeakMap<ProjectContext, TransformSession>();
@@ -82,20 +98,71 @@ function readPixels(canvas: HTMLCanvasElement): ImageData | null {
   }
 }
 
-function captureIndexEntries(
-  context: ProjectContext,
-  canvas: HTMLCanvasElement,
-): SelectionTransformIndexEntry[] {
-  const entries: SelectionTransformIndexEntry[] = [];
-  for (const [key, cel] of context.animation.cels.value) {
-    if (cel.canvas !== canvas) continue;
-    entries.push({
-      key,
-      buffer: cel.indexBuffer,
-      bytes: cel.indexBuffer ? new Uint8Array(cel.indexBuffer) : undefined,
-    });
+function snapshotCels(context: ProjectContext): CelSnapshot {
+  const cels = new Map(context.animation.cels.value);
+  const indexBytes = new Map<string, Uint8Array | undefined>();
+  for (const [key, cel] of cels) {
+    indexBytes.set(key, cel.indexBuffer ? new Uint8Array(cel.indexBuffer) : undefined);
   }
-  return entries;
+  return { cels, indexBytes };
+}
+
+function snapshotPalette(context: ProjectContext): PaletteSnapshot {
+  const flagsSignal = (context.palette as unknown as {
+    newColorFlags?: { value: Set<string> };
+  }).newColorFlags;
+  return {
+    colors: [...context.palette.mainColors.value],
+    newColorFlags: new Set(flagsSignal?.value ?? []),
+  };
+}
+
+function sameBytes(a: ArrayLike<number> | undefined, b: ArrayLike<number> | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
+}
+
+function sameCelSnapshot(context: ProjectContext, snapshot: CelSnapshot): boolean {
+  const current = context.animation.cels.value;
+  if (current.size !== snapshot.cels.size) return false;
+  for (const [key, expected] of snapshot.cels) {
+    const actual = current.get(key);
+    if (!actual || actual !== expected) return false;
+    if (!sameBytes(actual.indexBuffer, snapshot.indexBytes.get(key))) return false;
+  }
+  return true;
+}
+
+function samePaletteSnapshot(context: ProjectContext, snapshot: PaletteSnapshot): boolean {
+  const colors = context.palette.mainColors.value;
+  const flags = (context.palette as unknown as {
+    newColorFlags?: { value: Set<string> };
+  }).newColorFlags?.value ?? new Set<string>();
+  return colors.length === snapshot.colors.length
+    && colors.every((color, index) => color === snapshot.colors[index])
+    && flags.size === snapshot.newColorFlags.size
+    && [...flags].every((flag) => snapshot.newColorFlags.has(flag));
+}
+
+function restoreDocumentSnapshot(
+  context: ProjectContext,
+  cels: CelSnapshot,
+  palette: PaletteSnapshot,
+): void {
+  for (const [key, cel] of cels.cels) {
+    const bytes = cels.indexBytes.get(key);
+    if (cel.indexBuffer && bytes) cel.indexBuffer.set(bytes);
+  }
+  context.animation.cels.value = new Map(cels.cels);
+  context.palette.mainColors.value = [...palette.colors];
+  const flagsSignal = (context.palette as unknown as {
+    newColorFlags?: { value: Set<string> };
+  }).newColorFlags;
+  if (flagsSignal) flagsSignal.value = new Set(palette.newColorFlags);
 }
 
 function activeTarget(context: ProjectContext): {
@@ -125,16 +192,6 @@ function targetFor(
   );
   if (!cel) return null;
   return { celId: cel.id, canvas: cel.canvas };
-}
-
-function ensureTargetIndexBuffer(context: ProjectContext, layerId: string, frameId: string): void {
-  const cel = context.animation.cels.value.get(
-    context.animation.getCelKey(layerId, frameId),
-  );
-  if (cel?.indexBuffer) return;
-
-  const ensure = context.animation.ensureCelIndexBuffer;
-  if (typeof ensure === 'function') ensure.call(context.animation, layerId, frameId);
 }
 
 function transformStateHasChanges(
@@ -176,7 +233,13 @@ function createSession(
   initialPixels: ImageData,
   beforeSelection: SelectionState,
   cutCommand?: CutToFloatCommand,
+  snapshots?: {
+    beforeCels: CelSnapshot;
+    beforePalette: PaletteSnapshot;
+  },
 ): TransformSession {
+  const beforeCels = snapshots?.beforeCels ?? snapshotCels(context);
+  const beforePalette = snapshots?.beforePalette ?? snapshotPalette(context);
   return {
     projectId: context.project.id.value,
     observedRevision: context.project.revision.value,
@@ -186,13 +249,43 @@ function createSession(
     canvas: target.canvas,
     beforePixels: cloneImageData(beforePixels),
     initialPixels: cloneImageData(initialPixels),
-    beforeIndices: captureIndexEntries(context, target.canvas),
+    beforeIndices: captureSelectionTransformIndexEntries(context, target.canvas),
     beforeSelection: cloneSelectionState(beforeSelection),
+    beforeCels,
+    previewCels: snapshotCels(context),
+    beforePalette,
+    previewPalette: snapshotPalette(context),
     cutCommand,
   };
 }
 
-function restoreSession(context: ProjectContext, session: TransformSession): void {
+function isPreviewStillCurrent(context: ProjectContext, session: TransformSession): boolean {
+  const pixels = readPixels(session.canvas);
+  return Boolean(
+    pixels
+    && sameBytes(pixels.data, session.initialPixels.data)
+    && sameCelSnapshot(context, session.previewCels)
+    && samePaletteSnapshot(context, session.previewPalette)
+  );
+}
+
+function restoreSelectionIfStillOwned(context: ProjectContext, session: TransformSession): void {
+  const state = context.selection.getTransformState();
+  if (
+    state
+    && state.targetLayerId === session.layerId
+    && state.targetFrameId === session.frameId
+  ) {
+    restoreSelectionState(context, session.beforeSelection);
+  }
+}
+
+function restoreSession(context: ProjectContext, session: TransformSession): boolean {
+  if (!isPreviewStillCurrent(context, session)) {
+    restoreSelectionIfStillOwned(context, session);
+    return false;
+  }
+
   if (session.cutCommand) {
     try {
       session.cutCommand.undo();
@@ -204,20 +297,9 @@ function restoreSession(context: ProjectContext, session: TransformSession): voi
   const ctx = session.canvas.getContext('2d');
   if (ctx) ctx.putImageData(session.beforePixels, 0, 0);
 
-  const cels = new Map(context.animation.cels.value);
-  for (const entry of session.beforeIndices) {
-    const cel = cels.get(entry.key);
-    if (!cel) continue;
-    if (entry.buffer) {
-      entry.buffer.set(entry.bytes ?? []);
-      cels.set(entry.key, { ...cel, indexBuffer: entry.buffer });
-    } else {
-      const { indexBuffer: _indexBuffer, ...withoutIndexBuffer } = cel;
-      cels.set(entry.key, withoutIndexBuffer);
-    }
-  }
-  context.animation.cels.value = cels;
+  restoreDocumentSnapshot(context, session.beforeCels, session.beforePalette);
   restoreSelectionState(context, session.beforeSelection);
+  return true;
 }
 
 function isSelectedPixel(
@@ -288,6 +370,71 @@ function palettePixel(
   return index;
 }
 
+function transformDestination(
+  state: NonNullable<ReturnType<ProjectContext['selection']['getTransformState']>>,
+  preview: ImageData,
+): { x: number; y: number } {
+  return {
+    x: Math.round(
+      state.originalBounds.x
+        + state.currentOffset.x
+        + state.originalBounds.width / 2
+        - preview.width / 2,
+    ),
+    y: Math.round(
+      state.originalBounds.y
+        + state.currentOffset.y
+        + state.originalBounds.height / 2
+        - preview.height / 2,
+    ),
+  };
+}
+
+// fallow-ignore-next-line complexity -- Boundary validation keeps unsafe dimensions and out-of-canvas results atomic.
+function validateTransformBounds(
+  canvas: HTMLCanvasElement,
+  state: NonNullable<ReturnType<ProjectContext['selection']['getTransformState']>>,
+  preview: ImageData,
+): SelectionTransformErrorCode | null {
+  const values = [
+    state.originalBounds.x,
+    state.originalBounds.y,
+    state.originalBounds.width,
+    state.originalBounds.height,
+    state.currentOffset.x,
+    state.currentOffset.y,
+    state.rotation,
+    state.scale.x,
+    state.scale.y,
+    preview.width,
+    preview.height,
+  ];
+  if (values.some((value) => !Number.isFinite(value))) return 'invalid_request';
+  if (
+    preview.width <= 0
+    || preview.height <= 0
+    || !Number.isSafeInteger(preview.width)
+    || !Number.isSafeInteger(preview.height)
+    || preview.width * preview.height > 64_000_000
+  ) {
+    return 'limit_exceeded';
+  }
+
+  const { x: destinationX, y: destinationY } = transformDestination(state, preview);
+  if (!Number.isSafeInteger(destinationX) || !Number.isSafeInteger(destinationY)) {
+    return 'limit_exceeded';
+  }
+  if (
+    destinationX >= canvas.width
+    || destinationY >= canvas.height
+    || destinationX + preview.width <= 0
+    || destinationY + preview.height <= 0
+  ) {
+    return 'limit_exceeded';
+  }
+  return null;
+}
+
 // fallow-ignore-next-line complexity -- The atomic preview composes RGBA and indexed pixels while preserving the existing palette policy.
 function composeTransform(
   context: ProjectContext,
@@ -295,22 +442,13 @@ function composeTransform(
   state: NonNullable<ReturnType<ProjectContext['selection']['getTransformState']>>,
 ): { afterPixels: ImageData; afterIndices: Uint8Array } | { error: SelectionTransformErrorCode } {
   const preview = context.selection.getTransformPreview() ?? state.imageData;
+  const boundsError = validateTransformBounds(session.canvas, state, preview);
+  if (boundsError) return { error: boundsError };
   const afterPixels = cloneImageData(session.initialPixels);
   const touched = new Uint8Array(afterPixels.width * afterPixels.height);
   clearRegion(afterPixels, touched, state.originalBounds, state.shape, state.mask);
 
-  const destinationX = Math.round(
-    state.originalBounds.x
-      + state.currentOffset.x
-      + state.originalBounds.width / 2
-      - preview.width / 2,
-  );
-  const destinationY = Math.round(
-    state.originalBounds.y
-      + state.currentOffset.y
-      + state.originalBounds.height / 2
-      - preview.height / 2,
-  );
+  const { x: destinationX, y: destinationY } = transformDestination(state, preview);
 
   const previewShape = state.shape === 'freeform' ? 'rectangle' : state.shape;
   for (let y = 0; y < preview.height; y += 1) {
@@ -385,27 +523,28 @@ export function beginSelectionTransform(context: ProjectContext):
   if (current.type === 'selected') {
     const target = activeTarget(context);
     if (!target) return failure('target_not_found', true);
-    ensureTargetIndexBuffer(context, target.layerId, target.frameId);
-
-    const cut = new CutToFloatCommand(
-      target.layerId,
-      target.frameId,
-      current.bounds,
-      current.shape,
-      current.shape === 'freeform' ? current.mask : undefined,
-      context,
-    );
-    const refreshed = targetFor(context, target.layerId, target.frameId);
-    if (!refreshed) return failure('target_not_found', true);
-    const beforePixels = readPixels(refreshed.canvas);
+    const beforeCels = snapshotCels(context);
+    const beforePalette = snapshotPalette(context);
+    const beforePixels = readPixels(target.canvas);
     if (!beforePixels) return failure('invalid_state');
+    let cut: CutToFloatCommand | undefined;
     try {
+      cut = new CutToFloatCommand(
+        target.layerId,
+        target.frameId,
+        current.bounds,
+        current.shape,
+        current.shape === 'freeform' ? current.mask : undefined,
+        context,
+      );
       cut.execute();
       const floating = context.selection.state.value;
       if (floating.type !== 'floating') {
         cut.undo();
         return failure('invalid_state');
       }
+      const refreshed = targetFor(context, target.layerId, target.frameId);
+      if (!refreshed) return failure('target_not_found', true);
       selectionFromFloating(context, floating, target.layerId, target.frameId);
       const initialPixels = readPixels(refreshed.canvas);
       if (!initialPixels) {
@@ -421,26 +560,41 @@ export function beginSelectionTransform(context: ProjectContext):
           initialPixels,
           current,
           cut,
+          { beforeCels, beforePalette },
         ),
       );
       return { ok: true, changed: false, revision: context.project.revision.value };
     } catch {
       try {
-        cut.undo();
+        cut?.undo();
       } catch {
         // No durable transition has occurred; return the bounded failure.
       }
+      restoreDocumentSnapshot(context, beforeCels, beforePalette);
+      restoreSelectionState(context, current);
       return failure('internal');
     }
   }
 
   if (current.type === 'floating') {
-    const target = activeTarget(context);
+    if (!current.targetLayerId || !current.targetFrameId) {
+      return failure('target_not_found', true);
+    }
+    const target = targetFor(context, current.targetLayerId, current.targetFrameId);
     if (!target) return failure('target_not_found', true);
+    if (current.targetCelId && current.targetCelId !== target.celId) {
+      return failure('target_not_found', true);
+    }
     const pixels = readPixels(target.canvas);
     if (!pixels) return failure('invalid_state');
-    selectionFromFloating(context, current, target.layerId, target.frameId);
-    const session = createSession(context, target, pixels, pixels, current);
+    selectionFromFloating(context, current, current.targetLayerId, current.targetFrameId);
+    const session = createSession(
+      context,
+      { layerId: current.targetLayerId, frameId: current.targetFrameId, ...target },
+      pixels,
+      pixels,
+      current,
+    );
     sessions.set(context, session);
     return { ok: true, changed: false, revision: context.project.revision.value };
   }

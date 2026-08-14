@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import '../../src/components/toolbar/pf-context-bar';
+import '../../src/components/canvas/pf-canvas-viewport';
+import { MarqueeRectTool } from '../../src/tools/selection/marquee-rect-tool';
+import { beginSelectionTransform } from '../../src/services/selection-transform-commit';
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -81,6 +84,7 @@ describe('selection transform in Chromium', () => {
     xInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
     expect(context.selection.state.value.type).toBe('transforming');
+    expect(context.history.undoStack.value).toHaveLength(0);
     await userEvent.click(page.getByRole('button', { name: 'Apply', exact: true }));
     await expect.poll(() => context.history.undoStack.value.length).toBe(1);
 
@@ -116,5 +120,165 @@ describe('selection transform in Chromium', () => {
     expect(context.history.undoStack.value).toHaveLength(0);
     expect(context.project.revision.value).toBe(0);
     expect(context.selection.state.value.type).toBe('selected');
+  });
+
+  it('focuses the first transform control and binds every numeric label', async () => {
+    const { context } = createContext();
+    const { bar } = await mountContextBar(context);
+
+    await userEvent.click(page.getByRole('button', { name: 'Transform selection' }));
+    await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+
+    const root = (bar as HTMLElement).shadowRoot;
+    expect(root?.activeElement?.id).toBe('transform-x');
+    expect(root?.querySelector('label[for="transform-width"]')).not.toBeNull();
+    expect(root?.querySelector('label[for="transform-height"]')).not.toBeNull();
+    expect(root?.querySelector('label[for="transform-angle"]')).not.toBeNull();
+  });
+
+  it('keeps resize, rotate, aspect-lock, and one change event on Apply', async () => {
+    const { context } = createContext();
+    const { bar } = await mountContextBar(context);
+    let changeEvents = 0;
+    context.project.changeEvents.addEventListener('project-change', () => {
+      changeEvents += 1;
+    });
+
+    await userEvent.click(page.getByRole('button', { name: 'Transform selection' }));
+    await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+
+    const width = page.getByRole('spinbutton', { name: 'Width' }).element() as HTMLInputElement;
+    width.value = '2';
+    width.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+    expect(context.selection.scale).toEqual({ x: 2, y: 2 });
+
+    await userEvent.click(page.getByRole('button', { name: 'Lock aspect ratio' }));
+    await expect.element(page.getByRole('button', { name: 'Unlock aspect ratio' })).toBeVisible();
+    const height = page.getByRole('spinbutton', { name: 'Height' }).element() as HTMLInputElement;
+    height.value = '1';
+    height.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    const angle = page.getByRole('spinbutton', { name: 'Angle degrees' }).element() as HTMLInputElement;
+    angle.value = '90';
+    angle.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+    expect(context.selection.scale).toEqual({ x: 2, y: 1 });
+    expect(context.selection.rotation).toBe(90);
+
+    await userEvent.click(page.getByRole('button', { name: 'Apply', exact: true }));
+    await expect.poll(() => context.history.undoStack.value.length).toBe(1);
+    expect(changeEvents).toBe(1);
+    expect(context.project.revision.value).toBe(1);
+  });
+
+  it('keeps the BaseSelectionTool pointer preview session-only before one Apply', async () => {
+    const { context } = createContext();
+    setActiveProjectContext(context);
+    const viewport = document.createElement('pf-canvas-viewport');
+    document.body.append(viewport);
+    await (viewport as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+    const tool = new MarqueeRectTool();
+    tool.setProjectContext(context);
+
+    const beforeRevision = context.project.revision.value;
+    context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    tool.onDown(0, 0, { shift: false, ctrl: false, alt: false, button: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(context.project.revision.value).toBe(beforeRevision);
+
+    if (context.selection.state.value.type === 'floating') {
+      expect(beginSelectionTransform(context)).toMatchObject({ ok: true });
+    }
+    context.selection.moveTransform(1, 0);
+    window.dispatchEvent(new CustomEvent('commit-transform', { detail: { context } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(context.history.undoStack.value).toHaveLength(1);
+    expect(context.project.revision.value).toBe(beforeRevision + 1);
+  });
+
+  it('commits only the initiating context through the real viewport listener', async () => {
+    const first = createContext();
+    const second = createContext();
+    setActiveProjectContext(first.context);
+    const firstViewport = document.createElement('pf-canvas-viewport');
+    document.body.append(firstViewport);
+    await (firstViewport as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+
+    setActiveProjectContext(second.context);
+    const secondViewport = document.createElement('pf-canvas-viewport');
+    document.body.append(secondViewport);
+    await (secondViewport as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+
+    first.context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    second.context.selection.setSelected({ x: 0, y: 0, width: 1, height: 1 }, 'rectangle');
+    expect(beginSelectionTransform(first.context)).toMatchObject({ ok: true });
+    expect(beginSelectionTransform(second.context)).toMatchObject({ ok: true });
+    first.context.selection.moveTransform(1, 0);
+    second.context.selection.moveTransform(1, 0);
+
+    window.dispatchEvent(new CustomEvent('commit-transform', { detail: { context: first.context } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(first.context.history.undoStack.value).toHaveLength(1);
+    expect(first.context.project.revision.value).toBe(1);
+    expect(second.context.history.undoStack.value).toHaveLength(0);
+    expect(second.context.project.revision.value).toBe(0);
+    expect(second.context.selection.state.value.type).toBe('transforming');
+  });
+
+  it('exposes bounded invalid width validation without mutating the preview', async () => {
+    const fixture = createContext();
+    const { context } = fixture;
+    const { bar } = await mountContextBar(context);
+    const width = page.getByRole('spinbutton', { name: 'Width' });
+    await userEvent.click(page.getByRole('button', { name: 'Transform selection' }));
+    await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+
+    const widthInput = width.element() as HTMLInputElement;
+    const beforeScale = context.selection.scale;
+    const beforeRevision = context.project.revision.value;
+    widthInput.value = '0';
+    widthInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    await (bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+
+    expect(widthInput.getAttribute('aria-invalid')).toBe('true');
+    const describedBy = widthInput.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect((bar as HTMLElement).shadowRoot?.getElementById(describedBy ?? '')).not.toBeNull();
+    expect(context.selection.scale).toEqual(beforeScale);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(context.project.revision.value).toBe(beforeRevision);
+  });
+
+  it('keeps unavailable begin errors bounded and visible in the context bar', async () => {
+    const { context } = createContext();
+    context.animation.getEditableCelCanvas = () => {
+      throw new Error('disposed target');
+    };
+    const mounted = await mountContextBar(context);
+
+    const trigger = page.getByRole('button', { name: 'Transform selection' }).element();
+    let uncaughtError: unknown = null;
+    const captureError = (event: ErrorEvent) => {
+      uncaughtError = event.error;
+      event.preventDefault();
+    };
+    window.addEventListener('error', captureError);
+    try {
+      trigger.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      window.removeEventListener('error', captureError);
+    }
+    expect(uncaughtError).toBeNull();
+    await (mounted.bar as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+    await expect.element(page.getByRole('status')).toHaveTextContent(/no longer available|could not be prepared|Transform failed/i);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(context.project.revision.value).toBe(0);
   });
 });

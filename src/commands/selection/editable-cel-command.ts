@@ -10,10 +10,14 @@ export abstract class EditableCelCommand<
   readonly id = crypto.randomUUID();
   readonly timestamp = Date.now();
 
+  protected readonly commandLayerId: string;
+  protected readonly commandFrameId: string;
   protected readonly canvas: HTMLCanvasElement;
   protected readonly context: Context;
 
   protected constructor(layerId: string, frameId: string, context: Context) {
+    this.commandLayerId = layerId;
+    this.commandFrameId = frameId;
     const canvas = context.animation.getEditableCelCanvas(layerId, frameId);
     if (!canvas) throw new Error('Editable cel canvas not found');
 

@@ -96,6 +96,7 @@ export function cloneSelectionState(state: SelectionState): SelectionState {
   }
 }
 
+// fallow-ignore-next-line complexity -- Existing restoration handles each public selection variant.
 export function restoreSelectionState(
   context: Pick<ProjectContext, 'selection'>,
   state: SelectionState,
@@ -124,6 +125,13 @@ export function restoreSelectionState(
                 colors: [...state.indexedPaste.paletteBeforeCommit.colors],
                 newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
               },
+            }
+          : undefined,
+        state.targetLayerId && state.targetFrameId
+          ? {
+              layerId: state.targetLayerId,
+              frameId: state.targetFrameId,
+              ...(state.targetCelId ? { celId: state.targetCelId } : {}),
             }
           : undefined,
       );
@@ -207,7 +215,7 @@ export class TransformSelectionCommand implements Command {
 
     const currentPixels = this.readPixels();
     const currentSelection = cloneSelectionState(this.context.selection.state.value);
-    const currentIndices = captureCurrentIndexEntries(this.context, this.canvas);
+    const currentIndices = captureSelectionTransformIndexEntries(this.context, this.canvas);
     try {
       this.applyPixels(this.afterPixels);
       this.applyIndices(this.afterIndices);
@@ -233,7 +241,7 @@ export class TransformSelectionCommand implements Command {
 
     const currentPixels = this.readPixels();
     const currentSelection = cloneSelectionState(this.context.selection.state.value);
-    const currentIndices = captureCurrentIndexEntries(this.context, this.canvas);
+    const currentIndices = captureSelectionTransformIndexEntries(this.context, this.canvas);
     try {
       this.applyPixels(this.beforePixels);
       restoreIndexEntries(this.context, this.beforeIndices);
@@ -271,7 +279,7 @@ export class TransformSelectionCommand implements Command {
   }
 
   private assertIndices(expected: readonly SelectionTransformIndexEntry[]): void {
-    const current = captureCurrentIndexEntries(this.context, this.canvas);
+    const current = captureSelectionTransformIndexEntries(this.context, this.canvas);
     if (current.length !== expected.length) {
       throw transformError('revision_conflict', true, { reason: 'index_buffer_changed' });
     }
@@ -339,7 +347,7 @@ function arraysEqual(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
   return true;
 }
 
-function captureCurrentIndexEntries(
+export function captureSelectionTransformIndexEntries(
   context: ProjectContext,
   canvas: HTMLCanvasElement,
 ): SelectionTransformIndexEntry[] {

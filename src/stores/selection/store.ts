@@ -10,6 +10,7 @@ import type {
   FloatingIndexedPaste,
   SelectionState,
   SelectionShape,
+  SelectionTargetIdentity,
 } from '../../types/selection';
 import type { Rect } from '../../types/geometry';
 import type { SelectionMode } from './types';
@@ -276,7 +277,8 @@ class SelectionStore {
     originalBounds: Rect,
     shape: SelectionShape,
     mask?: Uint8Array,
-    indexedPaste?: FloatingIndexedPaste
+    indexedPaste?: FloatingIndexedPaste,
+    target?: SelectionTargetIdentity,
   ) {
     this.state.value = {
       type: 'floating',
@@ -286,6 +288,9 @@ class SelectionStore {
       shape,
       mask,
       indexedPaste,
+      ...(target?.layerId ? { targetLayerId: target.layerId } : {}),
+      ...(target?.frameId ? { targetFrameId: target.frameId } : {}),
+      ...(target?.celId ? { targetCelId: target.celId } : {}),
     };
   }
 
@@ -682,6 +687,8 @@ class SelectionStore {
       currentOffset: { x: 0, y: 0 },
       shape: s.shape,
       mask: s.mask,
+      ...(s.targetLayerId ? { targetLayerId: s.targetLayerId } : {}),
+      ...(s.targetFrameId ? { targetFrameId: s.targetFrameId } : {}),
     };
   }
 
@@ -926,4 +933,5 @@ export function createSelectionStore() {
   return new SelectionStore();
 }
 
+// fallow-ignore-next-line unused-export -- Compatibility singleton retained for legacy selection-tool consumers.
 export const selectionStore = createSelectionStore();

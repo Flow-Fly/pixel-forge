@@ -215,6 +215,7 @@ export class PFContextBar extends BaseComponent {
   @state() private isCommitting = false;
   @state() private transformStatus = '';
   @state() private transformError = '';
+  @state() private transformValidationMessage = '';
   @state() private isCelScrubbing = false;
   @state() private lockAspectRatio = true;
   private celScrubStartX = 0;
@@ -250,7 +251,10 @@ export class PFContextBar extends BaseComponent {
 
     // Check if we have an active selection - show selection controls
     if (selectionState.type === 'selected') {
-      return this._renderSelectionControls(selectionState, context);
+      return html`
+        ${this._renderSelectionControls(selectionState, context)}
+        ${this._renderTransformOutcomeStatus()}
+      `;
     }
 
     const tool = toolStore.activeTool.value;
@@ -320,6 +324,8 @@ export class PFContextBar extends BaseComponent {
             id="transform-x"
             type="number"
             aria-label="X position"
+            aria-describedby="transform-status"
+            aria-invalid=${this.transformValidationMessage ? 'true' : 'false'}
             .value=${String(currentX)}
             @input=${(e: Event) => this._handlePositionInput(e, context, 'x')}
             @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
@@ -333,6 +339,8 @@ export class PFContextBar extends BaseComponent {
             id="transform-y"
             type="number"
             aria-label="Y position"
+            aria-describedby="transform-status"
+            aria-invalid=${this.transformValidationMessage ? 'true' : 'false'}
             .value=${String(currentY)}
             @input=${(e: Event) => this._handlePositionInput(e, context, 'y')}
             @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
@@ -342,10 +350,13 @@ export class PFContextBar extends BaseComponent {
 
         <!-- Scale controls -->
         <div class="angle-control">
-          <label>W:</label>
+          <label for="transform-width">W:</label>
           <input
+            id="transform-width"
             type="number"
             aria-label="Width"
+            aria-describedby="transform-status"
+            aria-invalid=${this.transformValidationMessage ? 'true' : 'false'}
             min="1"
             .value=${String(currentWidth)}
             @input=${(e: Event) => this._handleWidthInput(e, context)}
@@ -359,18 +370,21 @@ export class PFContextBar extends BaseComponent {
           class="toggle-btn ${this.lockAspectRatio ? 'active' : ''}"
           @click=${this._toggleAspectRatioLock}
           aria-pressed=${this.lockAspectRatio}
-          aria-label="Lock aspect ratio"
-          title="${this.lockAspectRatio ? 'Unlock aspect ratio' : 'Lock aspect ratio'}"
+          aria-label=${this.lockAspectRatio ? 'Lock aspect ratio' : 'Unlock aspect ratio'}
+          title="${this.lockAspectRatio ? 'Lock aspect ratio' : 'Unlock aspect ratio'}"
           style="padding: 2px 6px; font-size: 10px;"
         >
           ${this.lockAspectRatio ? '🔗' : '🔓'}
         </button>
 
         <div class="angle-control">
-          <label>H:</label>
+          <label for="transform-height">H:</label>
           <input
+            id="transform-height"
             type="number"
             aria-label="Height"
+            aria-describedby="transform-status"
+            aria-invalid=${this.transformValidationMessage ? 'true' : 'false'}
             min="1"
             .value=${String(currentHeight)}
             @input=${(e: Event) => this._handleHeightInput(e, context)}
@@ -388,10 +402,11 @@ export class PFContextBar extends BaseComponent {
 
         <!-- Rotation controls -->
         <div class="angle-control">
-          <label>Angle:</label>
+          <label for="transform-angle">Angle:</label>
           <input
             type="range"
             aria-label="Angle"
+            aria-describedby="transform-status"
             min="0"
             max="360"
             step="1"
@@ -401,6 +416,9 @@ export class PFContextBar extends BaseComponent {
           <input
             type="number"
             aria-label="Angle degrees"
+            id="transform-angle"
+            aria-describedby="transform-status"
+            aria-invalid=${this.transformValidationMessage ? 'true' : 'false'}
             min="0"
             max="360"
             .value=${String(Math.round(rotation))}
@@ -430,8 +448,8 @@ export class PFContextBar extends BaseComponent {
           Cancel
         </pf-button>
       </div>
-      <span class="transform-status" role="status" aria-live="polite">
-        ${this.transformError || this.transformStatus || `Position ${currentX}, ${currentY}; ${currentWidth} × ${currentHeight} px; angle ${Math.round(rotation)}°; width and height at least 1 px; angle 0 to 360 degrees; aspect ratio ${this.lockAspectRatio ? 'locked' : 'unlocked'}.`}
+      <span id="transform-status" class="transform-status" role="status" aria-live="polite">
+        ${this.transformError || this.transformValidationMessage || this.transformStatus || `Position ${currentX}, ${currentY}; ${currentWidth} × ${currentHeight} px; angle ${Math.round(rotation)}°; width and height at least 1 px; angle 0 to 360 degrees; aspect ratio ${this.lockAspectRatio ? 'locked' : 'unlocked'}.`}
       </span>
     `;
   }
@@ -442,15 +460,28 @@ export class PFContextBar extends BaseComponent {
         element instanceof HTMLElement && element.tagName === 'PF-BUTTON',
     );
     this.transformInitiator = initiator ?? null;
-    const result = beginSelectionTransform(context);
+    let result: ReturnType<typeof beginSelectionTransform>;
+    try {
+      result = beginSelectionTransform(context);
+    } catch {
+      this.transformError = 'Transform could not be prepared.';
+      this.transformStatus = '';
+      this.transformValidationMessage = '';
+      return;
+    }
     if (!result.ok) {
       this.transformError = result.error.message;
       this.transformStatus = '';
+      this.transformValidationMessage = '';
       return;
     }
     this.transformError = '';
     this.transformStatus = 'Transform preview active. Apply or cancel.';
+    this.transformValidationMessage = '';
     this.lockAspectRatio = true;
+    void this.updateComplete.then(() => {
+      this.shadowRoot?.querySelector<HTMLInputElement>('#transform-x')?.focus();
+    });
   }
 
   private _handlePositionInput(event: Event, context: ProjectContext, axis: 'x' | 'y') {
@@ -458,7 +489,11 @@ export class PFContextBar extends BaseComponent {
     if (!transformState) return;
     const input = event.target as HTMLInputElement;
     const value = Number.parseInt(input.value, 10);
-    if (!Number.isFinite(value)) return;
+    if (!Number.isSafeInteger(value)) {
+      this.transformValidationMessage = `${axis.toUpperCase()} position must be a whole number.`;
+      return;
+    }
+    this.transformValidationMessage = '';
     const current = transformState.originalBounds[axis] + transformState.currentOffset[axis];
     const delta = value - current;
     context.selection.moveTransform(axis === 'x' ? delta : 0, axis === 'y' ? delta : 0);
@@ -467,7 +502,8 @@ export class PFContextBar extends BaseComponent {
   private _handleWidthInput(e: Event, context: ProjectContext) {
     const selection = context.selection;
     const input = e.target as HTMLInputElement;
-    const newWidth = parseInt(input.value) || 1;
+    const newWidth = this._readTransformDimension(input.value, context, 'Width');
+    if (newWidth === null) return;
     const transformState = selection.getTransformState();
     if (!transformState) return;
 
@@ -484,7 +520,8 @@ export class PFContextBar extends BaseComponent {
   private _handleHeightInput(e: Event, context: ProjectContext) {
     const selection = context.selection;
     const input = e.target as HTMLInputElement;
-    const newHeight = parseInt(input.value) || 1;
+    const newHeight = this._readTransformDimension(input.value, context, 'Height');
+    if (newHeight === null) return;
     const transformState = selection.getTransformState();
     if (!transformState) return;
 
@@ -500,6 +537,25 @@ export class PFContextBar extends BaseComponent {
 
   private _toggleAspectRatioLock() {
     this.lockAspectRatio = !this.lockAspectRatio;
+  }
+
+  private _readTransformDimension(
+    rawValue: string,
+    context: ProjectContext,
+    label: 'Width' | 'Height',
+  ): number | null {
+    const value = Number(rawValue);
+    const maxDimension = Math.max(
+      1,
+      context.project.width.value,
+      context.project.height.value,
+    ) * 4;
+    if (!Number.isSafeInteger(value) || value < 1 || value > maxDimension) {
+      this.transformValidationMessage = `${label} must be a whole number from 1 to ${maxDimension} px.`;
+      return null;
+    }
+    this.transformValidationMessage = '';
+    return value;
   }
 
   private _handleTransformKeydown(e: KeyboardEvent, context: ProjectContext) {
@@ -520,9 +576,12 @@ export class PFContextBar extends BaseComponent {
 
   private _handleAngleInput(e: Event, context: ProjectContext) {
     const input = e.target as HTMLInputElement;
-    let angle = parseFloat(input.value) || 0;
-    // Clamp to valid range
-    angle = Math.max(0, Math.min(360, angle));
+    const angle = Number(input.value);
+    if (!Number.isFinite(angle) || angle < 0 || angle > 360) {
+      this.transformValidationMessage = 'Angle must be between 0 and 360 degrees.';
+      return;
+    }
+    this.transformValidationMessage = '';
     context.selection.updateRotation(angle);
   }
 
@@ -530,17 +589,30 @@ export class PFContextBar extends BaseComponent {
     if (this.isCommitting) return;
     this.isCommitting = true;
     this.transformError = '';
-    const result = await commitSelectionTransform(context);
-    this.isCommitting = false;
-    this._setTransformResult(result);
-    await this.updateComplete;
-    this._restoreTransformFocus();
+    try {
+      const result = await commitSelectionTransform(context);
+      this._setTransformResult(result);
+    } catch {
+      this.transformError = 'Transform failed. Your original pixels were restored.';
+      this.transformStatus = '';
+      this.transformValidationMessage = '';
+    } finally {
+      this.isCommitting = false;
+      await this.updateComplete;
+      this._restoreTransformFocus();
+    }
   }
 
   private _cancelTransform(context: ProjectContext) {
     if (this.isCommitting) return;
-    const result = cancelSelectionTransform(context);
-    this._setTransformResult(result);
+    try {
+      const result = cancelSelectionTransform(context);
+      this._setTransformResult(result);
+    } catch {
+      this.transformError = 'Transform could not be canceled.';
+      this.transformStatus = '';
+      this.transformValidationMessage = '';
+    }
     void this.updateComplete.then(() => this._restoreTransformFocus());
   }
 
@@ -548,10 +620,21 @@ export class PFContextBar extends BaseComponent {
     if (!result.ok) {
       this.transformError = result.error.message;
       this.transformStatus = '';
+      this.transformValidationMessage = '';
       return;
     }
     this.transformError = '';
+    this.transformValidationMessage = '';
     this.transformStatus = result.changed ? 'Transform applied.' : 'Transform canceled.';
+  }
+
+  private _renderTransformOutcomeStatus() {
+    if (!this.transformError && !this.transformStatus && !this.transformValidationMessage) return '';
+    return html`
+      <span id="transform-status" class="transform-status" role="status" aria-live="polite">
+        ${this.transformError || this.transformValidationMessage || this.transformStatus}
+      </span>
+    `;
   }
 
   private _restoreTransformFocus() {
