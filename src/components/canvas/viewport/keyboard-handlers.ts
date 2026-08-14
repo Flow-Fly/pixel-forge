@@ -19,6 +19,7 @@ export interface KeyboardHandlerCallbacks {
   getClientWidth: () => number;
   getClientHeight: () => number;
   commitTransform: () => void;
+  cancelTransform?: () => void;
   setDragging: (value: boolean) => void;
   getDragging: () => boolean;
 }
@@ -37,6 +38,7 @@ export function createKeyboardState(): KeyboardState {
 /**
  * Handle keydown events.
  */
+// fallow-ignore-next-line complexity -- Native keyboard movement and transform cancellation share one ordered event boundary.
 export function handleKeyDown(
   e: KeyboardEvent,
   state: KeyboardState,
@@ -102,7 +104,11 @@ export function handleKeyDown(
       callbacks.commitTransform();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      selection.cancelTransform();
+      if (callbacks.cancelTransform) {
+        callbacks.cancelTransform();
+      } else {
+        selection.cancelTransform();
+      }
     }
   }
 }

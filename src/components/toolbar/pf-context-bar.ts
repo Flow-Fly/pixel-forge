@@ -8,6 +8,12 @@ import { getToolMeta } from '../../tools/tool-registry';
 import { LinkCelsCommand, UnlinkCelsCommand } from '../../commands/animation-commands';
 import { SetCelOpacityCommand } from '../../commands/cel-opacity-command';
 import { FlipSelectionCommand } from '../../commands/selection-commands';
+import {
+  beginSelectionTransform,
+  cancelSelectionTransform,
+  commitSelectionTransform,
+  type SelectionTransformResult,
+} from '../../services/selection-transform-commit';
 import type { ToolOption } from '../../types/tool-meta';
 import './options/pf-option-slider';
 import './options/pf-option-checkbox';
@@ -80,6 +86,15 @@ export class PFContextBar extends BaseComponent {
       align-items: center;
       gap: var(--pf-spacing-2);
       flex: 1;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .transform-status {
+      color: var(--pf-color-text-muted);
+      font-size: 11px;
+      text-transform: none;
+      white-space: nowrap;
     }
 
     .angle-control {
@@ -198,6 +213,8 @@ export class PFContextBar extends BaseComponent {
   `;
 
   @state() private isCommitting = false;
+  @state() private transformStatus = '';
+  @state() private transformError = '';
   @state() private isCelScrubbing = false;
   @state() private lockAspectRatio = true;
   private celScrubStartX = 0;
@@ -206,6 +223,7 @@ export class PFContextBar extends BaseComponent {
   private celScrubContext: ProjectContext | null = null;
   private celScrubSelectedKeys: string[] = [];
   private context: ProjectContext = defaultProjectContext;
+  private transformInitiator: HTMLElement | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -276,6 +294,7 @@ export class PFContextBar extends BaseComponent {
     `;
   }
 
+  // fallow-ignore-next-line complexity -- The context bar keeps all labelled transform values and validation controls together.
   private _renderTransformControls(context: ProjectContext) {
     const selection = context.selection;
     const rotation = selection.rotation;
@@ -285,19 +304,48 @@ export class PFContextBar extends BaseComponent {
     // Calculate current dimensions
     const originalWidth = transformState?.originalBounds.width ?? 0;
     const originalHeight = transformState?.originalBounds.height ?? 0;
-    const currentWidth = Math.round(originalWidth * scale.x);
-    const currentHeight = Math.round(originalHeight * scale.y);
+    const currentWidth = Math.round(transformState?.currentBounds.width ?? originalWidth * scale.x);
+    const currentHeight = Math.round(transformState?.currentBounds.height ?? originalHeight * scale.y);
+    const currentX = Math.round((transformState?.originalBounds.x ?? 0) + (transformState?.currentOffset.x ?? 0));
+    const currentY = Math.round((transformState?.originalBounds.y ?? 0) + (transformState?.currentOffset.y ?? 0));
 
     return html`
-      <span class="tool-name">Transform Selection</span>
+      <span class="tool-name">Transform selection</span>
       <div class="separator"></div>
 
       <div class="transform-section">
+        <div class="angle-control">
+          <label for="transform-x">X:</label>
+          <input
+            id="transform-x"
+            type="number"
+            aria-label="X position"
+            .value=${String(currentX)}
+            @input=${(e: Event) => this._handlePositionInput(e, context, 'x')}
+            @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
+          />
+          <span style="color: var(--pf-color-text-muted); font-size: 11px;">px</span>
+        </div>
+
+        <div class="angle-control">
+          <label for="transform-y">Y:</label>
+          <input
+            id="transform-y"
+            type="number"
+            aria-label="Y position"
+            .value=${String(currentY)}
+            @input=${(e: Event) => this._handlePositionInput(e, context, 'y')}
+            @keydown=${(e: KeyboardEvent) => this._handleTransformKeydown(e, context)}
+          />
+          <span style="color: var(--pf-color-text-muted); font-size: 11px;">px</span>
+        </div>
+
         <!-- Scale controls -->
         <div class="angle-control">
           <label>W:</label>
           <input
             type="number"
+            aria-label="Width"
             min="1"
             .value=${String(currentWidth)}
             @input=${(e: Event) => this._handleWidthInput(e, context)}
@@ -310,6 +358,8 @@ export class PFContextBar extends BaseComponent {
         <button
           class="toggle-btn ${this.lockAspectRatio ? 'active' : ''}"
           @click=${this._toggleAspectRatioLock}
+          aria-pressed=${this.lockAspectRatio}
+          aria-label="Lock aspect ratio"
           title="${this.lockAspectRatio ? 'Unlock aspect ratio' : 'Lock aspect ratio'}"
           style="padding: 2px 6px; font-size: 10px;"
         >
@@ -320,6 +370,7 @@ export class PFContextBar extends BaseComponent {
           <label>H:</label>
           <input
             type="number"
+            aria-label="Height"
             min="1"
             .value=${String(currentHeight)}
             @input=${(e: Event) => this._handleHeightInput(e, context)}
@@ -340,6 +391,7 @@ export class PFContextBar extends BaseComponent {
           <label>Angle:</label>
           <input
             type="range"
+            aria-label="Angle"
             min="0"
             max="360"
             step="1"
@@ -348,6 +400,7 @@ export class PFContextBar extends BaseComponent {
           />
           <input
             type="number"
+            aria-label="Angle degrees"
             min="0"
             max="360"
             .value=${String(Math.round(rotation))}
@@ -363,6 +416,7 @@ export class PFContextBar extends BaseComponent {
           variant="primary"
           @click=${() => this._commitTransform(context)}
           ?disabled=${this.isCommitting}
+          aria-label="Apply transform"
           title="Apply transform (Enter)"
         >
           ${this.isCommitting ? 'Applying...' : 'Apply'}
@@ -370,12 +424,44 @@ export class PFContextBar extends BaseComponent {
         <pf-button
           @click=${() => this._cancelTransform(context)}
           ?disabled=${this.isCommitting}
+          aria-label="Cancel transform"
           title="Cancel transform (Escape)"
         >
           Cancel
         </pf-button>
       </div>
+      <span class="transform-status" role="status" aria-live="polite">
+        ${this.transformError || this.transformStatus || `Position ${currentX}, ${currentY}; ${currentWidth} × ${currentHeight} px; angle ${Math.round(rotation)}°; width and height at least 1 px; angle 0 to 360 degrees; aspect ratio ${this.lockAspectRatio ? 'locked' : 'unlocked'}.`}
+      </span>
     `;
+  }
+
+  private _beginTransform(context: ProjectContext, event: Event) {
+    const initiator = event.composedPath().find(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && element.tagName === 'PF-BUTTON',
+    );
+    this.transformInitiator = initiator ?? null;
+    const result = beginSelectionTransform(context);
+    if (!result.ok) {
+      this.transformError = result.error.message;
+      this.transformStatus = '';
+      return;
+    }
+    this.transformError = '';
+    this.transformStatus = 'Transform preview active. Apply or cancel.';
+    this.lockAspectRatio = true;
+  }
+
+  private _handlePositionInput(event: Event, context: ProjectContext, axis: 'x' | 'y') {
+    const transformState = context.selection.getTransformState();
+    if (!transformState) return;
+    const input = event.target as HTMLInputElement;
+    const value = Number.parseInt(input.value, 10);
+    if (!Number.isFinite(value)) return;
+    const current = transformState.originalBounds[axis] + transformState.currentOffset[axis];
+    const delta = value - current;
+    context.selection.moveTransform(axis === 'x' ? delta : 0, axis === 'y' ? delta : 0);
   }
 
   private _handleWidthInput(e: Event, context: ProjectContext) {
@@ -440,23 +526,44 @@ export class PFContextBar extends BaseComponent {
     context.selection.updateRotation(angle);
   }
 
-  private _commitTransform(context: ProjectContext) {
+  private async _commitTransform(context: ProjectContext) {
     if (this.isCommitting) return;
-
-    // Dispatch event for viewport to handle the commit
-    // The viewport has access to the canvas and can perform the rotation
-    this.dispatchEvent(
-      new CustomEvent('commit-transform', {
-        bubbles: true,
-        composed: true,
-        detail: { context },
-      })
-    );
+    this.isCommitting = true;
+    this.transformError = '';
+    const result = await commitSelectionTransform(context);
+    this.isCommitting = false;
+    this._setTransformResult(result);
+    await this.updateComplete;
+    this._restoreTransformFocus();
   }
 
   private _cancelTransform(context: ProjectContext) {
     if (this.isCommitting) return;
-    context.selection.cancelTransform();
+    const result = cancelSelectionTransform(context);
+    this._setTransformResult(result);
+    void this.updateComplete.then(() => this._restoreTransformFocus());
+  }
+
+  private _setTransformResult(result: SelectionTransformResult) {
+    if (!result.ok) {
+      this.transformError = result.error.message;
+      this.transformStatus = '';
+      return;
+    }
+    this.transformError = '';
+    this.transformStatus = result.changed ? 'Transform applied.' : 'Transform canceled.';
+  }
+
+  private _restoreTransformFocus() {
+    if (this.transformInitiator?.isConnected) {
+      const button = this.transformInitiator.shadowRoot?.querySelector('button');
+      (button ?? this.transformInitiator).focus();
+      return;
+    }
+    const activeTab = document.querySelector<HTMLElement>(
+      'pf-project-tabs [role="tab"][aria-selected="true"], pf-project-tabs button[aria-current="page"]',
+    );
+    activeTab?.focus();
   }
 
   private _renderSelectionControls(
@@ -479,6 +586,13 @@ export class PFContextBar extends BaseComponent {
           ${bounds.width} × ${bounds.height} px
         </span>
         <div class="separator"></div>
+        <pf-button
+          @click=${(event: Event) => this._beginTransform(context, event)}
+          aria-label="Transform selection"
+          title="Transform selection"
+        >
+          Transform selection
+        </pf-button>
         <pf-button
           @click=${() => this._flipSelection('horizontal', context)}
           title="Flip selection horizontally"

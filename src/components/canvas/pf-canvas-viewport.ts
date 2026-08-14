@@ -36,6 +36,7 @@ import {
   handleResizeStart,
   handleRotationEnd,
   commitTransform,
+  cancelTransform,
   type KeyboardState,
   type PanState,
 } from './viewport';
@@ -217,6 +218,7 @@ export class PFCanvasViewport extends BaseComponent {
     getClientWidth: () => this.clientWidth,
     getClientHeight: () => this.clientHeight,
     commitTransform: () => commitTransform(this.context),
+    cancelTransform: () => cancelTransform(this.context),
     setDragging: (value: boolean) => {
       this.panState.isDragging = value;
     },
