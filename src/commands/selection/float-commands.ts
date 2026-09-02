@@ -69,7 +69,8 @@ function restoreFloatingSelection(
   bounds: Rect,
   shape: SelectionShape,
   mask?: Uint8Array,
-  indexedPaste?: FloatingIndexedPaste
+  indexedPaste?: FloatingIndexedPaste,
+  target?: { layerId: string; frameId: string; celId?: string },
 ): void {
   context.selection.setFloating(
     imageData,
@@ -81,7 +82,8 @@ function restoreFloatingSelection(
     },
     shape,
     mask,
-    indexedPaste
+    indexedPaste,
+    target
   );
 }
 
@@ -93,11 +95,12 @@ function restoreCommittedFloat(
   destinationBounds: Rect,
   shape: SelectionShape,
   mask?: Uint8Array,
-  indexedPaste?: FloatingIndexedPaste
+  indexedPaste?: FloatingIndexedPaste,
+  target?: { layerId: string; frameId: string; celId?: string },
 ): void {
   const ctx = canvas.getContext('2d')!;
   ctx.putImageData(overwrittenImageData, destinationBounds.x, destinationBounds.y);
-  restoreFloatingSelection(context, floatingImageData, destinationBounds, shape, mask, indexedPaste);
+  restoreFloatingSelection(context, floatingImageData, destinationBounds, shape, mask, indexedPaste, target);
 }
 
 /**
@@ -168,7 +171,12 @@ export class CutToFloatCommand extends SelectionRegionCommand implements Command
       this.trimmedImageData,
       this.trimmedBounds,
       this.shape,
-      this.trimmedMask
+      this.trimmedMask,
+      undefined,
+      {
+        layerId: this.commandLayerId,
+        frameId: this.commandFrameId,
+      },
     );
   }
 
@@ -247,7 +255,12 @@ export class CommitFloatCommand extends EditableCelCommand implements Command {
       this.floatingImageData,
       this.destinationBounds,
       this.shape,
-      this.mask
+      this.mask,
+      undefined,
+      {
+        layerId: this.commandLayerId,
+        frameId: this.commandFrameId,
+      },
     );
     // Reset offset to 0 since we're now at destination
   }
@@ -353,7 +366,11 @@ export class CommitIndexedFloatCommand
       this.destinationBounds,
       this.shape,
       this.mask,
-      this.indexedPaste
+      this.indexedPaste,
+      {
+        layerId: this.layerId,
+        frameId: this.frameId,
+      },
     );
   }
 

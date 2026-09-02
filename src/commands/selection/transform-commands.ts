@@ -1,8 +1,9 @@
 import { type Command } from '../../stores/history';
-import { getActiveProjectContext } from '../../stores/project-context';
+import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
+import type { ProjectChangeEvent } from '../../stores/project-store';
 import { type Rect } from '../../types/geometry';
-import { type SelectionShape } from '../../types/selection';
-import { flipSelectedPixels, pasteImageDataWithAlpha } from './pixels';
+import { type SelectionShape, type SelectionState } from '../../types/selection';
+import { flipSelectedPixels } from './pixels';
 import { EditableCelCommand, type EditableCelCommandContext } from './editable-cel-command';
 
 /**
@@ -14,126 +15,383 @@ import { EditableCelCommand, type EditableCelCommandContext } from './editable-c
  * selection store. The transform calculation happens before the command
  * is created (to support async web worker processing).
  */
-export class TransformSelectionCommand extends EditableCelCommand implements Command {
-  name: string;
+export interface SelectionTransformIndexEntry {
+  readonly key: string;
+  readonly buffer?: Uint8Array;
+  readonly bytes?: Uint8Array;
+}
+
+export interface PreparedSelectionTransform {
+  readonly context: ProjectContext;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId: string;
+  readonly canvas: HTMLCanvasElement;
+  readonly beforePixels: ImageData;
+  readonly initialPixels: ImageData;
+  readonly afterPixels: ImageData;
+  readonly beforeIndices: readonly SelectionTransformIndexEntry[];
+  readonly afterIndices: Uint8Array;
+  readonly beforeSelection: SelectionState;
+}
+
+export function cloneImageData(imageData: ImageData): ImageData {
+  const data = new Uint8ClampedArray(imageData.data);
+  if (typeof ImageData === 'function') {
+    return new ImageData(data, imageData.width, imageData.height);
+  }
+  return {
+    data,
+    width: imageData.width,
+    height: imageData.height,
+    colorSpace: 'srgb',
+  } as ImageData;
+}
+
+export function cloneSelectionState(state: SelectionState): SelectionState {
+  switch (state.type) {
+    case 'none':
+      return { type: 'none' };
+    case 'selecting':
+      return {
+        ...state,
+        startPoint: { ...state.startPoint },
+        currentBounds: { ...state.currentBounds },
+        previewPath: state.previewPath?.map((point) => ({ ...point })),
+      };
+    case 'selected':
+      return {
+        ...state,
+        bounds: { ...state.bounds },
+        ...(state.shape === 'freeform' ? { mask: new Uint8Array(state.mask) } : {}),
+      };
+    case 'floating':
+      return {
+        ...state,
+        imageData: cloneImageData(state.imageData),
+        originalBounds: { ...state.originalBounds },
+        currentOffset: { ...state.currentOffset },
+        mask: state.mask ? new Uint8Array(state.mask) : undefined,
+        indexedPaste: state.indexedPaste
+          ? {
+              remappedIndexData: new Uint8Array(state.indexedPaste.remappedIndexData),
+              paletteBeforeCommit: {
+                colors: [...state.indexedPaste.paletteBeforeCommit.colors],
+                newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
+              },
+            }
+          : undefined,
+      };
+    case 'transforming':
+      return {
+        ...state,
+        imageData: cloneImageData(state.imageData),
+        originalBounds: { ...state.originalBounds },
+        currentBounds: { ...state.currentBounds },
+        currentOffset: { ...state.currentOffset },
+        scale: { ...state.scale },
+        previewData: state.previewData ? cloneImageData(state.previewData) : null,
+        mask: state.mask ? new Uint8Array(state.mask) : undefined,
+      };
+  }
+}
+
+// fallow-ignore-next-line complexity -- Existing restoration handles each public selection variant.
+export function restoreSelectionState(
+  context: Pick<ProjectContext, 'selection'>,
+  state: SelectionState,
+): void {
+  switch (state.type) {
+    case 'none':
+      context.selection.clearAfterTransform();
+      return;
+    case 'selected':
+      context.selection.setSelected(
+        { ...state.bounds },
+        state.shape,
+        state.shape === 'freeform' ? new Uint8Array(state.mask) : undefined,
+      );
+      return;
+    case 'floating':
+      context.selection.setFloating(
+        cloneImageData(state.imageData),
+        { ...state.originalBounds },
+        state.shape,
+        state.mask ? new Uint8Array(state.mask) : undefined,
+        state.indexedPaste
+          ? {
+              remappedIndexData: new Uint8Array(state.indexedPaste.remappedIndexData),
+              paletteBeforeCommit: {
+                colors: [...state.indexedPaste.paletteBeforeCommit.colors],
+                newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
+              },
+            }
+          : undefined,
+        state.targetLayerId && state.targetFrameId
+          ? {
+              layerId: state.targetLayerId,
+              frameId: state.targetFrameId,
+              ...(state.targetCelId ? { celId: state.targetCelId } : {}),
+            }
+          : undefined,
+      );
+      context.selection.moveFloat(state.currentOffset.x, state.currentOffset.y);
+      return;
+    case 'transforming':
+      context.selection.startTransform(
+        cloneImageData(state.imageData),
+        { ...state.originalBounds },
+        state.shape,
+        state.mask ? new Uint8Array(state.mask) : undefined,
+        state.targetLayerId,
+        state.targetFrameId,
+      );
+      context.selection.moveTransform(state.currentOffset.x, state.currentOffset.y);
+      if (state.scale.x !== 1 || state.scale.y !== 1) {
+        context.selection.updateScale(state.scale.x, state.scale.y);
+      }
+      if (state.rotation !== 0) {
+        context.selection.updateRotation(state.rotation);
+      }
+      return;
+  }
+}
+
+export class TransformSelectionCommand implements Command {
+  readonly id = crypto.randomUUID();
+  readonly name = 'Transform Selection';
+  // The history store reads this flag through the Command contract to keep the
+  // one atomic apply transition from advancing the revision twice.
+  // fallow-ignore-next-line unused-class-member -- Read by HistoryStore through Command.
+  readonly managesProjectRevision = true;
+  readonly memorySize: number;
+
+  private readonly context: ProjectContext;
   private readonly layerId: string;
   private readonly frameId: string;
+  private readonly celId: string;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly beforePixels: ImageData;
+  private readonly initialPixels: ImageData;
+  private readonly afterPixels: ImageData;
+  private readonly beforeIndices: readonly SelectionTransformIndexEntry[];
+  private readonly afterIndices: Uint8Array;
+  private readonly beforeSelection: SelectionState;
+  private applied = false;
+  private hasExecuted = false;
+  private afterIndexBuffer: Uint8Array | null = null;
+  private _lastEvent: ProjectChangeEvent | null = null;
 
-  // Original state (for undo)
-  private originalImageData: ImageData;
-  private originalBounds: Rect;
-  private originalShape: SelectionShape;
-  private originalMask?: Uint8Array;
+  constructor(prepared: PreparedSelectionTransform) {
+    this.context = prepared.context;
+    this.layerId = prepared.layerId;
+    this.frameId = prepared.frameId;
+    this.celId = prepared.celId;
+    this.canvas = prepared.canvas;
+    this.beforePixels = cloneImageData(prepared.beforePixels);
+    this.initialPixels = cloneImageData(prepared.initialPixels);
+    this.afterPixels = cloneImageData(prepared.afterPixels);
+    this.beforeIndices = prepared.beforeIndices.map((entry) => ({
+      key: entry.key,
+      buffer: entry.buffer,
+      bytes: entry.bytes ? new Uint8Array(entry.bytes) : undefined,
+    }));
+    this.afterIndices = new Uint8Array(prepared.afterIndices);
+    this.beforeSelection = cloneSelectionState(prepared.beforeSelection);
+    this.memorySize = this.beforePixels.data.byteLength + this.afterPixels.data.byteLength +
+      this.afterIndices.byteLength + 256;
+  }
 
-  // Final state (after transform)
-  private transformedImageData: ImageData;
-  private rotation: number;
-  private scale: { x: number; y: number };
+  get lastEvent() {
+    return this._lastEvent;
+  }
 
-  // Actual destination position (calculated from transformed image dimensions)
-  private actualDestX: number;
-  private actualDestY: number;
+  execute(): void {
+    if (this.applied) throw transformError('invalid_state', false, { reason: 'already_applied' });
+    this.assertTarget();
+    this.assertCel();
+    this.assertPixels(this.hasExecuted ? this.beforePixels : this.initialPixels);
+    this.assertIndices(this.beforeIndices);
 
-  // For proper undo/redo: what was at the destination before pasting
-  private overwrittenAtDestination: ImageData;
+    const currentPixels = this.readPixels();
+    const currentSelection = cloneSelectionState(this.context.selection.state.value);
+    const currentIndices = captureSelectionTransformIndexEntries(this.context, this.canvas);
+    try {
+      this.applyPixels(this.afterPixels);
+      this.applyIndices(this.afterIndices);
+      this.context.selection.clearAfterTransform();
+      this._lastEvent = this.context.project.commitChange(this.id, ['raster-content']);
+      this.context.dirtyRect?.requestFullRedraw();
+      this.hasExecuted = true;
+      this.applied = true;
+    } catch (error) {
+      this.restorePixels(currentPixels);
+      restoreIndexEntries(this.context, currentIndices);
+      restoreSelectionState(this.context, currentSelection);
+      throw error;
+    }
+  }
 
-  constructor(
-    layerId: string,
-    frameId: string,
-    originalImageData: ImageData,
-    originalBounds: Rect,
-    transformedImageData: ImageData,
-    _transformedBounds: Rect,
-    rotation: number,
-    scale: { x: number; y: number },
-    shape: SelectionShape,
-    originalMask?: Uint8Array,
-    offset: { x: number; y: number } = { x: 0, y: 0 },
-    context: EditableCelCommandContext = getActiveProjectContext()
-  ) {
-    super(layerId, frameId, context);
-    this.layerId = layerId;
-    this.frameId = frameId;
+  undo(): void {
+    if (!this.applied) throw transformError('invalid_state', false, { reason: 'not_applied' });
+    this.assertTarget();
+    this.assertCel();
+    this.assertPixels(this.afterPixels);
+    this.assertIndicesForBuffer(this.afterIndices);
 
-    // Generate descriptive name based on what changed
-    const hasScale = scale.x !== 1 || scale.y !== 1;
-    const hasRotation = rotation !== 0;
-    if (hasScale && hasRotation) {
-      this.name = 'Transform Selection';
-    } else if (hasScale) {
-      this.name = 'Scale Selection';
-    } else if (hasRotation) {
-      this.name = 'Rotate Selection';
+    const currentPixels = this.readPixels();
+    const currentSelection = cloneSelectionState(this.context.selection.state.value);
+    const currentIndices = captureSelectionTransformIndexEntries(this.context, this.canvas);
+    try {
+      this.applyPixels(this.beforePixels);
+      restoreIndexEntries(this.context, this.beforeIndices);
+      restoreSelectionState(this.context, this.beforeSelection);
+      this._lastEvent = this.context.project.commitChange(this.id, ['raster-content']);
+      this.context.dirtyRect?.requestFullRedraw();
+      this.applied = false;
+    } catch (error) {
+      this.restorePixels(currentPixels);
+      restoreIndexEntries(this.context, currentIndices);
+      restoreSelectionState(this.context, currentSelection);
+      throw error;
+    }
+  }
+
+  private assertTarget(): void {
+    if (this.context.isDisposed || this.context.project.id.value.length === 0) {
+      throw transformError('target_not_found', true);
+    }
+  }
+
+  private assertCel(): void {
+    const editableCanvas = this.context.animation.getEditableCelCanvas(this.layerId, this.frameId);
+    const key = this.context.animation.getCelKey(this.layerId, this.frameId);
+    const cel = this.context.animation.cels.value.get(key);
+    if (!editableCanvas || !cel || cel.id !== this.celId || cel.canvas !== this.canvas || editableCanvas !== this.canvas) {
+      throw transformError('revision_conflict', true, { reason: 'cel_changed' });
+    }
+  }
+
+  private assertPixels(expected: ImageData): void {
+    if (!arraysEqual(this.readPixels().data, expected.data)) {
+      throw transformError('revision_conflict', true, { reason: 'pixels_changed' });
+    }
+  }
+
+  private assertIndices(expected: readonly SelectionTransformIndexEntry[]): void {
+    const current = captureSelectionTransformIndexEntries(this.context, this.canvas);
+    if (current.length !== expected.length) {
+      throw transformError('revision_conflict', true, { reason: 'index_buffer_changed' });
+    }
+    for (const entry of expected) {
+      const actual = current.find((candidate) => candidate.key === entry.key);
+      if (!actual || !arraysEqual(actual.bytes ?? new Uint8Array(), entry.bytes ?? new Uint8Array())) {
+        throw transformError('revision_conflict', true, { reason: 'index_buffer_changed' });
+      }
+    }
+  }
+
+  private assertIndicesForBuffer(expected: Uint8Array): void {
+    const key = this.context.animation.getCelKey(this.layerId, this.frameId);
+    const buffer = this.context.animation.cels.value.get(key)?.indexBuffer;
+    if (!buffer || !arraysEqual(buffer, expected)) {
+      throw transformError('revision_conflict', true, { reason: 'index_buffer_changed' });
+    }
+  }
+
+  private readPixels(): ImageData {
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) throw transformError('invalid_state', true, { reason: 'canvas_context' });
+    return ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  private applyPixels(imageData: ImageData): void {
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) throw transformError('invalid_state', true, { reason: 'canvas_context' });
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  private restorePixels(imageData: ImageData): void {
+    try {
+      this.applyPixels(imageData);
+    } catch {
+      // Preserve the original bounded failure.
+    }
+  }
+
+  private applyIndices(indices: Uint8Array): void {
+    const current = new Map(this.context.animation.cels.value);
+    const affected = this.beforeIndices.map((entry) => entry.key);
+    const key = this.context.animation.getCelKey(this.layerId, this.frameId);
+    if (!affected.includes(key)) affected.push(key);
+
+    if (!this.afterIndexBuffer) {
+      const reusable = this.beforeIndices.find((entry) => entry.buffer)?.buffer;
+      this.afterIndexBuffer = reusable ?? new Uint8Array(indices);
+    }
+    this.afterIndexBuffer.set(indices);
+
+    for (const celKey of affected) {
+      const cel = current.get(celKey);
+      if (cel) current.set(celKey, { ...cel, indexBuffer: this.afterIndexBuffer });
+    }
+    this.context.animation.cels.value = current;
+  }
+}
+
+function arraysEqual(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
+}
+
+export function captureSelectionTransformIndexEntries(
+  context: ProjectContext,
+  canvas: HTMLCanvasElement,
+): SelectionTransformIndexEntry[] {
+  const entries: SelectionTransformIndexEntry[] = [];
+  for (const [key, cel] of context.animation.cels.value) {
+    if (cel.canvas !== canvas) continue;
+    entries.push({
+      key,
+      buffer: cel.indexBuffer,
+      bytes: cel.indexBuffer ? new Uint8Array(cel.indexBuffer) : undefined,
+    });
+  }
+  return entries;
+}
+
+function restoreIndexEntries(
+  context: ProjectContext,
+  entries: readonly SelectionTransformIndexEntry[],
+): void {
+  const cels = new Map(context.animation.cels.value);
+  for (const entry of entries) {
+    const cel = cels.get(entry.key);
+    if (!cel) continue;
+    if (entry.buffer) {
+      entry.buffer.set(entry.bytes ?? []);
+      cels.set(entry.key, { ...cel, indexBuffer: entry.buffer });
     } else {
-      this.name = 'Move Selection';
-    }
-
-    // Store original state
-    this.originalImageData = originalImageData;
-    this.originalBounds = { ...originalBounds };
-    this.originalShape = shape;
-    this.originalMask = originalMask;
-
-    // Store transformed state
-    this.transformedImageData = transformedImageData;
-    this.rotation = rotation;
-    this.scale = { ...scale };
-
-    // Calculate actual destination position (including offset from movement during transform)
-    // IMPORTANT: Use originalBounds center + offset, not transformedBounds (which has preview dimensions)
-    // Both preview (nearest-neighbor) and RotSprite may produce slightly different dimensions
-    // due to rounding, but both should be centered on the same original center point.
-    const originalCenterX = originalBounds.x + offset.x + originalBounds.width / 2;
-    const originalCenterY = originalBounds.y + offset.y + originalBounds.height / 2;
-    this.actualDestX = Math.round(originalCenterX - transformedImageData.width / 2);
-    this.actualDestY = Math.round(originalCenterY - transformedImageData.height / 2);
-
-    // Capture what's at the actual destination before we paste
-    const ctx = this.canvas.getContext('2d')!;
-    this.overwrittenAtDestination = ctx.getImageData(
-      this.actualDestX,
-      this.actualDestY,
-      transformedImageData.width,
-      transformedImageData.height
-    );
-  }
-
-  execute() {
-    const ctx = this.canvas.getContext('2d')!;
-
-    // Note: The original location was already cleared when we cut to floating state
-    // So we just need to paste the transformed pixels at the new location
-
-    pasteImageDataWithAlpha(ctx, this.transformedImageData, this.actualDestX, this.actualDestY);
-
-    // Clear selection state
-    this.context.selection.clearAfterTransform();
-  }
-
-  undo() {
-    const ctx = this.canvas.getContext('2d')!;
-
-    // Restore what was at the actual destination
-    ctx.putImageData(this.overwrittenAtDestination, this.actualDestX, this.actualDestY);
-
-    // Restore to transforming state with original data
-    this.context.selection.startTransform(
-      this.originalImageData,
-      this.originalBounds,
-      this.originalShape,
-      this.originalMask,
-      this.layerId,
-      this.frameId
-    );
-
-    // Re-apply the transforms for preview
-    if (this.scale.x !== 1 || this.scale.y !== 1) {
-      this.context.selection.updateScale(this.scale.x, this.scale.y);
-    }
-    if (this.rotation !== 0) {
-      this.context.selection.updateRotation(this.rotation);
+      const { indexBuffer: _indexBuffer, ...withoutIndexBuffer } = cel;
+      cels.set(entry.key, withoutIndexBuffer);
     }
   }
+  context.animation.cels.value = cels;
+}
+
+function transformError(
+  code: 'invalid_request' | 'target_not_found' | 'revision_conflict' | 'invalid_state' | 'limit_exceeded' | 'unsupported' | 'internal',
+  retryable: boolean,
+  details?: Readonly<Record<string, string | number>>,
+) {
+  const error = new Error(code) as Error & {
+    editorError: { code: typeof code; retryable: boolean; details?: Readonly<Record<string, string | number>> };
+  };
+  error.editorError = { code, retryable, ...(details ? { details } : {}) };
+  return error;
 }
 
 /**

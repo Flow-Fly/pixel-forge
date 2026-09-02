@@ -9,6 +9,7 @@ import {
 } from '../../utils/mask-utils';
 import { CutToFloatCommand, CommitFloatCommand } from '../../commands/selection-commands';
 import { isPaintableLayer } from '../../utils/layer-capabilities';
+import { beginSelectionTransform } from '../../services/selection-transform-commit';
 
 /**
  * Shared behavior for selection tools (marquee, lasso, polygonal lasso,
@@ -162,9 +163,11 @@ export abstract class BaseSelectionTool extends BaseTool {
   protected startDragging(x: number, y: number) {
     const state = this.projectContext.selection.state.value;
 
-    // If selected (not floating or transforming), cut to float first
+    // Start the session-only transform before moving a selected region. This
+    // keeps pointer preview aligned with the keyboard transform transaction.
     if (state.type === 'selected') {
-      this.cutToFloat();
+      const started = beginSelectionTransform(this.projectContext);
+      if (!started.ok) return;
     }
 
     // For floating and transforming states, just start dragging
@@ -173,6 +176,10 @@ export abstract class BaseSelectionTool extends BaseTool {
     this.lastDragY = y;
   }
 
+  /**
+   * Preserve the explicit cut helper for non-pointer callers. Pointer starts
+   * use beginSelectionTransform above so their preview remains session-only.
+   */
   protected cutToFloat() {
     const selected = getSelectedLayerSelection(this.projectContext);
     if (!selected) return;
@@ -183,9 +190,8 @@ export abstract class BaseSelectionTool extends BaseTool {
       selected.bounds,
       selected.shape,
       selected.mask,
-      this.projectContext
+      this.projectContext,
     );
-
     this.projectContext.history.execute(command);
   }
 
@@ -194,7 +200,9 @@ export abstract class BaseSelectionTool extends BaseTool {
     if (state.type !== 'transforming') return false;
 
     // Dispatch event to trigger commit in viewport
-    window.dispatchEvent(new CustomEvent('commit-transform'));
+    window.dispatchEvent(new CustomEvent('commit-transform', {
+      detail: { context: this.projectContext },
+    }));
     return true;
   }
 

@@ -42,4 +42,5 @@ export {
   handleRotationEnd,
   handleResizeStart,
   commitTransform,
+  cancelTransform,
 } from './transform-handlers';

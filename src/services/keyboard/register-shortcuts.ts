@@ -5,7 +5,6 @@ import {
   DeleteSelectionCommand,
   CommitFloatCommand,
   CommitIndexedFloatCommand,
-  CutToFloatCommand,
   FillSelectionCommand,
 } from '../../commands/selection-commands';
 import { shapeSettings } from '../../stores/tool-settings';
@@ -29,6 +28,7 @@ import { createClipboardIndexPasteRegionPlan } from '../clipboard-index-paste-re
 import { normalizeHex } from '../../stores/palette/color-utils';
 import { isPaintableLayer } from '../../utils/layer-capabilities';
 import { togglePlayback } from '../playback-action';
+import { beginSelectionTransform } from '../selection-transform-commit';
 
 type ShortcutAction = () => void;
 
@@ -181,19 +181,9 @@ function moveSelectionByArrow(
   if (state.type === 'selected') {
     const layer = activeLayerWithCanvasInContext(context);
     if (!layer?.canvas) return;
-
-    context.history.execute(
-      new CutToFloatCommand(
-        layer.id,
-        context.animation.currentFrameId.value,
-        state.bounds,
-        state.shape,
-        freeformMask(state),
-        context
-      )
-    );
-
-    context.selection.moveFloat(dx, dy);
+    const started = beginSelectionTransform(context);
+    if (!started.ok) return;
+    context.selection.moveTransform(dx, dy);
     return;
   }
 
@@ -482,6 +472,11 @@ function pasteSelection() {
     currentOffset: { x: 0, y: 0 },
     mask: data.mask,
     indexedPaste: pasteData.indexedPaste,
+    targetLayerId: layer.id,
+    targetFrameId: context.animation.currentFrameId.value,
+    targetCelId: context.animation.cels.value.get(
+      context.animation.getCelKey(layer.id, context.animation.currentFrameId.value),
+    )?.id,
   };
 }
 

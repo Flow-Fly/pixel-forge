@@ -137,6 +137,7 @@ export class ProjectContext {
   }
 
   private started = false;
+  private disposed = false;
 
   constructor(stores: ProjectContextStores = createProjectContextStores()) {
     this.animation = stores.animation;
@@ -160,8 +161,13 @@ export class ProjectContext {
   start() {
     if (this.started) return;
 
+    this.disposed = false;
     this.animation.startPaletteSync();
     this.started = true;
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed;
   }
 
   dispose() {
@@ -169,6 +175,7 @@ export class ProjectContext {
 
     this.animation.dispose();
     this.started = false;
+    this.disposed = true;
   }
 }
 
