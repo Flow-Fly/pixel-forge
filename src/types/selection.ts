@@ -7,7 +7,7 @@ export interface FloatingIndexedPaste {
   paletteBeforeCommit: {
     colors: string[];
     newColorFlags: Set<string>;
-    entryIds?: string[];
+    entryIds: string[];
   };
 }
 

@@ -34,7 +34,11 @@ export type ProjectLoadStores = {
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
     isRuntimeEmptyCel: (cel: Cel) => boolean;
-    linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
+    linkCels: (
+      celKeys: string[],
+      linkType: CelLinkType,
+      suppliedLinkedCelId?: string,
+    ) => string | null;
     rebuildAllCelCanvases: () => void;
     rebuildAllIndexBuffers: () => void;
     setFrameDuration: (frameId: string, duration: number) => void;
@@ -469,7 +473,7 @@ function restoreLinkedCelGroups(
 ): void {
   for (const [linkedCelId, { celKeys, linkType }] of linkedCelGroups) {
     if (celKeys.length >= 2) {
-      stores.animation.linkCels(celKeys, linkType);
+      stores.animation.linkCels(celKeys, linkType, linkedCelId);
       continue;
     }
 

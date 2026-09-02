@@ -356,7 +356,9 @@ class PaletteStore {
     const normalized = normalizeHex(color);
     const newColors = [...this.colors.value];
     newColors.splice(arrayIndex, 0, normalized);
-    this.replaceColors(newColors);
+    const entryIds = [...this.getPaletteEntryIds()];
+    entryIds.splice(arrayIndex, 0, crypto.randomUUID());
+    this.replaceColors(newColors, entryIds);
     this.markDirty();
     this.pruneNewFlags();
     this.rebuildColorMap();
@@ -652,7 +654,9 @@ class PaletteStore {
 
     const colors = [...this.colors.value];
     colors.splice(arrayIndex, 1);
-    this.replaceColors(colors);
+    const entryIds = [...this.getPaletteEntryIds()];
+    entryIds.splice(arrayIndex, 1);
+    this.replaceColors(colors, entryIds);
     this.markDirty();
     this.pruneNewFlags();
     this.rebuildColorMap();

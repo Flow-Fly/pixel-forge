@@ -207,6 +207,7 @@ function makeCommand(target: IndexedContext) {
   const paletteBeforeCommit = {
     colors: [...target.context.palette.mainColors.value],
     newColorFlags: new Set(target.context.palette.newColorFlags.value),
+    entryIds: target.context.palette.getPaletteEntryIds(),
   };
 
   target.context.palette.addColor('#ff0000', { flagNew: true });

@@ -109,16 +109,10 @@ function snapshotCels(context: ProjectContext): CelSnapshot {
 }
 
 function snapshotPalette(context: ProjectContext): PaletteSnapshot {
-  const flagsSignal = (context.palette as unknown as {
-    newColorFlags?: { value: Set<string> };
-  }).newColorFlags;
-  const paletteWithIdentities = context.palette as unknown as {
-    getPaletteEntryIds?: () => string[];
-  };
   return {
     colors: [...context.palette.mainColors.value],
-    newColorFlags: new Set(flagsSignal?.value ?? []),
-    entryIds: paletteWithIdentities.getPaletteEntryIds?.() ?? [],
+    newColorFlags: new Set(context.palette.newColorFlags.value),
+    entryIds: context.palette.getPaletteEntryIds(),
   };
 }
 
@@ -154,13 +148,8 @@ function sameStringSet(actual: ReadonlySet<string>, expected: ReadonlySet<string
 
 function samePaletteSnapshot(context: ProjectContext, snapshot: PaletteSnapshot): boolean {
   const colors = context.palette.mainColors.value;
-  const paletteWithIdentities = context.palette as unknown as {
-    getPaletteEntryIds?: () => string[];
-  };
-  const entryIds = paletteWithIdentities.getPaletteEntryIds?.() ?? [];
-  const flags = (context.palette as unknown as {
-    newColorFlags?: { value: Set<string> };
-  }).newColorFlags?.value ?? new Set<string>();
+  const entryIds = context.palette.getPaletteEntryIds();
+  const flags = context.palette.newColorFlags.value;
   return sameStringArray(colors, snapshot.colors)
     && sameStringArray(entryIds, snapshot.entryIds)
     && sameStringSet(flags, snapshot.newColorFlags);
@@ -176,23 +165,11 @@ function restoreDocumentSnapshot(
     if (cel.indexBuffer && bytes) cel.indexBuffer.set(bytes);
   }
   context.animation.cels.value = new Map(cels.cels);
-  const paletteWithIdentityOperations = context.palette as unknown as {
-    setColorsDirect?: (colors: string[], flags: Set<string>, entryIds?: string[]) => void;
-  };
-  if (paletteWithIdentityOperations.setColorsDirect) {
-    paletteWithIdentityOperations.setColorsDirect(
-      [...palette.colors],
-      new Set(palette.newColorFlags),
-      [...palette.entryIds]
-    );
-    return;
-  }
-
-  context.palette.mainColors.value = [...palette.colors];
-  const flagsSignal = (context.palette as unknown as {
-    newColorFlags?: { value: Set<string> };
-  }).newColorFlags;
-  if (flagsSignal) flagsSignal.value = new Set(palette.newColorFlags);
+  context.palette.setColorsDirect(
+    [...palette.colors],
+    new Set(palette.newColorFlags),
+    [...palette.entryIds]
+  );
 }
 
 function activeTarget(context: ProjectContext): {

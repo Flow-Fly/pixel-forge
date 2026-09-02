@@ -157,6 +157,21 @@ function createFixture(): {
       history.version.value += 1;
     },
   };
+  const palette = {
+    mainColors: { value: ['#ff0000'] },
+    newColorFlags: { value: new Set<string>() },
+    paletteEntryIds: ['palette-1'],
+    getPaletteEntryIds() {
+      return [...this.paletteEntryIds];
+    },
+    setColorsDirect(colors: string[], flags: Set<string>, entryIds: string[]) {
+      this.mainColors.value = [...colors];
+      this.newColorFlags.value = new Set(flags);
+      this.paletteEntryIds = [...entryIds];
+    },
+    getColorIndex: (hex: string) => hex.toLowerCase() === '#ff0000' ? 1 : 0,
+    findClosestColorIndex: () => 1,
+  };
   const context = {
     animation: {
       cels: { value: cels },
@@ -170,11 +185,7 @@ function createFixture(): {
       activeLayerId: { value: 'layer-1' },
       layers: { value: [{ id: 'layer-1', type: 'paint', canvas: canvas.canvas, locked: false, visible: true }] },
     },
-    palette: {
-      mainColors: { value: ['#ff0000'] },
-      getColorIndex: (hex: string) => hex.toLowerCase() === '#ff0000' ? 1 : 0,
-      findClosestColorIndex: () => 1,
-    },
+    palette,
     project,
     selection,
   } as unknown as ProjectContext;

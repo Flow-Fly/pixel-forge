@@ -21,7 +21,7 @@ type IndexedSelectionCommandContext = EditableCelCommandContext & Pick<ProjectCo
 export interface IndexedFloatPaletteState {
   colors: string[];
   newColorFlags: Set<string>;
-  entryIds?: string[];
+  entryIds: string[];
 }
 
 export interface CommitIndexedFloatCommandOptions {
@@ -38,7 +38,7 @@ function clonePaletteState(state: IndexedFloatPaletteState): IndexedFloatPalette
   return {
     colors: [...state.colors],
     newColorFlags: new Set(state.newColorFlags),
-    entryIds: state.entryIds ? [...state.entryIds] : undefined,
+    entryIds: [...state.entryIds],
   };
 }
 

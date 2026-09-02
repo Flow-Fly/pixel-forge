@@ -699,8 +699,12 @@ class AnimationStore {
 
   // ===== Cel Linking (delegated) =====
 
-  linkCels(celKeys: string[], linkType: 'soft' | 'hard' = 'hard'): string | null {
-    const result = celLinking.linkCels(this.cels.value, celKeys, linkType);
+  linkCels(
+    celKeys: string[],
+    linkType: 'soft' | 'hard' = 'hard',
+    suppliedLinkedCelId?: string,
+  ): string | null {
+    const result = celLinking.linkCels(this.cels.value, celKeys, linkType, suppliedLinkedCelId);
     this.cels.value = result.cels;
     return result.linkedCelId;
   }

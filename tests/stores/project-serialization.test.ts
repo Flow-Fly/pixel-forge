@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import pako from 'pako';
@@ -82,6 +83,45 @@ function normalizeRoundTripFile(file: ProjectFile): ProjectFile {
         return { ...cel, linkedCelId: linkIds.get(cel.linkedCelId) };
       }),
     })),
+  };
+}
+
+function projectContentForRoundTrip(file: ProjectFile) {
+  return {
+    name: file.name,
+    width: file.width,
+    height: file.height,
+    layers: file.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      type: layer.type,
+      visible: layer.visible,
+      locked: layer.locked,
+      opacity: layer.opacity,
+      blendMode: layer.blendMode ?? 'normal',
+      continuous: layer.continuous ?? false,
+      parentId: layer.parentId,
+      data: Array.from(layer.data),
+      textData: layer.textData,
+      referenceData: layer.referenceData
+        ? { ...layer.referenceData, bytes: Array.from(layer.referenceData.bytes) }
+        : undefined,
+    })),
+    frames: file.frames.map((frame) => ({
+      id: frame.id,
+      duration: frame.duration,
+      cels: frame.cels.map((cel) => ({
+        id: cel.id,
+        layerId: cel.layerId,
+        data: Array.from(cel.data),
+        opacity: cel.opacity,
+        linkedCelId: cel.linkedCelId,
+        linkType: cel.linkType,
+        textCelData: cel.textCelData,
+      })),
+    })),
+    animation: file.animation,
+    tags: file.tags,
   };
 }
 
@@ -360,6 +400,31 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(reloaded.paletteEntries).toEqual(saved.paletteEntries);
   });
 
+  it('keeps duplicate-color entry identities positional through insert and delete', () => {
+    paletteStore.setPalette(['#111111', '#222222', '#222222', '#333333']);
+    const initialIds = paletteStore.getPaletteEntryIds();
+
+    paletteStore.insertColorAt(3, '#222222');
+    const insertedIds = paletteStore.getPaletteEntryIds();
+    expect(insertedIds).toEqual([
+      initialIds[0],
+      initialIds[1],
+      expect.any(String),
+      initialIds[2],
+      initialIds[3],
+    ]);
+    expect(insertedIds[2]).not.toBe(initialIds[1]);
+    expect(insertedIds[2]).not.toBe(initialIds[2]);
+
+    paletteStore.removeColorByIndex(4);
+    expect(paletteStore.getPaletteEntryIds()).toEqual([
+      initialIds[0],
+      initialIds[1],
+      insertedIds[2],
+      initialIds[3],
+    ]);
+  });
+
   it.each([
     ['legacy-4.1.pf.base64', '4.1.0'],
     ['current-4.2.pf.base64', '4.2.0'],
@@ -499,7 +564,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     ).toEqual([]);
   });
 
-  it('keeps non-empty group cels on the normal serialization path', async () => {
+  it('preserves a persisted linked-cel identity through hydration and save/load/save', async () => {
     const input = await readCompressedProjectFixture('current-4.2.pf.base64');
     const project = decodeProjectFileWithDiagnostics(input).project;
     const group = project.layers.find((layer) => layer.type === 'group');
@@ -549,10 +614,30 @@ describe('project save -> load -> save round-trip (structural)', () => {
       );
       expect(cels[0]?.linkedCelId).toEqual(expect.any(String));
       expect(cels.map((cel) => cel?.linkedCelId)).toEqual([
-        cels[0]?.linkedCelId,
-        cels[0]?.linkedCelId,
+        'loaded-group-link',
+        'loaded-group-link',
       ]);
     }
+  });
+
+  it('round-trips the controlled cup archive through browser hydration with its hash protected', async () => {
+    const fixturePath = resolve(process.cwd(), 'tests/fixtures/project-files/cup-compatibility.pf');
+    const compressed = await readFile(fixturePath);
+    expect(createHash('sha256').update(compressed).digest('hex')).toBe(
+      '1351b2e18301142aee3b4270d14faf46b3c5c7bc1fa0f5cd92788494ac521f99'
+    );
+
+    const input = JSON.parse(pako.inflate(compressed, { to: 'string' })) as ProjectFileInput;
+    const source = decodeProjectFileWithDiagnostics(input).project;
+
+    await projectStore.loadProject(input, false);
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    await projectStore.loadProject(saved, false);
+    const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+    expect(projectContentForRoundTrip(saved)).toEqual(projectContentForRoundTrip(source));
+    expect(projectContentForRoundTrip(reloaded)).toEqual(projectContentForRoundTrip(source));
+    expect(normalizeRoundTripFile(reloaded)).toEqual(normalizeRoundTripFile(saved));
   });
 
   it('persists an unlinked cel and the remaining hard-linked group through reload', async () => {

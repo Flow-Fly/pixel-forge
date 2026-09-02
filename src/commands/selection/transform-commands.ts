@@ -45,9 +45,7 @@ function cloneIndexedPaste(indexedPaste: FloatingIndexedPaste): FloatingIndexedP
     paletteBeforeCommit: {
       colors: [...indexedPaste.paletteBeforeCommit.colors],
       newColorFlags: new Set(indexedPaste.paletteBeforeCommit.newColorFlags),
-      entryIds: indexedPaste.paletteBeforeCommit.entryIds
-        ? [...indexedPaste.paletteBeforeCommit.entryIds]
-        : undefined,
+      entryIds: [...indexedPaste.paletteBeforeCommit.entryIds],
     },
   };
 }
