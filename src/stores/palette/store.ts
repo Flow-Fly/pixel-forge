@@ -9,7 +9,7 @@ import { signal } from '../../core/signal';
 import { type StoreRefs } from '../store-refs';
 import type { createLayerStore } from '../layers-store';
 import type { CustomPalette } from '../../types/palette';
-import type { ProjectPaletteEntryFile } from '@pixel-forge/shared';
+import type { ProjectPaletteEntryFile } from '../../types/project';
 
 import { DB32_COLORS, MAX_PALETTE_SIZE, PALETTE_BY_ID } from './types';
 import { normalizeHex } from './color-utils';

@@ -142,6 +142,16 @@ function sameCelSnapshot(context: ProjectContext, snapshot: CelSnapshot): boolea
   return true;
 }
 
+function sameStringArray(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length
+    && actual.every((value, index) => value === expected[index]);
+}
+
+function sameStringSet(actual: ReadonlySet<string>, expected: ReadonlySet<string>): boolean {
+  return actual.size === expected.size
+    && [...actual].every((value) => expected.has(value));
+}
+
 function samePaletteSnapshot(context: ProjectContext, snapshot: PaletteSnapshot): boolean {
   const colors = context.palette.mainColors.value;
   const paletteWithIdentities = context.palette as unknown as {
@@ -151,12 +161,9 @@ function samePaletteSnapshot(context: ProjectContext, snapshot: PaletteSnapshot)
   const flags = (context.palette as unknown as {
     newColorFlags?: { value: Set<string> };
   }).newColorFlags?.value ?? new Set<string>();
-  return colors.length === snapshot.colors.length
-    && colors.every((color, index) => color === snapshot.colors[index])
-    && entryIds.every((entryId, index) => entryId === snapshot.entryIds[index])
-    && entryIds.length === snapshot.entryIds.length
-    && flags.size === snapshot.newColorFlags.size
-    && [...flags].every((flag) => snapshot.newColorFlags.has(flag));
+  return sameStringArray(colors, snapshot.colors)
+    && sameStringArray(entryIds, snapshot.entryIds)
+    && sameStringSet(flags, snapshot.newColorFlags);
 }
 
 function restoreDocumentSnapshot(

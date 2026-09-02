@@ -2,7 +2,11 @@ import { type Command } from '../../stores/history';
 import { getActiveProjectContext, type ProjectContext } from '../../stores/project-context';
 import type { ProjectChangeEvent } from '../../stores/project-store';
 import { type Rect } from '../../types/geometry';
-import { type SelectionShape, type SelectionState } from '../../types/selection';
+import {
+  type FloatingIndexedPaste,
+  type SelectionShape,
+  type SelectionState,
+} from '../../types/selection';
 import { flipSelectedPixels } from './pixels';
 import { EditableCelCommand, type EditableCelCommandContext } from './editable-cel-command';
 
@@ -33,6 +37,19 @@ export interface PreparedSelectionTransform {
   readonly beforeIndices: readonly SelectionTransformIndexEntry[];
   readonly afterIndices: Uint8Array;
   readonly beforeSelection: SelectionState;
+}
+
+function cloneIndexedPaste(indexedPaste: FloatingIndexedPaste): FloatingIndexedPaste {
+  return {
+    remappedIndexData: new Uint8Array(indexedPaste.remappedIndexData),
+    paletteBeforeCommit: {
+      colors: [...indexedPaste.paletteBeforeCommit.colors],
+      newColorFlags: new Set(indexedPaste.paletteBeforeCommit.newColorFlags),
+      entryIds: indexedPaste.paletteBeforeCommit.entryIds
+        ? [...indexedPaste.paletteBeforeCommit.entryIds]
+        : undefined,
+    },
+  };
 }
 
 export function cloneImageData(imageData: ImageData): ImageData {
@@ -72,18 +89,7 @@ export function cloneSelectionState(state: SelectionState): SelectionState {
         originalBounds: { ...state.originalBounds },
         currentOffset: { ...state.currentOffset },
         mask: state.mask ? new Uint8Array(state.mask) : undefined,
-        indexedPaste: state.indexedPaste
-          ? {
-              remappedIndexData: new Uint8Array(state.indexedPaste.remappedIndexData),
-              paletteBeforeCommit: {
-                colors: [...state.indexedPaste.paletteBeforeCommit.colors],
-                newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
-                entryIds: state.indexedPaste.paletteBeforeCommit.entryIds
-                  ? [...state.indexedPaste.paletteBeforeCommit.entryIds]
-                  : undefined,
-              },
-            }
-          : undefined,
+        indexedPaste: state.indexedPaste ? cloneIndexedPaste(state.indexedPaste) : undefined,
       };
     case 'transforming':
       return {
@@ -121,18 +127,7 @@ export function restoreSelectionState(
         { ...state.originalBounds },
         state.shape,
         state.mask ? new Uint8Array(state.mask) : undefined,
-        state.indexedPaste
-          ? {
-              remappedIndexData: new Uint8Array(state.indexedPaste.remappedIndexData),
-              paletteBeforeCommit: {
-                colors: [...state.indexedPaste.paletteBeforeCommit.colors],
-                newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
-                entryIds: state.indexedPaste.paletteBeforeCommit.entryIds
-                  ? [...state.indexedPaste.paletteBeforeCommit.entryIds]
-                  : undefined,
-              },
-            }
-          : undefined,
+        state.indexedPaste ? cloneIndexedPaste(state.indexedPaste) : undefined,
         state.targetLayerId && state.targetFrameId
           ? {
               layerId: state.targetLayerId,

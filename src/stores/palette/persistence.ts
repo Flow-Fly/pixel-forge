@@ -31,41 +31,48 @@ export interface StoredPaletteState {
   cachedName: string | null;
 }
 
+function loadStoredColors(): { colors: string[]; hasStoredColors: boolean } {
+  const saved = localStorage.getItem(STORAGE_KEYS.COLORS);
+  if (!saved) return { colors: [], hasStoredColors: false };
+
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    if (Array.isArray(parsed)) {
+      return { colors: parsed as string[], hasStoredColors: true };
+    }
+  } catch {
+    // Invalid JSON, use defaults.
+  }
+
+  return { colors: [], hasStoredColors: false };
+}
+
+function loadStoredEntryIds(): string[] {
+  const saved = localStorage.getItem(STORAGE_KEYS.ENTRY_IDS);
+  if (!saved) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    if (Array.isArray(parsed) && parsed.every((entryId) => typeof entryId === 'string')) {
+      return parsed;
+    }
+  } catch {
+    // Invalid JSON, generate identities for the loaded colors.
+  }
+
+  return [];
+}
+
 /**
  * Load palette state from localStorage.
  */
 export function loadFromStorage(): StoredPaletteState {
-  let colors: string[] = [];
-  let hasStoredColors = false;
-
-  const saved = localStorage.getItem(STORAGE_KEYS.COLORS);
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        colors = parsed;
-        hasStoredColors = true;
-      }
-    } catch {
-      // Invalid JSON, use defaults
-    }
-  }
+  const { colors, hasStoredColors } = loadStoredColors();
 
   const presetId = localStorage.getItem(STORAGE_KEYS.PRESET_ID) || null;
   const customId = localStorage.getItem(STORAGE_KEYS.CUSTOM_ID) || null;
   const cachedName = localStorage.getItem(STORAGE_KEYS.NAME) || null;
-  let entryIds: string[] = [];
-  const savedEntryIds = localStorage.getItem(STORAGE_KEYS.ENTRY_IDS);
-  if (savedEntryIds) {
-    try {
-      const parsed = JSON.parse(savedEntryIds);
-      if (Array.isArray(parsed) && parsed.every((entryId) => typeof entryId === 'string')) {
-        entryIds = parsed;
-      }
-    } catch {
-      // Invalid JSON, generate identities for the loaded colors.
-    }
-  }
+  const entryIds = loadStoredEntryIds();
 
   return {
     colors,
