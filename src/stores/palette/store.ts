@@ -9,6 +9,7 @@ import { signal } from '../../core/signal';
 import { type StoreRefs } from '../store-refs';
 import type { createLayerStore } from '../layers-store';
 import type { CustomPalette } from '../../types/palette';
+import type { ProjectPaletteEntryFile } from '@pixel-forge/shared';
 
 import { DB32_COLORS, MAX_PALETTE_SIZE, PALETTE_BY_ID } from './types';
 import { normalizeHex } from './color-utils';
@@ -34,6 +35,60 @@ type AddColorOptions = {
 
 type PaletteLayerStore = ReturnType<typeof createLayerStore>;
 
+function createPaletteEntryIds(colors: string[]): string[] {
+  return colors.map(() => crypto.randomUUID());
+}
+
+function hasValidPaletteEntryIds(entryIds: string[], colorCount: number): boolean {
+  return (
+    entryIds.length === colorCount &&
+    entryIds.every((entryId) => entryId.trim().length > 0) &&
+    new Set(entryIds).size === entryIds.length
+  );
+}
+
+function colorsMatch(first: string[], second: string[]): boolean {
+  return (
+    first.length === second.length &&
+    first.every((color, index) => normalizeHex(color) === normalizeHex(second[index]))
+  );
+}
+
+function reconcilePaletteEntryIds(
+  nextColors: string[],
+  previousColors: string[],
+  previousEntryIds: string[]
+): string[] {
+  const usedIds = new Set<string>();
+  return nextColors.map((color, index) => {
+    const normalized = normalizeHex(color);
+    const sameIndexId = previousEntryIds[index];
+    if (
+      sameIndexId &&
+      !usedIds.has(sameIndexId) &&
+      normalizeHex(previousColors[index] ?? '') === normalized
+    ) {
+      usedIds.add(sameIndexId);
+      return sameIndexId;
+    }
+
+    const matchingIndex = previousColors.findIndex(
+      (previousColor, previousIndex) =>
+        normalizeHex(previousColor) === normalized &&
+        !usedIds.has(previousEntryIds[previousIndex] ?? '')
+    );
+    const matchingId = previousEntryIds[matchingIndex];
+    if (matchingIndex !== -1 && matchingId) {
+      usedIds.add(matchingId);
+      return matchingId;
+    }
+
+    const newId = crypto.randomUUID();
+    usedIds.add(newId);
+    return newId;
+  });
+}
+
 export interface PaletteStoreDependencies {
   events: EventTarget;
   layers: PaletteLayerStore;
@@ -47,6 +102,9 @@ class PaletteStore {
 
   /** Main palette colors (user-managed, visible in palette panel) */
   mainColors = signal<string[]>([...DB32_COLORS]);
+
+  /** Stable identities aligned with the persisted main palette colors. */
+  private paletteEntryIds = signal<string[]>(createPaletteEntryIds(DB32_COLORS));
 
   /** Colors added by drawing during this session and awaiting user acknowledgement. */
   newColorFlags = signal<Set<string>>(new Set());
@@ -76,6 +134,7 @@ class PaletteStore {
 
   private colorToIndex = new Map<string, number>();
   private cachedPaletteName: string | null = null;
+  private paletteIdentityColors = [...DB32_COLORS];
   private readonly events: EventTarget;
   private readonly layers: PaletteLayerStore;
   private readonly refs: StoreRefs;
@@ -128,6 +187,30 @@ class PaletteStore {
     return indexedColor.getColorByIndex(index, this.mainColors.value);
   }
 
+  getPaletteEntryIds(): string[] {
+    if (
+      !colorsMatch(this.paletteIdentityColors, this.mainColors.value) ||
+      !hasValidPaletteEntryIds(this.paletteEntryIds.value, this.mainColors.value.length)
+    ) {
+      this.paletteEntryIds.value = reconcilePaletteEntryIds(
+        this.mainColors.value,
+        this.paletteIdentityColors,
+        this.paletteEntryIds.value
+      );
+      this.paletteIdentityColors = [...this.mainColors.value];
+    }
+
+    return [...this.paletteEntryIds.value];
+  }
+
+  getProjectPaletteEntries(): ProjectPaletteEntryFile[] {
+    const entryIds = this.getPaletteEntryIds();
+    return this.mainColors.value.map((color, index) => ({
+      id: entryIds[index],
+      color,
+    }));
+  }
+
   // ==========================================
   // Color Addition
   // ==========================================
@@ -150,7 +233,7 @@ class PaletteStore {
     }
 
     const newIndex = this.colors.value.length + 1;
-    this.colors.value = [...this.colors.value, normalized];
+    this.replaceColors([...this.colors.value, normalized]);
     if (options.flagNew) {
       this.addNewFlag(normalized);
     }
@@ -225,7 +308,11 @@ class PaletteStore {
     this.setColorAtArrayIndex(index - 1, newColor);
   }
 
-  setColorsDirect(colors: string[], newColorFlags = this.newColorFlags.value) {
+  setColorsDirect(
+    colors: string[],
+    newColorFlags = this.newColorFlags.value,
+    entryIds?: string[]
+  ) {
     const normalizedColors = colors.map(c => normalizeHex(c));
     const paletteSet = new Set(normalizedColors);
     const flags = new Set(
@@ -234,7 +321,7 @@ class PaletteStore {
         .filter(color => paletteSet.has(color))
     );
 
-    this.colors.value = normalizedColors;
+    this.replaceColors(normalizedColors, entryIds);
     this.newColorFlags.value = flags;
     this.markDirty();
     this.rebuildColorMap();
@@ -269,7 +356,7 @@ class PaletteStore {
     const normalized = normalizeHex(color);
     const newColors = [...this.colors.value];
     newColors.splice(arrayIndex, 0, normalized);
-    this.colors.value = newColors;
+    this.replaceColors(newColors);
     this.markDirty();
     this.pruneNewFlags();
     this.rebuildColorMap();
@@ -288,9 +375,12 @@ class PaletteStore {
     if (toIndex < 0 || toIndex >= this.colors.value.length) return;
 
     const colors = [...this.colors.value];
+    const entryIds = [...this.getPaletteEntryIds()];
     const [movedColor] = colors.splice(fromIndex, 1);
     colors.splice(toIndex, 0, movedColor);
-    this.colors.value = colors;
+    const [movedEntryId] = entryIds.splice(fromIndex, 1);
+    if (movedEntryId) entryIds.splice(toIndex, 0, movedEntryId);
+    this.replaceColors(colors, entryIds);
     this.markDirty();
     this.rebuildColorMap();
     this.saveToStorage();
@@ -318,7 +408,7 @@ class PaletteStore {
     }
 
     const oldMainColors = [...this.mainColors.value];
-    this.mainColors.value = this.withUsedColorsPreserved(preset.colors);
+    this.replaceColors(this.withUsedColorsPreserved(preset.colors));
     this.currentPresetId.value = id;
     this.currentCustomPaletteId.value = null;
     this.isDirty.value = false;
@@ -341,7 +431,7 @@ class PaletteStore {
     }
 
     const oldMainColors = [...this.mainColors.value];
-    this.mainColors.value = this.withUsedColorsPreserved(palette.colors);
+    this.replaceColors(this.withUsedColorsPreserved(palette.colors));
     this.currentPresetId.value = null;
     this.currentCustomPaletteId.value = id;
     this.isDirty.value = false;
@@ -357,7 +447,7 @@ class PaletteStore {
   }
 
   createEmpty() {
-    this.mainColors.value = [];
+    this.replaceColors([]);
     this.currentPresetId.value = null;
     this.currentCustomPaletteId.value = null;
     this.isDirty.value = true;
@@ -372,8 +462,8 @@ class PaletteStore {
     );
   }
 
-  setPalette(colors: string[], preserveSelection = false) {
-    this.colors.value = colors.map(c => normalizeHex(c));
+  setPalette(colors: string[], preserveSelection = false, entryIds?: string[]) {
+    this.replaceColors(colors.map(c => normalizeHex(c)), entryIds);
     this.clearAllNewFlags();
 
     if (!preserveSelection) {
@@ -432,7 +522,7 @@ class PaletteStore {
     }
 
     if (newColors.length > 0) {
-      this.colors.value = [...this.colors.value, ...newColors];
+      this.replaceColors([...this.colors.value, ...newColors]);
       this.markDirty();
       this.rebuildColorMap();
       this.saveToStorage();
@@ -444,7 +534,7 @@ class PaletteStore {
     if (this.extractedColors.value.length > 0) {
       const oldMainColors = [...this.mainColors.value];
 
-      this.colors.value = this.extractedColors.value.map(c => normalizeHex(c));
+      this.replaceColors(this.extractedColors.value.map(c => normalizeHex(c)));
       this.extractedColors.value = [];
       this.markDirty();
       this.clearAllNewFlags();
@@ -479,8 +569,13 @@ class PaletteStore {
   private loadFromStorage() {
     const stored = persistence.loadFromStorage();
 
-    if (stored.colors.length > 0) {
-      this.colors.value = stored.colors;
+    if (stored.hasStoredColors) {
+      const colors = stored.colors.map((color) => normalizeHex(color));
+      this.mainColors.value = colors;
+      this.paletteEntryIds.value = hasValidPaletteEntryIds(stored.entryIds, colors.length)
+        ? [...stored.entryIds]
+        : createPaletteEntryIds(colors);
+      this.paletteIdentityColors = [...colors];
     }
 
     if (stored.customId) {
@@ -502,10 +597,27 @@ class PaletteStore {
   private saveToStorage() {
     persistence.saveToStorage(
       this.colors.value,
+      this.getPaletteEntryIds(),
       this.currentPresetId.value,
       this.currentCustomPaletteId.value,
       this.getCurrentPaletteName()
     );
+  }
+
+  private replaceColors(colors: string[], entryIds?: string[]) {
+    const normalizedColors = colors.map((color) => normalizeHex(color));
+    const nextEntryIds =
+      entryIds && hasValidPaletteEntryIds(entryIds, normalizedColors.length)
+        ? [...entryIds]
+        : reconcilePaletteEntryIds(
+            normalizedColors,
+            this.paletteIdentityColors,
+            this.paletteEntryIds.value
+          );
+
+    this.mainColors.value = normalizedColors;
+    this.paletteEntryIds.value = nextEntryIds;
+    this.paletteIdentityColors = [...normalizedColors];
   }
 
   private markDirty() {
@@ -522,7 +634,7 @@ class PaletteStore {
     const normalized = normalizeHex(newColor);
     const colors = [...this.colors.value];
     colors[arrayIndex] = normalized;
-    this.colors.value = colors;
+    this.replaceColors(colors, this.getPaletteEntryIds());
 
     if (options.markDirty) {
       this.markDirty();
@@ -540,7 +652,7 @@ class PaletteStore {
 
     const colors = [...this.colors.value];
     colors.splice(arrayIndex, 1);
-    this.colors.value = colors;
+    this.replaceColors(colors);
     this.markDirty();
     this.pruneNewFlags();
     this.rebuildColorMap();

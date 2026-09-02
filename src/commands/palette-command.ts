@@ -63,6 +63,8 @@ export class DeletePaletteColorCommand implements Command {
 
   private oldColors: string[] | null = null;
   private newColors: string[] | null = null;
+  private oldEntryIds: string[] | null = null;
+  private newEntryIds: string[] | null = null;
   private oldNewColorFlags: Set<string> | null = null;
   private newColorFlags: Set<string> | null = null;
   private oldIndexBuffers: Map<string, Uint8Array> | null = null;
@@ -86,26 +88,28 @@ export class DeletePaletteColorCommand implements Command {
 
   execute(): void {
     this.ensureSnapshots();
-    if (!this.newColors || !this.newColorFlags || !this.newIndexBuffers) return;
+    if (!this.newColors || !this.newColorFlags || !this.newIndexBuffers || !this.newEntryIds) return;
 
-    this.applyState(this.newColors, this.newColorFlags, this.newIndexBuffers);
+    this.applyState(this.newColors, this.newColorFlags, this.newIndexBuffers, this.newEntryIds);
   }
 
   undo(): void {
-    if (!this.oldColors || !this.oldNewColorFlags || !this.oldIndexBuffers) return;
+    if (!this.oldColors || !this.oldNewColorFlags || !this.oldIndexBuffers || !this.oldEntryIds) return;
 
-    this.applyState(this.oldColors, this.oldNewColorFlags, this.oldIndexBuffers);
+    this.applyState(this.oldColors, this.oldNewColorFlags, this.oldIndexBuffers, this.oldEntryIds);
   }
 
   private ensureSnapshots(): void {
     if (this.oldColors) return;
 
     const oldColors = [...this.context.palette.mainColors.value];
+    const oldEntryIds = this.context.palette.getPaletteEntryIds();
     const removedArrayIndex = this.paletteIndex - 1;
     if (removedArrayIndex < 0 || removedArrayIndex >= oldColors.length) return;
 
     const removedColor = oldColors[removedArrayIndex];
     const newColors = oldColors.filter((_, index) => index !== removedArrayIndex);
+    const newEntryIds = oldEntryIds.filter((_, index) => index !== removedArrayIndex);
     const replacementIndex = this.getReplacementIndex(removedColor, newColors);
     const oldIndexBuffers = cloneIndexBuffers(this.context.animation.cels.value);
     const remappedCels = remapPaletteIndexAfterDelete(
@@ -117,6 +121,8 @@ export class DeletePaletteColorCommand implements Command {
 
     this.oldColors = oldColors;
     this.newColors = newColors;
+    this.oldEntryIds = oldEntryIds;
+    this.newEntryIds = newEntryIds;
     this.oldNewColorFlags = new Set(this.context.palette.newColorFlags.value);
     this.newColorFlags = withoutDeletedColor(this.oldNewColorFlags, removedColor);
     this.oldIndexBuffers = oldIndexBuffers;
@@ -134,9 +140,10 @@ export class DeletePaletteColorCommand implements Command {
   private applyState(
     colors: string[],
     newColorFlags: Set<string>,
-    indexBuffers: Map<string, Uint8Array>
+    indexBuffers: Map<string, Uint8Array>,
+    entryIds: string[]
   ): void {
-    this.context.palette.setColorsDirect(colors, newColorFlags);
+    this.context.palette.setColorsDirect(colors, newColorFlags, entryIds);
     this.context.animation.cels.value = withIndexBuffers(
       this.context.animation.cels.value,
       indexBuffers

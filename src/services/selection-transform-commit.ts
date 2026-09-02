@@ -60,6 +60,7 @@ interface CelSnapshot {
 interface PaletteSnapshot {
   readonly colors: readonly string[];
   readonly newColorFlags: ReadonlySet<string>;
+  readonly entryIds: readonly string[];
 }
 
 const sessions = new WeakMap<ProjectContext, TransformSession>();
@@ -111,9 +112,13 @@ function snapshotPalette(context: ProjectContext): PaletteSnapshot {
   const flagsSignal = (context.palette as unknown as {
     newColorFlags?: { value: Set<string> };
   }).newColorFlags;
+  const paletteWithIdentities = context.palette as unknown as {
+    getPaletteEntryIds?: () => string[];
+  };
   return {
     colors: [...context.palette.mainColors.value],
     newColorFlags: new Set(flagsSignal?.value ?? []),
+    entryIds: paletteWithIdentities.getPaletteEntryIds?.() ?? [],
   };
 }
 
@@ -139,11 +144,17 @@ function sameCelSnapshot(context: ProjectContext, snapshot: CelSnapshot): boolea
 
 function samePaletteSnapshot(context: ProjectContext, snapshot: PaletteSnapshot): boolean {
   const colors = context.palette.mainColors.value;
+  const paletteWithIdentities = context.palette as unknown as {
+    getPaletteEntryIds?: () => string[];
+  };
+  const entryIds = paletteWithIdentities.getPaletteEntryIds?.() ?? [];
   const flags = (context.palette as unknown as {
     newColorFlags?: { value: Set<string> };
   }).newColorFlags?.value ?? new Set<string>();
   return colors.length === snapshot.colors.length
     && colors.every((color, index) => color === snapshot.colors[index])
+    && entryIds.every((entryId, index) => entryId === snapshot.entryIds[index])
+    && entryIds.length === snapshot.entryIds.length
     && flags.size === snapshot.newColorFlags.size
     && [...flags].every((flag) => snapshot.newColorFlags.has(flag));
 }
@@ -158,6 +169,18 @@ function restoreDocumentSnapshot(
     if (cel.indexBuffer && bytes) cel.indexBuffer.set(bytes);
   }
   context.animation.cels.value = new Map(cels.cels);
+  const paletteWithIdentityOperations = context.palette as unknown as {
+    setColorsDirect?: (colors: string[], flags: Set<string>, entryIds?: string[]) => void;
+  };
+  if (paletteWithIdentityOperations.setColorsDirect) {
+    paletteWithIdentityOperations.setColorsDirect(
+      [...palette.colors],
+      new Set(palette.newColorFlags),
+      [...palette.entryIds]
+    );
+    return;
+  }
+
   context.palette.mainColors.value = [...palette.colors];
   const flagsSignal = (context.palette as unknown as {
     newColorFlags?: { value: Set<string> };

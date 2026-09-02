@@ -54,6 +54,7 @@ export function assertProjectFile(value: unknown): asserts value is ProjectFile 
       assertImport(isCelOpacity(cel.opacity), 'cel opacity is invalid');
     });
   });
+  assertProjectEntityIdentities(project);
 }
 
 function assertProjectFileInput(value: unknown): asserts value is ProjectFileInput {
@@ -74,6 +75,7 @@ function assertProjectShape(
   assertImport(isPositiveInteger(value.width), 'width must be a positive integer');
   assertImport(isPositiveInteger(value.height), 'height must be a positive integer');
   assertOptionalStringArray(value.palette, 'palette is invalid');
+  assertPaletteEntries(value.paletteEntries);
   assertImport(Array.isArray(value.layers) && value.layers.length > 0, 'a layer is required');
   assertImport(Array.isArray(value.frames) && value.frames.length > 0, 'a frame is required');
   assertImport(isRecord(value.animation), 'animation state is missing');
@@ -177,6 +179,7 @@ function assertCel(
     value.indexData === undefined || isProjectByteArray(value.indexData),
     'cel index data is invalid'
   );
+  assertImport(value.id === undefined || typeof value.id === 'string', 'cel id is invalid');
   assertImport(
     value.linkedCelId === undefined || typeof value.linkedCelId === 'string',
     'linked cel id is invalid'
@@ -306,6 +309,46 @@ function assertOptionalStringArray(value: unknown, detail: string): void {
   assertImport(value === undefined || isStringArray(value), detail);
 }
 
+function assertPaletteEntries(value: unknown): void {
+  if (value === undefined) return;
+
+  assertImport(Array.isArray(value), 'palette entries are invalid');
+  value.forEach((entry) => {
+    assertImport(isRecord(entry), 'palette entry is invalid');
+    assertImport(typeof entry.color === 'string', 'palette entry color is invalid');
+    assertImport(
+      entry.id === undefined || typeof entry.id === 'string',
+      'palette entry id is invalid'
+    );
+  });
+}
+
+function assertProjectEntityIdentities(project: ProjectFile): void {
+  const celIds = project.frames.flatMap((frame) => frame.cels.map((cel) => cel.id));
+  assertImport(celIds.every(isUsableIdentity), 'cel ids must be strings');
+  assertImport(new Set(celIds).size === celIds.length, 'cel ids must be unique');
+
+  if (project.palette === undefined) {
+    assertImport(project.paletteEntries.length === 0, 'palette entries require a palette');
+    return;
+  }
+
+  assertImport(
+    project.paletteEntries.length === project.palette.length,
+    'palette entries must match palette colors'
+  );
+  const paletteEntryIds = project.paletteEntries.map((entry) => entry.id);
+  assertImport(paletteEntryIds.every(isUsableIdentity), 'palette entry ids must be strings');
+  assertImport(
+    new Set(paletteEntryIds).size === paletteEntryIds.length,
+    'palette entry ids must be unique'
+  );
+  assertImport(
+    project.paletteEntries.every((entry, index) => entry.color === project.palette![index]),
+    'palette entry colors must match palette'
+  );
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
@@ -316,6 +359,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isUsableIdentity(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function isPositiveInteger(value: unknown): value is number {

@@ -33,10 +33,10 @@ import { projectStore } from '../../src/stores/project';
 import { layerStore } from '../../src/stores/layers';
 
 describe('project file format version', () => {
-  it('is in sync with the newest schema fields (4.2.0 = editing state)', () => {
+  it('is in sync with the newest schema fields (4.3.0 = stable entity identities)', () => {
     // If this fails, the ProjectFile schema changed without bumping
     // PROJECT_VERSION — bump it in the same PR (see src/types/project.ts).
-    expect(PROJECT_VERSION).toBe('4.2.0');
+    expect(PROJECT_VERSION).toBe('4.3.0');
   });
 
   it('stamps saved projects with PROJECT_VERSION and serializes current-format fields', async () => {
@@ -61,7 +61,10 @@ describe('project file format version', () => {
     for (const frame of file.frames) {
       for (const cel of frame.cels) {
         expect(cel).toHaveProperty('opacity');
+        expect(cel).toHaveProperty('id');
       }
     }
+    expect(file.paletteEntries).toHaveLength(file.palette?.length ?? 0);
+    expect(file.paletteEntries.every((entry) => entry.id.length > 0)).toBe(true);
   });
 });

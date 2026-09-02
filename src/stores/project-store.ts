@@ -96,6 +96,7 @@ async function serializeCelForLayer(
 
   if (!cel) {
     return {
+      id: `cel-${frame.id}-${layer.id}`,
       layerId: layer.id,
       data: new Uint8Array(0),
       opacity: 100,
@@ -114,6 +115,7 @@ async function serializeExistingCel(
   const textCelData = animation.getTextCelData(layer.id, frame.id);
   if (hasRuntimeEmptyCel(animation, cel, textCelData)) {
     return {
+      id: cel.id,
       layerId: layer.id,
       data: new Uint8Array(0),
       opacity: cel.opacity ?? 100,
@@ -121,6 +123,7 @@ async function serializeExistingCel(
   }
 
   const celFile: ProjectCelFile = {
+    id: cel.id,
     layerId: layer.id,
     data: await canvasToPngBytes(cel.canvas),
     opacity: cel.opacity ?? 100,
@@ -311,6 +314,7 @@ class ProjectStore {
       width: this.width.value,
       height: this.height.value,
       palette: this.palette.mainColors.value, // v3.0+: Save the main palette
+      paletteEntries: this.palette.getProjectPaletteEntries(),
       layers,
       frames,
       animation: {

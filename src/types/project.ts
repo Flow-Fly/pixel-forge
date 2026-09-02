@@ -11,4 +11,5 @@ export {
   type ProjectFileInput,
   type ProjectFrameFile,
   type ProjectLayerFile,
+  type ProjectPaletteEntryFile,
 } from '@pixel-forge/shared';

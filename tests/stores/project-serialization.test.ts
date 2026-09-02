@@ -72,9 +72,8 @@ function normalizeRoundTripFile(file: ProjectFile): ProjectFile {
   return {
     ...file,
     version: PROJECT_VERSION,
-    frames: file.frames.map((frame, frameIndex) => ({
+    frames: file.frames.map((frame) => ({
       ...frame,
-      id: `frame-${frameIndex}`,
       cels: frame.cels.map((cel) => {
         if (!cel.linkedCelId) return cel;
         if (!linkIds.has(cel.linkedCelId)) {
@@ -279,7 +278,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(resaved.layers[1].visible).toBe(false);
     expect(resaved.layers[0].visible).toBe(true);
 
-    // Frames: ids are regenerated on load, but count/durations/order survive
+    // Frames: persisted ids and count/durations/order survive load
     expect(resaved.frames).toHaveLength(3);
     expect(resaved.frames.map((f) => f.duration)).toEqual([100, 250, 400]);
 
@@ -317,6 +316,48 @@ describe('project save -> load -> save round-trip (structural)', () => {
     vi.useRealTimers();
 
     expect(normalizeRoundTripFile(twice)).toEqual(normalizeRoundTripFile(once));
+  });
+
+  it('preserves frame, cel, and palette-entry identities through hydration and save', async () => {
+    const saved = await buildSampleProject();
+    const expectedFrameIds = saved.frames.map((frame) => frame.id);
+    const expectedCelIds = saved.frames.map((frame) => frame.cels.map((cel) => cel.id));
+    const expectedPaletteEntries = saved.paletteEntries;
+
+    await projectStore.loadProject(structuredClone(saved), false);
+    const reloaded = await projectStore.saveProject();
+
+    expect(reloaded.frames.map((frame) => frame.id)).toEqual(expectedFrameIds);
+    expect(reloaded.frames.map((frame) => frame.cels.map((cel) => cel.id))).toEqual(expectedCelIds);
+    expect(reloaded.paletteEntries).toEqual(expectedPaletteEntries);
+  });
+
+  it('keeps palette identities aligned through edit, insert, reorder, delete, and reload', async () => {
+    paletteStore.setPalette(['#000000', '#ff0000', '#00ff00']);
+    const initialIds = paletteStore.getPaletteEntryIds();
+
+    paletteStore.updateColor(2, '#0000ff');
+    expect(paletteStore.getPaletteEntryIds()[1]).toBe(initialIds[1]);
+
+    paletteStore.insertColorAt(2, '#123456');
+    const insertedIds = paletteStore.getPaletteEntryIds();
+    expect(insertedIds).toEqual([initialIds[0], expect.any(String), initialIds[1], initialIds[2]]);
+
+    paletteStore.moveColor(3, 0);
+    const reorderedIds = paletteStore.getPaletteEntryIds();
+    expect(reorderedIds).toEqual([initialIds[2], initialIds[0], insertedIds[1], initialIds[1]]);
+
+    paletteStore.removeColorByIndex(3);
+    const saved = await projectStore.saveProject();
+    expect(saved.paletteEntries.map((entry) => entry.id)).toEqual([
+      initialIds[2],
+      initialIds[0],
+      initialIds[1],
+    ]);
+
+    await projectStore.loadProject(structuredClone(saved), false);
+    const reloaded = await projectStore.saveProject();
+    expect(reloaded.paletteEntries).toEqual(saved.paletteEntries);
   });
 
   it.each([

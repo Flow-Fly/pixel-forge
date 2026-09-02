@@ -166,13 +166,15 @@ function createBlankProjectFile(options: CreateProjectOptions): ProjectFile {
     options.height ?? DEFAULT_PROJECT_HEIGHT,
     DEFAULT_PROJECT_HEIGHT
   );
+  const palette = getDefaultPalette();
 
   return {
     version: PROJECT_VERSION,
     name: normalizeProjectName(options.name),
     width,
     height,
-    palette: getDefaultPalette(),
+    palette,
+    paletteEntries: palette.map((color) => ({ id: uuidv4(), color })),
     layers: [
       {
         id: layerId,
@@ -193,6 +195,7 @@ function createBlankProjectFile(options: CreateProjectOptions): ProjectFile {
         duration: 100,
         cels: [
           {
+            id: uuidv4(),
             layerId,
             data: new Uint8Array(0),
             opacity: 100,

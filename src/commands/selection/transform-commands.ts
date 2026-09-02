@@ -78,6 +78,9 @@ export function cloneSelectionState(state: SelectionState): SelectionState {
               paletteBeforeCommit: {
                 colors: [...state.indexedPaste.paletteBeforeCommit.colors],
                 newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
+                entryIds: state.indexedPaste.paletteBeforeCommit.entryIds
+                  ? [...state.indexedPaste.paletteBeforeCommit.entryIds]
+                  : undefined,
               },
             }
           : undefined,
@@ -124,6 +127,9 @@ export function restoreSelectionState(
               paletteBeforeCommit: {
                 colors: [...state.indexedPaste.paletteBeforeCommit.colors],
                 newColorFlags: new Set(state.indexedPaste.paletteBeforeCommit.newColorFlags),
+                entryIds: state.indexedPaste.paletteBeforeCommit.entryIds
+                  ? [...state.indexedPaste.paletteBeforeCommit.entryIds]
+                  : undefined,
               },
             }
           : undefined,
