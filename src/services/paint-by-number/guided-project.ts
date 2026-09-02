@@ -27,13 +27,15 @@ export function createGuidedProjectFile(input: GuidedProjectInput): ProjectFile 
   const layerId = uuidv4();
   const frameId = uuidv4();
   const { guide } = input;
+  const palette = [...guide.palette];
 
   return {
     version: PROJECT_VERSION,
     name: normalizeProjectName(input.name ?? defaultGuidedProjectName(input.sourceName)),
     width: guide.width,
     height: guide.height,
-    palette: [...guide.palette],
+    palette,
+    paletteEntries: palette.map((color) => ({ id: uuidv4(), color })),
     layers: [
       {
         id: layerId,
@@ -54,6 +56,7 @@ export function createGuidedProjectFile(input: GuidedProjectInput): ProjectFile 
         duration: 100,
         cels: [
           {
+            id: uuidv4(),
             layerId,
             data: new Uint8Array(0),
             opacity: 100,

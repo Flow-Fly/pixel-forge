@@ -6,10 +6,11 @@
  *
  * History: 3.1.0 added `ephemeralPalette`, 3.2.0 added
  * `layers[].continuous`, 4.0.0 removed `ephemeralPalette` and added reference
- * layer data, 4.1.0 added optional guided drawing sessions, and 4.2.0 added
- * persisted layer type, lock, parent, and cel opacity state.
+ * layer data, 4.1.0 added optional guided drawing sessions, 4.2.0 added
+ * persisted layer type, lock, parent, and cel opacity state, and 4.3.0 added
+ * persisted cel and palette-entry identities.
  */
-export const PROJECT_VERSION = '4.2.0';
+export const PROJECT_VERSION = '4.3.0';
 export const GUIDED_DRAWING_VERSION = 1;
 
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
@@ -88,15 +89,25 @@ export interface ProjectLayerFile {
   referenceData?: ReferenceLayerData;
 }
 
+export interface ProjectPaletteEntryFile {
+  id: string;
+  color: string;
+}
+
 export interface ProjectCelFile {
   layerId: string;
   data: ProjectImageData;
   opacity: number;
   indexData?: number[];
+  id: string;
   linkedCelId?: string;
   linkType?: CelLinkType;
   textCelData?: TextCelData;
 }
+
+export type ProjectPaletteEntryFileInput = Omit<ProjectPaletteEntryFile, 'id'> & {
+  id?: string;
+};
 
 export interface ProjectFrameFile {
   id: string;
@@ -110,6 +121,7 @@ export interface ProjectFile {
   width: number;
   height: number;
   palette?: string[];
+  paletteEntries: ProjectPaletteEntryFile[];
   layers: ProjectLayerFile[];
   frames: ProjectFrameFile[];
   animation: {
@@ -133,17 +145,19 @@ export type ProjectLayerFileInput = Omit<
   };
 };
 
-export type ProjectCelFileInput = Omit<ProjectCelFile, 'data' | 'opacity'> & {
+export type ProjectCelFileInput = Omit<ProjectCelFile, 'data' | 'opacity' | 'id'> & {
   data: LegacyProjectImageData;
   opacity?: number;
+  id?: string;
 };
 
 export type ProjectFrameFileInput = Omit<ProjectFrameFile, 'cels'> & {
   cels: ProjectCelFileInput[];
 };
 
-export type ProjectFileInput = Omit<ProjectFile, 'layers' | 'frames'> & {
+export type ProjectFileInput = Omit<ProjectFile, 'layers' | 'frames' | 'paletteEntries'> & {
   ephemeralPalette?: string[];
+  paletteEntries?: ProjectPaletteEntryFileInput[];
   layers: ProjectLayerFileInput[];
   frames: ProjectFrameFileInput[];
 };
@@ -171,6 +185,8 @@ export type NormalizedProjectFileInput = Omit<ProjectFileInput, 'layers' | 'fram
 
 export interface ProjectCompatibilityDiagnostics {
   repairedParentLayerIds: string[];
+  repairedCelIds: string[];
+  repairedPaletteEntryIds: string[];
 }
 
 export interface ProjectFileDecodeResult {

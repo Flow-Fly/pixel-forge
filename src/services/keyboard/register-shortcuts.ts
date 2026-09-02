@@ -415,6 +415,7 @@ function getFloatingIndexedPaletteState(
   return {
     colors: [...context.palette.mainColors.value],
     newColorFlags: new Set(context.palette.newColorFlags.value),
+    entryIds: context.palette.getPaletteEntryIds(),
   };
 }
 

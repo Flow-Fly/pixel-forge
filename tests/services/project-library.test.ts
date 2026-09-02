@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectFile, ProjectFileInput } from '../../src/types/project';
+import { decodeProjectFile, type ProjectFile, type ProjectFileInput } from '../../src/types/project';
 
 const repositoryMock = vi.hoisted(() => ({
   list: vi.fn(),
@@ -347,7 +347,8 @@ describe('ProjectLibraryService', () => {
   });
 
   it('duplicates projects into an independent copy without opening it', async () => {
-    projects.set('original', makeProject('Original'));
+    const original = decodeProjectFile(makeProject('Original'));
+    projects.set('original', original);
 
     const copyId = await service.duplicateProject('original');
     await service.renameProject(copyId, 'Renamed copy');
@@ -356,6 +357,13 @@ describe('ProjectLibraryService', () => {
     expect(projectStore.id.value).toBe('current');
     expect(projects.get('original')?.name).toBe('Original');
     expect(projects.get(copyId)?.name).toBe('Renamed copy');
+    expect(projects.get(copyId)?.frames.map((frame) => frame.id)).toEqual(
+      original.frames.map((frame) => frame.id)
+    );
+    expect(projects.get(copyId)?.paletteEntries).toEqual(original.paletteEntries);
+    expect(projects.get(copyId)?.frames.flatMap((frame) => frame.cels.map((cel) => cel.id))).toEqual(
+      original.frames.flatMap((frame) => frame.cels.map((cel) => cel.id))
+    );
   });
 
   it('deletes the open project without a pending auto-save recreating it', async () => {

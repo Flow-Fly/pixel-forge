@@ -117,6 +117,7 @@ export interface GradientRender {
 interface PaletteSnapshot {
   readonly colors: readonly string[];
   readonly newColorFlags: ReadonlySet<string>;
+  readonly entryIds: readonly string[];
   readonly isDirty: boolean;
 }
 
@@ -370,6 +371,7 @@ function prepareFillChange(
     paletteAfter: {
       colors: palettePlan.colors,
       newColorFlags: palettePlan.newColorFlags,
+      entryIds: palettePlan.entryIds,
       isDirty: paletteBefore.isDirty || palettePlan.colors.length !== paletteBefore.colors.length,
     },
     bounds,
@@ -612,14 +614,24 @@ function planPaletteColor(
   context: ProjectContext,
   hex: string,
   before: PaletteSnapshot,
-): { index: number; colors: readonly string[]; newColorFlags: ReadonlySet<string> } {
+): {
+  index: number;
+  colors: readonly string[];
+  newColorFlags: ReadonlySet<string>;
+  entryIds: readonly string[];
+} {
   const normalized = normalizeHex(hex);
   if (!hexToRgb(normalized)) {
     throw editorError('invalid_request', false, { reason: 'fill_color' });
   }
   const existing = context.palette.getColorIndex(normalized);
   if (existing > 0) {
-    return { index: existing, colors: before.colors, newColorFlags: before.newColorFlags };
+    return {
+      index: existing,
+      colors: before.colors,
+      newColorFlags: before.newColorFlags,
+      entryIds: before.entryIds,
+    };
   }
   if (before.colors.length >= MAX_INDEXED_PALETTE_ENTRIES || before.colors.length >= MAX_PALETTE_SIZE) {
     throw editorError('limit_exceeded', false, { limitId: 'palette-colors' });
@@ -627,7 +639,12 @@ function planPaletteColor(
   const colors = [...before.colors, normalized];
   const newColorFlags = new Set(before.newColorFlags);
   newColorFlags.add(normalized);
-  return { index: colors.length, colors, newColorFlags };
+  return {
+    index: colors.length,
+    colors,
+    newColorFlags,
+    entryIds: [...before.entryIds, crypto.randomUUID()],
+  };
 }
 
 function paletteFillColor(index: number, colors: readonly string[]): FloodFillColor {
@@ -654,6 +671,7 @@ function capturePalette(context: ProjectContext): PaletteSnapshot {
   return {
     colors: [...context.palette.mainColors.value],
     newColorFlags: new Set(context.palette.newColorFlags.value),
+    entryIds: context.palette.getPaletteEntryIds(),
     isDirty: context.palette.isDirty.value,
   };
 }
@@ -684,14 +702,19 @@ function paletteSnapshotsEqual(a: PaletteSnapshot, b: PaletteSnapshot): boolean 
   if (!normalizedColorArraysEqual(a.colors, b.colors)) {
     return false;
   }
+  if (a.entryIds.length !== b.entryIds.length || !a.entryIds.every((id, index) => id === b.entryIds[index])) {
+    return false;
+  }
   return normalizedFlagSetsEqual(a.newColorFlags, b.newColorFlags);
 }
 
 function applyPalette(context: ProjectContext, snapshot: PaletteSnapshot): void {
-  context.palette.mainColors.value = [...snapshot.colors];
-  context.palette.newColorFlags.value = new Set(snapshot.newColorFlags);
+  context.palette.setColorsDirect(
+    [...snapshot.colors],
+    new Set(snapshot.newColorFlags),
+    [...snapshot.entryIds]
+  );
   context.palette.isDirty.value = snapshot.isDirty;
-  context.palette.rebuildColorMap();
 }
 
 class RasterToolCommand implements Command {

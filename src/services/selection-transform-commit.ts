@@ -60,6 +60,7 @@ interface CelSnapshot {
 interface PaletteSnapshot {
   readonly colors: readonly string[];
   readonly newColorFlags: ReadonlySet<string>;
+  readonly entryIds: readonly string[];
 }
 
 const sessions = new WeakMap<ProjectContext, TransformSession>();
@@ -108,12 +109,10 @@ function snapshotCels(context: ProjectContext): CelSnapshot {
 }
 
 function snapshotPalette(context: ProjectContext): PaletteSnapshot {
-  const flagsSignal = (context.palette as unknown as {
-    newColorFlags?: { value: Set<string> };
-  }).newColorFlags;
   return {
     colors: [...context.palette.mainColors.value],
-    newColorFlags: new Set(flagsSignal?.value ?? []),
+    newColorFlags: new Set(context.palette.newColorFlags.value),
+    entryIds: context.palette.getPaletteEntryIds(),
   };
 }
 
@@ -137,15 +136,23 @@ function sameCelSnapshot(context: ProjectContext, snapshot: CelSnapshot): boolea
   return true;
 }
 
+function sameStringArray(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length
+    && actual.every((value, index) => value === expected[index]);
+}
+
+function sameStringSet(actual: ReadonlySet<string>, expected: ReadonlySet<string>): boolean {
+  return actual.size === expected.size
+    && [...actual].every((value) => expected.has(value));
+}
+
 function samePaletteSnapshot(context: ProjectContext, snapshot: PaletteSnapshot): boolean {
   const colors = context.palette.mainColors.value;
-  const flags = (context.palette as unknown as {
-    newColorFlags?: { value: Set<string> };
-  }).newColorFlags?.value ?? new Set<string>();
-  return colors.length === snapshot.colors.length
-    && colors.every((color, index) => color === snapshot.colors[index])
-    && flags.size === snapshot.newColorFlags.size
-    && [...flags].every((flag) => snapshot.newColorFlags.has(flag));
+  const entryIds = context.palette.getPaletteEntryIds();
+  const flags = context.palette.newColorFlags.value;
+  return sameStringArray(colors, snapshot.colors)
+    && sameStringArray(entryIds, snapshot.entryIds)
+    && sameStringSet(flags, snapshot.newColorFlags);
 }
 
 function restoreDocumentSnapshot(
@@ -158,11 +165,11 @@ function restoreDocumentSnapshot(
     if (cel.indexBuffer && bytes) cel.indexBuffer.set(bytes);
   }
   context.animation.cels.value = new Map(cels.cels);
-  context.palette.mainColors.value = [...palette.colors];
-  const flagsSignal = (context.palette as unknown as {
-    newColorFlags?: { value: Set<string> };
-  }).newColorFlags;
-  if (flagsSignal) flagsSignal.value = new Set(palette.newColorFlags);
+  context.palette.setColorsDirect(
+    [...palette.colors],
+    new Set(palette.newColorFlags),
+    [...palette.entryIds]
+  );
 }
 
 function activeTarget(context: ProjectContext): {

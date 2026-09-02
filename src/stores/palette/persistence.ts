@@ -12,6 +12,7 @@ import { PALETTE_BY_ID } from './types';
 
 const STORAGE_KEYS = {
   COLORS: 'pf-palette-colors',
+  ENTRY_IDS: 'pf-palette-entry-ids',
   PRESET_ID: 'pf-palette-preset-id',
   CUSTOM_ID: 'pf-palette-custom-id',
   NAME: 'pf-palette-name',
@@ -23,35 +24,60 @@ const STORAGE_KEYS = {
 
 export interface StoredPaletteState {
   colors: string[];
+  entryIds: string[];
+  hasStoredColors: boolean;
   presetId: string | null;
   customId: string | null;
   cachedName: string | null;
+}
+
+function loadStoredColors(): { colors: string[]; hasStoredColors: boolean } {
+  const saved = localStorage.getItem(STORAGE_KEYS.COLORS);
+  if (!saved) return { colors: [], hasStoredColors: false };
+
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    if (Array.isArray(parsed)) {
+      return { colors: parsed as string[], hasStoredColors: true };
+    }
+  } catch {
+    // Invalid JSON, use defaults.
+  }
+
+  return { colors: [], hasStoredColors: false };
+}
+
+function loadStoredEntryIds(): string[] {
+  const saved = localStorage.getItem(STORAGE_KEYS.ENTRY_IDS);
+  if (!saved) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    if (Array.isArray(parsed) && parsed.every((entryId) => typeof entryId === 'string')) {
+      return parsed;
+    }
+  } catch {
+    // Invalid JSON, generate identities for the loaded colors.
+  }
+
+  return [];
 }
 
 /**
  * Load palette state from localStorage.
  */
 export function loadFromStorage(): StoredPaletteState {
-  let colors: string[] = [];
-
-  const saved = localStorage.getItem(STORAGE_KEYS.COLORS);
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        colors = parsed;
-      }
-    } catch {
-      // Invalid JSON, use defaults
-    }
-  }
+  const { colors, hasStoredColors } = loadStoredColors();
 
   const presetId = localStorage.getItem(STORAGE_KEYS.PRESET_ID) || null;
   const customId = localStorage.getItem(STORAGE_KEYS.CUSTOM_ID) || null;
   const cachedName = localStorage.getItem(STORAGE_KEYS.NAME) || null;
+  const entryIds = loadStoredEntryIds();
 
   return {
     colors,
+    entryIds,
+    hasStoredColors,
     presetId: presetId || null,
     customId: customId || null,
     cachedName,
@@ -63,11 +89,13 @@ export function loadFromStorage(): StoredPaletteState {
  */
 export function saveToStorage(
   colors: string[],
+  entryIds: string[],
   presetId: string | null,
   customId: string | null,
   paletteName: string
 ): void {
   localStorage.setItem(STORAGE_KEYS.COLORS, JSON.stringify(colors));
+  localStorage.setItem(STORAGE_KEYS.ENTRY_IDS, JSON.stringify(entryIds));
   localStorage.setItem(STORAGE_KEYS.PRESET_ID, presetId ?? '');
   localStorage.setItem(STORAGE_KEYS.CUSTOM_ID, customId ?? '');
   localStorage.setItem(STORAGE_KEYS.NAME, paletteName);

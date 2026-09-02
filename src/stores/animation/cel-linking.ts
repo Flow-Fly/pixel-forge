@@ -19,14 +19,15 @@ import { isRuntimeEmptyCel } from './empty-cel';
 export function linkCels(
   cels: Map<string, Cel>,
   celKeys: string[],
-  linkType: 'soft' | 'hard' = 'hard'
+  linkType: 'soft' | 'hard' = 'hard',
+  suppliedLinkedCelId?: string,
 ): { cels: Map<string, Cel>; linkedCelId: string | null } {
   if (celKeys.length < 2) {
     return { cels, linkedCelId: null };
   }
 
   const newCels = new Map(cels);
-  const linkedCelId = crypto.randomUUID();
+  const linkedCelId = suppliedLinkedCelId ?? crypto.randomUUID();
 
   // Get the first cel's canvas to use as shared canvas
   const firstCel = newCels.get(celKeys[0]);

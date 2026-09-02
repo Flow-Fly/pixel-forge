@@ -293,6 +293,9 @@ describe('shared ProjectFile contract', () => {
     expect(decoded.layers[1].referenceData?.bytes).toEqual(Uint8Array.from([4, 5, 6]));
     expect(decoded.frames[0].cels[0].data).toEqual(Uint8Array.from([7, 8, 9]));
     expect(decoded.frames[0].cels[0].opacity).toBe(40);
+    expect(decoded.frames[0].cels[0].id).toEqual(expect.any(String));
+    expect(decoded.paletteEntries.map((entry) => entry.color)).toEqual(decoded.palette);
+    expect(decoded.paletteEntries.every((entry) => entry.id.length > 0)).toBe(true);
   });
 
   // Regression: #425
@@ -366,7 +369,7 @@ describe('shared ProjectFile contract', () => {
 
     const decoded = decodeProjectFile(legacy);
 
-    expect(PROJECT_VERSION).toBe('4.2.0');
+    expect(PROJECT_VERSION).toBe('4.3.0');
     expect(decoded.version).toBe('3.2.0');
     expect(decoded.palette).toEqual(['#000000', '#ffffff', '#123456']);
     expect(decoded.frames[0].cels[0].indexData).toEqual([2, 3, 0, 1]);
@@ -526,6 +529,91 @@ describe('shared ProjectFile contract', () => {
 
     expect(twice.project).toEqual(once.project);
     expect(twice.compatibility.repairedParentLayerIds).toEqual([]);
+  });
+
+  it('repairs missing and duplicate entity identities deterministically', () => {
+    const malformed = serializedProject();
+    const firstCel = (malformed.frames[0].cels as Array<Record<string, unknown>>)[0];
+    malformed.frames = [
+      {
+        ...(malformed.frames[0] as Record<string, unknown>),
+        id: 'frame-a',
+        cels: [{ ...firstCel, id: 'stable-cel' }],
+      },
+      {
+        ...(malformed.frames[0] as Record<string, unknown>),
+        id: 'frame-b',
+        cels: [{ ...firstCel, id: 'stable-cel' }],
+      },
+      {
+        ...(malformed.frames[0] as Record<string, unknown>),
+        id: 'frame-c',
+        cels: [{ ...firstCel, id: ' ' }],
+      },
+    ];
+    malformed.paletteEntries = [
+      { id: 'stable-palette-entry', color: '#112233' },
+      { id: 'stable-palette-entry', color: '#ffffff' },
+    ];
+
+    const once = decodeProjectFileWithDiagnostics(malformed);
+    const twice = decodeProjectFileWithDiagnostics(once.project);
+    const celIds = once.project.frames.flatMap((frame) => frame.cels.map((cel) => cel.id));
+    const paletteEntryIds = once.project.paletteEntries.map((entry) => entry.id);
+
+    expect(celIds[0]).toBe('stable-cel');
+    expect(new Set(celIds).size).toBe(celIds.length);
+    expect(new Set(paletteEntryIds).size).toBe(paletteEntryIds.length);
+    expect(once.compatibility.repairedCelIds).toHaveLength(2);
+    expect(once.compatibility.repairedPaletteEntryIds).toHaveLength(1);
+    expect(twice.project).toEqual(once.project);
+    expect(twice.compatibility.repairedCelIds).toEqual([]);
+    expect(twice.compatibility.repairedPaletteEntryIds).toEqual([]);
+  });
+
+  it('preserves valid identities and unknown entity payloads', () => {
+    const current = serializedProject();
+    const cel = (current.frames[0].cels as Array<Record<string, unknown>>)[0];
+    cel.id = 'cel-stable';
+    cel.editorPayload = { source: 'kept' };
+    current.paletteEntries = [
+      { id: 'palette-stable', color: '#112233', editorPayload: { source: 'kept' } },
+      { id: 'palette-second', color: '#ffffff' },
+    ];
+
+    const decoded = decodeProjectFile(current);
+
+    expect(decoded.frames[0].cels[0]).toMatchObject({
+      id: 'cel-stable',
+      editorPayload: { source: 'kept' },
+    });
+    expect(decoded.paletteEntries).toEqual([
+      expect.objectContaining({
+        id: 'palette-stable',
+        color: '#112233',
+        editorPayload: { source: 'kept' },
+      }),
+      { id: 'palette-second', color: '#ffffff' },
+    ]);
+  });
+
+  it('reads the controlled owner cup archive and adds stable identities without logging artwork data', async () => {
+    const compressed = await readFile(
+      resolve(
+        basename(process.cwd()) === 'shared' ? resolve(process.cwd(), '..') : process.cwd(),
+        'tests/fixtures/project-files/cup-compatibility.pf'
+      )
+    );
+    const input = JSON.parse(inflateSync(compressed).toString('utf8')) as Record<string, unknown>;
+    const result = decodeProjectFileWithDiagnostics(input);
+    const celIds = result.project.frames.flatMap((frame) => frame.cels.map((cel) => cel.id));
+
+    expect(result.project.version).toBe('2.1.0');
+    expect(result.project.frames).toHaveLength(15);
+    expect(new Set(celIds).size).toBe(celIds.length);
+    expect(result.project.paletteEntries).toEqual([]);
+    expect(result.compatibility.repairedCelIds).toHaveLength(celIds.length);
+    expect(JSON.stringify(result.compatibility)).not.toContain('Coupe');
   });
 
   it('reads the checked-in 4.1 .pf fixture with its legacy writer shape', async () => {

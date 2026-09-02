@@ -138,7 +138,11 @@ async function decodeAsepriteProjectFile(file: File): Promise<ProjectFileDecodeR
     context.project.name.value = getFileStem(file.name);
     return {
       project: await context.project.saveProject(),
-      compatibility: { repairedParentLayerIds: [] },
+      compatibility: {
+        repairedParentLayerIds: [],
+        repairedCelIds: [],
+        repairedPaletteEntryIds: [],
+      },
     };
   } finally {
     context.dispose();

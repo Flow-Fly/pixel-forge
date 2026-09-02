@@ -20,6 +20,7 @@ export type ProjectLoadStores = {
   animation: {
     frames: WritableSignal<Frame[]>;
     cels: WritableSignal<Map<string, Cel>>;
+    currentFrameId: WritableSignal<string>;
     fps: WritableSignal<number>;
     tags: WritableSignal<FrameTag[]>;
     addFrame: (
@@ -33,7 +34,11 @@ export type ProjectLoadStores = {
     getCelKey: (layerId: string, frameId: string) => string;
     goToFrame: (frameId: string) => void;
     isRuntimeEmptyCel: (cel: Cel) => boolean;
-    linkCels: (celKeys: string[], linkType: CelLinkType) => string | null;
+    linkCels: (
+      celKeys: string[],
+      linkType: CelLinkType,
+      suppliedLinkedCelId?: string,
+    ) => string | null;
     rebuildAllCelCanvases: () => void;
     rebuildAllIndexBuffers: () => void;
     setFrameDuration: (frameId: string, duration: number) => void;
@@ -66,7 +71,7 @@ export type ProjectLoadStores = {
     getColorIndex: (hex: string) => number;
     getOrAddColor: (hex: string) => number;
     refreshUsedColors: () => void;
-    setPalette: (colors: string[]) => void;
+    setPalette: (colors: string[], preserveSelection?: boolean, entryIds?: string[]) => void;
   };
 };
 
@@ -82,11 +87,13 @@ const COMPATIBILITY_WARNING_MESSAGE_LIMIT = 240;
 export function restoreProjectPaletteForLoad(stores: ProjectLoadStores, file: ProjectFile): void {
   const { palette } = stores;
 
-  const filePalette = file.palette && Array.isArray(file.palette) ? file.palette : [];
+  if (file.palette === undefined) return;
 
-  if (filePalette.length > 0) {
-    palette.setPalette(filePalette);
-  }
+  palette.setPalette(
+    file.palette,
+    false,
+    file.paletteEntries?.map((entry) => entry.id)
+  );
 }
 
 export async function hydrateProjectLayers(
@@ -104,7 +111,10 @@ export async function hydrateProjectFrames(
   stores: ProjectLoadStores,
   file: ProjectFile
 ): Promise<void> {
-  const placeholderFrameId = prepareFramesForLoad(stores);
+  const placeholderFrameId = prepareFramesForLoad(
+    stores,
+    new Set(file.frames.map((frame) => frame.id))
+  );
   const linkedCelGroups = new Map<string, LinkedCelGroup>();
 
   for (const frameFile of file.frames) {
@@ -163,16 +173,24 @@ function describeProjectCompatibilityWarning(
   diagnostics: ProjectCompatibilityDiagnostics
 ): string | null {
   const repairedLayerIds = diagnostics.repairedParentLayerIds;
-  if (repairedLayerIds.length === 0) return null;
+  if (repairedLayerIds.length > 0) {
+    const visibleLayerIds = repairedLayerIds
+      .slice(0, COMPATIBILITY_WARNING_LAYER_LIMIT)
+      .map(limitCompatibilityWarningLayerId)
+      .join(', ');
+    const hiddenCount = repairedLayerIds.length - COMPATIBILITY_WARNING_LAYER_LIMIT;
+    const remaining = hiddenCount > 0 ? `, and ${hiddenCount} more` : '';
+    return limitCompatibilityWarningMessage(
+      `Repaired invalid group links for layers: ${visibleLayerIds}${remaining}.`
+    );
+  }
 
-  const visibleLayerIds = repairedLayerIds
-    .slice(0, COMPATIBILITY_WARNING_LAYER_LIMIT)
-    .map(limitCompatibilityWarningLayerId)
-    .join(', ');
-  const hiddenCount = repairedLayerIds.length - COMPATIBILITY_WARNING_LAYER_LIMIT;
-  const remaining = hiddenCount > 0 ? `, and ${hiddenCount} more` : '';
+  const repairedCelCount = diagnostics.repairedCelIds.length;
+  const repairedPaletteEntryCount = diagnostics.repairedPaletteEntryIds.length;
+  if (repairedCelCount === 0 && repairedPaletteEntryCount === 0) return null;
+
   return limitCompatibilityWarningMessage(
-    `Repaired invalid group links for layers: ${visibleLayerIds}${remaining}.`
+    `Repaired project identities: ${repairedCelCount} cels and ${repairedPaletteEntryCount} palette entries.`
   );
 }
 
@@ -267,14 +285,42 @@ function createEmptyReferenceData(): ReferenceLayerData {
   };
 }
 
-function prepareFramesForLoad(stores: ProjectLoadStores): string | undefined {
+function prepareFramesForLoad(
+  stores: ProjectLoadStores,
+  reservedFrameIds: ReadonlySet<string>
+): string | undefined {
   const { animation } = stores;
 
   while (animation.frames.value.length > 1) {
     animation.deleteFrame(animation.frames.value[0].id);
   }
 
-  return animation.frames.value[0]?.id;
+  const placeholder = animation.frames.value[0];
+  if (!placeholder) return undefined;
+  if (!reservedFrameIds.has(placeholder.id)) return placeholder.id;
+
+  let temporaryId = `placeholder-${crypto.randomUUID()}`;
+  while (reservedFrameIds.has(temporaryId)) {
+    temporaryId = `placeholder-${crypto.randomUUID()}`;
+  }
+
+  const frames = animation.frames.value.map((frame) =>
+    frame.id === placeholder.id ? { ...frame, id: temporaryId } : frame
+  );
+  animation.frames.value = frames;
+  if (animation.currentFrameId.value === placeholder.id) {
+    animation.currentFrameId.value = temporaryId;
+  }
+
+  const cels = new Map(animation.cels.value);
+  for (const [celKey, cel] of cels) {
+    if (cel.frameId !== placeholder.id) continue;
+    const replacementKey = animation.getCelKey(cel.layerId, temporaryId);
+    cels.delete(celKey);
+    cels.set(replacementKey, { ...cel, frameId: temporaryId });
+  }
+  animation.cels.value = cels;
+  return temporaryId;
 }
 
 function addLoadedFrame(stores: ProjectLoadStores, frameFile: ProjectFrameFile): Frame {
@@ -282,7 +328,7 @@ function addLoadedFrame(stores: ProjectLoadStores, frameFile: ProjectFrameFile):
 
   // Loaded cels restore their persisted link groups after every frame exists.
   // The layer preference applies only to future user-created cels.
-  animation.addFrame(false, undefined, undefined, false);
+  animation.addFrame(false, undefined, frameFile.id, false);
   const frame = animation.frames.value[animation.frames.value.length - 1];
   animation.setFrameDuration(frame.id, frameFile.duration);
   return frame;
@@ -374,6 +420,7 @@ function restoreCelIndexBuffer(
   const cels = new Map(animation.cels.value);
   const restoredCel = {
     ...cel,
+    id: celFile.id,
     opacity: celFile.opacity,
   };
   cels.set(celKey, restoredCel);
@@ -426,7 +473,7 @@ function restoreLinkedCelGroups(
 ): void {
   for (const [linkedCelId, { celKeys, linkType }] of linkedCelGroups) {
     if (celKeys.length >= 2) {
-      stores.animation.linkCels(celKeys, linkType);
+      stores.animation.linkCels(celKeys, linkType, linkedCelId);
       continue;
     }
 

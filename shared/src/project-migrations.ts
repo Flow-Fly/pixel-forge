@@ -17,22 +17,165 @@ export function migrateProjectFileForLoadWithDiagnostics(
   const fileWithPalette = shouldFoldEphemeralPalette(file)
     ? foldLegacyEphemeralPalette(file, fileWithoutEphemeral)
     : fileWithoutEphemeral;
+  const {
+    palette,
+    paletteEntries,
+    repairedPaletteEntryIds,
+  } = normalizePaletteEntries(fileWithPalette);
   const { layers, repairedParentLayerIds } = normalizeProjectLayers(fileWithPalette.layers);
+  const { frames, repairedCelIds } = normalizeCelIds(fileWithPalette.frames);
+
+  const projectWithoutPaletteEntries = {
+    ...fileWithPalette,
+    layers,
+    frames,
+  };
+  const projectWithIdentities = {
+    ...projectWithoutPaletteEntries,
+    ...(palette === undefined ? {} : { palette }),
+    paletteEntries: paletteEntries ?? [],
+  };
+  const project: ProjectFile = {
+    ...projectWithIdentities,
+    frames: projectWithIdentities.frames.map((frame) => ({
+      ...frame,
+      cels: frame.cels.map((cel) => ({
+        ...cel,
+        opacity: cel.opacity ?? 100,
+      })),
+    })),
+  };
 
   return {
-    project: {
-      ...fileWithPalette,
-      layers,
-      frames: fileWithPalette.frames.map((frame) => ({
-        ...frame,
-        cels: frame.cels.map((cel) => ({
-          ...cel,
-          opacity: cel.opacity ?? 100,
-        })),
-      })),
+    project,
+    compatibility: {
+      repairedParentLayerIds,
+      repairedCelIds,
+      repairedPaletteEntryIds,
     },
-    compatibility: { repairedParentLayerIds },
   };
+}
+
+type NormalizedPalette = {
+  palette?: string[];
+  paletteEntries?: NonNullable<ProjectFile['paletteEntries']>;
+  repairedPaletteEntryIds: string[];
+};
+
+type NormalizedCelWithIdentity = Omit<
+  NormalizedProjectFileInput['frames'][number]['cels'][number],
+  'id'
+> & {
+  id: string;
+};
+
+type NormalizedFrameWithIdentities = Omit<
+  NormalizedProjectFileInput['frames'][number],
+  'cels'
+> & {
+  cels: NormalizedCelWithIdentity[];
+};
+
+function normalizePaletteEntries(file: NormalizedProjectFileInput): NormalizedPalette {
+  const sourcePalette = Array.isArray(file.palette) ? file.palette : undefined;
+  const sourceEntries = file.paletteEntries;
+
+  if (sourcePalette === undefined && sourceEntries === undefined) {
+    return { repairedPaletteEntryIds: [] };
+  }
+
+  const palette = sourcePalette ?? sourceEntries!.map((entry) => entry.color);
+  if (sourceEntries && sourcePalette && sourceEntries.length !== sourcePalette.length) {
+    throw new Error('Invalid project file: palette entries must match palette colors');
+  }
+
+  const reservedIds = new Set(
+    palette
+      .map((_color, index) => sourceEntries?.[index]?.id)
+      .filter(isUsableIdentity)
+  );
+  const usedIds = new Set<string>();
+  const repairedPaletteEntryIds: string[] = [];
+  const paletteEntries = palette.map((color, index) => {
+    const sourceEntry = sourceEntries?.[index];
+    if (sourceEntry && sourceEntry.color !== color) {
+      throw new Error('Invalid project file: palette entry color does not match palette');
+    }
+
+    const sourceId = sourceEntry?.id;
+    const id = isUsableIdentity(sourceId) && !usedIds.has(sourceId)
+      ? sourceId
+      : createDeterministicIdentity(
+          'palette',
+          `${index}:${color}`,
+          new Set([...usedIds, ...reservedIds])
+        );
+    if (id !== sourceEntry?.id) repairedPaletteEntryIds.push(id);
+    usedIds.add(id);
+
+    return {
+      ...sourceEntry,
+      id,
+      color,
+    };
+  });
+
+  return { palette, paletteEntries, repairedPaletteEntryIds };
+}
+
+function normalizeCelIds(
+  frames: NormalizedProjectFileInput['frames']
+): { frames: NormalizedFrameWithIdentities[]; repairedCelIds: string[] } {
+  const reservedIds = new Set(
+    frames.flatMap((frame) => frame.cels.map((cel) => cel.id)).filter(isUsableIdentity)
+  );
+  const usedIds = new Set<string>();
+  const repairedCelIds: string[] = [];
+  const normalizedFrames: NormalizedFrameWithIdentities[] = frames.map((frame) => ({
+    ...frame,
+    cels: frame.cels.map((cel, celIndex) => {
+      const id = isUsableIdentity(cel.id) && !usedIds.has(cel.id)
+        ? cel.id
+        : createDeterministicIdentity(
+            'cel',
+            `${frame.id}:${cel.layerId}:${celIndex}`,
+            new Set([...usedIds, ...reservedIds])
+          );
+      if (id !== cel.id) repairedCelIds.push(id);
+      usedIds.add(id);
+      return { ...cel, id };
+    }),
+  }));
+
+  return { frames: normalizedFrames, repairedCelIds };
+}
+
+function isUsableIdentity(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function createDeterministicIdentity(
+  kind: string,
+  source: string,
+  usedIds: ReadonlySet<string>
+): string {
+  const base = `pf-${kind}-${hashIdentitySource(`${kind}:${source}`)}`;
+  let candidate = base;
+  let suffix = 1;
+  while (usedIds.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function hashIdentitySource(source: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function shouldFoldEphemeralPalette(file: NormalizedProjectFileInput): boolean {
@@ -57,10 +200,15 @@ function foldLegacyEphemeralPalette(
   const basePalette = Array.isArray(file.palette) ? file.palette : [];
   const legacyPalette = file.ephemeralPalette ?? [];
   const { palette, oldIndexToNewIndex } = foldEphemeralPalette(basePalette, legacyPalette);
+  const existingEntries = fileWithoutEphemeral.paletteEntries ?? [];
 
   return {
     ...fileWithoutEphemeral,
     palette,
+    paletteEntries: palette.map((color, index) => ({
+      ...existingEntries[index],
+      color,
+    })),
     frames: remapLegacyEphemeralIndices(file.frames, oldIndexToNewIndex),
   };
 }

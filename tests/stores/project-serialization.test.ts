@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import pako from 'pako';
@@ -72,9 +73,8 @@ function normalizeRoundTripFile(file: ProjectFile): ProjectFile {
   return {
     ...file,
     version: PROJECT_VERSION,
-    frames: file.frames.map((frame, frameIndex) => ({
+    frames: file.frames.map((frame) => ({
       ...frame,
-      id: `frame-${frameIndex}`,
       cels: frame.cels.map((cel) => {
         if (!cel.linkedCelId) return cel;
         if (!linkIds.has(cel.linkedCelId)) {
@@ -83,6 +83,45 @@ function normalizeRoundTripFile(file: ProjectFile): ProjectFile {
         return { ...cel, linkedCelId: linkIds.get(cel.linkedCelId) };
       }),
     })),
+  };
+}
+
+function projectContentForRoundTrip(file: ProjectFile) {
+  return {
+    name: file.name,
+    width: file.width,
+    height: file.height,
+    layers: file.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      type: layer.type,
+      visible: layer.visible,
+      locked: layer.locked,
+      opacity: layer.opacity,
+      blendMode: layer.blendMode ?? 'normal',
+      continuous: layer.continuous ?? false,
+      parentId: layer.parentId,
+      data: Array.from(layer.data),
+      textData: layer.textData,
+      referenceData: layer.referenceData
+        ? { ...layer.referenceData, bytes: Array.from(layer.referenceData.bytes) }
+        : undefined,
+    })),
+    frames: file.frames.map((frame) => ({
+      id: frame.id,
+      duration: frame.duration,
+      cels: frame.cels.map((cel) => ({
+        id: cel.id,
+        layerId: cel.layerId,
+        data: Array.from(cel.data),
+        opacity: cel.opacity,
+        linkedCelId: cel.linkedCelId,
+        linkType: cel.linkType,
+        textCelData: cel.textCelData,
+      })),
+    })),
+    animation: file.animation,
+    tags: file.tags,
   };
 }
 
@@ -279,7 +318,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     expect(resaved.layers[1].visible).toBe(false);
     expect(resaved.layers[0].visible).toBe(true);
 
-    // Frames: ids are regenerated on load, but count/durations/order survive
+    // Frames: persisted ids and count/durations/order survive load
     expect(resaved.frames).toHaveLength(3);
     expect(resaved.frames.map((f) => f.duration)).toEqual([100, 250, 400]);
 
@@ -317,6 +356,73 @@ describe('project save -> load -> save round-trip (structural)', () => {
     vi.useRealTimers();
 
     expect(normalizeRoundTripFile(twice)).toEqual(normalizeRoundTripFile(once));
+  });
+
+  it('preserves frame, cel, and palette-entry identities through hydration and save', async () => {
+    const saved = await buildSampleProject();
+    const expectedFrameIds = saved.frames.map((frame) => frame.id);
+    const expectedCelIds = saved.frames.map((frame) => frame.cels.map((cel) => cel.id));
+    const expectedPaletteEntries = saved.paletteEntries;
+
+    await projectStore.loadProject(structuredClone(saved), false);
+    const reloaded = await projectStore.saveProject();
+
+    expect(reloaded.frames.map((frame) => frame.id)).toEqual(expectedFrameIds);
+    expect(reloaded.frames.map((frame) => frame.cels.map((cel) => cel.id))).toEqual(expectedCelIds);
+    expect(reloaded.paletteEntries).toEqual(expectedPaletteEntries);
+  });
+
+  it('keeps palette identities aligned through edit, insert, reorder, delete, and reload', async () => {
+    paletteStore.setPalette(['#000000', '#ff0000', '#00ff00']);
+    const initialIds = paletteStore.getPaletteEntryIds();
+
+    paletteStore.updateColor(2, '#0000ff');
+    expect(paletteStore.getPaletteEntryIds()[1]).toBe(initialIds[1]);
+
+    paletteStore.insertColorAt(2, '#123456');
+    const insertedIds = paletteStore.getPaletteEntryIds();
+    expect(insertedIds).toEqual([initialIds[0], expect.any(String), initialIds[1], initialIds[2]]);
+
+    paletteStore.moveColor(3, 0);
+    const reorderedIds = paletteStore.getPaletteEntryIds();
+    expect(reorderedIds).toEqual([initialIds[2], initialIds[0], insertedIds[1], initialIds[1]]);
+
+    paletteStore.removeColorByIndex(3);
+    const saved = await projectStore.saveProject();
+    expect(saved.paletteEntries.map((entry) => entry.id)).toEqual([
+      initialIds[2],
+      initialIds[0],
+      initialIds[1],
+    ]);
+
+    await projectStore.loadProject(structuredClone(saved), false);
+    const reloaded = await projectStore.saveProject();
+    expect(reloaded.paletteEntries).toEqual(saved.paletteEntries);
+  });
+
+  it('keeps duplicate-color entry identities positional through insert and delete', () => {
+    paletteStore.setPalette(['#111111', '#222222', '#222222', '#333333']);
+    const initialIds = paletteStore.getPaletteEntryIds();
+
+    paletteStore.insertColorAt(3, '#222222');
+    const insertedIds = paletteStore.getPaletteEntryIds();
+    expect(insertedIds).toEqual([
+      initialIds[0],
+      initialIds[1],
+      expect.any(String),
+      initialIds[2],
+      initialIds[3],
+    ]);
+    expect(insertedIds[2]).not.toBe(initialIds[1]);
+    expect(insertedIds[2]).not.toBe(initialIds[2]);
+
+    paletteStore.removeColorByIndex(4);
+    expect(paletteStore.getPaletteEntryIds()).toEqual([
+      initialIds[0],
+      initialIds[1],
+      insertedIds[2],
+      initialIds[3],
+    ]);
   });
 
   it.each([
@@ -458,7 +564,7 @@ describe('project save -> load -> save round-trip (structural)', () => {
     ).toEqual([]);
   });
 
-  it('keeps non-empty group cels on the normal serialization path', async () => {
+  it('preserves a persisted linked-cel identity through hydration and save/load/save', async () => {
     const input = await readCompressedProjectFixture('current-4.2.pf.base64');
     const project = decodeProjectFileWithDiagnostics(input).project;
     const group = project.layers.find((layer) => layer.type === 'group');
@@ -508,10 +614,30 @@ describe('project save -> load -> save round-trip (structural)', () => {
       );
       expect(cels[0]?.linkedCelId).toEqual(expect.any(String));
       expect(cels.map((cel) => cel?.linkedCelId)).toEqual([
-        cels[0]?.linkedCelId,
-        cels[0]?.linkedCelId,
+        'loaded-group-link',
+        'loaded-group-link',
       ]);
     }
+  });
+
+  it('round-trips the controlled cup archive through browser hydration with its hash protected', async () => {
+    const fixturePath = resolve(process.cwd(), 'tests/fixtures/project-files/cup-compatibility.pf');
+    const compressed = await readFile(fixturePath);
+    expect(createHash('sha256').update(compressed).digest('hex')).toBe(
+      '1351b2e18301142aee3b4270d14faf46b3c5c7bc1fa0f5cd92788494ac521f99'
+    );
+
+    const input = JSON.parse(pako.inflate(compressed, { to: 'string' })) as ProjectFileInput;
+    const source = decodeProjectFileWithDiagnostics(input).project;
+
+    await projectStore.loadProject(input, false);
+    const saved = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+    await projectStore.loadProject(saved, false);
+    const reloaded = decodeProjectFileWithDiagnostics(await projectStore.saveProject()).project;
+
+    expect(projectContentForRoundTrip(saved)).toEqual(projectContentForRoundTrip(source));
+    expect(projectContentForRoundTrip(reloaded)).toEqual(projectContentForRoundTrip(source));
+    expect(normalizeRoundTripFile(reloaded)).toEqual(normalizeRoundTripFile(saved));
   });
 
   it('persists an unlinked cel and the remaining hard-linked group through reload', async () => {

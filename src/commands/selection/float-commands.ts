@@ -21,6 +21,7 @@ type IndexedSelectionCommandContext = EditableCelCommandContext & Pick<ProjectCo
 export interface IndexedFloatPaletteState {
   colors: string[];
   newColorFlags: Set<string>;
+  entryIds: string[];
 }
 
 export interface CommitIndexedFloatCommandOptions {
@@ -37,6 +38,7 @@ function clonePaletteState(state: IndexedFloatPaletteState): IndexedFloatPalette
   return {
     colors: [...state.colors],
     newColorFlags: new Set(state.newColorFlags),
+    entryIds: [...state.entryIds],
   };
 }
 
@@ -44,6 +46,7 @@ function currentPaletteState(context: IndexedSelectionCommandContext): IndexedFl
   return {
     colors: [...context.palette.mainColors.value],
     newColorFlags: new Set(context.palette.newColorFlags.value),
+    entryIds: context.palette.getPaletteEntryIds(),
   };
 }
 
@@ -375,7 +378,7 @@ export class CommitIndexedFloatCommand
   }
 
   private applyPaletteState(state: IndexedFloatPaletteState): void {
-    this.context.palette.setColorsDirect(state.colors, state.newColorFlags);
+    this.context.palette.setColorsDirect(state.colors, state.newColorFlags, state.entryIds);
   }
 
   private writeIndexRegion(data: Uint8Array): void {
