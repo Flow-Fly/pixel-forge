@@ -10,6 +10,10 @@ export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
 // fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
 export const PROJECT_SAVE_SAFETY_OBSERVATION_ID = 'project.save-safety';
+// fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
+export const PROJECT_OBSERVATION_ID = 'project.observe';
+// fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
+export const RENDER_OBSERVATION_ID = 'project.render.observe';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
 export const FILL_COMMAND_ID = 'project.raster.fill';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
@@ -236,9 +240,54 @@ export const projectSaveSafetyCatalog = Object.freeze({
   privacy: 'no project content or raw errors',
 });
 
+// fallow-ignore-next-line unused-export -- Public observation catalog is negotiated by adapters.
+export const projectObservationCatalog = Object.freeze({
+  id: PROJECT_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  requiresRevision: true,
+  fields: {
+    target: { projectId: 'string' },
+    revision: 'integer >= 0',
+    canvas: { width: 'positive integer', height: 'positive integer' },
+    layers: 'bounded ordered layer identities and state',
+    frames: 'bounded ordered frame and cel identities',
+    tags: 'bounded ordered frame-tag identities and ranges',
+    palette: 'bounded ordered palette-entry identities and colors',
+    history: 'bounded undo and redo summary',
+    saveSafety: 'project.save-safety observation',
+    lastEvent: 'optional compact project-change event',
+  },
+  privacy: 'no canvases, stores, signals, command instances, or raw errors',
+});
+
+// fallow-ignore-next-line unused-export -- Public observation catalog is negotiated by adapters.
+export const renderObservationCatalog = Object.freeze({
+  id: RENDER_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'string' },
+    expectedRevision: 'integer >= 0',
+    frameId: 'string',
+  },
+  result: {
+    format: 'rgba8',
+    pixels: 'copied Uint8Array',
+    stride: 'width * 4',
+  },
+  limits: { maxBytes: 16 * 1024 * 1024 },
+  privacy: 'canonical artwork bytes only; no canvas or browser chrome',
+});
+
 export const editorCatalog = Object.freeze({
   version: '1.0',
-  observations: Object.freeze([projectSaveSafetyCatalog]),
+  observations: Object.freeze([
+    projectSaveSafetyCatalog,
+    projectObservationCatalog,
+    renderObservationCatalog,
+  ]),
   commands: Object.freeze([
     canvasSizeCatalog.command,
     layerStateCatalog,

@@ -41,10 +41,14 @@ export type ProjectSaveSafetyObservation = ProjectSaveSafetyState;
 
 export type EditorErrorCode =
   | 'invalid_request'
+  | 'capability_denied'
+  | 'project_not_found'
   | 'target_not_found'
   | 'revision_conflict'
   | 'invalid_state'
+  | 'bounds_exceeded'
   | 'limit_exceeded'
+  | 'cancelled'
   | 'unsupported'
   | 'internal';
 
