@@ -5,11 +5,16 @@ import type { Cel } from '../types/animation';
 import type { BlendMode, Layer } from '../types/layer';
 import { rebuildCanvasFromIndices } from '../utils/indexed-color';
 import { hexToRgb, normalizeHex } from '../stores/palette/color-utils';
+import { estimateCelPayloadBytes } from './payload-memory';
 import {
   STATIC_LAYER_TREE_COMMAND_ID,
   STATIC_PALETTE_COMMAND_ID,
+  STATIC_STRUCTURE_MAX_CELS,
+  STATIC_STRUCTURE_MAX_FRAMES,
   STATIC_STRUCTURE_MAX_LAYERS,
   STATIC_STRUCTURE_MAX_PALETTE_ENTRIES,
+  STATIC_STRUCTURE_MAX_PREPARATION_BYTES,
+  STATIC_STRUCTURE_SELECTION_ERROR_REASON,
   PROJECT_OBSERVATION_LIMITS,
 } from './catalog';
 import {
@@ -59,6 +64,10 @@ export interface StaticStructureChildInput {
   readonly input: Readonly<Record<string, unknown>>;
 }
 
+export interface StaticStructurePreparationOptions {
+  readonly entityIdFactory?: () => string;
+}
+
 export interface StaticStructureRequest {
   readonly target: ProjectTarget;
   readonly expectedRevision: number;
@@ -71,6 +80,7 @@ interface StaticStructureSnapshot {
   readonly cels: ReadonlyMap<string, Cel>;
   readonly palette: ProjectPaletteSnapshot;
   readonly activeLayerId: string | null;
+  readonly groupData: ReadonlyMap<string, Uint8Array>;
 }
 
 export interface PreparedStaticStructureChange {
@@ -78,6 +88,7 @@ export interface PreparedStaticStructureChange {
   readonly before: StaticStructureSnapshot;
   readonly after: StaticStructureSnapshot;
   readonly domains: readonly ProjectChangeDomain[];
+  readonly snapshotBytes: number;
 }
 
 class StaticStructureError extends Error {
@@ -100,40 +111,61 @@ export function prepareStaticStructureChange(
   children: readonly StaticStructureChildInput[],
   target: ProjectTarget,
   expectedRevision: number,
+  options: StaticStructurePreparationOptions = {},
 ): PreparedStaticStructureChange {
   validateTargetAndRevision(context, target, expectedRevision);
   const request = normalizeStaticStructureRequest(children, target, expectedRevision);
-  const before = captureSnapshot(context);
+  const before = captureSnapshot(context, false);
   validateExistingLayerTypes(before.layers);
   validatePaletteDeclaration(before.palette, request.palette);
   validateLayerDeclaration(before.layers, request.layerTree.layers);
-  validateLayerRemovals(before, request.layerTree.layers);
+  validateLayerRemovals(context, before, request.layerTree.layers);
 
   const paletteChanged = !samePalette(before.palette, request.palette);
+  const snapshotBytes = validatePreparationBounds(
+    context,
+    before,
+    request.layerTree.layers,
+    paletteChanged,
+  );
+  const beforeWithGroupData: StaticStructureSnapshot = {
+    ...before,
+    groupData: context.project.captureLoadedGroupLayerData(),
+  };
   const afterPalette = createAfterPalette(before.palette, request.palette, paletteChanged);
-  const afterCels = createAfterCels(context, before, request.layerTree.layers, afterPalette, paletteChanged);
+  const afterCels = createAfterCels(
+    context,
+    beforeWithGroupData,
+    request.layerTree.layers,
+    afterPalette,
+    paletteChanged,
+    options.entityIdFactory,
+  );
   const afterLayers = createAfterLayers(
     context,
-    before.layers,
+    beforeWithGroupData.layers,
     request.layerTree.layers,
     afterCels,
   );
+  const afterGroupData = createAfterGroupData(beforeWithGroupData.groupData, request.layerTree.layers);
   const after: StaticStructureSnapshot = {
     layers: afterLayers,
     cels: afterCels,
     palette: afterPalette,
     activeLayerId: chooseActiveLayerId(before.activeLayerId, afterLayers),
+    groupData: afterGroupData,
   };
 
-  if (sameSnapshot(before, after)) {
+  if (sameSnapshot(beforeWithGroupData, after)) {
     throw staticError('invalid_request', false, { reason: 'no_change' });
   }
 
   return {
     request,
-    before,
+    before: beforeWithGroupData,
     after,
     domains: STATIC_STRUCTURE_DOMAINS,
+    snapshotBytes,
   };
 }
 
@@ -148,6 +180,7 @@ export function applyPreparedStaticStructureChange(
     new Map(snapshot.cels),
     snapshot.palette,
     snapshot.activeLayerId,
+    snapshot.groupData,
   );
 }
 
@@ -181,6 +214,10 @@ function validateTargetAndRevision(
   }
   if (context.guidedDrawing.active) {
     throw staticError('unsupported', false, { feature: 'guided-drawing-static-structure' });
+  }
+  const selectionType = context.selection.state.value.type;
+  if (selectionType === 'floating' || selectionType === 'transforming') {
+    throw staticError('invalid_state', false, { reason: STATIC_STRUCTURE_SELECTION_ERROR_REASON });
   }
 }
 
@@ -362,7 +399,9 @@ function validateLayerDeclaration(
   });
 }
 
+// fallow-ignore-next-line complexity -- Removal safety keeps child, payload, and compatibility checks in one preflight.
 function validateLayerRemovals(
+  context: ProjectContext,
   before: StaticStructureSnapshot,
   declaration: readonly StaticLayerDeclaration[],
 ): void {
@@ -376,12 +415,60 @@ function validateLayerRemovals(
       if (!isLayerEmpty(before, layer.id)) {
         throw staticError('invalid_state', false, { reason: 'non_empty_layer_removal' });
       }
+      if (context.project.getLoadedGroupLayerDataByteLength(layer.id) > 0) {
+        throw staticError('invalid_state', false, { reason: 'non_empty_layer_removal' });
+      }
       continue;
     }
     if (!isLayerEmpty(before, layer.id)) {
       throw staticError('invalid_state', false, { reason: 'non_empty_layer_removal' });
     }
   }
+}
+
+function validatePreparationBounds(
+  context: ProjectContext,
+  before: StaticStructureSnapshot,
+  declaration: readonly StaticLayerDeclaration[],
+  paletteChanged: boolean,
+): number {
+  const frameCount = context.animation.frames.value.length;
+  if (frameCount > STATIC_STRUCTURE_MAX_FRAMES) {
+    throw staticError('limit_exceeded', false, {
+      reason: 'static_preparation_frames',
+      max: STATIC_STRUCTURE_MAX_FRAMES,
+    });
+  }
+
+  const existingLayerIds = new Set(before.layers.map((layer) => layer.id));
+  const newLayerCount = declaration.filter((layer) => !existingLayerIds.has(layer.id)).length;
+  const preparationCelCount = before.cels.size + (newLayerCount * frameCount);
+  if (preparationCelCount > STATIC_STRUCTURE_MAX_CELS) {
+    throw staticError('limit_exceeded', false, {
+      reason: 'static_preparation_cels',
+      max: STATIC_STRUCTURE_MAX_CELS,
+    });
+  }
+
+  const canvasBytes = context.project.width.value * context.project.height.value * 4;
+  if (!Number.isSafeInteger(canvasBytes) || canvasBytes < 0) {
+    throw staticError('limit_exceeded', false, {
+      reason: 'static_preparation_bytes',
+      max: STATIC_STRUCTURE_MAX_PREPARATION_BYTES,
+    });
+  }
+  const celBytes = estimateCelPayloadBytes(before.cels);
+  const groupBytes = context.project.getLoadedGroupLayerDataByteLength();
+  const newCelBytes = newLayerCount * frameCount * canvasBytes;
+  const afterPayloadBytes = (paletteChanged ? celBytes : 0) + groupBytes + newCelBytes;
+  const snapshotBytes = celBytes + groupBytes + afterPayloadBytes;
+  if (!Number.isSafeInteger(snapshotBytes) || snapshotBytes > STATIC_STRUCTURE_MAX_PREPARATION_BYTES) {
+    throw staticError('limit_exceeded', false, {
+      reason: 'static_preparation_bytes',
+      max: STATIC_STRUCTURE_MAX_PREPARATION_BYTES,
+    });
+  }
+  return snapshotBytes;
 }
 
 function createAfterPalette(
@@ -401,12 +488,14 @@ function createAfterPalette(
   };
 }
 
+// fallow-ignore-next-line complexity -- Bounded cel creation keeps identity validation and allocation atomic.
 function createAfterCels(
   context: ProjectContext,
   before: StaticStructureSnapshot,
   declaration: readonly StaticLayerDeclaration[],
   afterPalette: ProjectPaletteSnapshot,
   paletteChanged: boolean,
+  entityIdFactory: () => string = () => crypto.randomUUID(),
 ): Map<string, Cel> {
   const retained = new Set(declaration.map((layer) => layer.id));
   const after = paletteChanged
@@ -419,18 +508,38 @@ function createAfterCels(
   }
 
   const existing = new Set(before.layers.map((layer) => layer.id));
+  const celIds = new Set([...before.cels.values()].map((cel) => cel.id));
   for (const layer of declaration) {
     if (existing.has(layer.id)) continue;
     for (const frame of context.animation.frames.value) {
+      const celId = entityIdFactory();
+      if (typeof celId !== 'string' || celId.length === 0 || celIds.has(celId)) {
+        throw staticError('invalid_state', false, { reason: 'cel_identity' });
+      }
+      celIds.add(celId);
       const canvas = createBlankCanvas(context.project.width.value, context.project.height.value);
       const cel: Cel = {
-        id: crypto.randomUUID(),
+        id: celId,
         layerId: layer.id,
         frameId: frame.id,
         canvas,
       };
       after.set(context.animation.getCelKey(layer.id, frame.id), cel);
     }
+  }
+  return after;
+}
+
+function createAfterGroupData(
+  before: ReadonlyMap<string, Uint8Array>,
+  declaration: readonly StaticLayerDeclaration[],
+): Map<string, Uint8Array> {
+  const retainedGroups = new Set(
+    declaration.filter((layer) => layer.type === 'group').map((layer) => layer.id),
+  );
+  const after = new Map<string, Uint8Array>();
+  for (const [layerId, bytes] of before) {
+    if (retainedGroups.has(layerId)) after.set(layerId, new Uint8Array(bytes));
   }
   return after;
 }
@@ -519,12 +628,13 @@ function cloneAndRemapCels(
   return after;
 }
 
-function captureSnapshot(context: ProjectContext): StaticStructureSnapshot {
+function captureSnapshot(context: ProjectContext, includeGroupData = true): StaticStructureSnapshot {
   return {
     layers: context.layers.layers.value.map(cloneLayer),
     cels: new Map(context.animation.cels.value),
     palette: context.palette.captureProjectSnapshot(),
     activeLayerId: context.layers.activeLayerId.value,
+    groupData: includeGroupData ? context.project.captureLoadedGroupLayerData() : new Map(),
   };
 }
 
@@ -532,7 +642,20 @@ function sameSnapshot(first: StaticStructureSnapshot, second: StaticStructureSna
   return sameLayerArrays(first.layers, second.layers)
     && first.activeLayerId === second.activeLayerId
     && samePaletteSnapshots(first.palette, second.palette)
-    && sameCels(first.cels, second.cels);
+    && sameCels(first.cels, second.cels)
+    && sameGroupData(first.groupData, second.groupData);
+}
+
+function sameGroupData(
+  first: ReadonlyMap<string, Uint8Array>,
+  second: ReadonlyMap<string, Uint8Array>,
+): boolean {
+  if (first.size !== second.size) return false;
+  for (const [layerId, bytes] of first) {
+    const other = second.get(layerId);
+    if (!other || !sameBytes(bytes, other)) return false;
+  }
+  return true;
 }
 
 function samePaletteSnapshots(

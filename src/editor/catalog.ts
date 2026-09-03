@@ -77,6 +77,10 @@ export const STATIC_PALETTE_COMMAND_ID = 'project.palette.declaration';
 export const STATIC_LAYER_TREE_COMMAND_ID = 'project.layer.tree';
 export const STATIC_STRUCTURE_MAX_PALETTE_ENTRIES = 32;
 export const STATIC_STRUCTURE_MAX_LAYERS = 16;
+export const STATIC_STRUCTURE_MAX_FRAMES = 16;
+export const STATIC_STRUCTURE_MAX_CELS = STATIC_STRUCTURE_MAX_LAYERS * STATIC_STRUCTURE_MAX_FRAMES;
+export const STATIC_STRUCTURE_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
+export const STATIC_STRUCTURE_SELECTION_ERROR_REASON = 'selection_in_progress';
 // fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
 export const TRANSACTION_COMMAND_ID = 'project.transaction.execute';
@@ -134,7 +138,10 @@ export const transactionCatalog = Object.freeze({
   target: 'project',
   requiresRevision: true,
   request: {
-    profile: 'optional layer-and-tag | static-structure (default layer-and-tag)',
+    profile: {
+      oneOf: ['layer-and-tag', 'static-structure'],
+      default: 'layer-and-tag',
+    },
     target: { projectId: 'string' },
     expectedRevision: 'integer >= 0',
     provenance: {
@@ -146,7 +153,38 @@ export const transactionCatalog = Object.freeze({
     children: {
       exact: 2,
       order: 'either',
-      oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+      profiles: {
+        'layer-and-tag': { oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
+        'static-structure': {
+          oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID],
+          item: {
+            palette: {
+              command: STATIC_PALETTE_COMMAND_ID,
+              input: {
+                kind: 'palette.declaration',
+                entries: [{ id: 'stable bounded string', color: 'six-digit hex color' }],
+              },
+            },
+            layerTree: {
+              command: STATIC_LAYER_TREE_COMMAND_ID,
+              input: {
+                kind: 'layer-tree.declaration',
+                layers: [{
+                  id: 'stable bounded string',
+                  name: 'bounded non-empty string',
+                  type: 'image | group',
+                  parentId: 'null | existing group identity',
+                  visible: 'boolean',
+                  locked: 'boolean',
+                  opacity: 'integer 0..255',
+                  blendMode: 'supported blend mode',
+                  continuous: 'optional boolean',
+                }],
+              },
+            },
+          },
+        },
+      },
       item: {
         shape: { command: 'catalog child command ID', input: 'concrete discriminated input' },
         layerState: {
@@ -232,13 +270,30 @@ export const transactionCatalog = Object.freeze({
     },
   },
   limits: {
-    children: { exact: 2, order: 'either', oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
+    children: {
+      exact: 2,
+      order: 'either',
+      profiles: {
+        'layer-and-tag': { oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
+        'static-structure': { oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID] },
+      },
+    },
     provenance: {
       stringLength: {
         min: 1,
         max: TRANSACTION_PROVENANCE_MAX_STRING_LENGTH,
       },
       transitions: { max: TRANSACTION_PROVENANCE_MAX_TRANSITIONS },
+    },
+      profiles: {
+        'layer-and-tag': {},
+        'static-structure': {
+          paletteEntries: { max: STATIC_STRUCTURE_MAX_PALETTE_ENTRIES },
+          layers: { max: STATIC_STRUCTURE_MAX_LAYERS },
+          frames: { max: STATIC_STRUCTURE_MAX_FRAMES },
+        cels: { max: STATIC_STRUCTURE_MAX_CELS },
+        preparationBytes: { max: STATIC_STRUCTURE_MAX_PREPARATION_BYTES },
+      },
     },
   },
   profiles: {
@@ -280,9 +335,17 @@ export const transactionCatalog = Object.freeze({
   },
   affectedDomains: ['palette', 'layer-state', 'timeline'] as const,
   availability: {
-    guidedDrawing: {
-      layerState: 'unsupported',
-      frameTag: 'supported',
+    profiles: {
+      'layer-and-tag': {
+        guidedDrawing: {
+          layerState: 'unsupported',
+          frameTag: 'supported',
+        },
+      },
+      'static-structure': {
+        guidedDrawing: 'unsupported',
+        selection: 'none | selected; floating and transforming are rejected',
+      },
     },
   },
   revision: 'expectedRevision must equal the captured project revision; execute advances it once',

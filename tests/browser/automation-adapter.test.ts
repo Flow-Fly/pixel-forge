@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createFixtureSession,
+  FixtureProjectRepository,
   type FixtureSession,
 } from '../../src/editor/fixture-session';
 import type {
@@ -12,6 +13,13 @@ import type {
 } from '../../src/editor/automation-adapter';
 import type { ProjectObservation } from '../../src/editor/observations';
 import type { EditorTransactionResult } from '../../src/editor/transaction';
+import { createAutomationAdapter } from '../../src/editor/automation-adapter';
+import { createAutoSaveService, type AutoSaveService } from '../../src/services/auto-save';
+import {
+  STATIC_STRUCTURE_MAX_CELS,
+  STATIC_STRUCTURE_MAX_FRAMES,
+} from '../../src/editor/catalog';
+import type { ProjectFile } from '../../src/types/project';
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -21,10 +29,12 @@ import {
 
 const sessions: FixtureSession[] = [];
 const contexts: ProjectContext[] = [];
+const saveServices: AutoSaveService[] = [];
 
 afterEach(() => {
   restoreDefaultProjectContext();
   for (const session of sessions.splice(0)) session.dispose();
+  for (const saveService of saveServices.splice(0)) saveService.stop();
   for (const context of contexts.splice(0)) context.dispose();
 });
 
@@ -468,6 +478,359 @@ describe('Automation Adapter Fixture Session', () => {
       layer.id,
     ]);
     expect(reloaded.observation.canvas).toEqual({ width: 16, height: 16 });
+  });
+
+  it('proves deterministic static creation through close, repository reopen, and reload', async () => {
+    const session = createFixtureSession({
+      projectIdFactory: () => 'fixture-static-lifecycle',
+    });
+    sessions.push(session);
+
+    const journey = await session.runStaticStructure();
+
+    expect(journey.negotiation.version).toBe('1.0');
+    expect(journey.creation.creation.target).toEqual({ projectId: 'fixture-static-lifecycle' });
+    expect(journey.creation.observation.layers[0]?.id).toBe('fixture-entity-1');
+    expect(journey.creation.observation.frames[0]?.id).toBe('fixture-entity-2');
+    expect(journey.creation.observation.palette[0]?.id).toBe('fixture-entity-3');
+    expect(journey.creation.observation.palette.at(-1)?.id).toBe('fixture-entity-34');
+    expect(journey.transaction.revision).toBe(1);
+    expect(journey.transaction.event.domains).toEqual(['palette', 'layer-state']);
+    expect(journey.afterTransaction.observation.layers.map((layer) => layer.id)).toEqual([
+      'fixture-static-group',
+      'fixture-entity-1',
+      'fixture-static-added',
+    ]);
+    expect(journey.afterTransaction.observation.history.undoCount).toBe(1);
+    expect(journey.afterTransaction.document.frames[0]?.cels.map((cel) => cel.id)).toEqual([
+      'fixture-entity-36',
+      'fixture-entity-35',
+      'fixture-entity-37',
+    ]);
+    expect(journey.afterUndo.observation.revision).toBe(2);
+    expect(journey.afterRedo.observation.revision).toBe(3);
+    expect(journey.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.reload.revision).toBe(journey.afterRedo.observation.revision);
+    expect(journey.reopened.observation.layers).toEqual(journey.afterRedo.observation.layers);
+    expect(journey.reopened.observation.palette).toEqual(journey.afterRedo.observation.palette);
+    expect(journey.exact).toEqual({ document: true, render: true, structure: true });
+  });
+
+  it('rejects floating and transforming selection state before static mutation', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const session = createFixtureSession({ context });
+    sessions.push(session);
+    const baseline = await session.runTransaction();
+    const observation = baseline.afterRedo.observation;
+    const changedLayers = observation.layers.map((layer, index) => ({
+      ...layer,
+      name: index === 0 ? 'Selection-safe rename' : layer.name,
+    }));
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const beforeRevision = context.project.revision.value;
+    const beforeHistory = {
+      undo: context.history.undoStack.value,
+      redo: context.history.redoStack.value,
+      version: context.history.version.value,
+    };
+    const beforeSaveSafety = (await requestSuccess<ProjectObservation>(session, {
+      operation: 'project.observe',
+      target: session.target,
+      expectedRevision: observation.revision,
+    })).saveSafety;
+
+    context.selection.setFloating(
+      new ImageData(1, 1),
+      { x: 0, y: 0, width: 1, height: 1 },
+      'rectangle',
+    );
+    const floating = await session.adapter.request(makeStaticStructureRequest(
+      session.target,
+      observation,
+      { operationId: 'selection-floating', layers: changedLayers },
+    ));
+    expect(floating).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'selection_in_progress' },
+      },
+    });
+
+    context.selection.startTransform(
+      new ImageData(1, 1),
+      { x: 0, y: 0, width: 1, height: 1 },
+      'rectangle',
+      undefined,
+      observation.layers[0]?.id ?? null,
+      observation.currentFrameId,
+    );
+    const transforming = await session.adapter.request(makeStaticStructureRequest(
+      session.target,
+      observation,
+      { operationId: 'selection-transforming', layers: changedLayers },
+    ));
+    expect(transforming).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_state', details: { reason: 'selection_in_progress' } },
+    });
+
+    expect(context.project.revision.value).toBe(beforeRevision);
+    expect(context.history.undoStack.value).toBe(beforeHistory.undo);
+    expect(context.history.redoStack.value).toBe(beforeHistory.redo);
+    expect(context.history.version.value).toBe(beforeHistory.version);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
+    const after = await requestSuccess<ProjectObservation>(session, {
+      operation: 'project.observe',
+      target: session.target,
+      expectedRevision: beforeRevision,
+    });
+    expect(after.saveSafety).toEqual(beforeSaveSafety);
+  });
+
+  it('enforces the static frame, cel, and preparation-byte bounds before allocation', async () => {
+    const frameContext = createProjectContext();
+    contexts.push(frameContext);
+    const frameSession = createFixtureSession({ context: frameContext });
+    sessions.push(frameSession);
+    const frameBaseline = await frameSession.runTransaction();
+    const frameObservation = frameBaseline.afterRedo.observation;
+    const frame = frameContext.animation.frames.value[0];
+    if (!frame) throw new Error('Fixture project has no frame.');
+    frameContext.animation.frames.value = Array.from(
+      { length: STATIC_STRUCTURE_MAX_FRAMES + 1 },
+      (_, index) => ({ ...frame, id: `frame-over-limit-${index}`, order: index }),
+    );
+    const frameResult = await frameSession.adapter.request(makeStaticStructureRequest(
+      frameSession.target,
+      frameObservation,
+      { operationId: 'frame-bound', layers: frameObservation.layers },
+    ));
+    expect(frameResult).toMatchObject({
+      ok: false,
+      error: {
+        code: 'limit_exceeded',
+        details: { reason: 'static_preparation_frames', max: STATIC_STRUCTURE_MAX_FRAMES },
+      },
+    });
+
+    const celContext = createProjectContext();
+    contexts.push(celContext);
+    const celSession = createFixtureSession({ context: celContext });
+    sessions.push(celSession);
+    const celBaseline = await celSession.runTransaction();
+    const celObservation = celBaseline.afterRedo.observation;
+    const firstCel = celContext.animation.cels.value.values().next().value;
+    if (!firstCel) throw new Error('Fixture project has no cel.');
+    celContext.animation.cels.value = new Map(Array.from(
+      { length: STATIC_STRUCTURE_MAX_CELS + 1 },
+      (_, index) => [`cel-over-limit-${index}`, { ...firstCel, id: `cel-over-limit-${index}` }],
+    ));
+    const celResult = await celSession.adapter.request(makeStaticStructureRequest(
+      celSession.target,
+      celObservation,
+      { operationId: 'cel-bound', layers: celObservation.layers },
+    ));
+    expect(celResult).toMatchObject({
+      ok: false,
+      error: {
+        code: 'limit_exceeded',
+        details: { reason: 'static_preparation_cels', max: STATIC_STRUCTURE_MAX_CELS },
+      },
+    });
+
+    const bytesContext = createProjectContext();
+    contexts.push(bytesContext);
+    const bytesSession = createFixtureSession({ context: bytesContext });
+    sessions.push(bytesSession);
+    const bytesBaseline = await bytesSession.runTransaction();
+    const bytesObservation = bytesBaseline.afterRedo.observation;
+    bytesContext.project.width.value = 2048;
+    bytesContext.project.height.value = 2048;
+    const byteLayers = [
+      ...bytesObservation.layers,
+      {
+        id: 'byte-bound-one',
+        name: 'Byte Bound One',
+        type: 'image' as const,
+        parentId: null,
+        visible: true,
+        locked: false,
+        opacity: 255,
+        blendMode: 'normal' as const,
+        continuous: false,
+      },
+      {
+        id: 'byte-bound-two',
+        name: 'Byte Bound Two',
+        type: 'image' as const,
+        parentId: null,
+        visible: true,
+        locked: false,
+        opacity: 255,
+        blendMode: 'normal' as const,
+        continuous: false,
+      },
+    ];
+    const byteResult = await bytesSession.adapter.request(makeStaticStructureRequest(
+      bytesSession.target,
+      bytesObservation,
+      { operationId: 'byte-bound', layers: byteLayers },
+    ));
+    expect(byteResult).toMatchObject({
+      ok: false,
+      error: {
+        code: 'limit_exceeded',
+        details: { reason: 'static_preparation_bytes' },
+      },
+    });
+  });
+
+  it('accounts static transaction snapshots in history while retaining the layer-tag profile', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const session = createFixtureSession({ context });
+    sessions.push(session);
+    const baseline = await session.runTransaction();
+    const observation = baseline.afterRedo.observation;
+    const result = await session.adapter.request(makeStaticStructureRequest(
+      session.target,
+      observation,
+      {
+        operationId: 'history-memory',
+        layers: observation.layers.map((layer, index) => ({
+          ...layer,
+          name: index === 0 ? 'Memory snapshot' : layer.name,
+        })),
+      },
+    ));
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    const staticCommand = context.history.undoStack.value.at(-1);
+    expect(staticCommand?.memorySize).toBeGreaterThan(0);
+
+    const layer = observation.layers[0];
+    if (!layer) throw new Error('Fixture project has no layer.');
+    const layerTag = await session.adapter.request({
+      operation: 'project.transaction.execute',
+      target: session.target,
+      expectedRevision: result.result.revision,
+      provenance: {
+        clientId: 'history-memory-client',
+        sessionId: 'history-memory-session',
+        runId: 'history-memory-run',
+        operationId: 'history-layer-tag',
+      },
+      children: [
+        {
+          command: 'project.layer.state',
+          input: { kind: 'layer.visibility', layerId: layer.id, visible: !layer.visible },
+        },
+        {
+          command: 'project.animation.frame-tag',
+          input: { kind: 'tag.delete', tagId: observation.tags[0]?.id ?? 'missing-tag' },
+        },
+      ],
+    });
+    expect(layerTag).toMatchObject({ ok: true });
+    expect(context.history.undoStack.value.at(-1)?.memorySize).toBe(0);
+    expect(context.history.getMemoryUsage()).toBe(staticCommand?.memorySize);
+  });
+
+  it('protects persisted compatibility bytes when removing an otherwise empty loaded group', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const repository = new FixtureProjectRepository();
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const projectId = 'loaded-group-project';
+    const groupId = 'loaded-group';
+    const imageId = 'loaded-image';
+    const project: ProjectFile = {
+      version: '4.3.0',
+      name: 'Loaded Group',
+      width: 4,
+      height: 4,
+      palette: ['#000000'],
+      paletteEntries: [{ id: 'loaded-black', color: '#000000' }],
+      layers: [
+        {
+          id: groupId,
+          name: 'Legacy Group',
+          type: 'group',
+          visible: true,
+          locked: false,
+          opacity: 255,
+          blendMode: 'normal',
+          continuous: false,
+          parentId: null,
+          data: new Uint8Array([7, 8, 9]),
+        },
+        {
+          id: imageId,
+          name: 'Loaded Image',
+          type: 'image',
+          visible: true,
+          locked: false,
+          opacity: 255,
+          blendMode: 'normal',
+          continuous: false,
+          parentId: groupId,
+          data: new Uint8Array(0),
+        },
+      ],
+      frames: [{
+        id: 'loaded-frame',
+        duration: 100,
+        cels: [{
+          id: 'loaded-cel',
+          layerId: imageId,
+          data: new Uint8Array(0),
+          opacity: 100,
+        }],
+      }],
+      animation: { fps: 12, currentFrameIndex: 0 },
+      tags: [],
+    };
+    await saveService.runWithoutSaving(async () => {
+      await context.project.loadProject(project);
+      context.project.id.value = projectId;
+    }, context);
+    await repository.create(projectId, project);
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([[projectId, context]]),
+      repository,
+      saveService,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const observationResult = await adapter.request({
+      operation: 'project.observe',
+      target: { projectId },
+      expectedRevision: 0,
+    });
+    if (!observationResult.ok) throw new Error(`Loaded group observation failed: ${observationResult.error.code}`);
+    const observation = observationResult.result as ProjectObservation;
+    const persistedBefore = await repository.load(projectId);
+    const result = await adapter.request(makeStaticStructureRequest(
+      { projectId },
+      observation,
+      {
+        operationId: 'loaded-group-removal',
+        layers: [{ ...observation.layers[1]!, parentId: null }],
+      },
+    ));
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_state', details: { reason: 'non_empty_layer_removal' } },
+    });
+    expect(await repository.load(projectId)).toEqual(persistedBefore);
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect((await context.project.saveProject({ rebuildIndexBuffers: false })).layers[0]?.data)
+      .toEqual(new Uint8Array([7, 8, 9]));
   });
 
   it('rejects non-empty layer removal and used-palette recoloring without a revision or history change', async () => {

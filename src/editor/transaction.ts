@@ -94,6 +94,7 @@ type PreparedTransactionChild =
 interface EditorTransactionExecutionOptions {
   readonly transactionIdFactory?: () => string;
   readonly tagIdFactory?: () => string;
+  readonly entityIdFactory?: () => string;
 }
 
 interface PendingTransactionTransition {
@@ -132,7 +133,7 @@ class EditorTransactionCommand implements Command {
   readonly id: string;
   readonly name = 'Automation Transaction';
   readonly managesProjectRevision = true;
-  readonly memorySize = 0;
+  readonly memorySize: number;
 
   private readonly context: ProjectContext;
   private readonly request: EditorTransactionRequest;
@@ -155,6 +156,7 @@ class EditorTransactionCommand implements Command {
     this.request = request;
     this.children = children;
     this.staticPrepared = staticPrepared;
+    this.memorySize = staticPrepared?.snapshotBytes ?? 0;
     this.id = transactionIdFactory?.() ?? crypto.randomUUID();
     this.currentProvenance = freezeProvenance(request, this.id, children, []);
   }
@@ -374,6 +376,7 @@ export async function executeEditorTransaction(
       request.children as readonly StaticStructureChildInput[],
       request.target,
       request.expectedRevision,
+      { entityIdFactory: options.entityIdFactory },
     )
     : null;
   const children: PreparedTransactionChild[] = request.profile === 'static-structure'

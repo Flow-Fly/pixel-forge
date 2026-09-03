@@ -47,7 +47,10 @@ export interface ProjectRepository {
   /** Create or overwrite a project under the given id. */
   save(id: string, project: ProjectFile, options?: SaveProjectOptions): Promise<void>;
 
-  /** Create a project only when its repository key is unused. */
+  /**
+   * Create a project only when its repository key is unused. A rejection must
+   * leave the repository unchanged, including when the key is already used.
+   */
   create(id: string, project: ProjectFile, options?: SaveProjectOptions): Promise<void>;
 
   /** Remove a project. Unknown ids are a no-op. */

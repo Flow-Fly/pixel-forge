@@ -293,12 +293,27 @@ class ProjectStore {
     cels: Map<string, Cel>,
     palette: Parameters<ProjectPaletteStore['applyProjectSnapshot']>[0],
     activeLayerId: string | null,
+    groupData: ReadonlyMap<string, Uint8Array>,
   ) {
+    this.loadedGroupLayerData = cloneGroupLayerData(groupData);
     this.palette.applyProjectSnapshot(palette);
     this.layers.layers.value = layers.map((layer) => ({ ...layer }));
     this.animation.cels.value = new Map(cels);
     this.layers.activeLayerId.value = activeLayerId;
     this.dirtyRect.requestFullRedraw();
+  }
+
+  captureLoadedGroupLayerData(): Map<string, Uint8Array> {
+    return cloneGroupLayerData(this.loadedGroupLayerData);
+  }
+
+  getLoadedGroupLayerDataByteLength(layerId?: string): number {
+    if (layerId !== undefined) {
+      return this.loadedGroupLayerData.get(layerId)?.byteLength ?? 0;
+    }
+    let total = 0;
+    for (const bytes of this.loadedGroupLayerData.values()) total += bytes.byteLength;
+    return total;
   }
 
   private syncCurrentFrameLayerCanvases(cels: Map<string, Cel>) {
@@ -544,4 +559,10 @@ class ProjectStore {
 
 export function createProjectStore(dependencies: ProjectStoreDependencies) {
   return new ProjectStore(dependencies);
+}
+
+function cloneGroupLayerData(
+  groupData: ReadonlyMap<string, Uint8Array>,
+): Map<string, Uint8Array> {
+  return new Map([...groupData].map(([layerId, bytes]) => [layerId, new Uint8Array(bytes)]));
 }

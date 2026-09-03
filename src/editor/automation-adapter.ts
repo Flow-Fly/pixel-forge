@@ -54,7 +54,6 @@ export type ProjectTargetResolver = (target: ProjectTarget) => ProjectContext | 
 
 export interface ProjectTargetRegistry {
   resolve(target: ProjectTarget): ProjectContext | undefined;
-  register?(target: ProjectTarget, context: ProjectContext): void;
 }
 
 export type ProjectTargetLookup =
@@ -70,6 +69,7 @@ export interface AutomationAdapterDependencies {
   readonly transactionIdFactory?: () => string;
   readonly transactionTagIdFactory?: () => string;
   readonly projectIdFactory?: () => string;
+  readonly entityIdFactory?: () => string;
 }
 
 export interface AutomationSuccess<T> {
@@ -157,6 +157,11 @@ interface ReloadSaveProof {
   readonly saveSafety: ProjectSaveSafetyObservation;
 }
 
+interface CreatedTargetReservation {
+  readonly target: ProjectTarget;
+  readonly context: ProjectContext;
+}
+
 const CURRENT_CATALOG_VERSION = editorCatalog.version;
 const CANONICAL_OPERATION_IDS: ReadonlySet<string> = new Set(
   editorCatalog.operations.map((operation) => operation.id),
@@ -202,6 +207,7 @@ export class AutomationAdapter {
   private readonly transactionIdFactory?: () => string;
   private readonly transactionTagIdFactory?: () => string;
   private readonly projectIdFactory: () => string;
+  private readonly entityIdFactory: () => string;
   private readonly registeredTargets = new Map<string, ProjectContext>();
   private readonly targetLookup?: ProjectTargetLookup;
   private readonly latestEvents = new WeakMap<ProjectContext, ProjectChangeEvent>();
@@ -222,6 +228,7 @@ export class AutomationAdapter {
     this.transactionIdFactory = dependencies.transactionIdFactory;
     this.transactionTagIdFactory = dependencies.transactionTagIdFactory;
     this.projectIdFactory = dependencies.projectIdFactory ?? (() => crypto.randomUUID());
+    this.entityIdFactory = dependencies.entityIdFactory ?? (() => crypto.randomUUID());
     this.requestHandlers = {
       'catalog.negotiate': async (input) => this.negotiateCatalog(input),
       'project.create': async (input) => this.createProject(input),
@@ -299,22 +306,13 @@ export class AutomationAdapter {
 
       let project: ProjectFile;
       if (request.kind === 'blank') {
-        project = createBlankProjectFile(request.name, request.width, request.height);
+        project = createBlankProjectFile(request.name, request.width, request.height, this.entityIdFactory);
       } else {
         const source = this.resolveCapturedContext(request.source.target);
         this.assertSourceRevision(source, request.source.expectedRevision);
         project = structuredClone(await source.project.saveProject({ rebuildIndexBuffers: false }));
         this.assertSourceRevision(source, request.source.expectedRevision);
         project.name = request.name ?? `Copy of ${normalizeProjectName(project.name)}`;
-      }
-
-      try {
-        await this.repository.create(id, structuredClone(project));
-      } catch (error) {
-        if (error instanceof ProjectAlreadyExistsError) {
-          return failure('invalid_state', false, { reason: 'project_id_collision' });
-        }
-        throw error;
       }
 
       let context: ProjectContext | undefined;
@@ -325,10 +323,31 @@ export class AutomationAdapter {
           context!.project.id.value = id;
           context!.project.lastSaved.value = Date.now();
         }, context);
-        this.registerCreatedTarget(target, context);
       } catch (error) {
-        context?.dispose();
-        await this.repository.delete(id).catch(() => {});
+        if (context) {
+          this.saveService.stop(context);
+          context.dispose();
+        }
+        throw error;
+      }
+
+      let reservation: CreatedTargetReservation | undefined;
+      try {
+        // Reserve the adapter target synchronously before persistence. The
+        // reservation is exact-identity reversible if the fresh-only create
+        // rejects, so no post-persistence registration can fail or overwrite.
+        reservation = this.reserveCreatedTarget(target, context);
+        // ProjectRepository.create is the fresh-only persistence boundary. It
+        // must reject a used key without changing the repository, so the only
+        // compensation needed here is releasing our in-memory reservation.
+        await this.repository.create(id, structuredClone(project));
+      } catch (error) {
+        if (reservation) this.rollbackCreatedTarget(reservation);
+        this.saveService.stop(context);
+        context.dispose();
+        if (error instanceof ProjectAlreadyExistsError) {
+          return failure('invalid_state', false, { reason: 'project_id_collision' });
+        }
         throw error;
       }
 
@@ -421,6 +440,7 @@ export class AutomationAdapter {
       const result = await executeEditorTransaction(context, input, {
         transactionIdFactory: this.transactionIdFactory,
         tagIdFactory: this.transactionTagIdFactory,
+        entityIdFactory: this.entityIdFactory,
       });
       return success({
         ...result,
@@ -636,20 +656,37 @@ export class AutomationAdapter {
     }
   }
 
-  private registerCreatedTarget(target: ProjectTarget, context: ProjectContext): void {
-    if (this.resolveTarget(target)) {
+  private reserveCreatedTarget(
+    target: ProjectTarget,
+    context: ProjectContext,
+  ): CreatedTargetReservation {
+    if (this.registeredTargets.has(target.projectId)) {
+      throw adapterError('invalid_state', false, { reason: 'target_registration_collision' });
+    }
+    if (this.targetLookup instanceof Map && Map.prototype.has.call(this.targetLookup, target.projectId)) {
       throw adapterError('invalid_state', false, { reason: 'target_registration_collision' });
     }
     this.registeredTargets.set(target.projectId, context);
     try {
-      if (this.targetLookup && isTargetRegistry(this.targetLookup)) {
-        this.targetLookup.register?.(target, context);
-      } else if (this.targetLookup instanceof Map) {
-        this.targetLookup.set(target.projectId, context);
+      if (this.targetLookup instanceof Map) {
+        Map.prototype.set.call(this.targetLookup, target.projectId, context);
       }
     } catch (error) {
       this.registeredTargets.delete(target.projectId);
       throw error;
+    }
+    return { target, context };
+  }
+
+  private rollbackCreatedTarget(reservation: CreatedTargetReservation): void {
+    if (this.registeredTargets.get(reservation.target.projectId) === reservation.context) {
+      this.registeredTargets.delete(reservation.target.projectId);
+    }
+    if (
+      this.targetLookup instanceof Map
+      && Map.prototype.get.call(this.targetLookup, reservation.target.projectId) === reservation.context
+    ) {
+      Map.prototype.delete.call(this.targetLookup, reservation.target.projectId);
     }
   }
 
@@ -756,17 +793,12 @@ export function createProjectTargetRegistry(
 ): ProjectTargetRegistry {
   const targets = new Map<string, ProjectContext>();
   for (const context of contexts) targets.set(context.project.id.value, context);
-  return {
-    resolve(target) {
+  const registry: ProjectTargetRegistry = Object.freeze({
+    resolve(target: ProjectTarget) {
       return targets.get(target.projectId);
     },
-    register(target, context) {
-      if (targets.has(target.projectId)) {
-        throw new Error('Target already registered.');
-      }
-      targets.set(target.projectId, context);
-    },
-  };
+  });
+  return registry;
 }
 
 function createTargetResolver(lookup: ProjectTargetLookup | undefined): ProjectTargetResolver {
@@ -857,9 +889,14 @@ function normalizeCreateDimension(value: unknown, reason: string): number {
   return value;
 }
 
-function createBlankProjectFile(name: string, width: number, height: number): ProjectFile {
-  const layerId = crypto.randomUUID();
-  const frameId = crypto.randomUUID();
+function createBlankProjectFile(
+  name: string,
+  width: number,
+  height: number,
+  entityIdFactory: () => string = () => crypto.randomUUID(),
+): ProjectFile {
+  const layerId = entityIdFactory();
+  const frameId = entityIdFactory();
   const palette = [...DB32_COLORS];
   return {
     version: PROJECT_VERSION,
@@ -867,7 +904,7 @@ function createBlankProjectFile(name: string, width: number, height: number): Pr
     width,
     height,
     palette,
-    paletteEntries: palette.map((color) => ({ id: crypto.randomUUID(), color })),
+    paletteEntries: palette.map((color) => ({ id: entityIdFactory(), color })),
     layers: [{
       id: layerId,
       name: 'Layer 1',
@@ -884,7 +921,7 @@ function createBlankProjectFile(name: string, width: number, height: number): Pr
       id: frameId,
       duration: 100,
       cels: [{
-        id: crypto.randomUUID(),
+        id: entityIdFactory(),
         layerId,
         data: new Uint8Array(0),
         opacity: 100,
