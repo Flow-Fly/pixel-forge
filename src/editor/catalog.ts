@@ -9,6 +9,8 @@
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
 export const RENDER_OBSERVATION_MAX_BYTES = 16 * 1024 * 1024;
+export const TRANSACTION_PROVENANCE_MAX_STRING_LENGTH = 256;
+export const TRANSACTION_PROVENANCE_MAX_TRANSITIONS = 16;
 export const PROJECT_OBSERVATION_LIMITS = Object.freeze({
   maxLayers: 64,
   maxFrames: 64,
@@ -69,12 +71,11 @@ export const canvasSizeCatalog = Object.freeze({
   },
 } as const);
 
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const LAYER_STATE_COMMAND_ID = 'project.layer.state';
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const FRAME_TAG_COMMAND_ID = 'project.animation.frame-tag';
 // fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
+export const TRANSACTION_COMMAND_ID = 'project.transaction.execute';
 
 // fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
 export const layerStateCatalog = Object.freeze({
@@ -117,6 +118,139 @@ export const frameTagCatalog = Object.freeze({
     'target_not_found',
     'revision_conflict',
     'invalid_state',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
+// fallow-ignore-next-line unused-export -- Public transaction catalog consumed by editor tooling.
+export const transactionCatalog = Object.freeze({
+  id: TRANSACTION_COMMAND_ID,
+  kind: 'command',
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'string' },
+    expectedRevision: 'integer >= 0',
+    provenance: {
+      clientId: 'non-empty bounded string',
+      sessionId: 'non-empty bounded string',
+      runId: 'non-empty bounded string',
+      operationId: 'non-empty bounded string',
+    },
+    children: {
+      exact: 2,
+      order: 'either',
+      oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+      item: {
+        shape: { command: 'catalog child command ID', input: 'concrete discriminated input' },
+        layerState: {
+          command: LAYER_STATE_COMMAND_ID,
+          input: {
+            oneOf: [
+              { kind: 'layer.visibility', layerId: 'string', visible: 'boolean' },
+              { kind: 'layer.lock', layerId: 'string', locked: 'boolean' },
+              { kind: 'layer.continuity', layerId: 'string', continuous: 'boolean' },
+              {
+                kind: 'layer.reorder',
+                layerId: 'string',
+                direction: 'optional up | down',
+                targetLayerId: 'optional string',
+                exactlyOne: ['direction', 'targetLayerId'],
+              },
+            ],
+          },
+        },
+        frameTag: {
+          command: FRAME_TAG_COMMAND_ID,
+          input: {
+            oneOf: [
+              {
+                kind: 'tag.create',
+                name: 'string',
+                color: 'string',
+                startFrameIndex: 'integer',
+                endFrameIndex: 'integer',
+              },
+              { kind: 'tag.rename', tagId: 'string', name: 'string' },
+              { kind: 'tag.recolor', tagId: 'string', color: 'string' },
+              {
+                kind: 'tag.range',
+                tagId: 'string',
+                startFrameIndex: 'integer',
+                endFrameIndex: 'integer',
+              },
+              { kind: 'tag.collapse', tagId: 'string', collapsed: 'boolean' },
+              { kind: 'tag.remove-frame', tagId: 'string', frameIndex: 'integer' },
+              { kind: 'tag.delete', tagId: 'string' },
+            ],
+          },
+        },
+      },
+    },
+  },
+  result: {
+    type: TRANSACTION_COMMAND_ID,
+    target: { projectId: 'string' },
+    fromRevision: 'integer >= 0',
+    revision: 'integer >= 0',
+    event: {
+      type: 'project-change',
+      target: 'string',
+      fromRevision: 'integer >= 0',
+      toRevision: 'integer >= 0',
+      transactionId: 'string',
+      domains: ['layer-state', 'timeline'],
+    },
+    provenance: {
+      source: 'automation',
+      transactionId: 'string',
+      clientId: 'string',
+      sessionId: 'string',
+      runId: 'string',
+      operationId: 'string',
+      target: { projectId: 'string' },
+      fromRevision: 'integer >= 0',
+      toRevision: 'integer >= 0',
+      transitionCount: 'integer >= 0',
+      transitionsTruncated: 'boolean; true when older transitions are outside the bounded window',
+      transitions: [{
+        phase: 'execute | undo | redo',
+        fromRevision: 'integer >= 0',
+        toRevision: 'integer >= 0',
+      }],
+      children: [{
+        commandId: 'project.layer.state | project.animation.frame-tag',
+        operation: 'concrete child kind',
+        domains: ['layer-state | timeline'],
+      }],
+    },
+  },
+  limits: {
+    children: { exact: 2, order: 'either', oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
+    provenance: {
+      stringLength: {
+        min: 1,
+        max: TRANSACTION_PROVENANCE_MAX_STRING_LENGTH,
+      },
+      transitions: { max: TRANSACTION_PROVENANCE_MAX_TRANSITIONS },
+    },
+  },
+  affectedDomains: ['layer-state', 'timeline'] as const,
+  availability: {
+    guidedDrawing: {
+      layerState: 'unsupported',
+      frameTag: 'supported',
+    },
+  },
+  revision: 'expectedRevision must equal the captured project revision; execute advances it once',
+  undo: 'one-session-history-entry',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'limit_exceeded',
     'unsupported',
     'internal',
   ] as const,
@@ -398,6 +532,19 @@ const automationOperationCatalog = Object.freeze([
     errors: canvasSizeCatalog.command.errors,
   },
   {
+    id: TRANSACTION_COMMAND_ID,
+    kind: 'command',
+    target: 'project',
+    requiresRevision: true,
+    request: transactionCatalog.request,
+    result: transactionCatalog.result,
+    limits: transactionCatalog.limits,
+    revision: transactionCatalog.revision,
+    undo: transactionCatalog.undo,
+    availability: transactionCatalog.availability,
+    errors: transactionCatalog.errors,
+  },
+  {
     id: 'project.history.undo',
     kind: 'history-command',
     target: 'project',
@@ -513,6 +660,7 @@ export const editorCatalog = Object.freeze({
   ]),
   commands: Object.freeze([
     canvasSizeCatalog.command,
+    transactionCatalog,
     layerStateCatalog,
     frameTagCatalog,
     celUnlinkCatalog,

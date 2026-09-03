@@ -30,6 +30,15 @@ import {
   type ProjectSaveSafetyObservation,
   type ProjectTarget,
 } from './contracts';
+import {
+  EDITOR_TRANSACTION_OPERATION_ID,
+  executeEditorTransaction,
+  readEditorTransactionTarget,
+  type EditorTransactionResult,
+} from './transaction';
+
+// fallow-ignore-next-line unused-export -- Public operation ID is part of the adapter contract.
+export { EDITOR_TRANSACTION_OPERATION_ID } from './transaction';
 
 export type ProjectTargetResolver = (target: ProjectTarget) => ProjectContext | undefined;
 
@@ -47,6 +56,8 @@ export interface AutomationAdapterDependencies {
   readonly saveService?: AutoSaveService;
   readonly repository?: ProjectRepository;
   readonly maxRenderBytes?: number;
+  readonly transactionIdFactory?: () => string;
+  readonly transactionTagIdFactory?: () => string;
 }
 
 export interface AutomationSuccess<T> {
@@ -154,6 +165,9 @@ const SAFE_ERROR_DETAIL_KEYS = new Set([
   'limitId',
   'max',
   'requestedVersion',
+  'childIndex',
+  'family',
+  'phase',
 ]);
 
 /**
@@ -166,6 +180,8 @@ export class AutomationAdapter {
   private readonly saveService: AutoSaveService;
   private readonly repository?: ProjectRepository;
   private readonly maxRenderBytes: number;
+  private readonly transactionIdFactory?: () => string;
+  private readonly transactionTagIdFactory?: () => string;
   private readonly latestEvents = new WeakMap<ProjectContext, ProjectChangeEvent>();
   private readonly eventCleanups = new WeakMap<ProjectContext, () => void>();
   private readonly reloadSaveProofs = new WeakMap<ProjectContext, ReloadSaveProof>();
@@ -178,12 +194,15 @@ export class AutomationAdapter {
     this.repository = dependencies.repository;
     this.maxRenderBytes = normalizeRenderByteLimit(dependencies.maxRenderBytes ?? NaN)
       ?? RENDER_OBSERVATION_MAX_BYTES;
+    this.transactionIdFactory = dependencies.transactionIdFactory;
+    this.transactionTagIdFactory = dependencies.transactionTagIdFactory;
     this.requestHandlers = {
       'catalog.negotiate': async (input) => this.negotiateCatalog(input),
       'project.target': async (input) => this.captureTargetRevision(input),
       'project.observe': async (input) => this.observeProject(input),
       'project.render.observe': async (input) => this.observeRender(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
+      [EDITOR_TRANSACTION_OPERATION_ID]: (input) => this.executeTransaction(input),
       'project.history.undo': (input) => this.undo(input),
       'project.history.redo': (input) => this.redo(input),
       'project.save': (input) => this.save(input),
@@ -296,6 +315,28 @@ export class AutomationAdapter {
         target: { projectId: request.target.projectId },
         revision: result.revision,
         event: cloneProjectChangeEvent(result.event),
+      });
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  async executeTransaction(
+    input: unknown,
+  ): Promise<AutomationResult<EditorTransactionResult>> {
+    try {
+      this.assertNegotiated();
+      const target = readEditorTransactionTarget(input);
+      const context = this.prepareContext(target);
+      const result = await executeEditorTransaction(context, input, {
+        transactionIdFactory: this.transactionIdFactory,
+        tagIdFactory: this.transactionTagIdFactory,
+      });
+      return success({
+        ...result,
+        target: { projectId: result.target.projectId },
+        event: cloneProjectChangeEvent(result.event),
+        provenance: structuredClone(result.provenance),
       });
     } catch (error) {
       return failureFromUnknown(error);
@@ -419,6 +460,7 @@ export class AutomationAdapter {
     });
   }
 
+  // fallow-ignore-next-line complexity -- Undo/redo validation and event restoration share one adapter boundary.
   private async runHistoryTransition(
     input: unknown,
     phase: 'undo' | 'redo',
@@ -434,11 +476,17 @@ export class AutomationAdapter {
         return failure('invalid_state', false, { reason: `history_${phase}` });
       }
 
+      const previousEvent = this.latestEvents.get(context);
       this.latestEvents.delete(context);
-      if (phase === 'undo') {
-        await context.history.undo();
-      } else {
-        await context.history.redo();
+      try {
+        if (phase === 'undo') {
+          await context.history.undo();
+        } else {
+          await context.history.redo();
+        }
+      } catch (error) {
+        if (previousEvent) this.latestEvents.set(context, previousEvent);
+        throw error;
       }
 
       const event = this.latestEvents.get(context);

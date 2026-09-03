@@ -92,6 +92,7 @@ describe('AutomationAdapter', () => {
       'project.observe',
       'project.render.observe',
       'project.canvas.resize',
+      'project.transaction.execute',
       'project.history.undo',
       'project.history.redo',
       'project.save',
@@ -118,6 +119,37 @@ describe('AutomationAdapter', () => {
     expect(operations.find((operation) => operation.id === 'project.render.observe')).toMatchObject({
       limits: { maxBytes: RENDER_OBSERVATION_MAX_BYTES },
       result: { type: 'render.observation', format: 'rgba8' },
+    });
+    expect(operations.find((operation) => operation.id === 'project.transaction.execute')).toMatchObject({
+      target: 'project',
+      requiresRevision: true,
+      request: {
+        expectedRevision: 'integer >= 0',
+        provenance: expect.objectContaining({
+          clientId: 'non-empty bounded string',
+        }),
+        children: expect.objectContaining({
+          exact: 2,
+          order: 'either',
+          oneOfEach: ['project.layer.state', 'project.animation.frame-tag'],
+        }),
+      },
+      limits: {
+        children: {
+          exact: 2,
+          order: 'either',
+          oneOfEach: ['project.layer.state', 'project.animation.frame-tag'],
+        },
+        provenance: {
+          stringLength: { min: 1, max: 256 },
+          transitions: { max: 16 },
+        },
+      },
+      availability: {
+        guidedDrawing: { layerState: 'unsupported', frameTag: 'supported' },
+      },
+      result: { type: 'project.transaction.execute' },
+      errors: expect.arrayContaining(['revision_conflict', 'limit_exceeded', 'internal']),
     });
     expect(operations.find((operation) => operation.id === 'project.reload')).toMatchObject({
       target: 'project',

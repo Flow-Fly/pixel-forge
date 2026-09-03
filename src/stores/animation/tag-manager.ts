@@ -58,6 +58,7 @@ export function createFrameTagSnapshot(
   startFrameIndex: number,
   endFrameIndex: number,
   frameCount: number,
+  createTagId: () => string = () => crypto.randomUUID(),
 ): TagMutationResult<FrameTag[]> {
   if (!isValidTagRange(startFrameIndex, endFrameIndex, frameCount)) {
     return { ok: false, reason: 'invalid_range' };
@@ -67,7 +68,7 @@ export function createFrameTagSnapshot(
   }
 
   const newTag: FrameTag = {
-    id: crypto.randomUUID(),
+    id: createTagId(),
     name,
     color,
     startFrameIndex,
