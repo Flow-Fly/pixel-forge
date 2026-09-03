@@ -69,13 +69,10 @@ export const canvasSizeCatalog = Object.freeze({
   },
 } as const);
 
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const LAYER_STATE_COMMAND_ID = 'project.layer.state';
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const FRAME_TAG_COMMAND_ID = 'project.animation.frame-tag';
 // fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
-// fallow-ignore-next-line unused-export -- Stable transaction ID is part of the public catalog contract.
 export const TRANSACTION_COMMAND_ID = 'project.transaction.execute';
 
 // fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.

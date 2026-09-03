@@ -24,7 +24,7 @@ import {
 } from './catalog';
 
 export const EDITOR_TRANSACTION_OPERATION_ID = TRANSACTION_COMMAND_ID;
-export const EDITOR_TRANSACTION_MAX_CHILDREN = 2;
+const EDITOR_TRANSACTION_MAX_CHILDREN = 2;
 
 export type EditorTransactionChildCommandId =
   | typeof LAYER_STATE_COMMAND_ID
@@ -42,6 +42,7 @@ export interface EditorTransactionChildInput {
   readonly input: Readonly<Record<string, unknown>>;
 }
 
+// fallow-ignore-next-line unused-type -- Public prepared request shape documents the transaction boundary.
 export interface EditorTransactionRequest {
   readonly target: ProjectTarget;
   readonly expectedRevision: number;
@@ -290,28 +291,38 @@ function normalizeChild(value: unknown): EditorTransactionChildInput {
     throw transactionError('invalid_request', false, { reason: 'child' });
   }
 
-  const command = normalizeChildCommand(
-    value.command ?? value.commandId ?? value.family ?? value.operation ?? value.type ?? value.id,
-  );
+  const command = normalizeChildCommand(readChildCommand(value));
+  const input = normalizeChildPayload(value);
+  assertChildFamily(command, input);
+
+  return { command, input };
+}
+
+function readChildCommand(value: Record<string, unknown>): unknown {
+  return value.command ?? value.commandId ?? value.family ?? value.operation ?? value.type ?? value.id;
+}
+
+function normalizeChildPayload(value: Record<string, unknown>): Record<string, unknown> {
   if (value.input !== undefined && value.request !== undefined) {
     throw transactionError('invalid_request', false, { reason: 'child_input' });
   }
   const nestedInput = value.input ?? value.request;
-  const input = nestedInput === undefined
+  return nestedInput === undefined
     ? copyInlineChildInput(value)
     : copyNestedChildInput(nestedInput);
+}
 
+function assertChildFamily(
+  command: EditorTransactionChildCommandId,
+  input: Record<string, unknown>,
+): void {
   if (typeof input.kind !== 'string') {
     throw transactionError('invalid_request', false, { reason: 'child_kind' });
   }
-  if (command === LAYER_STATE_COMMAND_ID && !input.kind.startsWith('layer.')) {
+  const prefix = command === LAYER_STATE_COMMAND_ID ? 'layer.' : 'tag.';
+  if (!input.kind.startsWith(prefix)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   }
-  if (command === FRAME_TAG_COMMAND_ID && !input.kind.startsWith('tag.')) {
-    throw transactionError('invalid_request', false, { reason: 'child_family' });
-  }
-
-  return { command, input };
 }
 
 function normalizeChildCommand(value: unknown): EditorTransactionChildCommandId {
@@ -324,14 +335,22 @@ function normalizeChildCommand(value: unknown): EditorTransactionChildCommandId 
 function copyInlineChildInput(value: Record<string, unknown>): Record<string, unknown> {
   const input: Record<string, unknown> = {};
   for (const [key, childValue] of Object.entries(value)) {
-    if (key === 'command' || key === 'commandId' || key === 'family' ||
-        key === 'operation' || key === 'type' || key === 'id' || key === 'request') continue;
-    if (key === 'target' || key === 'expectedRevision' || key === 'revision') {
+    if (isChildDescriptorKey(key)) continue;
+    if (isInheritedRevisionKey(key)) {
       throw transactionError('invalid_request', false, { reason: 'child_revision' });
     }
     input[key] = childValue;
   }
   return input;
+}
+
+function isChildDescriptorKey(key: string): boolean {
+  return key === 'command' || key === 'commandId' || key === 'family' ||
+    key === 'operation' || key === 'type' || key === 'id' || key === 'request';
+}
+
+function isInheritedRevisionKey(key: string): boolean {
+  return key === 'target' || key === 'expectedRevision' || key === 'revision';
 }
 
 function copyNestedChildInput(value: unknown): Record<string, unknown> {

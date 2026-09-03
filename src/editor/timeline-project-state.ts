@@ -235,7 +235,7 @@ class TimelineProjectStateCommand implements Command {
   readonly memorySize = 0;
   private readonly context: ProjectContext;
   private readonly request: TimelineProjectStateRequest;
-  private readonly prepared: PreparedChange;
+  private readonly prepared: PreparedTimelineProjectStateChange;
   private hasExecuted = false;
   private applied = false;
   private lastEvent: ProjectChangeEvent | null = null;
@@ -243,7 +243,7 @@ class TimelineProjectStateCommand implements Command {
   constructor(
     context: ProjectContext,
     request: TimelineProjectStateRequest,
-    prepared: PreparedChange,
+    prepared: PreparedTimelineProjectStateChange,
   ) {
     this.context = context;
     this.request = request;
@@ -264,7 +264,7 @@ class TimelineProjectStateCommand implements Command {
       this.assertRevision();
       this.assertCelUnlinkGroup();
     }
-    this.assertStructure(this.prepared.beforeStructure);
+    this.assertStructure('before');
     this.apply(this.prepared.afterLayers, this.prepared.afterTags, this.prepared.afterCels);
     this.lastEvent = this.context.project.commitChange(this.id, this.prepared.domains);
     this.hasExecuted = true;
@@ -277,7 +277,7 @@ class TimelineProjectStateCommand implements Command {
     }
 
     this.assertTarget();
-    this.assertStructure(this.prepared.afterStructure);
+    this.assertStructure('after');
     this.apply(this.prepared.beforeLayers, this.prepared.beforeTags, this.prepared.beforeCels);
     this.lastEvent = this.context.project.commitChange(this.id, this.prepared.domains);
     this.applied = false;
@@ -310,22 +310,13 @@ class TimelineProjectStateCommand implements Command {
     }
   }
 
-  private assertStructure(expected: ProjectStructure): void {
-    const current = captureProjectStructure(this.context, this.request.kind === 'cel.unlink');
-    const matches = this.hasExecuted
-      ? this.request.kind === 'cel.unlink'
-        ? sameCelUnlinkStructure(current, expected)
-        : this.request.kind.startsWith('layer.')
-        ? sameLayerSemanticArrays(current.layers, expected.layers)
-        : this.request.kind.startsWith('tag.')
-          ? sameTimelineStructure(current, expected)
-          : sameProjectStructure(current, expected)
-      : sameProjectStructure(current, expected);
-    if (!matches) {
-      throw timelineError('revision_conflict', true, {
-        reason: 'history_structure_changed',
-      });
-    }
+  private assertStructure(phase: 'before' | 'after'): void {
+    assertPreparedTimelineProjectStateChange(
+      this.context,
+      this.prepared,
+      phase,
+      this.hasExecuted,
+    );
   }
 
   private apply(

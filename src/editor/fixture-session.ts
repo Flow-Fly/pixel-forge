@@ -8,12 +8,12 @@ import {
   type CatalogNegotiation,
   type CanvasResizeExecutionResult,
   type CanvasResizePreviewResult,
-  type EditorTransactionResult,
   type HistoryTransitionResult,
   type ReloadResult,
   type SaveResult,
 } from './automation-adapter';
 import type { ProjectObservation, RenderObservation } from './observations';
+import type { EditorTransactionResult } from './transaction';
 
 // fallow-ignore-next-line unused-export -- Stable fixture identity is part of conformance setup.
 export const FIXTURE_PROJECT_ID = 'fixture-project';
@@ -136,6 +136,34 @@ export interface FixtureTransactionJourneyResult {
   };
 }
 
+interface FixtureJourneyStart {
+  readonly negotiation: CatalogNegotiation;
+  readonly initial: {
+    readonly observation: ProjectObservation;
+    readonly render: RenderObservation;
+    readonly document: ProjectFile;
+  };
+}
+
+interface FixtureHistoryReplay {
+  readonly afterUndo: {
+    readonly transition: HistoryTransitionResult;
+    readonly observation: ProjectObservation;
+    readonly render: RenderObservation;
+    readonly document: ProjectFile;
+  };
+  readonly afterRedo: {
+    readonly transition: HistoryTransitionResult;
+    readonly observation: ProjectObservation;
+    readonly render: RenderObservation;
+    readonly document: ProjectFile;
+  };
+  readonly save: SaveResult;
+  readonly reload: ReloadResult;
+  readonly reloadedRender: RenderObservation;
+  readonly reloadedDocument: ProjectFile;
+}
+
 /**
  * Deterministic conformance harness for the first adapter tracer bullet.
  * It replaces only the project repository and leaves editor algorithms,
@@ -167,34 +195,11 @@ export class FixtureSession {
 
   async run(): Promise<FixtureJourneyResult> {
     await this.initialize();
-
-    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
-      operation: 'catalog.negotiate',
-      version: '1.0',
-    });
-    const initialRevision = (await requestSuccess<{
-      readonly type: 'project.target';
-      readonly revision: number;
-    }>(this.adapter, {
-      operation: 'project.target',
-      target: this.target,
-    })).revision;
-    const initialObservation = await requestSuccess<ProjectObservation>(this.adapter, {
-      operation: 'project.observe',
-      target: this.target,
-      expectedRevision: initialRevision,
-    });
-    const initialRender = await requestSuccess<RenderObservation>(this.adapter, {
-      operation: 'project.render.observe',
-      target: this.target,
-      expectedRevision: initialObservation.revision,
-      frameId: initialObservation.currentFrameId,
-    });
-    const initialDocument = await this.serializeDocument();
+    const start = await this.beginJourney();
 
     const resizeRequest = {
       target: this.target,
-      expectedRevision: initialObservation.revision,
+      expectedRevision: start.initial.observation.revision,
       width: 6,
       height: 5,
       offset: { x: 1, y: 1 },
@@ -224,122 +229,51 @@ export class FixtureSession {
       frameId: afterResizeObservation.currentFrameId,
     });
     const resizedDocument = await this.serializeDocument();
-
-    const undoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
-      operation: 'project.history.undo',
-      target: this.target,
-      expectedRevision: afterResizeObservation.revision,
-    });
-    const afterUndoObservation = await requestSuccess<ProjectObservation>(this.adapter, {
-      operation: 'project.observe',
-      target: this.target,
-      expectedRevision: undoTransition.revision,
-    });
-    const afterUndoRender = await requestSuccess<RenderObservation>(this.adapter, {
-      operation: 'project.render.observe',
-      target: this.target,
-      expectedRevision: afterUndoObservation.revision,
-      frameId: afterUndoObservation.currentFrameId,
-    });
-    const afterUndoDocument = await this.serializeDocument();
-
-    const redoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
-      operation: 'project.history.redo',
-      target: this.target,
-      expectedRevision: afterUndoObservation.revision,
-    });
-    const afterRedoObservation = await requestSuccess<ProjectObservation>(this.adapter, {
-      operation: 'project.observe',
-      target: this.target,
-      expectedRevision: redoTransition.revision,
-    });
-    const afterRedoRender = await requestSuccess<RenderObservation>(this.adapter, {
-      operation: 'project.render.observe',
-      target: this.target,
-      expectedRevision: afterRedoObservation.revision,
-      frameId: afterRedoObservation.currentFrameId,
-    });
-    const afterRedoDocument = await this.serializeDocument();
-
-    const save = await requestSuccess<SaveResult>(this.adapter, {
-      operation: 'project.save',
-      target: this.target,
-      expectedRevision: afterRedoObservation.revision,
-    });
-    const reload = await requestSuccess<ReloadResult>(this.adapter, {
-      operation: 'project.reload',
-      target: this.target,
-      expectedRevision: afterRedoObservation.revision,
-    });
-    const reloadedRender = await requestSuccess<RenderObservation>(this.adapter, {
-      operation: 'project.render.observe',
-      target: this.target,
-      expectedRevision: reload.revision,
-      frameId: reload.observation.currentFrameId,
-    });
-    const reloadedDocument = await this.serializeDocument();
+    const history = await this.completeHistoryJourney(
+      afterResizeObservation,
+    );
 
     return {
-      negotiation,
-      initial: { observation: initialObservation, render: initialRender },
+      negotiation: start.negotiation,
+      initial: {
+        observation: start.initial.observation,
+        render: start.initial.render,
+      },
       resize: { preview: resizePreview, execution: resizeExecution },
       afterResize: { observation: afterResizeObservation, render: afterResizeRender },
       afterUndo: {
-        transition: undoTransition,
-        observation: afterUndoObservation,
-        render: afterUndoRender,
+        transition: history.afterUndo.transition,
+        observation: history.afterUndo.observation,
+        render: history.afterUndo.render,
       },
       afterRedo: {
-        transition: redoTransition,
-        observation: afterRedoObservation,
-        render: afterRedoRender,
+        transition: history.afterRedo.transition,
+        observation: history.afterRedo.observation,
+        render: history.afterRedo.render,
       },
-      save,
-      reload,
+      save: history.save,
+      reload: history.reload,
       exact: {
-        document: sameProjectFile(initialDocument, afterUndoDocument)
-          && sameProjectFile(resizedDocument, afterRedoDocument)
-          && sameProjectFile(afterRedoDocument, reloadedDocument),
-        render: sameRender(initialRender, afterUndoRender)
-          && sameRender(afterResizeRender, afterRedoRender)
-          && sameRender(afterRedoRender, reloadedRender),
+        document: sameProjectFile(start.initial.document, history.afterUndo.document)
+          && sameProjectFile(resizedDocument, history.afterRedo.document)
+          && sameProjectFile(history.afterRedo.document, history.reloadedDocument),
+        render: sameRender(start.initial.render, history.afterUndo.render)
+          && sameRender(afterResizeRender, history.afterRedo.render)
+          && sameRender(history.afterRedo.render, history.reloadedRender),
       },
     };
   }
 
   async runTransaction(): Promise<FixtureTransactionJourneyResult> {
     await this.initialize();
-
-    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
-      operation: 'catalog.negotiate',
-      version: '1.0',
-    });
-    const initialRevision = (await requestSuccess<{
-      readonly type: 'project.target';
-      readonly revision: number;
-    }>(this.adapter, {
-      operation: 'project.target',
-      target: this.target,
-    })).revision;
-    const initialObservation = await requestSuccess<ProjectObservation>(this.adapter, {
-      operation: 'project.observe',
-      target: this.target,
-      expectedRevision: initialRevision,
-    });
-    const initialRender = await requestSuccess<RenderObservation>(this.adapter, {
-      operation: 'project.render.observe',
-      target: this.target,
-      expectedRevision: initialObservation.revision,
-      frameId: initialObservation.currentFrameId,
-    });
-    const initialDocument = await this.serializeDocument();
-    const layer = initialObservation.layers[0];
+    const start = await this.beginJourney();
+    const layer = start.initial.observation.layers[0];
     if (!layer) throw new Error('Fixture project did not load a layer.');
 
     const transaction = await requestSuccess<EditorTransactionResult>(this.adapter, {
       operation: 'project.transaction.execute',
       target: this.target,
-      expectedRevision: initialObservation.revision,
+      expectedRevision: start.initial.observation.revision,
       provenance: {
         clientId: 'fixture-client',
         sessionId: 'fixture-session',
@@ -381,11 +315,74 @@ export class FixtureSession {
       frameId: afterTransactionObservation.currentFrameId,
     });
     const afterTransactionDocument = await this.serializeDocument();
+    const history = await this.completeHistoryJourney(
+      afterTransactionObservation,
+    );
 
+    return {
+      negotiation: start.negotiation,
+      initial: start.initial,
+      transaction,
+      afterTransaction: {
+        observation: afterTransactionObservation,
+        render: afterTransactionRender,
+        document: afterTransactionDocument,
+      },
+      afterUndo: history.afterUndo,
+      afterRedo: history.afterRedo,
+      save: history.save,
+      reload: history.reload,
+      exact: {
+        document: sameProjectFile(start.initial.document, history.afterUndo.document)
+          && sameProjectFile(afterTransactionDocument, history.afterRedo.document)
+          && sameProjectFile(history.afterRedo.document, history.reloadedDocument),
+        render: sameRender(start.initial.render, history.afterUndo.render)
+          && sameRender(afterTransactionRender, history.afterRedo.render)
+          && sameRender(history.afterRedo.render, history.reloadedRender),
+      },
+    };
+  }
+
+  private async beginJourney(): Promise<FixtureJourneyStart> {
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    const initialRevision = (await requestSuccess<{
+      readonly type: 'project.target';
+      readonly revision: number;
+    }>(this.adapter, {
+      operation: 'project.target',
+      target: this.target,
+    })).revision;
+    const observation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
+      target: this.target,
+      expectedRevision: initialRevision,
+    });
+    const render = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
+      target: this.target,
+      expectedRevision: observation.revision,
+      frameId: observation.currentFrameId,
+    });
+    return {
+      negotiation,
+      initial: {
+        observation,
+        render,
+        document: await this.serializeDocument(),
+      },
+    };
+  }
+
+  private async completeHistoryJourney(
+    afterObservation: ProjectObservation,
+  ): Promise<FixtureHistoryReplay> {
     const undoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
       operation: 'project.history.undo',
       target: this.target,
-      expectedRevision: afterTransactionObservation.revision,
+      expectedRevision: afterObservation.revision,
     });
     const afterUndoObservation = await requestSuccess<ProjectObservation>(this.adapter, {
       operation: 'project.observe',
@@ -437,14 +434,6 @@ export class FixtureSession {
     const reloadedDocument = await this.serializeDocument();
 
     return {
-      negotiation,
-      initial: { observation: initialObservation, render: initialRender, document: initialDocument },
-      transaction,
-      afterTransaction: {
-        observation: afterTransactionObservation,
-        render: afterTransactionRender,
-        document: afterTransactionDocument,
-      },
       afterUndo: {
         transition: undoTransition,
         observation: afterUndoObservation,
@@ -459,14 +448,8 @@ export class FixtureSession {
       },
       save,
       reload,
-      exact: {
-        document: sameProjectFile(initialDocument, afterUndoDocument)
-          && sameProjectFile(afterTransactionDocument, afterRedoDocument)
-          && sameProjectFile(afterRedoDocument, reloadedDocument),
-        render: sameRender(initialRender, afterUndoRender)
-          && sameRender(afterTransactionRender, afterRedoRender)
-          && sameRender(afterRedoRender, reloadedRender),
-      },
+      reloadedRender,
+      reloadedDocument,
     };
   }
 

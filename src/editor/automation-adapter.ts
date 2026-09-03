@@ -37,13 +37,8 @@ import {
   type EditorTransactionResult,
 } from './transaction';
 
+// fallow-ignore-next-line unused-export -- Public operation ID is part of the adapter contract.
 export { EDITOR_TRANSACTION_OPERATION_ID } from './transaction';
-export type {
-  AutomationTransactionProvenanceInput,
-  EditorTransactionChildInput,
-  EditorTransactionRequest,
-  EditorTransactionResult,
-} from './transaction';
 
 export type ProjectTargetResolver = (target: ProjectTarget) => ProjectContext | undefined;
 
