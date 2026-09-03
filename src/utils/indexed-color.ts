@@ -72,6 +72,7 @@ export function rebuildCanvasFromIndices(
 
   const imageData = ctx.createImageData(width, height);
   const data = imageData.data;
+  const existingData = ctx.getImageData(0, 0, width, height).data;
 
   for (let i = 0; i < indexBuffer.length; i++) {
     const paletteIndex = indexBuffer[i];
@@ -81,7 +82,11 @@ export function rebuildCanvasFromIndices(
     data[pixelOffset] = r;
     data[pixelOffset + 1] = g;
     data[pixelOffset + 2] = b;
-    data[pixelOffset + 3] = a;
+    // An indexed pixel normally renders opaque, but an existing canvas can
+    // carry a deliberate nonzero alpha for the same palette color. Preserve
+    // that byte when rebuilding so indexed and RGBA views remain coherent.
+    const existingAlpha = existingData[pixelOffset + 3] ?? 0;
+    data[pixelOffset + 3] = paletteIndex === 0 ? a : existingAlpha || a;
   }
 
   ctx.putImageData(imageData, 0, 0);
@@ -117,7 +122,7 @@ export function buildIndexBufferFromCanvas(
     const a = data[pixelOffset + 3];
 
     // Transparent pixel
-    if (a < 128) {
+    if (a === 0) {
       indexBuffer[i] = 0;
       continue;
     }

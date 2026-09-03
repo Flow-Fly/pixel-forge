@@ -45,6 +45,129 @@ afterEach(() => {
 });
 
 describe('Automation Adapter Fixture Session', () => {
+  it('observes a layer and composite Symbol Grid, then applies an atomic raster patch', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    context.project.id.value = 'symbol-grid-browser';
+    context.project.setSize(4, 4);
+    context.palette.setPalette(
+      ['#000000', '#ff0000', '#00ff00'],
+      false,
+      ['palette-black', 'palette-red', 'palette-green'],
+    );
+    const layer = context.layers.layers.value[0];
+    const frame = context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Expected a Symbol Grid layer and frame.');
+    const canvas = document.createElement('canvas');
+    canvas.width = 4;
+    canvas.height = 4;
+    const drawing = canvas.getContext('2d');
+    if (!drawing) throw new Error('Expected a Symbol Grid drawing context.');
+    drawing.fillStyle = '#ff0000';
+    drawing.fillRect(1, 1, 1, 1);
+    const cel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+    if (!cel) throw new Error('Expected a Symbol Grid cel.');
+    const indexBuffer = new Uint8Array(16);
+    indexBuffer[5] = 2;
+    context.layers.updateLayer(layer.id, { canvas });
+    context.animation.cels.value = new Map([[
+      context.animation.getCelKey(layer.id, frame.id),
+      { ...cel, canvas, indexBuffer },
+    ]]);
+    context.animation.syncLayerCanvases();
+
+    const saveService = createAutoSaveService({ repository: new FixtureProjectRepository() });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([['symbol-grid-browser', context]]),
+      saveService,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const layerObservation = await adapter.request({
+      operation: 'project.raster.observe',
+      target: { projectId: 'symbol-grid-browser' },
+      expectedRevision: 0,
+      source: { kind: 'layer', layerId: layer.id, frameId: frame.id, celId: cel.id },
+      region: { x: 0, y: 0, width: 4, height: 4 },
+    });
+    expect(layerObservation).toMatchObject({
+      ok: true,
+      result: {
+        type: 'project.raster.observation',
+        editable: true,
+        sourceKind: 'layer',
+        region: { x: 0, y: 0, width: 4, height: 4 },
+        rows: expect.any(Array),
+        legend: expect.arrayContaining([
+          expect.objectContaining({ paletteEntryId: 'palette-red', color: '#ff0000ff' }),
+        ]),
+        digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    if (!layerObservation.ok) return;
+    const observed = layerObservation.result as {
+      readonly source: { readonly celId: string };
+      readonly legend: readonly { readonly symbol: string; readonly paletteEntryId?: string; readonly color: string }[];
+      readonly digest: string;
+    };
+    const redSymbol = observed.legend.find((entry) => entry.paletteEntryId === 'palette-red')?.symbol;
+    if (!redSymbol) throw new Error('Expected a palette-backed Symbol Grid entry.');
+
+    const compositeObservation = await adapter.request({
+      operation: 'project.raster.observe',
+      target: { projectId: 'symbol-grid-browser' },
+      expectedRevision: 0,
+      source: { kind: 'composite', frameId: frame.id },
+      region: { x: 0, y: 0, width: 4, height: 4 },
+    });
+    expect(compositeObservation).toMatchObject({
+      ok: true,
+      result: { editable: false, sourceKind: 'composite', source: { kind: 'composite' } },
+    });
+
+    const transaction = await adapter.request({
+      operation: 'project.transaction.execute',
+      profile: 'raster-patch',
+      target: { projectId: 'symbol-grid-browser' },
+      expectedRevision: 0,
+      provenance: {
+        clientId: 'symbol-grid-client',
+        sessionId: 'symbol-grid-session',
+        runId: 'symbol-grid-run',
+        operationId: 'symbol-grid-patch',
+      },
+      children: [{
+        command: 'project.raster.patch',
+        input: {
+          kind: 'raster.patch',
+          layerId: layer.id,
+          frameId: frame.id,
+          celId: observed.source.celId,
+          region: { x: 0, y: 0, width: 4, height: 4 },
+          digest: observed.digest,
+          legend: [
+            { symbol: redSymbol, paletteEntryId: 'palette-red' },
+            { symbol: 'g', color: '#00ff00ff' },
+          ],
+          patches: [
+            { x: 0, y: 0, width: 1, height: 1, rows: [redSymbol] },
+            { x: 2, y: 2, width: 1, height: 1, rows: ['g'] },
+          ],
+        },
+      }],
+    });
+    expect(transaction).toMatchObject({
+      ok: true,
+      result: {
+        revision: 1,
+        rasterPatch: { changedBounds: { x: 0, y: 0, width: 3, height: 3 } },
+      },
+    });
+    expect(context.history.undoStack.value).toHaveLength(1);
+    expect(context.project.revision.value).toBe(1);
+  });
+
   it('proves the catalog, explicit target, render, resize, recovery, and persistence journey', async () => {
     const session = createFixtureSession();
     sessions.push(session);
@@ -161,6 +284,49 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.reload.observation.saveSafety.status).toBe('saved');
     expect(journey.reload.revision).toBe(journey.afterRedo.observation.revision);
     expect(journey.exact).toEqual({ document: true, render: true });
+  });
+
+  it('proves the bounded Symbol Grid raster patch journey through reopen', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+
+    const journey = await session.runRasterPatch();
+
+    expect(journey.initial.layerObservation).toMatchObject({
+      sourceKind: 'layer',
+      editable: true,
+      region: { x: 0, y: 0, width: 4, height: 4 },
+    });
+    expect(journey.initial.compositeObservation).toMatchObject({
+      sourceKind: 'composite',
+      editable: false,
+    });
+    expect(journey.transaction).toMatchObject({
+      revision: 1,
+      event: { domains: ['raster-content'] },
+      rasterPatch: { changedBounds: { x: 0, y: 0, width: 3, height: 3 } },
+      provenance: {
+        children: [{ commandId: 'project.raster.patch', operation: 'raster.patch', domains: ['raster-content'] }],
+      },
+    });
+    expect(journey.afterTransaction.layerObservation.rows).not.toEqual(journey.initial.layerObservation.rows);
+    expectOnlyRasterCellsChanged(
+      journey.initial.layerObservation.rows,
+      journey.afterTransaction.layerObservation.rows,
+      [{ x: 0, y: 0 }, { x: 2, y: 2 }],
+    );
+    expect(journey.afterUndo.layerObservation.rows).toEqual(journey.initial.layerObservation.rows);
+    expect(journey.afterUndo.layerObservation.legend).toEqual(journey.initial.layerObservation.legend);
+    expect(journey.afterUndo.compositeObservation.rows).toEqual(journey.initial.compositeObservation.rows);
+    expect(journey.afterUndo.compositeObservation.legend).toEqual(journey.initial.compositeObservation.legend);
+    expect(journey.afterUndo.render.pixels).toEqual(journey.initial.render.pixels);
+    expect(journey.afterUndo.document).toEqual(journey.initial.document);
+    expect(journey.afterRedo.layerObservation.rows).toEqual(journey.afterTransaction.layerObservation.rows);
+    expect(journey.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.reload.revision).toBe(journey.afterRedo.layerObservation.revision);
+    expect(journey.reopened.state.layerObservation.rows).toEqual(journey.afterRedo.layerObservation.rows);
+    expect(journey.exact).toEqual({ document: true, render: true, digest: true, source: true });
   });
 
   // fallow-ignore-next-line complexity -- The browser fixture proves the complete public animation lifecycle.
@@ -1931,6 +2097,23 @@ function normalizeProjectPayload(project: ProjectFile): unknown {
   return JSON.parse(JSON.stringify(project, (_, value: unknown) =>
     value instanceof Uint8Array ? Array.from(value) : value
   ));
+}
+
+function expectOnlyRasterCellsChanged(
+  before: readonly string[],
+  after: readonly string[],
+  changedCells: readonly { readonly x: number; readonly y: number }[],
+): void {
+  const changed = new Set(changedCells.map(({ x, y }) => `${x}:${y}`));
+  expect(after).toHaveLength(before.length);
+  for (let y = 0; y < before.length; y++) {
+    const beforeRow = before[y] ?? '';
+    const afterRow = after[y] ?? '';
+    expect(afterRow).toHaveLength(beforeRow.length);
+    for (let x = 0; x < beforeRow.length; x++) {
+      if (!changed.has(`${x}:${y}`)) expect(afterRow[x]).toBe(beforeRow[x]);
+    }
+  }
 }
 
 async function digestBytes(bytes: Uint8Array): Promise<string> {

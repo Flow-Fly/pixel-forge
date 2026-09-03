@@ -33,6 +33,14 @@ import {
   type StructureRefinementChildInput,
 } from './structure-refinement';
 import {
+  applyPreparedRasterPatchChange,
+  assertPreparedRasterPatchChange,
+  prepareRasterPatchChange,
+  type PreparedRasterPatchChange,
+  type RasterPatchChildInput,
+  type RasterPatchResult,
+} from './symbol-grid';
+import {
   hasOnlyKeys,
   isRecord,
   type AutomationTransactionChildSummary,
@@ -55,6 +63,8 @@ import {
   ANIMATION_FRAME_COMMAND_ID,
   CEL_UNLINK_COMMAND_ID,
   STRUCTURE_REFINEMENT_COMMAND_ID,
+  RASTER_GRID_MAX_STRING_LENGTH,
+  RASTER_PATCH_COMMAND_ID,
 } from './catalog';
 
 export const EDITOR_TRANSACTION_OPERATION_ID = TRANSACTION_COMMAND_ID;
@@ -68,9 +78,10 @@ export type EditorTransactionChildCommandId =
   | typeof ANIMATION_FRAME_COMMAND_ID
   | typeof ANIMATION_CEL_LINK_COMMAND_ID
   | typeof CEL_UNLINK_COMMAND_ID
-  | typeof STRUCTURE_REFINEMENT_COMMAND_ID;
+  | typeof STRUCTURE_REFINEMENT_COMMAND_ID
+  | typeof RASTER_PATCH_COMMAND_ID;
 
-export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure' | 'structure-refinement' | 'animation';
+export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure' | 'structure-refinement' | 'animation' | 'raster-patch';
 
 export interface AutomationTransactionProvenanceInput {
   readonly clientId: string;
@@ -101,6 +112,7 @@ export interface EditorTransactionResult {
   readonly event: ProjectChangeEvent;
   readonly provenance: AutomationTransactionProvenance;
   readonly compositeEquality?: ProjectCompositeEqualityEvidence;
+  readonly rasterPatch?: RasterPatchResult;
 }
 
 type PreparedTimelineTransactionChild = {
@@ -115,9 +127,16 @@ type PreparedAnimationTransactionChild = {
   readonly prepared: PreparedAnimationProjectStateChange;
 };
 
+type PreparedRasterPatchTransactionChild = {
+  readonly kind: 'raster-patch';
+  readonly command: typeof RASTER_PATCH_COMMAND_ID;
+  readonly prepared: PreparedRasterPatchChange;
+};
+
 type PreparedTransactionChild =
   | PreparedTimelineTransactionChild
   | PreparedAnimationTransactionChild
+  | PreparedRasterPatchTransactionChild
   | {
       readonly kind: 'structure-refinement';
       readonly command: typeof STRUCTURE_REFINEMENT_COMMAND_ID;
@@ -158,6 +177,7 @@ const TRANSACTION_CHILD_COMMANDS: ReadonlySet<string> = new Set([
   ANIMATION_CEL_LINK_COMMAND_ID,
   CEL_UNLINK_COMMAND_ID,
   STRUCTURE_REFINEMENT_COMMAND_ID,
+  RASTER_PATCH_COMMAND_ID,
 ]);
 
 class EditorTransactionError extends Error {
@@ -182,12 +202,14 @@ class EditorTransactionCommand implements Command {
   private readonly staticPrepared: PreparedStaticStructureChange | null;
   private readonly structureRefinementPrepared: PreparedStructureRefinementChange | null;
   private readonly animationPrepared: PreparedAnimationProjectStateChange | null;
+  private readonly rasterPatchPrepared: PreparedRasterPatchChange | null;
   private currentProvenance: AutomationTransactionProvenance;
   private hasExecuted = false;
   private applied = false;
   private lastEvent: ProjectChangeEvent | null = null;
   private pendingTransition: PendingTransactionTransition | null = null;
 
+  // fallow-ignore-next-line complexity -- One command retains one prepared profile and immutable provenance.
   constructor(
     context: ProjectContext,
     request: EditorTransactionRequest,
@@ -195,6 +217,7 @@ class EditorTransactionCommand implements Command {
     staticPrepared: PreparedStaticStructureChange | null,
     structureRefinementPrepared: PreparedStructureRefinementChange | null,
     animationPrepared: PreparedAnimationProjectStateChange | null,
+    rasterPatchPrepared: PreparedRasterPatchChange | null,
     transactionIdFactory?: () => string,
   ) {
     this.context = context;
@@ -203,9 +226,11 @@ class EditorTransactionCommand implements Command {
     this.staticPrepared = staticPrepared;
     this.structureRefinementPrepared = structureRefinementPrepared;
     this.animationPrepared = animationPrepared;
+    this.rasterPatchPrepared = rasterPatchPrepared;
     this.memorySize = staticPrepared?.snapshotBytes
       ?? structureRefinementPrepared?.snapshotBytes
       ?? animationPrepared?.snapshotBytes
+      ?? rasterPatchPrepared?.snapshotBytes
       ?? 0;
     this.id = transactionIdFactory?.() ?? crypto.randomUUID();
     this.currentProvenance = freezeProvenance(request, this.id, children, []);
@@ -285,6 +310,7 @@ class EditorTransactionCommand implements Command {
     this.pendingTransition = null;
   }
 
+  // fallow-ignore-next-line complexity -- Profile-specific rollback restores one staged transition without publishing partial state.
   rollbackTransition(): void {
     const pending = this.pendingTransition;
     if (!pending) return;
@@ -296,6 +322,8 @@ class EditorTransactionCommand implements Command {
         applyPreparedStructureRefinementChange(this.context, this.structureRefinementPrepared, pending.rollbackPhase);
       } else if (this.animationPrepared) {
         applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, pending.rollbackPhase);
+      } else if (this.rasterPatchPrepared) {
+        applyPreparedRasterPatchChange(this.context, this.rasterPatchPrepared, pending.rollbackPhase);
       } else {
         for (const child of [...this.children].reverse()) {
           if (!('prepared' in child) || child.kind !== 'timeline') continue;
@@ -347,6 +375,10 @@ class EditorTransactionCommand implements Command {
       assertPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
       return;
     }
+    if (this.rasterPatchPrepared) {
+      assertPreparedRasterPatchChange(this.context, this.rasterPatchPrepared, phase);
+      return;
+    }
     for (const child of this.children) {
       if (!('prepared' in child) || child.kind !== 'timeline') continue;
       assertPreparedTimelineProjectStateChange(this.context, child.prepared, phase, replayed);
@@ -364,6 +396,10 @@ class EditorTransactionCommand implements Command {
     }
     if (this.animationPrepared) {
       applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
+      return;
+    }
+    if (this.rasterPatchPrepared) {
+      applyPreparedRasterPatchChange(this.context, this.rasterPatchPrepared, phase);
       return;
     }
     for (const child of this.children) {
@@ -388,11 +424,13 @@ class EditorTransactionCommand implements Command {
         this.staticPrepared?.domains
           ?? this.structureRefinementPrepared?.domains
           ?? this.animationPrepared?.domains
+          ?? this.rasterPatchPrepared?.domains
           ?? TRANSACTION_DOMAINS,
       ),
     };
   }
 
+  // fallow-ignore-next-line complexity -- All profiles share the same failure restoration boundary after a prepared apply.
   private restoreAfterFailure(
     phase: 'before' | 'after',
     originalError: unknown,
@@ -407,6 +445,8 @@ class EditorTransactionCommand implements Command {
         applyPreparedStructureRefinementChange(this.context, this.structureRefinementPrepared, phase);
       } else if (this.animationPrepared) {
         applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
+      } else if (this.rasterPatchPrepared) {
+        applyPreparedRasterPatchChange(this.context, this.rasterPatchPrepared, phase);
       } else {
         for (const child of [...this.children].reverse()) {
           if (!('prepared' in child) || child.kind !== 'timeline') continue;
@@ -433,7 +473,7 @@ export function readEditorTransactionTarget(input: unknown): ProjectTarget {
   if (!isRecord(input)) {
     throw transactionError('invalid_request', false, { reason: 'request' });
   }
-  return normalizeTarget(input.target);
+  return normalizeTarget(input.target, input.profile === 'raster-patch');
 }
 
 /**
@@ -441,6 +481,7 @@ export function readEditorTransactionTarget(input: unknown): ProjectTarget {
  * Each profile validates its children and captures before/after snapshots
  * without mutating the project.
  */
+// fallow-ignore-next-line complexity -- The bounded profile dispatcher prepares exactly one transaction family before history execution.
 export async function executeEditorTransaction(
   context: ProjectContext,
   input: unknown,
@@ -474,6 +515,14 @@ export async function executeEditorTransaction(
       { entityIdFactory: options.entityIdFactory },
     )
     : null;
+  const rasterPatchPrepared = request.profile === 'raster-patch'
+    ? await prepareRasterPatchChange(
+      context,
+      request.children[0] as RasterPatchChildInput,
+      request.target,
+      request.expectedRevision,
+    )
+    : null;
   const children: PreparedTransactionChild[] = request.profile === 'static-structure'
     ? request.children.map((child) => ({
       command: child.command as typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID,
@@ -490,6 +539,12 @@ export async function executeEditorTransaction(
         kind: 'animation' as const,
         command: request.children[0].command as typeof ANIMATION_FRAME_COMMAND_ID | typeof ANIMATION_CEL_LINK_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID | typeof CEL_UNLINK_COMMAND_ID,
         prepared: animationPrepared as PreparedAnimationProjectStateChange,
+      }]
+      : request.profile === 'raster-patch'
+      ? [{
+        kind: 'raster-patch' as const,
+        command: request.children[0].command as typeof RASTER_PATCH_COMMAND_ID,
+        prepared: rasterPatchPrepared as PreparedRasterPatchChange,
       }]
     : request.children.map((child) => ({
       kind: 'timeline' as const,
@@ -509,6 +564,7 @@ export async function executeEditorTransaction(
     staticPrepared,
     structureRefinementPrepared,
     animationPrepared,
+    rasterPatchPrepared,
     options.transactionIdFactory,
   );
   try {
@@ -531,6 +587,14 @@ export async function executeEditorTransaction(
     ...(structureRefinementPrepared
       ? { compositeEquality: structureRefinementPrepared.compositeEquality }
       : {}),
+    ...(rasterPatchPrepared
+      ? {
+        rasterPatch: {
+          type: 'project.raster.patch',
+          changedBounds: { ...rasterPatchPrepared.changedBounds },
+        },
+      }
+      : {}),
   };
 }
 
@@ -543,10 +607,10 @@ function normalizeTransactionRequest(input: unknown): EditorTransactionRequest {
   if (input.operation !== undefined && input.operation !== EDITOR_TRANSACTION_OPERATION_ID) {
     throw transactionError('invalid_request', false, { reason: 'operation' });
   }
-  const target = normalizeTarget(input.target);
+  const profile = normalizeProfile(input.profile);
+  const target = normalizeTarget(input.target, profile === 'raster-patch');
   const expectedRevision = normalizeRevision(input.expectedRevision);
   const provenance = normalizeProvenance(input.provenance);
-  const profile = normalizeProfile(input.profile);
   const children = normalizeChildren(input.children, profile);
 
   return { profile, target, expectedRevision, provenance, children };
@@ -557,7 +621,7 @@ function normalizeChildren(value: unknown, profile: EditorTransactionProfile): E
   if (!Array.isArray(value)) {
     throw transactionError('invalid_request', false, { reason: 'children' });
   }
-  const expectedCount = profile === 'animation' || profile === 'structure-refinement'
+  const expectedCount = profile === 'animation' || profile === 'structure-refinement' || profile === 'raster-patch'
     ? 1
     : EDITOR_TRANSACTION_MAX_CHILDREN;
   if (value.length > EDITOR_TRANSACTION_MAX_CHILDREN) {
@@ -585,6 +649,8 @@ function normalizeChildren(value: unknown, profile: EditorTransactionProfile): E
   } else if (profile === 'structure-refinement' && !commands.has(STRUCTURE_REFINEMENT_COMMAND_ID)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   } else if (profile === 'animation' && !isAnimationChildCommand([...commands][0])) {
+    throw transactionError('invalid_request', false, { reason: 'child_family' });
+  } else if (profile === 'raster-patch' && !commands.has(RASTER_PATCH_COMMAND_ID)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   }
   return children;
@@ -646,6 +712,12 @@ function assertChildFamily(
     }
     return;
   }
+  if (profile === 'raster-patch') {
+    if (command !== RASTER_PATCH_COMMAND_ID || input.kind !== 'raster.patch') {
+      throw transactionError('invalid_request', false, { reason: 'child_family' });
+    }
+    return;
+  }
   const prefix = command === LAYER_STATE_COMMAND_ID ? 'layer.' : 'tag.';
   if (!input.kind.startsWith(prefix)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
@@ -680,6 +752,7 @@ function normalizeProfile(value: unknown): EditorTransactionProfile {
   if (value === 'static-structure') return value;
   if (value === 'structure-refinement') return value;
   if (value === 'animation') return value;
+  if (value === 'raster-patch') return value;
   throw transactionError('invalid_request', false, { reason: 'profile' });
 }
 
@@ -707,6 +780,16 @@ function childInputFields(kind: string): readonly string[] | undefined {
     case 'cel.link': return ['kind', 'layerId', 'members'];
     case 'cel.unlink': return ['kind', 'layerId', 'frameId', 'celId', 'linkedCelId', 'linkGroup'];
     case 'structure.refine': return ['kind', 'layers', 'mergePairs'];
+    case 'raster.patch': return [
+      'kind',
+      'layerId',
+      'frameId',
+      'celId',
+      'region',
+      'digest',
+      'legend',
+      'patches',
+    ];
     default: return undefined;
   }
 }
@@ -734,11 +817,17 @@ function normalizeProvenance(value: unknown): AutomationTransactionProvenanceInp
   };
 }
 
-function normalizeTarget(value: unknown): ProjectTarget {
+function normalizeTarget(value: unknown, enforceRasterBound = false): ProjectTarget {
   if (!isRecord(value) || typeof value.projectId !== 'string' || value.projectId.length === 0) {
     throw transactionError('invalid_request', false, { reason: 'target' });
   }
   assertExactKeys(value, ['projectId'], 'target');
+  if (enforceRasterBound && value.projectId.length > RASTER_GRID_MAX_STRING_LENGTH) {
+    throw transactionError('limit_exceeded', false, {
+      reason: 'target',
+      max: RASTER_GRID_MAX_STRING_LENGTH,
+    });
+  }
   return { projectId: value.projectId };
 }
 

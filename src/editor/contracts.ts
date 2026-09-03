@@ -46,7 +46,8 @@ export interface AutomationTransactionChildSummary {
     | 'project.animation.cel.link'
     | 'project.animation.cel.unlink'
     | 'project.palette.declaration'
-    | 'project.layer.tree';
+    | 'project.layer.tree'
+    | 'project.raster.patch';
   readonly operation: string;
   readonly domains: readonly string[];
 }
