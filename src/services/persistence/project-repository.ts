@@ -14,6 +14,17 @@ export interface SaveProjectOptions {
   thumbnail?: Uint8Array;
 }
 
+/** Raised when a fresh-only create would reuse an existing repository key. */
+export class ProjectAlreadyExistsError extends Error {
+  readonly projectId: string;
+
+  constructor(projectId: string) {
+    super(`Project already exists: ${projectId}`);
+    this.name = 'ProjectAlreadyExistsError';
+    this.projectId = projectId;
+  }
+}
+
 export interface WorkspaceState {
   openProjectIds: string[];
   activeProjectId: string | null;
@@ -35,6 +46,9 @@ export interface ProjectRepository {
 
   /** Create or overwrite a project under the given id. */
   save(id: string, project: ProjectFile, options?: SaveProjectOptions): Promise<void>;
+
+  /** Create a project only when its repository key is unused. */
+  create(id: string, project: ProjectFile, options?: SaveProjectOptions): Promise<void>;
 
   /** Remove a project. Unknown ids are a no-op. */
   delete(id: string): Promise<void>;

@@ -1,4 +1,9 @@
-import type { ProjectRepository, ProjectMeta, WorkspaceState } from '../services/persistence/project-repository';
+import {
+  ProjectAlreadyExistsError,
+  type ProjectRepository,
+  type ProjectMeta,
+  type WorkspaceState,
+} from '../services/persistence/project-repository';
 import { AutoSaveService, createAutoSaveService } from '../services/auto-save';
 import { createProjectContext, type ProjectContext } from '../stores/project-context';
 import { PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../types/project';
@@ -40,6 +45,11 @@ export class FixtureProjectRepository implements ProjectRepository {
   }
 
   async save(id: string, project: ProjectFile): Promise<void> {
+    this.projects.set(id, cloneProject(project));
+  }
+
+  async create(id: string, project: ProjectFile): Promise<void> {
+    if (this.projects.has(id)) throw new ProjectAlreadyExistsError(id);
     this.projects.set(id, cloneProject(project));
   }
 
