@@ -40,6 +40,7 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.afterRedo.observation.canvas).toEqual({ width: 6, height: 5 });
     expect(journey.save.saveSafety.status).toBe('saved');
     expect(journey.reload.observation.saveSafety.status).toBe('saved');
+    expect(journey.reload.revision).toBe(journey.afterRedo.observation.revision);
     expect(journey.exact).toEqual({ document: true, render: true });
   });
 });

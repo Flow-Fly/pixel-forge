@@ -4,16 +4,15 @@ import type { Command } from '../stores/history-store';
 import type { Cel, FrameTag } from '../types/animation';
 import { createArtworkCompositionPlan, drawArtworkComposition } from '../services/export-composition';
 import { autoSaveService } from '../services/auto-save';
+import {
+  PROJECT_OBSERVATION_LIMITS,
+  RENDER_OBSERVATION_MAX_BYTES,
+} from './catalog';
 import type {
   EditorError,
   ProjectSaveSafetyObservation,
   ProjectTarget,
 } from './contracts';
-
-// fallow-ignore-next-line unused-export -- Public adapter limit is part of the catalog contract.
-export const RENDER_OBSERVATION_MAX_BYTES = 16 * 1024 * 1024;
-// fallow-ignore-next-line unused-export -- Public adapter limit is part of the catalog contract.
-export const PROJECT_OBSERVATION_MAX_HISTORY_ENTRIES = 100;
 
 export interface ProjectLayerObservation {
   readonly id: string;
@@ -123,6 +122,13 @@ export interface RenderObservationFailure {
   readonly error: EditorError;
 }
 
+export interface ProjectObservationFailure {
+  readonly ok: false;
+  readonly error: EditorError;
+}
+
+export type ProjectObservationResult = ProjectObservation | ProjectObservationFailure;
+
 /**
  * Capture project state as plain records. The context remains private to the
  * caller; no store, signal, canvas, command, or live collection is returned.
@@ -131,8 +137,12 @@ export function observeProject(
   context: ProjectContext,
   target: ProjectTarget,
   options: ProjectObservationOptions = {},
-): ProjectObservation {
-  const maxHistoryEntries = options.maxHistoryEntries ?? PROJECT_OBSERVATION_MAX_HISTORY_ENTRIES;
+): ProjectObservationResult {
+  const paletteEntries = context.palette.getProjectPaletteEntries();
+  const boundsFailure = validateProjectObservationBounds(context, target, paletteEntries, options);
+  if (boundsFailure) return boundsFailure;
+
+  const maxHistoryEntries = options.maxHistoryEntries ?? PROJECT_OBSERVATION_LIMITS.maxHistoryEntries;
   const layers = context.layers.layers.value.map((layer, order) => ({
     id: layer.id,
     name: layer.name,
@@ -168,7 +178,7 @@ export function observeProject(
     layers,
     frames,
     tags: context.animation.tags.value.map(cloneTag),
-    palette: context.palette.getProjectPaletteEntries().map((entry, index) => ({
+    palette: paletteEntries.map((entry, index) => ({
       id: entry.id,
       color: entry.color,
       index,
@@ -189,6 +199,18 @@ export function renderProject(
   frameId: string,
   maxBytes = RENDER_OBSERVATION_MAX_BYTES,
 ): RenderObservation | RenderObservationFailure {
+  const renderLimit = normalizeRenderByteLimit(maxBytes);
+  if (renderLimit === null) {
+    return {
+      ok: false,
+      error: {
+        code: 'limit_exceeded',
+        retryable: false,
+        details: { limitId: 'render-bytes-config', max: RENDER_OBSERVATION_MAX_BYTES },
+      },
+    };
+  }
+
   const frame = context.animation.frames.value.find((candidate) => candidate.id === frameId);
   if (!frame) {
     return {
@@ -204,13 +226,13 @@ export function renderProject(
   const width = context.project.width.value;
   const height = context.project.height.value;
   const byteLength = width * height * 4;
-  if (!Number.isSafeInteger(byteLength) || byteLength > maxBytes) {
+  if (!Number.isSafeInteger(byteLength) || byteLength > renderLimit) {
     return {
       ok: false,
       error: {
         code: 'limit_exceeded',
         retryable: false,
-        details: { limitId: 'render-bytes', max: maxBytes },
+        details: { limitId: 'render-bytes', max: renderLimit },
       },
     };
   }
@@ -277,6 +299,155 @@ export function renderProject(
       },
     };
   }
+}
+
+export function normalizeRenderByteLimit(value: number): number | null {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const limit = Math.floor(value);
+  if (limit < 1) return null;
+  return Math.min(limit, RENDER_OBSERVATION_MAX_BYTES);
+}
+
+function validateProjectObservationBounds(
+  context: ProjectContext,
+  target: ProjectTarget,
+  paletteEntries: readonly { readonly id: string; readonly color: string }[],
+  options: ProjectObservationOptions,
+): ProjectObservationFailure | undefined {
+  const limits = PROJECT_OBSERVATION_LIMITS;
+  const maxHistoryEntries = options.maxHistoryEntries ?? limits.maxHistoryEntries;
+  if (!Number.isSafeInteger(maxHistoryEntries) || maxHistoryEntries < 0 ||
+      maxHistoryEntries > limits.maxHistoryEntries) {
+    return observationLimitFailure('project-history-entries', limits.maxHistoryEntries);
+  }
+
+  const layers = context.layers.layers.value;
+  const frames = context.animation.frames.value;
+  const tags = context.animation.tags.value;
+  const cels = context.animation.cels.value;
+  const undo = context.history.undoStack.value;
+  const redo = context.history.redoStack.value;
+
+  const collectionFailure = validateObservationCollections(
+    layers.length,
+    frames.length,
+    cels.size,
+    tags.length,
+    paletteEntries.length,
+    undo.length,
+    redo.length,
+  );
+  if (collectionFailure) return collectionFailure;
+
+  const strings = collectObservationStrings(context, target, paletteEntries, options);
+  return validateObservationStrings(strings);
+}
+
+function validateObservationCollections(
+  layerCount: number,
+  frameCount: number,
+  celCount: number,
+  tagCount: number,
+  paletteCount: number,
+  undoCount: number,
+  redoCount: number,
+): ProjectObservationFailure | undefined {
+  const limits = PROJECT_OBSERVATION_LIMITS;
+  const counts: readonly [string, number, number][] = [
+    ['project-layers', layerCount, limits.maxLayers],
+    ['project-frames', frameCount, limits.maxFrames],
+    ['project-cels', celCount, limits.maxCels],
+    ['project-tags', tagCount, limits.maxTags],
+    ['project-palette-entries', paletteCount, limits.maxPaletteEntries],
+    ['project-history-entries', Math.max(undoCount, redoCount), limits.maxHistoryEntries],
+  ];
+  for (const [limitId, count, max] of counts) {
+    if (count > max) return observationLimitFailure(limitId, max);
+  }
+  return undefined;
+}
+
+function collectObservationStrings(
+  context: ProjectContext,
+  target: ProjectTarget,
+  paletteEntries: readonly { readonly id: string; readonly color: string }[],
+  options: ProjectObservationOptions,
+): Array<[string, string | null | undefined]> {
+  const strings: Array<[string, string | null | undefined]> = [
+    ['target', target.projectId],
+    ['project-name', context.project.name.value],
+    ['current-frame', context.animation.currentFrameId.value],
+  ];
+  for (const layer of context.layers.layers.value) {
+    strings.push(
+      ['layer-id', layer.id],
+      ['layer-name', layer.name],
+      ['layer-type', layer.type],
+      ['layer-blend-mode', layer.blendMode],
+      ['layer-parent-id', layer.parentId],
+    );
+  }
+  for (const frame of context.animation.frames.value) strings.push(['frame-id', frame.id]);
+  for (const [key, cel] of context.animation.cels.value) {
+    strings.push(
+      ['cel-key', key],
+      ['cel-id', cel.id],
+      ['cel-layer-id', cel.layerId],
+      ['cel-frame-id', cel.frameId],
+      ['cel-linked-id', cel.linkedCelId],
+      ['cel-link-type', cel.linkType],
+    );
+  }
+  for (const tag of context.animation.tags.value) {
+    strings.push(['tag-id', tag.id], ['tag-name', tag.name], ['tag-color', tag.color]);
+  }
+  for (const entry of paletteEntries) {
+    strings.push(['palette-id', entry.id], ['palette-color', entry.color]);
+  }
+  for (const command of [
+    ...context.history.undoStack.value,
+    ...context.history.redoStack.value,
+  ]) {
+    strings.push(['history-id', command.id], ['history-name', command.name]);
+  }
+  if (options.lastEvent) {
+    strings.push(['event-target', options.lastEvent.target], ['event-id', options.lastEvent.transactionId]);
+  }
+  return strings;
+}
+
+function validateObservationStrings(
+  strings: readonly [string, string | null | undefined][],
+): ProjectObservationFailure | undefined {
+  for (const [resource, value] of strings) {
+    if (value !== undefined && value !== null && value.length > PROJECT_OBSERVATION_LIMITS.maxStringLength) {
+      return observationLimitFailure(
+        'project-string-length',
+        PROJECT_OBSERVATION_LIMITS.maxStringLength,
+        resource,
+      );
+    }
+  }
+  return undefined;
+}
+
+function observationLimitFailure(
+  limitId: string,
+  max: number,
+  resource?: string,
+): ProjectObservationFailure {
+  return {
+    ok: false,
+    error: {
+      code: 'limit_exceeded',
+      retryable: false,
+      details: {
+        limitId,
+        max,
+        ...(resource ? { resource } : {}),
+      },
+    },
+  };
 }
 
 function observeFrameCels(context: ProjectContext, frameId: string): ProjectCelObservation[] {

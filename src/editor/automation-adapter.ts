@@ -15,14 +15,15 @@ import {
 import {
   cloneProjectChangeEvent,
   cloneSaveSafetyObservation,
+  normalizeRenderByteLimit,
   observeProject,
   renderProject,
   type ProjectObservation,
+  type ProjectObservationFailure,
+  type ProjectObservationResult,
   type RenderObservation,
 } from './observations';
-import {
-  editorCatalog,
-} from './catalog';
+import { editorCatalog, RENDER_OBSERVATION_MAX_BYTES } from './catalog';
 import {
   isRecord,
   type EditorError,
@@ -42,7 +43,6 @@ export type ProjectTargetLookup =
   | ReadonlyMap<string, ProjectContext>;
 
 export interface AutomationAdapterDependencies {
-  readonly targets?: ProjectTargetLookup;
   readonly targetRegistry?: ProjectTargetLookup;
   readonly saveService?: AutoSaveService;
   readonly repository?: ProjectRepository;
@@ -121,6 +121,9 @@ type ProjectRequestInput = {
 };
 
 const CURRENT_CATALOG_VERSION = editorCatalog.version;
+const CANONICAL_OPERATION_IDS: ReadonlySet<string> = new Set(
+  editorCatalog.operations.map((operation) => operation.id),
+);
 const SAFE_ERROR_CODES = new Set<EditorError['code']>([
   'invalid_request',
   'capability_denied',
@@ -162,31 +165,26 @@ export class AutomationAdapter {
   private negotiatedVersion: string | null = null;
 
   constructor(dependencies: AutomationAdapterDependencies = {}) {
-    const lookup = dependencies.targets ?? dependencies.targetRegistry;
-    this.resolveTarget = createTargetResolver(lookup);
+    this.resolveTarget = createTargetResolver(dependencies.targetRegistry);
     this.saveService = dependencies.saveService ?? autoSaveService;
     this.repository = dependencies.repository;
-    this.maxRenderBytes = dependencies.maxRenderBytes ?? 16 * 1024 * 1024;
+    this.maxRenderBytes = normalizeRenderByteLimit(dependencies.maxRenderBytes ?? NaN)
+      ?? RENDER_OBSERVATION_MAX_BYTES;
     this.requestHandlers = {
       'catalog.negotiate': async (input) => this.negotiateCatalog(input),
       'project.target': async (input) => this.captureTargetRevision(input),
       'project.observe': async (input) => this.observeProject(input),
       'project.render.observe': async (input) => this.observeRender(input),
-      'render.observe': async (input) => this.observeRender(input),
-      'project.canvas.resize.preview': async (input) => this.previewCanvasResize(input),
-      'canvas.resize.preview': async (input) => this.previewCanvasResize(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
-      'canvas.resize': (input) => this.dispatchCanvasResize(input),
       'project.history.undo': (input) => this.undo(input),
-      'history.undo': (input) => this.undo(input),
       'project.history.redo': (input) => this.redo(input),
-      'history.redo': (input) => this.redo(input),
       'project.save': (input) => this.save(input),
       'project.reload': (input) => this.reload(input),
     };
   }
 
   negotiateCatalog(input: unknown): AutomationResult<CatalogNegotiation> {
+    this.negotiatedVersion = null;
     try {
       const request = normalizeCatalogNegotiation(input);
       const requested = parseVersion(request.version);
@@ -213,15 +211,10 @@ export class AutomationAdapter {
     }
   }
 
-  /** Compatibility alias for callers that use the shorter negotiation name. */
-  negotiate(input: unknown): AutomationResult<CatalogNegotiation> {
-    return this.negotiateCatalog(input);
-  }
-
   captureTargetRevision(input: unknown): AutomationResult<ProjectTargetRevision> {
     try {
       this.assertNegotiated();
-      const target = normalizeTarget(input);
+      const target = normalizeTargetRequest(input);
       const context = this.prepareContext(target);
       return success({
         type: 'project.target',
@@ -239,18 +232,15 @@ export class AutomationAdapter {
       const request = normalizeProjectRequest(input);
       const context = this.prepareContext(request.target);
       this.assertCurrentRevision(context, request.expectedRevision);
-      return success(observeProject(context, request.target, {
+      const observation = observeProject(context, request.target, {
         saveSafety: this.saveService.getSaveSafetyObservation(context),
         lastEvent: this.latestEvents.get(context),
-      }));
+      });
+      if (isProjectObservationFailure(observation)) return observation;
+      return success(observation);
     } catch (error) {
       return failureFromUnknown(error);
     }
-  }
-
-  // fallow-ignore-next-line unused-class-member -- Short compatibility alias is part of the public adapter boundary.
-  observe(input: unknown): AutomationResult<ProjectObservation> {
-    return this.observeProject(input);
   }
 
   observeRender(input: unknown): AutomationResult<RenderObservation> {
@@ -345,8 +335,11 @@ export class AutomationAdapter {
         return failure('target_not_found', true);
       }
 
+      this.revalidateCapturedContext(context, request.target, request.expectedRevision);
       await this.saveService.runWithoutSaving(async () => {
-        await context.project.loadProject(storedProject);
+        await context.project.loadProject(storedProject, false, {
+          preserveRevision: request.expectedRevision,
+        });
         context.project.id.value = request.target.projectId;
       }, context);
       this.latestEvents.delete(context);
@@ -354,6 +347,7 @@ export class AutomationAdapter {
       const observation = observeProject(context, request.target, {
         saveSafety: this.saveService.getSaveSafetyObservation(context),
       });
+      if (isProjectObservationFailure(observation)) return observation;
       return success({
         type: 'project.reload',
         target: { projectId: request.target.projectId },
@@ -369,7 +363,7 @@ export class AutomationAdapter {
   async request(input: unknown): Promise<AutomationResult<unknown>> {
     try {
       if (!isRecord(input)) return failure('invalid_request', false, { reason: 'request' });
-      const operation = input.operation ?? input.kind;
+      const operation = input.operation;
       if (typeof operation !== 'string') return failure('invalid_request', false, { reason: 'operation' });
       const handler = this.requestHandler(operation);
       if (!handler) return failure('unsupported', false, { reason: 'operation' });
@@ -379,17 +373,16 @@ export class AutomationAdapter {
     }
   }
 
-  // fallow-ignore-next-line unused-class-member -- Short compatibility alias is part of the public adapter boundary.
-  dispatch(input: unknown): Promise<AutomationResult<unknown>> {
-    return this.request(input);
-  }
-
   private requestHandler(operation: string): RequestHandler | undefined {
+    if (!CANONICAL_OPERATION_IDS.has(operation)) return undefined;
     return this.requestHandlers[operation];
   }
 
   private dispatchCanvasResize(input: AdapterRequestRecord): Promise<AutomationResult<unknown>> {
-    if (input.action === 'preview' || input.previewOnly === true) {
+    if (input.action !== undefined && input.action !== 'preview' && input.action !== 'execute') {
+      return Promise.resolve(failure('invalid_request', false, { reason: 'action' }));
+    }
+    if (input.action === 'preview') {
       return Promise.resolve(this.previewCanvasResize(input));
     }
     return this.executeCanvasResize(input, {
@@ -467,6 +460,29 @@ export class AutomationAdapter {
     }
   }
 
+  private revalidateCapturedContext(
+    context: ProjectContext,
+    target: ProjectTarget,
+    expectedRevision: number,
+  ): void {
+    let resolvedContext: ProjectContext | undefined;
+    try {
+      resolvedContext = this.resolveTarget(target);
+    } catch {
+      throw adapterError('target_not_found', true);
+    }
+    if (resolvedContext !== context) {
+      throw adapterError('target_not_found', true, { reason: 'target_rebound' });
+    }
+    if (context.isDisposed) {
+      throw adapterError('target_not_found', true, { reason: 'disposed' });
+    }
+    if (context.project.id.value !== target.projectId) {
+      throw adapterError('target_not_found', true, { reason: 'target_identity' });
+    }
+    this.assertCurrentRevision(context, expectedRevision);
+  }
+
   private trackEvents(context: ProjectContext): void {
     if (this.eventCleanups.has(context)) return;
 
@@ -519,6 +535,11 @@ function normalizeCatalogNegotiation(input: unknown): CatalogNegotiationRequest 
     throw adapterError('invalid_request', false, { reason: 'catalog_version' });
   }
   return { version };
+}
+
+function normalizeTargetRequest(input: unknown): ProjectTarget {
+  if (!isRecord(input)) throw adapterError('invalid_request', false, { reason: 'request' });
+  return normalizeTarget(input.target);
 }
 
 function normalizeProjectRequest(input: unknown): ProjectRequestInput {
@@ -618,6 +639,12 @@ function isFiniteNumber(value: unknown): value is number {
 function isRenderObservationFailure(
   value: RenderObservation | { readonly ok: false; readonly error: EditorError },
 ): value is { readonly ok: false; readonly error: EditorError } {
+  return 'ok' in value && value.ok === false;
+}
+
+function isProjectObservationFailure(
+  value: ProjectObservationResult,
+): value is ProjectObservationFailure {
   return 'ok' in value && value.ok === false;
 }
 

@@ -8,6 +8,16 @@
 
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
+export const RENDER_OBSERVATION_MAX_BYTES = 16 * 1024 * 1024;
+export const PROJECT_OBSERVATION_LIMITS = Object.freeze({
+  maxLayers: 64,
+  maxFrames: 64,
+  maxCels: 4096,
+  maxTags: 64,
+  maxPaletteEntries: 256,
+  maxHistoryEntries: 100,
+  maxStringLength: 256,
+});
 // fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
 export const PROJECT_SAVE_SAFETY_OBSERVATION_ID = 'project.save-safety';
 // fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
@@ -28,6 +38,7 @@ export const canvasSizeCatalog = Object.freeze({
     request: {
       target: { projectId: 'string' },
       expectedRevision: 'integer >= 0',
+      action: 'preview | execute (default execute)',
       width: 'integer 1..2048',
       height: 'integer 1..2048',
       offset: {
@@ -258,6 +269,7 @@ export const projectObservationCatalog = Object.freeze({
     saveSafety: 'project.save-safety observation',
     lastEvent: 'optional compact project-change event',
   },
+  limits: PROJECT_OBSERVATION_LIMITS,
   privacy: 'no canvases, stores, signals, command instances, or raw errors',
 });
 
@@ -277,12 +289,66 @@ export const renderObservationCatalog = Object.freeze({
     pixels: 'copied Uint8Array',
     stride: 'width * 4',
   },
-  limits: { maxBytes: 16 * 1024 * 1024 },
+  limits: { maxBytes: RENDER_OBSERVATION_MAX_BYTES },
   privacy: 'canonical artwork bytes only; no canvas or browser chrome',
 });
 
+const automationOperationCatalog = Object.freeze([
+  {
+    id: 'catalog.negotiate',
+    kind: 'negotiation',
+    request: { version: 'major.minor' },
+  },
+  {
+    id: 'project.target',
+    kind: 'target-observation',
+    request: { target: { projectId: 'string' } },
+  },
+  {
+    id: PROJECT_OBSERVATION_ID,
+    kind: 'observation',
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+  },
+  {
+    id: RENDER_OBSERVATION_ID,
+    kind: 'observation',
+    request: {
+      target: { projectId: 'string' },
+      expectedRevision: 'integer >= 0',
+      frameId: 'string',
+    },
+  },
+  {
+    id: CANVAS_SIZE_COMMAND_ID,
+    kind: 'command',
+    request: canvasSizeCatalog.command.request,
+  },
+  {
+    id: 'project.history.undo',
+    kind: 'history-command',
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+  },
+  {
+    id: 'project.history.redo',
+    kind: 'history-command',
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+  },
+  {
+    id: 'project.save',
+    kind: 'persistence-command',
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+  },
+  {
+    id: 'project.reload',
+    kind: 'persistence-command',
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+  },
+] as const);
+
 export const editorCatalog = Object.freeze({
   version: '1.0',
+  limits: PROJECT_OBSERVATION_LIMITS,
+  operations: automationOperationCatalog,
   observations: Object.freeze([
     projectSaveSafetyCatalog,
     projectObservationCatalog,

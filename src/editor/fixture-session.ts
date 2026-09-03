@@ -5,7 +5,6 @@ import { PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../typ
 import {
   AutomationAdapter,
   createAutomationAdapter,
-  type AutomationResult,
   type CatalogNegotiation,
   type CanvasResizeExecutionResult,
   type CanvasResizePreviewResult,
@@ -19,7 +18,6 @@ import type { ProjectObservation, RenderObservation } from './observations';
 export const FIXTURE_PROJECT_ID = 'fixture-project';
 
 /** Minimal deterministic repository used by Fixture Session tests. */
-// fallow-ignore-next-line unused-export -- Fixture consumers may inject the deterministic repository.
 export class FixtureProjectRepository implements ProjectRepository {
   private readonly projects = new Map<string, ProjectFileInput>();
   private lastOpenedProjectId: string | null = null;
@@ -127,7 +125,7 @@ export class FixtureSession {
     const projectId = options.projectId ?? FIXTURE_PROJECT_ID;
     this.target = { projectId };
     this.adapter = createAutomationAdapter({
-      targets: new Map([[projectId, this.context]]),
+      targetRegistry: new Map([[projectId, this.context]]),
       saveService: this.saveService,
       repository: this.repository,
     });
@@ -136,17 +134,29 @@ export class FixtureSession {
   async run(): Promise<FixtureJourneyResult> {
     await this.initialize();
 
-    const negotiation = expectSuccess(this.adapter.negotiateCatalog({ version: '1.0' }));
-    const initialRevision = expectSuccess(this.adapter.captureTargetRevision(this.target)).revision;
-    const initialObservation = expectSuccess(this.adapter.observeProject({
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    const initialRevision = (await requestSuccess<{
+      readonly type: 'project.target';
+      readonly revision: number;
+    }>(this.adapter, {
+      operation: 'project.target',
+      target: this.target,
+    })).revision;
+    const initialObservation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
       target: this.target,
       expectedRevision: initialRevision,
-    }));
-    const initialRender = expectSuccess(this.adapter.observeRender({
+    });
+    const initialRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
       target: this.target,
       expectedRevision: initialObservation.revision,
       frameId: initialObservation.currentFrameId,
-    }));
+    });
+    const initialDocument = await this.serializeDocument();
 
     const resizeRequest = {
       target: this.target,
@@ -155,64 +165,85 @@ export class FixtureSession {
       height: 5,
       offset: { x: 1, y: 1 },
     };
-    const resizePreview = expectSuccess(this.adapter.previewCanvasResize(resizeRequest));
-    const resizeExecution = expectSuccess(await this.adapter.executeCanvasResize(resizeRequest, {
+    const resizePreview = await requestSuccess<CanvasResizePreviewResult>(this.adapter, {
+      operation: 'project.canvas.resize',
+      action: 'preview',
+      ...resizeRequest,
+    });
+    const resizeExecution = await requestSuccess<CanvasResizeExecutionResult>(this.adapter, {
+      operation: 'project.canvas.resize',
+      ...resizeRequest,
       preview: resizePreview.preview,
       confirmed: true,
-    }));
+    });
     await settleEffects();
 
-    const afterResizeObservation = expectSuccess(this.adapter.observeProject({
+    const afterResizeObservation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
       target: this.target,
       expectedRevision: resizeExecution.revision,
-    }));
-    const afterResizeRender = expectSuccess(this.adapter.observeRender({
+    });
+    const afterResizeRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
       target: this.target,
       expectedRevision: afterResizeObservation.revision,
       frameId: afterResizeObservation.currentFrameId,
-    }));
+    });
+    const resizedDocument = await this.serializeDocument();
 
-    const undoTransition = expectSuccess(await this.adapter.undo({
+    const undoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
+      operation: 'project.history.undo',
       target: this.target,
       expectedRevision: afterResizeObservation.revision,
-    }));
-    const afterUndoObservation = expectSuccess(this.adapter.observeProject({
+    });
+    const afterUndoObservation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
       target: this.target,
       expectedRevision: undoTransition.revision,
-    }));
-    const afterUndoRender = expectSuccess(this.adapter.observeRender({
+    });
+    const afterUndoRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
       target: this.target,
       expectedRevision: afterUndoObservation.revision,
       frameId: afterUndoObservation.currentFrameId,
-    }));
+    });
+    const afterUndoDocument = await this.serializeDocument();
 
-    const redoTransition = expectSuccess(await this.adapter.redo({
+    const redoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
+      operation: 'project.history.redo',
       target: this.target,
       expectedRevision: afterUndoObservation.revision,
-    }));
-    const afterRedoObservation = expectSuccess(this.adapter.observeProject({
+    });
+    const afterRedoObservation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
       target: this.target,
       expectedRevision: redoTransition.revision,
-    }));
-    const afterRedoRender = expectSuccess(this.adapter.observeRender({
+    });
+    const afterRedoRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
       target: this.target,
       expectedRevision: afterRedoObservation.revision,
       frameId: afterRedoObservation.currentFrameId,
-    }));
+    });
+    const afterRedoDocument = await this.serializeDocument();
 
-    const save = expectSuccess(await this.adapter.save({
+    const save = await requestSuccess<SaveResult>(this.adapter, {
+      operation: 'project.save',
       target: this.target,
       expectedRevision: afterRedoObservation.revision,
-    }));
-    const reload = expectSuccess(await this.adapter.reload({
+    });
+    const reload = await requestSuccess<ReloadResult>(this.adapter, {
+      operation: 'project.reload',
       target: this.target,
       expectedRevision: afterRedoObservation.revision,
-    }));
-    const reloadedRender = expectSuccess(this.adapter.observeRender({
+    });
+    const reloadedRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
       target: this.target,
       expectedRevision: reload.revision,
       frameId: reload.observation.currentFrameId,
-    }));
+    });
+    const reloadedDocument = await this.serializeDocument();
 
     return {
       negotiation,
@@ -232,8 +263,12 @@ export class FixtureSession {
       save,
       reload,
       exact: {
-        document: sameDocument(afterRedoObservation, reload.observation),
-        render: sameBytes(afterRedoRender.pixels, reloadedRender.pixels),
+        document: sameProjectFile(initialDocument, afterUndoDocument)
+          && sameProjectFile(resizedDocument, afterRedoDocument)
+          && sameProjectFile(afterRedoDocument, reloadedDocument),
+        render: sameRender(initialRender, afterUndoRender)
+          && sameRender(afterResizeRender, afterRedoRender)
+          && sameRender(afterRedoRender, reloadedRender),
       },
     };
   }
@@ -253,6 +288,10 @@ export class FixtureSession {
     }, this.context);
     seedFixturePixel(this.context);
     this.initialized = true;
+  }
+
+  private async serializeDocument(): Promise<ProjectFile> {
+    return structuredClone(await this.context.project.saveProject());
   }
 }
 
@@ -323,35 +362,32 @@ function cloneProject<T extends ProjectFileInput>(project: T): T {
   return structuredClone(project);
 }
 
-function expectSuccess<T>(result: AutomationResult<T>): T {
+async function requestSuccess<T>(adapter: AutomationAdapter, input: Record<string, unknown>): Promise<T> {
+  const result = await adapter.request(input);
   if (!result.ok) throw new Error(`Fixture adapter request failed: ${result.error.code}`);
-  return result.result;
+  return result.result as T;
 }
 
-function sameDocument(first: ProjectObservation, second: ProjectObservation): boolean {
-  return JSON.stringify({
-    name: first.name,
-    canvas: first.canvas,
-    currentFrameId: first.currentFrameId,
-    fps: first.fps,
-    layers: first.layers,
-    frames: first.frames,
-    tags: first.tags,
-    palette: first.palette,
-  }) === JSON.stringify({
-    name: second.name,
-    canvas: second.canvas,
-    currentFrameId: second.currentFrameId,
-    fps: second.fps,
-    layers: second.layers,
-    frames: second.frames,
-    tags: second.tags,
-    palette: second.palette,
-  });
+function sameProjectFile(first: ProjectFile, second: ProjectFile): boolean {
+  return JSON.stringify(first, (_, value: unknown) =>
+    value instanceof Uint8Array ? Array.from(value) : value
+  ) === JSON.stringify(second, (_, value: unknown) =>
+    value instanceof Uint8Array ? Array.from(value) : value
+  );
 }
 
 function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
   return first.length === second.length && first.every((value, index) => value === second[index]);
+}
+
+function sameRender(first: RenderObservation, second: RenderObservation): boolean {
+  return first.target.projectId === second.target.projectId
+    && first.frameId === second.frameId
+    && first.width === second.width
+    && first.height === second.height
+    && first.format === second.format
+    && first.stride === second.stride
+    && sameBytes(first.pixels, second.pixels);
 }
 
 async function settleEffects(): Promise<void> {
