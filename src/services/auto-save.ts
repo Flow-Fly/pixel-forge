@@ -7,6 +7,7 @@ import type {
 } from '../editor/contracts';
 import { defaultProjectContext, type ProjectContext } from '../stores/project-context';
 import { projectRepository } from './persistence/indexed-db';
+import type { ProjectRepository } from './persistence/project-repository';
 import { createProjectThumbnail } from './project-thumbnail';
 import { compositeFrame } from '../utils/canvas-utils';
 import { productTelemetry } from './telemetry';
@@ -63,7 +64,11 @@ export class ProjectSaveError extends Error {
  * not know how (or where) projects are persisted. This service observes
  * `historyStore.version` instead, which bumps on every execute/undo/redo.
  */
-class AutoSaveService {
+export interface AutoSaveServiceDependencies {
+  readonly repository?: ProjectRepository;
+}
+
+export class AutoSaveService {
   readonly dirtyContexts = signal<ReadonlySet<ProjectContext>>(new Set());
   readonly saveSafetyStates = signal<ReadonlyMap<ProjectContext, ProjectSaveSafetyState>>(
     new Map()
@@ -73,6 +78,11 @@ class AutoSaveService {
   private dirtyContextSet = new Set<ProjectContext>();
   private blockedContexts = new WeakSet<ProjectContext>();
   private hasDocumentListeners = false;
+  private readonly repository: ProjectRepository;
+
+  constructor(dependencies: AutoSaveServiceDependencies = {}) {
+    this.repository = dependencies.repository ?? projectRepository;
+  }
 
   /** Start observing history changes. Idempotent. */
   start(context: ProjectContext = defaultProjectContext) {
@@ -351,7 +361,7 @@ class AutoSaveService {
     }
 
     try {
-      await projectRepository.save(projectId, projectData, {
+      await this.repository.save(projectId, projectData, {
         thumbnail,
       });
     } catch (error) {
@@ -639,6 +649,13 @@ class AutoSaveService {
 }
 
 export const autoSaveService = new AutoSaveService();
+
+/** Create an isolated save boundary for deterministic adapter fixtures. */
+export function createAutoSaveService(
+  dependencies: AutoSaveServiceDependencies = {}
+): AutoSaveService {
+  return new AutoSaveService(dependencies);
+}
 
 async function createThumbnailSafely(context: ProjectContext): Promise<Uint8Array | undefined> {
   const frame = context.animation.frames.value[0];

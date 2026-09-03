@@ -86,6 +86,10 @@ function hasRuntimeEmptyCel(
   return animation.isRuntimeEmptyCel(cel) && !textCelData && !hasPixelIndices;
 }
 
+interface ProjectLoadOptions {
+  preserveRevision?: number;
+}
+
 async function serializeCelForLayer(
   animation: ProjectAnimationStore,
   layer: Layer,
@@ -192,6 +196,12 @@ class ProjectStore {
 
   resetRevision() {
     this.revision.value = 0;
+  }
+
+  /** Preserve the captured document revision when a reload replaces state. */
+  private restoreRevisionAfterLoad(previousRevision: number) {
+    if (!Number.isSafeInteger(previousRevision) || previousRevision < 0) return;
+    this.revision.value = Math.max(this.revision.value, previousRevision);
   }
 
   /** Advance semantic document identity for a successful history transition. */
@@ -332,7 +342,11 @@ class ProjectStore {
    * @param _fromAutoSave Kept for call-site compatibility. All load paths now
    *                      restore the palette from the file.
    */
-  async loadProject(input: ProjectFileInput, _fromAutoSave = false): Promise<ProjectFile> {
+  async loadProject(
+    input: ProjectFileInput,
+    _fromAutoSave = false,
+    options: ProjectLoadOptions = {},
+  ): Promise<ProjectFile> {
     const { project: file, compatibility } = decodeProjectFileWithDiagnostics(input);
     const loadedGroupLayerData = new Map(
       file.layers
@@ -360,6 +374,9 @@ class ProjectStore {
     selectFirstLoadedLayer(this.loadStores);
     this.loadedGroupLayerData = loadedGroupLayerData;
     this.resetProjectLocalState();
+    if (options.preserveRevision !== undefined) {
+      this.restoreRevisionAfterLoad(options.preserveRevision);
+    }
     dispatchProjectCompatibilityWarning(compatibility);
 
     // Let the app shell reset the viewport after Lit renders the new dimensions.

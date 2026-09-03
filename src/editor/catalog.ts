@@ -8,8 +8,22 @@
 
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
+export const RENDER_OBSERVATION_MAX_BYTES = 16 * 1024 * 1024;
+export const PROJECT_OBSERVATION_LIMITS = Object.freeze({
+  maxLayers: 64,
+  maxFrames: 64,
+  maxCels: 4096,
+  maxTags: 64,
+  maxPaletteEntries: 256,
+  maxHistoryEntries: 100,
+  maxStringLength: 256,
+});
 // fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
 export const PROJECT_SAVE_SAFETY_OBSERVATION_ID = 'project.save-safety';
+// fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
+export const PROJECT_OBSERVATION_ID = 'project.observe';
+// fallow-ignore-next-line unused-export -- Stable observation ID is part of the public catalog contract.
+export const RENDER_OBSERVATION_ID = 'project.render.observe';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
 export const FILL_COMMAND_ID = 'project.raster.fill';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
@@ -24,6 +38,7 @@ export const canvasSizeCatalog = Object.freeze({
     request: {
       target: { projectId: 'string' },
       expectedRevision: 'integer >= 0',
+      action: 'preview | execute (default execute)',
       width: 'integer 1..2048',
       height: 'integer 1..2048',
       offset: {
@@ -236,9 +251,266 @@ export const projectSaveSafetyCatalog = Object.freeze({
   privacy: 'no project content or raw errors',
 });
 
+// fallow-ignore-next-line unused-export -- Public observation catalog is negotiated by adapters.
+export const projectObservationCatalog = Object.freeze({
+  id: PROJECT_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  requiresRevision: true,
+  fields: {
+    target: { projectId: 'string' },
+    revision: 'integer >= 0',
+    canvas: { width: 'positive integer', height: 'positive integer' },
+    layers: 'bounded ordered layer identities and state',
+    frames: 'bounded ordered frame and cel identities',
+    tags: 'bounded ordered frame-tag identities and ranges',
+    palette: 'bounded ordered palette-entry identities and colors',
+    history: 'bounded undo and redo summary',
+    saveSafety: 'project.save-safety observation',
+    lastEvent: 'optional compact project-change event',
+  },
+  limits: PROJECT_OBSERVATION_LIMITS,
+  privacy: 'no canvases, stores, signals, command instances, or raw errors',
+});
+
+// fallow-ignore-next-line unused-export -- Public observation catalog is negotiated by adapters.
+export const renderObservationCatalog = Object.freeze({
+  id: RENDER_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'string' },
+    expectedRevision: 'integer >= 0',
+    frameId: 'string',
+  },
+  result: {
+    format: 'rgba8',
+    pixels: 'copied Uint8Array',
+    stride: 'width * 4',
+  },
+  limits: { maxBytes: RENDER_OBSERVATION_MAX_BYTES },
+  privacy: 'canonical artwork bytes only; no canvas or browser chrome',
+});
+
+const automationOperationCatalog = Object.freeze([
+  {
+    id: 'catalog.negotiate',
+    kind: 'negotiation',
+    target: 'none',
+    requiresRevision: false,
+    request: { version: 'major.minor' },
+    result: {
+      type: 'catalog.negotiation',
+      requestedVersion: 'major.minor',
+      version: 'major.minor',
+      catalog: 'cloned editor catalog',
+    },
+    limits: {},
+    revision: 'not applicable',
+    errors: ['invalid_request', 'unsupported', 'internal'] as const,
+  },
+  {
+    id: 'project.target',
+    kind: 'target-observation',
+    target: 'project',
+    requiresRevision: false,
+    request: { target: { projectId: 'string' } },
+    result: {
+      type: 'project.target',
+      target: { projectId: 'string' },
+      revision: 'integer >= 0',
+    },
+    limits: { maxStringLength: PROJECT_OBSERVATION_LIMITS.maxStringLength },
+    revision: 'captures the current project revision for the explicit target',
+    errors: ['invalid_request', 'target_not_found', 'unsupported', 'internal'] as const,
+  },
+  {
+    id: PROJECT_OBSERVATION_ID,
+    kind: 'observation',
+    target: 'project',
+    requiresRevision: true,
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+    result: {
+      type: 'project.observation',
+      ...projectObservationCatalog.fields,
+    },
+    limits: projectObservationCatalog.limits,
+    revision: 'expectedRevision must equal the captured project revision; result reports that revision',
+    errors: [
+      'invalid_request',
+      'target_not_found',
+      'revision_conflict',
+      'limit_exceeded',
+      'unsupported',
+      'internal',
+    ] as const,
+  },
+  {
+    id: RENDER_OBSERVATION_ID,
+    kind: 'observation',
+    target: 'project',
+    requiresRevision: true,
+    request: {
+      target: { projectId: 'string' },
+      expectedRevision: 'integer >= 0',
+      frameId: 'string',
+    },
+    result: {
+      type: 'render.observation',
+      target: { projectId: 'string' },
+      revision: 'integer >= 0',
+      frameId: 'string',
+      ...renderObservationCatalog.result,
+    },
+    limits: renderObservationCatalog.limits,
+    revision: 'expectedRevision must equal the captured project revision; result reports that revision',
+    errors: [
+      'invalid_request',
+      'target_not_found',
+      'revision_conflict',
+      'limit_exceeded',
+      'invalid_state',
+      'unsupported',
+      'internal',
+    ] as const,
+  },
+  {
+    id: CANVAS_SIZE_COMMAND_ID,
+    kind: 'command',
+    target: 'project',
+    requiresRevision: true,
+    request: canvasSizeCatalog.command.request,
+    result: {
+      preview: {
+        type: 'project.canvas.resize.preview',
+        preview: 'Canvas Size preview',
+      },
+      execute: {
+        type: 'project.canvas.resize',
+        target: { projectId: 'string' },
+        revision: 'integer >= 0',
+        event: 'project-change event',
+      },
+    },
+    limits: canvasSizeCatalog.command.limits,
+    revision: 'expectedRevision must equal the captured project revision; execute advances it monotonically and preview does not',
+    errors: canvasSizeCatalog.command.errors,
+  },
+  {
+    id: 'project.history.undo',
+    kind: 'history-command',
+    target: 'project',
+    requiresRevision: true,
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+    result: {
+      type: 'project.history.undo',
+      target: { projectId: 'string' },
+      revision: 'integer >= 0',
+      event: 'project-change event',
+    },
+    limits: { maxHistoryEntries: PROJECT_OBSERVATION_LIMITS.maxHistoryEntries },
+    revision: 'expectedRevision must equal the captured project revision; successful undo returns its resulting revision',
+    errors: [
+      'invalid_request',
+      'target_not_found',
+      'revision_conflict',
+      'invalid_state',
+      'unsupported',
+      'internal',
+    ] as const,
+  },
+  {
+    id: 'project.history.redo',
+    kind: 'history-command',
+    target: 'project',
+    requiresRevision: true,
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+    result: {
+      type: 'project.history.redo',
+      target: { projectId: 'string' },
+      revision: 'integer >= 0',
+      event: 'project-change event',
+    },
+    limits: { maxHistoryEntries: PROJECT_OBSERVATION_LIMITS.maxHistoryEntries },
+    revision: 'expectedRevision must equal the captured project revision; successful redo returns its resulting revision',
+    errors: [
+      'invalid_request',
+      'target_not_found',
+      'revision_conflict',
+      'invalid_state',
+      'unsupported',
+      'internal',
+    ] as const,
+  },
+  {
+    id: 'project.save',
+    kind: 'persistence-command',
+    target: 'project',
+    requiresRevision: true,
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+    result: {
+      type: 'project.save',
+      target: { projectId: 'string' },
+      revision: 'integer >= 0',
+      saveSafety: 'project.save-safety observation',
+    },
+    limits: {},
+    revision: 'expectedRevision must equal the captured project revision; success reports the revision observed by save-safety',
+    errors: [
+      'invalid_request',
+      'target_not_found',
+      'revision_conflict',
+      'unsupported',
+      'internal',
+    ] as const,
+  },
+  {
+    id: 'project.reload',
+    kind: 'persistence-command',
+    target: 'project',
+    requiresRevision: true,
+    request: { target: { projectId: 'string' }, expectedRevision: 'integer >= 0' },
+    result: {
+      type: 'project.reload',
+      target: { projectId: 'string' },
+      revision: 'integer >= 0; preserves expectedRevision',
+      observation: 'project.observation',
+    },
+    limits: {},
+    revision: 'expectedRevision must equal the captured project revision; successful reload preserves that revision',
+    preconditions: {
+      exactSave: {
+        operation: 'project.save',
+        target: 'same captured ProjectContext and project ID',
+        revision: 'same expectedRevision',
+        saveSafety: {
+          status: 'saved',
+          persistedRevision: 'same expectedRevision',
+        },
+      },
+    },
+    errors: [
+      'invalid_request',
+      'target_not_found',
+      'revision_conflict',
+      'invalid_state',
+      'unsupported',
+      'limit_exceeded',
+      'internal',
+    ] as const,
+  },
+] as const);
+
 export const editorCatalog = Object.freeze({
   version: '1.0',
-  observations: Object.freeze([projectSaveSafetyCatalog]),
+  limits: PROJECT_OBSERVATION_LIMITS,
+  operations: automationOperationCatalog,
+  observations: Object.freeze([
+    projectSaveSafetyCatalog,
+    projectObservationCatalog,
+    renderObservationCatalog,
+  ]),
   commands: Object.freeze([
     canvasSizeCatalog.command,
     layerStateCatalog,

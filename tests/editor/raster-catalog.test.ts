@@ -57,6 +57,11 @@ describe('raster editor catalog contracts', () => {
         status: ['dirty', 'saving', 'saved', 'failed'],
       },
     });
-    expect(editorCatalog.observations).toEqual([projectSaveSafetyCatalog]);
+    expect(editorCatalog.observations).toContain(projectSaveSafetyCatalog);
+    expect(editorCatalog.observations.map((observation) => observation.id)).toEqual([
+      'project.save-safety',
+      'project.observe',
+      'project.render.observe',
+    ]);
   });
 });
