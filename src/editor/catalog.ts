@@ -30,6 +30,17 @@ export const RENDER_OBSERVATION_ID = 'project.render.observe';
 export const FILL_COMMAND_ID = 'project.raster.fill';
 // fallow-ignore-next-line unused-export -- Stable command ID is part of the public catalog contract.
 export const GRADIENT_COMMAND_ID = 'project.raster.gradient';
+export const RASTER_OBSERVATION_ID = 'project.raster.observe';
+export const RASTER_PATCH_COMMAND_ID = 'project.raster.patch';
+export const RASTER_GRID_MAX_REGION_WIDTH = 64;
+export const RASTER_GRID_MAX_REGION_HEIGHT = 64;
+export const RASTER_GRID_MAX_CELLS = 4096;
+export const RASTER_GRID_MAX_PATCHES = 16;
+export const RASTER_GRID_MAX_LEGEND_ENTRIES = 32;
+export const RASTER_GRID_MAX_STRING_LENGTH = 256;
+export const RASTER_GRID_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
+export const RASTER_GRID_MAX_COMPOSITE_BYTES = 32 * 1024 * 1024;
+export const RASTER_GRID_REPRESENTATION_VERSION = '1.0';
 
 export const canvasSizeCatalog = Object.freeze({
   version: '1.0',
@@ -158,7 +169,7 @@ export const transactionCatalog = Object.freeze({
   requiresRevision: true,
   request: {
     profile: {
-      oneOf: ['layer-and-tag', 'static-structure', 'structure-refinement', 'animation'],
+      oneOf: ['layer-and-tag', 'static-structure', 'structure-refinement', 'animation', 'raster-patch'],
       default: 'layer-and-tag',
     },
     target: { projectId: 'string' },
@@ -231,6 +242,10 @@ export const transactionCatalog = Object.freeze({
         animation: {
           exact: 1,
           oneOf: [ANIMATION_FRAME_COMMAND_ID, ANIMATION_CEL_LINK_COMMAND_ID, CEL_UNLINK_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+        },
+        'raster-patch': {
+          exact: 1,
+          oneOf: [RASTER_PATCH_COMMAND_ID],
         },
       },
       item: {
@@ -328,6 +343,43 @@ export const transactionCatalog = Object.freeze({
             },
           },
         },
+        rasterPatch: {
+          command: RASTER_PATCH_COMMAND_ID,
+          input: {
+            kind: 'raster.patch',
+            layerId: 'bounded non-empty string (1..256)',
+            frameId: 'bounded non-empty string (1..256)',
+            celId: 'optional captured cel identity',
+            region: {
+              x: 'integer',
+              y: 'integer',
+              width: 'integer 1..64',
+              height: 'integer 1..64',
+            },
+            digest: '64-character lowercase SHA-256 digest',
+            legend: {
+              maxEntries: RASTER_GRID_MAX_LEGEND_ENTRIES,
+              item: {
+                symbol: 'one-character non-transparent symbol',
+                resolution: 'exactly one of paletteEntryId or color',
+                paletteEntryId: 'optional stable existing palette identity',
+                paletteIndex: 'optional exact 1-based palette index',
+                color: 'optional non-transparent #RRGGBBAA with exact palette RGB',
+              },
+            },
+            patches: {
+              max: RASTER_GRID_MAX_PATCHES,
+              maxCells: RASTER_GRID_MAX_CELLS,
+              item: {
+                x: 'integer absolute origin',
+                y: 'integer absolute origin',
+                width: 'integer 1..64',
+                height: 'integer 1..64',
+                rows: 'equal-width non-empty symbol rows',
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -373,7 +425,7 @@ export const transactionCatalog = Object.freeze({
         toRevision: 'integer >= 0',
       }],
       children: [{
-        commandId: 'project.layer.state | project.layer.structure.refine | project.animation.frame-tag | project.palette.declaration | project.layer.tree | project.animation.frame | project.animation.cel.link | project.animation.cel.unlink',
+        commandId: 'project.layer.state | project.layer.structure.refine | project.animation.frame-tag | project.palette.declaration | project.layer.tree | project.animation.frame | project.animation.cel.link | project.animation.cel.unlink | project.raster.patch',
         operation: 'concrete child kind',
         domains: ['palette | layer-state | timeline | raster-content'],
       }],
@@ -398,6 +450,10 @@ export const transactionCatalog = Object.freeze({
         animation: {
           exact: 1,
           oneOf: [ANIMATION_FRAME_COMMAND_ID, ANIMATION_CEL_LINK_COMMAND_ID, CEL_UNLINK_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+        },
+        'raster-patch': {
+          exact: 1,
+          oneOf: [RASTER_PATCH_COMMAND_ID],
         },
       },
     },
@@ -437,6 +493,18 @@ export const transactionCatalog = Object.freeze({
         unlinkGroup: { min: ANIMATION_MIN_UNLINK_MEMBERS, max: ANIMATION_MAX_LINK_MEMBERS },
         requestString: { min: ANIMATION_REQUEST_STRING_MIN, max: ANIMATION_REQUEST_STRING_MAX },
         preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
+      },
+      'raster-patch': {
+        patches: { max: RASTER_GRID_MAX_PATCHES },
+        patchCells: { max: RASTER_GRID_MAX_CELLS },
+        legendEntries: { max: RASTER_GRID_MAX_LEGEND_ENTRIES },
+        region: {
+          maxWidth: RASTER_GRID_MAX_REGION_WIDTH,
+          maxHeight: RASTER_GRID_MAX_REGION_HEIGHT,
+          maxCells: RASTER_GRID_MAX_CELLS,
+        },
+        stringLength: { min: 1, max: RASTER_GRID_MAX_STRING_LENGTH },
+        preparationBytes: { max: RASTER_GRID_MAX_PREPARATION_BYTES },
       },
     },
   },
@@ -537,6 +605,27 @@ export const transactionCatalog = Object.freeze({
       preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
       affectedDomains: ['timeline', 'raster-content'],
     },
+    'raster-patch': {
+      children: {
+        exact: 1,
+        oneOf: [RASTER_PATCH_COMMAND_ID],
+      },
+      patch: {
+        kind: 'raster.patch',
+        region: {
+          maxWidth: RASTER_GRID_MAX_REGION_WIDTH,
+          maxHeight: RASTER_GRID_MAX_REGION_HEIGHT,
+          maxCells: RASTER_GRID_MAX_CELLS,
+        },
+        maxPatches: RASTER_GRID_MAX_PATCHES,
+        maxPatchCells: RASTER_GRID_MAX_CELLS,
+        maxLegendEntries: RASTER_GRID_MAX_LEGEND_ENTRIES,
+        digest: '64-character lowercase SHA-256 digest',
+        palette: 'existing exact identity or exact RGB match; no growth or approximation',
+      },
+      preflight: 're-observe matching layer region and prepare complete before-state and after-state snapshots',
+      affectedDomains: ['raster-content'],
+    },
   },
   affectedDomains: ['palette', 'layer-state', 'timeline', 'raster-content'] as const,
   availability: {
@@ -562,6 +651,12 @@ export const transactionCatalog = Object.freeze({
         guidedDrawing: 'unsupported',
         selection: 'none | selected; floating and transforming are rejected',
         layers: 'supported non-reference layers only',
+      },
+      'raster-patch': {
+        guidedDrawing: 'unsupported',
+        selection: 'none | selected; floating and transforming are rejected',
+        source: 'existing image-layer cel only; linked or shared payloads are unsupported',
+        palette: 'existing entries only; exact index and RGB matching',
       },
     },
   },
@@ -737,6 +832,161 @@ export const rasterGradientCatalog = Object.freeze({
   ] as const,
 });
 
+export const rasterObservationCatalog = Object.freeze({
+  id: RASTER_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'bounded non-empty string (1..256)' },
+    expectedRevision: 'integer >= 0',
+    source: {
+      layer: {
+        kind: 'layer',
+        layerId: 'bounded non-empty string (1..256)',
+        frameId: 'bounded non-empty string (1..256)',
+        celId: 'optional captured cel identity',
+      },
+      composite: {
+        kind: 'composite',
+        frameId: 'bounded non-empty string (1..256)',
+      },
+    },
+    region: {
+      x: 'integer',
+      y: 'integer',
+      width: `integer 1..${RASTER_GRID_MAX_REGION_WIDTH}`,
+      height: `integer 1..${RASTER_GRID_MAX_REGION_HEIGHT}`,
+    },
+  },
+  result: {
+    type: 'project.raster.observation',
+    target: { projectId: 'string' },
+    revision: 'integer >= 0',
+    source: 'layer identity with cel or composite frame identity',
+    sourceKind: 'layer | composite',
+    editable: 'true for layer; false for composite',
+    origin: { x: 'integer', y: 'integer' },
+    extent: {
+      width: `integer 1..${RASTER_GRID_MAX_REGION_WIDTH}`,
+      height: `integer 1..${RASTER_GRID_MAX_REGION_HEIGHT}`,
+    },
+    rows: 'equal-width Symbol Grid rows; . is transparent',
+    legend: 'deterministic non-transparent symbol/color/palette identity entries',
+    digest: '64-character lowercase SHA-256 digest',
+  },
+  limits: {
+    region: {
+      maxWidth: RASTER_GRID_MAX_REGION_WIDTH,
+      maxHeight: RASTER_GRID_MAX_REGION_HEIGHT,
+      maxCells: RASTER_GRID_MAX_CELLS,
+    },
+    legend: { maxEntries: RASTER_GRID_MAX_LEGEND_ENTRIES },
+    stringLength: { min: 1, max: RASTER_GRID_MAX_STRING_LENGTH },
+    compositeBytes: { max: RASTER_GRID_MAX_COMPOSITE_BYTES },
+  },
+  affectedDomains: ['raster-content'] as const,
+  availability: {
+    guidedDrawing: 'unsupported',
+    selection: 'none | selected; floating and transforming are rejected',
+    layer: 'existing image-layer cel only; linked or shared payloads are unsupported',
+    composite: 'canonical compositor; read-only and never patchable',
+  },
+  privacy: 'bounded Symbol Grid metadata and digest only; no canvas, store, command, or raw project bytes',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'bounds_exceeded',
+    'limit_exceeded',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
+export const rasterPatchCatalog = Object.freeze({
+  id: RASTER_PATCH_COMMAND_ID,
+  kind: 'command',
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    kind: 'raster.patch',
+    target: { projectId: 'bounded non-empty string (1..256)' },
+    expectedRevision: 'integer >= 0',
+    layerId: 'bounded non-empty string (1..256)',
+    frameId: 'bounded non-empty string (1..256)',
+    celId: 'optional captured cel identity',
+    region: {
+      x: 'integer',
+      y: 'integer',
+      width: `integer 1..${RASTER_GRID_MAX_REGION_WIDTH}`,
+      height: `integer 1..${RASTER_GRID_MAX_REGION_HEIGHT}`,
+    },
+    digest: '64-character lowercase SHA-256 digest',
+    legend: {
+      maxEntries: RASTER_GRID_MAX_LEGEND_ENTRIES,
+      item: {
+        symbol: 'one-character non-transparent symbol',
+        resolution: 'exactly one of paletteEntryId or color',
+        paletteEntryId: 'optional stable existing palette identity',
+        paletteIndex: 'optional exact 1-based palette index',
+        color: 'optional non-transparent #RRGGBBAA with exact palette RGB',
+      },
+    },
+    patches: {
+      max: RASTER_GRID_MAX_PATCHES,
+      maxCells: RASTER_GRID_MAX_CELLS,
+      item: {
+        x: 'integer absolute origin',
+        y: 'integer absolute origin',
+        width: `integer 1..${RASTER_GRID_MAX_REGION_WIDTH}`,
+        height: `integer 1..${RASTER_GRID_MAX_REGION_HEIGHT}`,
+        rows: 'equal-width non-empty symbol rows',
+      },
+    },
+  },
+  result: {
+    type: 'project.raster.patch',
+    changedBounds: {
+      x: 'integer',
+      y: 'integer',
+      width: 'positive integer',
+      height: 'positive integer',
+    },
+  },
+  limits: {
+    region: {
+      maxWidth: RASTER_GRID_MAX_REGION_WIDTH,
+      maxHeight: RASTER_GRID_MAX_REGION_HEIGHT,
+      maxCells: RASTER_GRID_MAX_CELLS,
+    },
+    patches: { max: RASTER_GRID_MAX_PATCHES, maxCells: RASTER_GRID_MAX_CELLS },
+    legend: { maxEntries: RASTER_GRID_MAX_LEGEND_ENTRIES },
+    stringLength: { min: 1, max: RASTER_GRID_MAX_STRING_LENGTH },
+    preparationBytes: { max: RASTER_GRID_MAX_PREPARATION_BYTES },
+  },
+  affectedDomains: ['raster-content'] as const,
+  availability: {
+    guidedDrawing: 'unsupported',
+    selection: 'none | selected; floating and transforming are rejected',
+    layer: 'existing image-layer cel only; linked or shared payloads are unsupported',
+    palette: 'existing entries only; exact index and RGB matching; no growth or approximation',
+  },
+  undo: 'one-session-history-entry',
+  privacy: 'no artwork bytes in result, provenance, events, or errors',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'bounds_exceeded',
+    'limit_exceeded',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
 export const projectSaveSafetyCatalog = Object.freeze({
   id: PROJECT_SAVE_SAFETY_OBSERVATION_ID,
   kind: 'observation',
@@ -896,6 +1146,20 @@ const automationOperationCatalog = Object.freeze([
     ] as const,
   },
   {
+    id: RASTER_OBSERVATION_ID,
+    kind: rasterObservationCatalog.kind,
+    target: rasterObservationCatalog.target,
+    requiresRevision: rasterObservationCatalog.requiresRevision,
+    request: rasterObservationCatalog.request,
+    result: rasterObservationCatalog.result,
+    limits: rasterObservationCatalog.limits,
+    affectedDomains: rasterObservationCatalog.affectedDomains,
+    availability: rasterObservationCatalog.availability,
+    privacy: rasterObservationCatalog.privacy,
+    revision: 'expectedRevision must equal the captured project revision; result reports that revision',
+    errors: rasterObservationCatalog.errors,
+  },
+  {
     id: CANVAS_SIZE_COMMAND_ID,
     kind: 'command',
     target: 'project',
@@ -929,6 +1193,21 @@ const automationOperationCatalog = Object.freeze([
     undo: transactionCatalog.undo,
     availability: transactionCatalog.availability,
     errors: transactionCatalog.errors,
+  },
+  {
+    id: RASTER_PATCH_COMMAND_ID,
+    kind: rasterPatchCatalog.kind,
+    target: rasterPatchCatalog.target,
+    requiresRevision: rasterPatchCatalog.requiresRevision,
+    request: rasterPatchCatalog.request,
+    result: rasterPatchCatalog.result,
+    limits: rasterPatchCatalog.limits,
+    affectedDomains: rasterPatchCatalog.affectedDomains,
+    availability: rasterPatchCatalog.availability,
+    undo: rasterPatchCatalog.undo,
+    privacy: rasterPatchCatalog.privacy,
+    revision: 'transaction expectedRevision must equal the captured project revision; execute advances it once',
+    errors: rasterPatchCatalog.errors,
   },
   {
     id: 'project.history.undo',
@@ -1043,6 +1322,7 @@ export const editorCatalog = Object.freeze({
     projectSaveSafetyCatalog,
     projectObservationCatalog,
     renderObservationCatalog,
+    rasterObservationCatalog,
   ]),
   commands: Object.freeze([
     projectCreateCatalog,
@@ -1107,5 +1387,6 @@ export const editorCatalog = Object.freeze({
     },
     rasterFillCatalog,
     rasterGradientCatalog,
+    rasterPatchCatalog,
   ]),
 });

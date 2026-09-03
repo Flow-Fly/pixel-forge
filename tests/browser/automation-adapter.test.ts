@@ -147,7 +147,7 @@ describe('Automation Adapter Fixture Session', () => {
           region: { x: 0, y: 0, width: 4, height: 4 },
           digest: observed.digest,
           legend: [
-            { symbol: redSymbol, paletteEntryId: 'palette-red', color: '#ff0000ff' },
+            { symbol: redSymbol, paletteEntryId: 'palette-red' },
             { symbol: 'g', color: '#00ff00ff' },
           ],
           patches: [
@@ -284,6 +284,49 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.reload.observation.saveSafety.status).toBe('saved');
     expect(journey.reload.revision).toBe(journey.afterRedo.observation.revision);
     expect(journey.exact).toEqual({ document: true, render: true });
+  });
+
+  it('proves the bounded Symbol Grid raster patch journey through reopen', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+
+    const journey = await session.runRasterPatch();
+
+    expect(journey.initial.layerObservation).toMatchObject({
+      sourceKind: 'layer',
+      editable: true,
+      region: { x: 0, y: 0, width: 4, height: 4 },
+    });
+    expect(journey.initial.compositeObservation).toMatchObject({
+      sourceKind: 'composite',
+      editable: false,
+    });
+    expect(journey.transaction).toMatchObject({
+      revision: 1,
+      event: { domains: ['raster-content'] },
+      rasterPatch: { changedBounds: { x: 0, y: 0, width: 3, height: 3 } },
+      provenance: {
+        children: [{ commandId: 'project.raster.patch', operation: 'raster.patch', domains: ['raster-content'] }],
+      },
+    });
+    expect(journey.afterTransaction.layerObservation.rows).not.toEqual(journey.initial.layerObservation.rows);
+    expectOnlyRasterCellsChanged(
+      journey.initial.layerObservation.rows,
+      journey.afterTransaction.layerObservation.rows,
+      [{ x: 0, y: 0 }, { x: 2, y: 2 }],
+    );
+    expect(journey.afterUndo.layerObservation.rows).toEqual(journey.initial.layerObservation.rows);
+    expect(journey.afterUndo.layerObservation.legend).toEqual(journey.initial.layerObservation.legend);
+    expect(journey.afterUndo.compositeObservation.rows).toEqual(journey.initial.compositeObservation.rows);
+    expect(journey.afterUndo.compositeObservation.legend).toEqual(journey.initial.compositeObservation.legend);
+    expect(journey.afterUndo.render.pixels).toEqual(journey.initial.render.pixels);
+    expect(journey.afterUndo.document).toEqual(journey.initial.document);
+    expect(journey.afterRedo.layerObservation.rows).toEqual(journey.afterTransaction.layerObservation.rows);
+    expect(journey.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.reload.revision).toBe(journey.afterRedo.layerObservation.revision);
+    expect(journey.reopened.state.layerObservation.rows).toEqual(journey.afterRedo.layerObservation.rows);
+    expect(journey.exact).toEqual({ document: true, render: true, digest: true, source: true });
   });
 
   // fallow-ignore-next-line complexity -- The browser fixture proves the complete public animation lifecycle.
@@ -2054,6 +2097,23 @@ function normalizeProjectPayload(project: ProjectFile): unknown {
   return JSON.parse(JSON.stringify(project, (_, value: unknown) =>
     value instanceof Uint8Array ? Array.from(value) : value
   ));
+}
+
+function expectOnlyRasterCellsChanged(
+  before: readonly string[],
+  after: readonly string[],
+  changedCells: readonly { readonly x: number; readonly y: number }[],
+): void {
+  const changed = new Set(changedCells.map(({ x, y }) => `${x}:${y}`));
+  expect(after).toHaveLength(before.length);
+  for (let y = 0; y < before.length; y++) {
+    const beforeRow = before[y] ?? '';
+    const afterRow = after[y] ?? '';
+    expect(afterRow).toHaveLength(beforeRow.length);
+    for (let x = 0; x < beforeRow.length; x++) {
+      if (!changed.has(`${x}:${y}`)) expect(afterRow[x]).toBe(beforeRow[x]);
+    }
+  }
 }
 
 async function digestBytes(bytes: Uint8Array): Promise<string> {

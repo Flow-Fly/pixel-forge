@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   editorCatalog,
   projectSaveSafetyCatalog,
+  rasterObservationCatalog,
+  rasterPatchCatalog,
   rasterFillCatalog,
   rasterGradientCatalog,
 } from '../../src/editor/catalog';
@@ -62,6 +64,41 @@ describe('raster editor catalog contracts', () => {
       'project.save-safety',
       'project.observe',
       'project.render.observe',
+      'project.raster.observe',
     ]);
+  });
+
+  it('describes bounded Symbol Grid observation and patch contracts', () => {
+    expect(rasterObservationCatalog).toMatchObject({
+      id: 'project.raster.observe',
+      kind: 'observation',
+      requiresRevision: true,
+      affectedDomains: ['raster-content'],
+      limits: {
+        region: { maxWidth: 64, maxHeight: 64, maxCells: 4096 },
+        legend: { maxEntries: 32 },
+      },
+      result: {
+        type: 'project.raster.observation',
+        digest: '64-character lowercase SHA-256 digest',
+      },
+    });
+    expect(rasterPatchCatalog).toMatchObject({
+      id: 'project.raster.patch',
+      kind: 'command',
+      affectedDomains: ['raster-content'],
+      undo: 'one-session-history-entry',
+      request: {
+        legend: {
+          item: { resolution: 'exactly one of paletteEntryId or color' },
+        },
+      },
+      limits: {
+        region: { maxWidth: 64, maxHeight: 64, maxCells: 4096 },
+        patches: { max: 16, maxCells: 4096 },
+        legend: { maxEntries: 32 },
+      },
+    });
+    expect(editorCatalog.commands).toContain(rasterPatchCatalog);
   });
 });

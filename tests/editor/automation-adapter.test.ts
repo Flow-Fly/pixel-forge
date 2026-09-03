@@ -86,6 +86,7 @@ describe('AutomationAdapter', () => {
       'project.save-safety',
       'project.observe',
       'project.render.observe',
+      'project.raster.observe',
     ]);
     expect(negotiated.result.catalog.operations.map((operation) => operation.id)).toEqual([
       'catalog.negotiate',
@@ -93,8 +94,10 @@ describe('AutomationAdapter', () => {
       'project.target',
       'project.observe',
       'project.render.observe',
+      'project.raster.observe',
       'project.canvas.resize',
       'project.transaction.execute',
+      'project.raster.patch',
       'project.history.undo',
       'project.history.redo',
       'project.save',
@@ -131,7 +134,7 @@ describe('AutomationAdapter', () => {
         expectedRevision: 'integer >= 0',
         profile: {
           default: 'layer-and-tag',
-          oneOf: ['layer-and-tag', 'static-structure', 'structure-refinement', 'animation'],
+          oneOf: ['layer-and-tag', 'static-structure', 'structure-refinement', 'animation', 'raster-patch'],
         },
         provenance: expect.objectContaining({
           clientId: 'non-empty bounded string',
@@ -156,6 +159,10 @@ describe('AutomationAdapter', () => {
                 'project.animation.frame-tag',
               ],
             }),
+            'raster-patch': {
+              exact: 1,
+              oneOf: ['project.raster.patch'],
+            },
           }),
         }),
       },
@@ -180,6 +187,10 @@ describe('AutomationAdapter', () => {
                 'project.animation.frame-tag',
               ],
             }),
+            'raster-patch': {
+              exact: 1,
+              oneOf: ['project.raster.patch'],
+            },
           }),
         },
         provenance: {
@@ -201,6 +212,12 @@ describe('AutomationAdapter', () => {
             linkMembers: { min: 2, max: 16 },
             unlinkGroup: { min: 2, max: 16 },
             requestString: { min: 1, max: 256 },
+            preparationBytes: { max: 32 * 1024 * 1024 },
+          }),
+          'raster-patch': expect.objectContaining({
+            patches: { max: 16 },
+            patchCells: { max: 4096 },
+            legendEntries: { max: 32 },
             preparationBytes: { max: 32 * 1024 * 1024 },
           }),
         }),

@@ -20,6 +20,7 @@ import {
 } from './automation-adapter';
 import type { ProjectObservation, RenderObservation } from './observations';
 import type { EditorTransactionResult } from './transaction';
+import type { RasterObservation } from './symbol-grid';
 import type { Cel, Frame } from '../types/animation';
 import type { Layer } from '../types/layer';
 
@@ -142,6 +143,34 @@ export interface FixtureTransactionJourneyResult {
     readonly document: boolean;
     readonly render: boolean;
   };
+}
+
+export interface FixtureRasterPatchJourneyResult {
+  readonly negotiation: CatalogNegotiation;
+  readonly initial: FixtureRasterPatchState;
+  readonly transaction: EditorTransactionResult;
+  readonly afterTransaction: FixtureRasterPatchState;
+  readonly afterUndo: FixtureRasterPatchState & { readonly transition: HistoryTransitionResult };
+  readonly afterRedo: FixtureRasterPatchState & { readonly transition: HistoryTransitionResult };
+  readonly save: SaveResult;
+  readonly reopened: {
+    readonly save: SaveResult;
+    readonly reload: ReloadResult;
+    readonly state: FixtureRasterPatchState;
+  };
+  readonly exact: {
+    readonly document: boolean;
+    readonly render: boolean;
+    readonly digest: boolean;
+    readonly source: boolean;
+  };
+}
+
+export interface FixtureRasterPatchState {
+  readonly layerObservation: RasterObservation;
+  readonly compositeObservation: RasterObservation;
+  readonly render: RenderObservation;
+  readonly document: ProjectFile;
 }
 
 export interface FixtureStaticStructureJourneyResult {
@@ -471,6 +500,124 @@ export class FixtureSession {
   }
 
   /**
+   * Prove one bounded layer/composite Symbol Grid and its exact raster patch
+   * through undo, redo, save, close/reopen, and reload.
+   */
+  async runRasterPatch(): Promise<FixtureRasterPatchJourneyResult> {
+    const start = await this.beginFixtureRun();
+    const { negotiation, initialRevision } = start;
+    const initial = await this.captureRasterPatchState(this.context, this.adapter, initialRevision);
+    const layerSource = initial.layerObservation.source;
+    if (layerSource.kind !== 'layer') throw new Error('Fixture Symbol Grid layer source is incomplete.');
+    const red = initial.layerObservation.legend.find((entry) => entry.paletteEntryId === 'fixture-palette-red');
+    if (!red) throw new Error('Fixture Symbol Grid did not expose its red palette entry.');
+
+    const transaction = await requestSuccess<EditorTransactionResult>(this.adapter, {
+      operation: 'project.transaction.execute',
+      profile: 'raster-patch',
+      target: this.target,
+      expectedRevision: initialRevision,
+      provenance: {
+        clientId: 'fixture-raster-client',
+        sessionId: 'fixture-raster-session',
+        runId: 'fixture-raster-run',
+        operationId: 'fixture-raster-patch',
+      },
+      children: [{
+        command: 'project.raster.patch',
+        input: {
+          kind: 'raster.patch',
+          layerId: layerSource.layerId,
+          frameId: layerSource.frameId,
+          celId: layerSource.celId,
+          region: initial.layerObservation.region,
+          digest: initial.layerObservation.digest,
+          legend: [
+            { symbol: red.symbol, paletteEntryId: red.paletteEntryId },
+            { symbol: 'g', color: '#00ff00ff' },
+          ],
+          patches: [
+            { x: 0, y: 0, width: 1, height: 1, rows: [red.symbol] },
+            { x: 2, y: 2, width: 1, height: 1, rows: ['g'] },
+          ],
+        },
+      }],
+    });
+    await settleEffects();
+    const afterTransaction = await this.captureRasterPatchState(
+      this.context,
+      this.adapter,
+      transaction.revision,
+    );
+
+    const undoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
+      operation: 'project.history.undo',
+      target: this.target,
+      expectedRevision: transaction.revision,
+    });
+    const afterUndo = {
+      ...(await this.captureRasterPatchState(this.context, this.adapter, undoTransition.revision)),
+      transition: undoTransition,
+    };
+    const redoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
+      operation: 'project.history.redo',
+      target: this.target,
+      expectedRevision: undoTransition.revision,
+    });
+    const afterRedo = {
+      ...(await this.captureRasterPatchState(this.context, this.adapter, redoTransition.revision)),
+      transition: redoTransition,
+    };
+    const save = await requestSuccess<SaveResult>(this.adapter, {
+      operation: 'project.save',
+      target: this.target,
+      expectedRevision: afterRedo.layerObservation.revision,
+    });
+    const reopenedContext = await this.reopenFixtureContext(
+      this.context,
+      this.target,
+      afterRedo.layerObservation.revision,
+      'raster patch',
+    );
+    const reopenedSave = await requestSuccess<SaveResult>(reopenedContext.adapter, {
+      operation: 'project.save',
+      target: this.target,
+      expectedRevision: afterRedo.layerObservation.revision,
+    });
+    const reopenedReload = await requestSuccess<ReloadResult>(reopenedContext.adapter, {
+      operation: 'project.reload',
+      target: this.target,
+      expectedRevision: afterRedo.layerObservation.revision,
+    });
+    const reopenedState = await this.captureRasterPatchState(
+      reopenedContext.context,
+      reopenedContext.adapter,
+      reopenedReload.revision,
+    );
+
+    return {
+      negotiation,
+      initial,
+      transaction,
+      afterTransaction,
+      afterUndo,
+      afterRedo,
+      save,
+      reopened: { save: reopenedSave, reload: reopenedReload, state: reopenedState },
+      exact: {
+        document: sameProjectFile(afterTransaction.document, afterRedo.document)
+          && sameProjectFile(afterRedo.document, reopenedState.document),
+        render: sameRender(afterTransaction.render, afterRedo.render)
+          && sameRender(afterRedo.render, reopenedState.render),
+        digest: afterRedo.layerObservation.digest === reopenedState.layerObservation.digest,
+        source: afterRedo.compositeObservation.sourceKind === 'composite'
+          && !afterRedo.compositeObservation.editable
+          && afterRedo.compositeObservation.digest === reopenedState.compositeObservation.digest,
+      },
+    };
+  }
+
+  /**
    * Prove the static profile across its complete persisted lifecycle. The
    * created target is closed before a fresh context loads it from the fixture
    * repository and then exercises the adapter reload proof.
@@ -669,15 +816,8 @@ export class FixtureSession {
    */
   // fallow-ignore-next-line complexity -- The deterministic fixture intentionally proves the complete public animation lifecycle.
   async runAnimation(): Promise<FixtureAnimationJourneyResult> {
-    await this.initialize();
-    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
-      operation: 'catalog.negotiate',
-      version: '1.0',
-    });
-    const initialRevision = (await requestSuccess<{
-      readonly type: 'project.target';
-      readonly revision: number;
-    }>(this.adapter, { operation: 'project.target', target: this.target })).revision;
+    const start = await this.beginFixtureRun();
+    const { negotiation, initialRevision } = start;
     const initial = await this.captureAnimationState(this.context, this.adapter, initialRevision);
     const firstFrame = initial.observation.frames[0];
     const layer = initial.observation.layers.find((candidate) => candidate.type !== 'reference');
@@ -848,6 +988,44 @@ export class FixtureSession {
     };
   }
 
+  private async captureRasterPatchState(
+    context: ProjectContext,
+    adapter: AutomationAdapter,
+    revision: number,
+    target: { readonly projectId: string } = this.target,
+  ): Promise<FixtureRasterPatchState> {
+    const observation = await this.observeTarget(adapter, revision, target);
+    const layer = observation.layers.find((candidate) => candidate.type === 'image');
+    if (!layer) throw new Error('Fixture project has no image layer.');
+    const frameId = observation.currentFrameId;
+    const layerObservation = await requestSuccess<RasterObservation>(adapter, {
+      operation: 'project.raster.observe',
+      target,
+      expectedRevision: revision,
+      source: { kind: 'layer', layerId: layer.id, frameId },
+      region: { x: 0, y: 0, width: observation.canvas.width, height: observation.canvas.height },
+    });
+    const compositeObservation = await requestSuccess<RasterObservation>(adapter, {
+      operation: 'project.raster.observe',
+      target,
+      expectedRevision: revision,
+      source: { kind: 'composite', frameId },
+      region: { x: 0, y: 0, width: observation.canvas.width, height: observation.canvas.height },
+    });
+    const render = await requestSuccess<RenderObservation>(adapter, {
+      operation: 'project.render.observe',
+      target,
+      expectedRevision: revision,
+      frameId,
+    });
+    return {
+      layerObservation,
+      compositeObservation,
+      render,
+      document: structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false })),
+    };
+  }
+
   private async completeAnimationLifecycle(
     context: ProjectContext,
     adapter: AutomationAdapter,
@@ -972,6 +1150,22 @@ export class FixtureSession {
     };
   }
 
+  private async beginFixtureRun(): Promise<{
+    readonly negotiation: CatalogNegotiation;
+    readonly initialRevision: number;
+  }> {
+    await this.initialize();
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    const initialRevision = (await requestSuccess<{
+      readonly type: 'project.target';
+      readonly revision: number;
+    }>(this.adapter, { operation: 'project.target', target: this.target })).revision;
+    return { negotiation, initialRevision };
+  }
+
   private async completeHistoryJourney(
     afterObservation: ProjectObservation,
   ): Promise<FixtureHistoryReplay> {
@@ -1086,10 +1280,11 @@ function createFixtureProject(): ProjectFile {
     name: 'Fixture Project',
     width: 4,
     height: 4,
-    palette: ['#000000', '#ff0000'],
+    palette: ['#000000', '#ff0000', '#00ff00'],
     paletteEntries: [
       { id: 'fixture-palette-transparent', color: '#000000' },
       { id: 'fixture-palette-red', color: '#ff0000' },
+      { id: 'fixture-palette-green', color: '#00ff00' },
     ],
     layers: [{
       id: layerId,

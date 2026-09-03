@@ -25,7 +25,16 @@ import {
   type ProjectObservationResult,
   type RenderObservation,
 } from './observations';
-import { editorCatalog, RENDER_OBSERVATION_MAX_BYTES } from './catalog';
+import {
+  editorCatalog,
+  RASTER_OBSERVATION_ID,
+  RENDER_OBSERVATION_MAX_BYTES,
+} from './catalog';
+import {
+  isRasterObservationFailure,
+  observeRaster,
+  type RasterObservation,
+} from './symbol-grid';
 import { DB32_COLORS } from '../stores/palette/types';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 import {
@@ -236,6 +245,7 @@ export class AutomationAdapter {
       'project.target': async (input) => this.captureTargetRevision(input),
       'project.observe': async (input) => this.observeProject(input),
       'project.render.observe': async (input) => this.observeRender(input),
+      [RASTER_OBSERVATION_ID]: async (input) => this.observeRaster(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
       [EDITOR_TRANSACTION_OPERATION_ID]: (input) => this.executeTransaction(input),
       'project.history.undo': (input) => this.undo(input),
@@ -388,6 +398,19 @@ export class AutomationAdapter {
       this.assertCurrentRevision(context, request.expectedRevision);
       const result = renderProject(context, request.target, request.frameId, this.maxRenderBytes);
       if (isRenderObservationFailure(result)) return result;
+      return success(result);
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  async observeRaster(input: unknown): Promise<AutomationResult<RasterObservation>> {
+    try {
+      this.assertNegotiated();
+      const request = normalizeProjectRequest(input);
+      const context = this.prepareContext(request.target);
+      const result = await observeRaster(context, input);
+      if (isRasterObservationFailure(result)) return result;
       return success(result);
     } catch (error) {
       return failureFromUnknown(error);
