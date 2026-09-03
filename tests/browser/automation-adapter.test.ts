@@ -1,17 +1,19 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import pako from 'pako';
 import {
   createFixtureSession,
   FixtureProjectRepository,
   type FixtureSession,
 } from '../../src/editor/fixture-session';
 import type {
+  AutomationAdapter,
   AutomationResult,
   HistoryTransitionResult,
   ProjectCreateResult,
   ReloadResult,
   SaveResult,
 } from '../../src/editor/automation-adapter';
-import type { ProjectObservation } from '../../src/editor/observations';
+import type { ProjectObservation, RenderObservation } from '../../src/editor/observations';
 import type { EditorTransactionResult } from '../../src/editor/transaction';
 import { createAutomationAdapter } from '../../src/editor/automation-adapter';
 import { createAutoSaveService, type AutoSaveService } from '../../src/services/auto-save';
@@ -19,7 +21,11 @@ import {
   STATIC_STRUCTURE_MAX_CELS,
   STATIC_STRUCTURE_MAX_FRAMES,
 } from '../../src/editor/catalog';
-import type { ProjectFile } from '../../src/types/project';
+import {
+  decodeProjectFileWithDiagnostics,
+  type ProjectFile,
+  type ProjectFileInput,
+} from '../../src/types/project';
 import {
   createProjectContext,
   restoreDefaultProjectContext,
@@ -826,6 +832,390 @@ describe('Automation Adapter Fixture Session', () => {
     expect(reloaded.observation.canvas).toEqual({ width: 16, height: 16 });
   });
 
+  it('proves a lossless structure refinement through every frame and persisted lifecycle', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+
+    const journey = await session.runStructureRefinement();
+
+    expect(journey.negotiation.version).toBe('1.0');
+    expect(journey.transaction.revision).toBe(1);
+    expect(journey.transaction.event.domains).toEqual(['layer-state', 'raster-content']);
+    expect(journey.transaction.compositeEquality).toMatchObject({
+      type: 'project.composite-equality',
+      allEqual: true,
+      frameCount: 2,
+    });
+    expect(journey.transaction.compositeEquality?.frames).toHaveLength(2);
+    expect(journey.afterTransaction.observation.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      type: layer.type,
+      parentId: layer.parentId,
+    }))).toEqual([
+      { id: 'fixture-refinement-group', name: 'Grouped', type: 'group', parentId: null },
+      { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: 'fixture-refinement-group' },
+      { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: null },
+    ]);
+    expect(journey.afterTransaction.observation.history.undoCount).toBe(1);
+    expect(journey.afterUndo.transition.revision).toBe(2);
+    expect(journey.afterRedo.transition.revision).toBe(3);
+    expect(journey.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.reload.revision).toBe(3);
+    expect(journey.exact).toEqual({ document: true, render: true, structure: true });
+  });
+
+  it('rejects non-empty removal before changing the refinement document', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+    const journey = await session.runStructureRefinement();
+    const before = journey.reopened.observation;
+    const bottom = before.layers.find((layer) => layer.id === 'fixture-refinement-bottom');
+    if (!bottom) throw new Error('Refinement fixture lost its retained image.');
+
+    const result = await session.adapter.request({
+      operation: 'project.transaction.execute',
+      profile: 'structure-refinement',
+      target: session.target,
+      expectedRevision: before.revision,
+      provenance: {
+        clientId: 'fixture-refinement-failure-client',
+        sessionId: 'fixture-refinement-failure-session',
+        runId: 'fixture-refinement-failure-run',
+        operationId: 'fixture-refinement-non-empty-removal',
+      },
+      children: [{
+        command: 'project.layer.structure.refine',
+        input: {
+          kind: 'structure.refine',
+          layers: [{ id: bottom.id, name: bottom.name, type: 'image', parentId: null }],
+          mergePairs: [],
+        },
+      }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'non_empty_layer_removal' } },
+    });
+    const after = await requestSuccess<ProjectObservation>(session, {
+      operation: 'project.observe',
+      target: session.target,
+      expectedRevision: before.revision,
+    });
+    expect(after.layers).toEqual(before.layers);
+    expect(after.history).toEqual(before.history);
+  });
+
+  it('preserves the checked-in cup compatibility payload through structure-only refinement and reload', async () => {
+    const fixture = await prepareCupCompatibilityFixture();
+    const refinement = await refineCupCompatibilityFixture(fixture);
+
+    expect(renderPixelBytes(refinement.afterRenders)).toEqual(renderPixelBytes(fixture.initialRenders));
+    expect(refinement.afterObservation.layers.map((layer) => layer.type)).toEqual([
+      'image',
+      'image',
+      'image',
+      'text',
+    ]);
+    expect(refinement.afterObservation.layers[3]?.id).toBe(fixture.textSource.id);
+    await assertCupTextRetention(fixture, refinement.transaction.revision);
+    await assertCupReload(fixture, refinement);
+  });
+
+  it('rejects floating selection before structure-refinement mutation', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const session = createFixtureSession({ context });
+    sessions.push(session);
+    const baseline = await session.runTransaction();
+    const before = baseline.afterRedo.observation;
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const layer = before.layers[0];
+    if (!layer) throw new Error('Refinement selection fixture lost its layer.');
+    context.selection.setFloating(
+      new ImageData(1, 1),
+      { x: 0, y: 0, width: 1, height: 1 },
+      'rectangle',
+    );
+
+    const result = await session.adapter.request(makeStructureRefinementRequest(
+      session.target,
+      before.revision,
+      [{ id: layer.id, name: 'Rejected rename', type: 'image', parentId: null }],
+      [],
+      'fixture-refinement-selection',
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'selection_in_progress' } },
+    });
+    expect(context.project.revision.value).toBe(before.revision);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
+  });
+
+  it('refines an explicitly registered inactive target without touching the active project', async () => {
+    const targetContext = createProjectContext();
+    const otherContext = createProjectContext();
+    contexts.push(targetContext, otherContext);
+    const targetId = 'refinement-target-tab';
+    const otherId = 'refinement-other-tab';
+    targetContext.project.id.value = targetId;
+    otherContext.project.id.value = otherId;
+    const targetLayer = targetContext.layers.layers.value[0];
+    const otherLayer = otherContext.layers.layers.value[0];
+    if (!targetLayer || !otherLayer) throw new Error('Registered refinement tabs lost their layers.');
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([
+        [targetId, targetContext],
+        [otherId, otherContext],
+      ]),
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    setActiveProjectContext(otherContext);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId: targetId },
+      0,
+      [{ id: targetLayer.id, name: 'Inactive target renamed', type: 'image', parentId: null }],
+      [],
+      'fixture-refinement-inactive-target',
+    ));
+
+    expect(result).toMatchObject({ ok: true, result: { revision: 1 } });
+    expect(targetContext.layers.layers.value[0]?.name).toBe('Inactive target renamed');
+    expect(targetContext.project.revision.value).toBe(1);
+    expect(otherContext.layers.layers.value[0]?.name).toBe(otherLayer.name);
+    expect(otherContext.project.revision.value).toBe(0);
+  });
+
+  it('rejects a new group that collides with an unrelated cel link identity atomically', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'refinement-link-group-collision';
+    context.project.id.value = projectId;
+    const layer = context.layers.layers.value[0];
+    const frame = context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Link-group collision fixture lost its layer or frame.');
+    const cel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+    if (!cel) throw new Error('Link-group collision fixture lost its cel.');
+    cel.linkedCelId = 'unrelated-link-group';
+    cel.linkType = 'hard';
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const adapter = createAutomationAdapter({ targetRegistry: new Map([[projectId, context]]) });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId },
+      0,
+      [
+        { id: 'unrelated-link-group', name: 'New group', type: 'group', parentId: null },
+        { id: layer.id, name: layer.name, type: 'image', parentId: 'unrelated-link-group' },
+      ],
+      [],
+      'fixture-refinement-link-group-collision',
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_request', retryable: false, details: { reason: 'entity_identity_collision' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
+  });
+
+  it('rejects a generated cel identity that collides with a new group atomically', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'refinement-generated-cel-collision';
+    context.project.id.value = projectId;
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Generated-cel collision fixture lost its layer.');
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const groupId = 'generated-cel-group';
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([[projectId, context]]),
+      entityIdFactory: () => groupId,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId },
+      0,
+      [
+        { id: groupId, name: 'Generated group', type: 'group', parentId: null },
+        { id: layer.id, name: layer.name, type: 'image', parentId: groupId },
+      ],
+      [],
+      'fixture-refinement-generated-cel-collision',
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'cel_identity' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
+  });
+
+  it('rejects opacity, blend, link, and index merge hazards before mutation', async () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly mutate: (context: ProjectContext, sourceId: string, targetId: string) => void;
+      readonly reason: string;
+    }[] = [
+      {
+        name: 'opacity',
+        mutate: (context, _sourceId, targetId) => context.layers.updateLayer(targetId, { opacity: 128 }),
+        reason: 'merge_layer_state',
+      },
+      {
+        name: 'blend',
+        mutate: (context, _sourceId, targetId) => context.layers.updateLayer(targetId, { blendMode: 'multiply' }),
+        reason: 'merge_layer_state',
+      },
+      {
+        name: 'link',
+        mutate: (context, sourceId, _targetId) => {
+          const frame = context.animation.frames.value[0];
+          const cel = frame && context.animation.cels.value.get(context.animation.getCelKey(sourceId, frame.id));
+          if (!cel) throw new Error('Merge fixture lost its source cel.');
+          cel.linkedCelId = 'ineligible-link';
+          cel.linkType = 'hard';
+        },
+        reason: 'merge_cel_payload',
+      },
+      {
+        name: 'index',
+        mutate: (context, sourceId, _targetId) => {
+          const frame = context.animation.frames.value[0];
+          const cel = frame && context.animation.cels.value.get(context.animation.getCelKey(sourceId, frame.id));
+          if (!cel) throw new Error('Merge fixture lost its indexed source cel.');
+          cel.indexBuffer = new Uint8Array(cel.canvas.width * cel.canvas.height);
+          cel.indexBuffer[0] = 255;
+        },
+        reason: 'merge_index_payload',
+      },
+    ];
+
+    for (const mergeCase of cases) {
+      const context = createProjectContext();
+      contexts.push(context);
+      const projectId = `refinement-merge-${mergeCase.name}`;
+      context.project.id.value = projectId;
+      const source = context.layers.layers.value[0];
+      const target = context.layers.addLayer('Merge target', context.project.width.value, context.project.height.value);
+      context.animation.syncLayerCanvases();
+      if (!source || !target) throw new Error('Merge fixture lost its adjacent image layers.');
+      mergeCase.mutate(context, source.id, target.id);
+      const adapter = createAutomationAdapter({ targetRegistry: new Map([[projectId, context]]) });
+      expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+      const result = await adapter.request(makeStructureRefinementRequest(
+        { projectId },
+        0,
+        [{ id: target.id, name: target.name, type: 'image', parentId: null }],
+        [{ sourceLayerId: source.id, targetLayerId: target.id }],
+        `fixture-refinement-merge-${mergeCase.name}`,
+      ));
+
+      expect(result).toEqual({
+        ok: false,
+        error: { code: mergeCase.name === 'index' ? 'invalid_state' : 'unsupported', retryable: false, details: { reason: mergeCase.reason } },
+      });
+      expect(context.project.revision.value).toBe(0);
+      expect(context.layers.layers.value.map((layer) => layer.id)).toEqual([source.id, target.id]);
+    }
+  });
+
+  it('rejects a prepared payload over the byte limit before allocating new cels', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'refinement-byte-limit';
+    context.project.id.value = projectId;
+    const layer = context.layers.layers.value[0];
+    const frame = context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Byte-limit fixture lost its initial layer.');
+    const cel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+    if (!cel) throw new Error('Byte-limit fixture lost its initial cel.');
+    context.project.width.value = 2048;
+    context.project.height.value = 2048;
+    cel.canvas.width = 2048;
+    cel.canvas.height = 2048;
+    layer.canvas = cel.canvas;
+    const adapter = createAutomationAdapter({ targetRegistry: new Map([[projectId, context]]) });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId },
+      0,
+      [
+        { id: 'refinement-byte-group', name: 'Too large', type: 'group', parentId: null },
+        { id: layer.id, name: layer.name, type: 'image', parentId: 'refinement-byte-group' },
+      ],
+      [],
+      'fixture-refinement-byte-limit',
+    ));
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'limit_exceeded', details: { reason: 'structure_preparation_bytes' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.layers.layers.value).toEqual([layer]);
+  });
+
+  it('rejects a visually changing reorder after exact composite preflight', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'refinement-visual-reorder';
+    context.project.id.value = projectId;
+    const bottom = context.layers.layers.value[0];
+    const frame = context.animation.frames.value[0];
+    if (!bottom || !frame) throw new Error('Reorder fixture lost its initial layer.');
+    const top = context.layers.addLayer('Top', context.project.width.value, context.project.height.value);
+    context.animation.syncLayerCanvases();
+    const bottomCel = context.animation.cels.value.get(context.animation.getCelKey(bottom.id, frame.id));
+    const topCel = context.animation.cels.value.get(context.animation.getCelKey(top.id, frame.id));
+    if (!bottomCel || !topCel) throw new Error('Reorder fixture lost its cels.');
+    const bottomDrawing = bottomCel.canvas.getContext('2d');
+    const topDrawing = topCel.canvas.getContext('2d');
+    if (!bottomDrawing || !topDrawing) throw new Error('Reorder fixture could not draw its cels.');
+    bottomDrawing.fillStyle = '#000000';
+    bottomDrawing.fillRect(0, 0, 1, 1);
+    topDrawing.fillStyle = '#ff0000';
+    topDrawing.fillRect(0, 0, 1, 1);
+    bottomCel.indexBuffer = new Uint8Array(bottomCel.canvas.width * bottomCel.canvas.height);
+    topCel.indexBuffer = new Uint8Array(topCel.canvas.width * topCel.canvas.height);
+    bottomCel.indexBuffer[0] = 1;
+    topCel.indexBuffer[0] = 2;
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const adapter = createAutomationAdapter({ targetRegistry: new Map([[projectId, context]]) });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId },
+      0,
+      [
+        { id: top.id, name: top.name, type: 'image', parentId: null },
+        { id: bottom.id, name: bottom.name, type: 'image', parentId: null },
+      ],
+      [],
+      'fixture-refinement-visual-reorder',
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'composite_changed' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.layers.layers.value.map((layer) => layer.id)).toEqual([bottom.id, top.id]);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
+  });
+
   it('proves deterministic static creation through close, repository reopen, and reload', async () => {
     const session = createFixtureSession({
       projectIdFactory: () => 'fixture-static-lifecycle',
@@ -1296,6 +1686,281 @@ async function requestRender(
     expectedRevision: observation.revision,
     frameId: observation.currentFrameId,
   });
+}
+
+async function captureAdapterRenders(
+  adapter: AutomationAdapter,
+  projectId: string,
+  observation: ProjectObservation,
+): Promise<readonly RenderObservation[]> {
+  const renders: RenderObservation[] = [];
+  for (const frame of observation.frames) {
+    const result = await adapter.request({
+      operation: 'project.render.observe',
+      target: { projectId },
+      expectedRevision: observation.revision,
+      frameId: frame.id,
+    });
+    if (!result.ok) throw new Error(`Fixture render failed: ${result.error.code}`);
+    renders.push(result.result as RenderObservation);
+  }
+  return renders;
+}
+
+function renderPixelBytes(renders: readonly RenderObservation[]): readonly number[][] {
+  return renders.map((render) => Array.from(render.pixels));
+}
+
+async function requestAdapterSuccess<T>(
+  adapter: AutomationAdapter,
+  input: Record<string, unknown>,
+): Promise<T> {
+  const result = await adapter.request(input);
+  if (!result.ok) throw new Error(`Adapter request failed: ${result.error.code}`);
+  return result.result as T;
+}
+
+interface CupCompatibilityFixture {
+  readonly adapter: AutomationAdapter;
+  readonly context: ProjectContext;
+  readonly expectedProject: ProjectFile;
+  readonly fixtureDigest: string;
+  readonly initialProject: ProjectFile;
+  readonly initialObservation: ProjectObservation;
+  readonly initialRenders: readonly RenderObservation[];
+  readonly projectId: string;
+  readonly refinementLayers: readonly ProjectObservation['layers'][number][];
+  readonly textSource: ProjectFile['layers'][number];
+}
+
+interface CupRefinementResult {
+  readonly afterObservation: ProjectObservation;
+  readonly afterRenders: readonly RenderObservation[];
+  readonly transaction: EditorTransactionResult;
+}
+
+async function prepareCupCompatibilityFixture(): Promise<CupCompatibilityFixture> {
+  const fixtureResponse = await fetch('/tests/fixtures/project-files/cup-compatibility.pf');
+  expect(fixtureResponse.ok).toBe(true);
+  const fixtureBytes = new Uint8Array(await fixtureResponse.arrayBuffer());
+  const fixtureDigest = await digestBytes(fixtureBytes);
+  const input = JSON.parse(pako.inflate(fixtureBytes, { to: 'string' })) as ProjectFileInput;
+  const source = decodeProjectFileWithDiagnostics(input).project;
+  const textSource = source.layers.find((layer) => layer.type === 'text');
+  if (!textSource) throw new Error('Cup fixture lost its text compatibility layer.');
+
+  const context = createProjectContext();
+  contexts.push(context);
+  const repository = new FixtureProjectRepository();
+  const saveService = createAutoSaveService({ repository });
+  saveServices.push(saveService);
+  const projectId = 'cup-compatibility-refinement';
+  await saveService.runWithoutSaving(async () => {
+    await context.project.loadProject(input);
+    context.project.id.value = projectId;
+  }, context);
+  const initialProject = await context.project.saveProject({ rebuildIndexBuffers: false });
+  await repository.create(projectId, initialProject);
+  const adapter = createAutomationAdapter({
+    targetRegistry: new Map([[projectId, context]]),
+    repository,
+    saveService,
+  });
+  expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+  const initialObservation = await requestAdapterSuccess<ProjectObservation>(adapter, {
+    operation: 'project.observe',
+    target: { projectId },
+    expectedRevision: 0,
+  });
+  const refinementLayers = initialObservation.layers.filter((layer) => layer.type !== 'reference');
+  const renamedLayer = refinementLayers[0];
+  if (!renamedLayer) throw new Error('Cup fixture lost its first editable layer.');
+  const expectedProject = structuredClone(initialProject);
+  const expectedRenamedLayer = expectedProject.layers.find((layer) => layer.id === renamedLayer.id);
+  if (!expectedRenamedLayer) throw new Error('Cup fixture lost its expected renamed layer.');
+  expectedRenamedLayer.name = 'Coupe (refined)';
+
+  return {
+    adapter,
+    context,
+    expectedProject,
+    fixtureDigest,
+    initialProject,
+    initialObservation,
+    initialRenders: await captureAdapterRenders(adapter, projectId, initialObservation),
+    projectId,
+    refinementLayers,
+    textSource,
+  };
+}
+
+async function refineCupCompatibilityFixture(
+  fixture: CupCompatibilityFixture,
+): Promise<CupRefinementResult> {
+  const renamedLayer = fixture.refinementLayers[0];
+  if (!renamedLayer) throw new Error('Cup fixture lost its first editable layer.');
+  const result = await fixture.adapter.request(makeStructureRefinementRequest(
+    { projectId: fixture.projectId },
+    fixture.initialObservation.revision,
+    fixture.refinementLayers.map((layer) => ({
+      id: layer.id,
+      name: layer.id === renamedLayer.id ? 'Coupe (refined)' : layer.name,
+      type: layer.type,
+      parentId: layer.parentId,
+    })),
+    [],
+    'cup-compatibility-refinement',
+  ));
+  expect(result).toMatchObject({
+    ok: true,
+    result: {
+      revision: 1,
+      compositeEquality: { type: 'project.composite-equality', allEqual: true, frameCount: 15 },
+    },
+  });
+  if (!result.ok) throw new Error(`Cup refinement failed: ${result.error.code}`);
+  const transaction = result.result as EditorTransactionResult;
+  expect(transaction.compositeEquality?.frames).toHaveLength(15);
+  const afterObservation = await requestAdapterSuccess<ProjectObservation>(fixture.adapter, {
+    operation: 'project.observe',
+    target: { projectId: fixture.projectId },
+    expectedRevision: transaction.revision,
+  });
+  return {
+    afterObservation,
+    afterRenders: await captureAdapterRenders(fixture.adapter, fixture.projectId, afterObservation),
+    transaction,
+  };
+}
+
+async function assertCupTextRetention(
+  fixture: CupCompatibilityFixture,
+  revision: number,
+): Promise<void> {
+  const textRemoval = await fixture.adapter.request(makeStructureRefinementRequest(
+    { projectId: fixture.projectId },
+    revision,
+    fixture.refinementLayers
+      .filter((layer) => layer.id !== fixture.textSource.id)
+      .map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        type: layer.type,
+        parentId: layer.parentId,
+      })),
+    [],
+    'cup-compatibility-text-removal',
+  ));
+  expect(textRemoval).toEqual({
+    ok: false,
+    error: { code: 'unsupported', retryable: false, details: { reason: 'text_layer_removal' } },
+  });
+  expect(fixture.context.project.revision.value).toBe(revision);
+
+  const persistedText = await fixture.context.project.saveProject({ rebuildIndexBuffers: false });
+  expect(persistedText.layers.find((layer) => layer.id === fixture.textSource.id)).toMatchObject({
+    type: 'text',
+    textData: fixture.textSource.textData,
+  });
+  expect(textCelPayloads(persistedText, fixture.textSource.id)).toEqual(
+    textCelPayloads(fixture.initialProject, fixture.textSource.id),
+  );
+}
+
+async function assertCupReload(
+  fixture: CupCompatibilityFixture,
+  refinement: CupRefinementResult,
+): Promise<void> {
+  const saved = await fixture.adapter.request({
+    operation: 'project.save',
+    target: { projectId: fixture.projectId },
+    expectedRevision: refinement.transaction.revision,
+  });
+  expect(saved).toMatchObject({ ok: true, result: { saveSafety: { status: 'saved' } } });
+  const reloaded = await fixture.adapter.request({
+    operation: 'project.reload',
+    target: { projectId: fixture.projectId },
+    expectedRevision: refinement.transaction.revision,
+  });
+  expect(reloaded).toMatchObject({ ok: true, result: { revision: 1 } });
+  if (!reloaded.ok) throw new Error(`Cup reload failed: ${reloaded.error.code}`);
+  const reloadedRenders = await captureAdapterRenders(
+    fixture.adapter,
+    fixture.projectId,
+    reloaded.result.observation,
+  );
+  expect(renderPixelBytes(reloadedRenders)).toEqual(renderPixelBytes(refinement.afterRenders));
+  const reloadedProject = await fixture.context.project.saveProject({ rebuildIndexBuffers: false });
+  expect(normalizeProjectPayload(reloadedProject)).toEqual(normalizeProjectPayload(fixture.expectedProject));
+  expect(reloadedProject.layers.find((layer) => layer.id === fixture.textSource.id)).toMatchObject({
+    type: 'text',
+    textData: fixture.textSource.textData,
+  });
+  expect(textCelPayloads(reloadedProject, fixture.textSource.id)).toEqual(
+    textCelPayloads(fixture.initialProject, fixture.textSource.id),
+  );
+
+  const fixtureResponseAfter = await fetch('/tests/fixtures/project-files/cup-compatibility.pf');
+  expect(await digestBytes(new Uint8Array(await fixtureResponseAfter.arrayBuffer()))).toBe(fixture.fixtureDigest);
+}
+
+function textCelPayloads(
+  project: ProjectFile,
+  layerId: string,
+): Readonly<{ readonly textData: ProjectFile['layers'][number]['textData']; readonly cels: readonly unknown[] }> {
+  const layer = project.layers.find((candidate) => candidate.id === layerId);
+  return {
+    textData: layer?.textData,
+    cels: project.frames.map((frame) => {
+      const cel = frame.cels.find((candidate) => candidate.layerId === layerId);
+      return cel ? {
+        id: cel.id,
+        layerId: cel.layerId,
+        data: cel.data,
+        opacity: cel.opacity,
+        indexData: cel.indexData,
+        linkedCelId: cel.linkedCelId,
+        linkType: cel.linkType,
+        textCelData: cel.textCelData,
+      } : undefined;
+    }),
+  };
+}
+
+function normalizeProjectPayload(project: ProjectFile): unknown {
+  return JSON.parse(JSON.stringify(project, (_, value: unknown) =>
+    value instanceof Uint8Array ? Array.from(value) : value
+  ));
+}
+
+async function digestBytes(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function makeStructureRefinementRequest(
+  target: { readonly projectId: string },
+  expectedRevision: number,
+  layers: readonly Readonly<Record<string, unknown>>[],
+  mergePairs: readonly Readonly<Record<string, unknown>>[],
+  operationId: string,
+): Record<string, unknown> {
+  return {
+    operation: 'project.transaction.execute',
+    profile: 'structure-refinement',
+    target,
+    expectedRevision,
+    provenance: {
+      clientId: 'browser-refinement-client',
+      sessionId: 'browser-refinement-session',
+      runId: 'browser-refinement-run',
+      operationId,
+    },
+    children: [{
+      command: 'project.layer.structure.refine',
+      input: { kind: 'structure.refine', layers, mergePairs },
+    }],
+  };
 }
 
 function makeStaticStructureRequest(

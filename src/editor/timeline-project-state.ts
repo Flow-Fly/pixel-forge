@@ -13,6 +13,7 @@ import {
   type EditorErrorCode,
   type ProjectTarget,
 } from './contracts';
+import { sameFrameTags } from './structure-support';
 
 // fallow-ignore-next-line unused-export -- Compatibility re-export keeps the catalog beside the transaction seam.
 export { editorCatalog } from './catalog';
@@ -1037,7 +1038,7 @@ function prepareTagChange(
   const frameCount = context.animation.frames.value.length;
   const afterTags = prepareTagSnapshot(beforeTags, request, frameCount, options);
 
-  if (sameTagArrays(beforeTags, afterTags)) {
+  if (sameFrameTags(beforeTags, afterTags)) {
     throw timelineError('invalid_request', false, { reason: 'no_change' });
   }
 
@@ -1311,7 +1312,7 @@ function sameCelUnlinkStructure(current: ProjectStructure, expected: ProjectStru
 
 function sameTimelineStructure(current: ProjectStructure, expected: ProjectStructure): boolean {
   return sameFrameStructures(current.frames, expected.frames) &&
-    sameTagArrays(current.tags, expected.tags);
+    sameFrameTags(current.tags, expected.tags);
 }
 
 function sameCelMapEntries(
@@ -1507,18 +1508,6 @@ function sameLayerState(a: Layer, b: Layer): boolean {
 
 function sameLayerPayloads(a: Layer, b: Layer): boolean {
   return a.canvas === b.canvas && a.textData === b.textData && a.referenceData === b.referenceData;
-}
-
-function sameTagArrays(a: readonly FrameTag[], b: readonly FrameTag[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((tag, index) => {
-    const other = b[index];
-    return other !== undefined && tag.id === other.id &&
-      tag.name === other.name && tag.color === other.color &&
-      tag.startFrameIndex === other.startFrameIndex &&
-      tag.endFrameIndex === other.endFrameIndex &&
-      tag.collapsed === other.collapsed;
-  });
 }
 
 function cloneLayer(layer: Layer): Layer {

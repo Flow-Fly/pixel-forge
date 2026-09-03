@@ -81,6 +81,13 @@ export const STATIC_STRUCTURE_MAX_FRAMES = 16;
 export const STATIC_STRUCTURE_MAX_CELS = STATIC_STRUCTURE_MAX_LAYERS * STATIC_STRUCTURE_MAX_FRAMES;
 export const STATIC_STRUCTURE_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
 export const STATIC_STRUCTURE_SELECTION_ERROR_REASON = 'selection_in_progress';
+export const STRUCTURE_REFINEMENT_COMMAND_ID = 'project.layer.structure.refine';
+export const STRUCTURE_REFINEMENT_MAX_LAYERS = 16;
+export const STRUCTURE_REFINEMENT_MAX_FRAMES = 16;
+export const STRUCTURE_REFINEMENT_MAX_CELS = STRUCTURE_REFINEMENT_MAX_LAYERS * STRUCTURE_REFINEMENT_MAX_FRAMES;
+export const STRUCTURE_REFINEMENT_MAX_MERGE_PAIRS = 16;
+export const STRUCTURE_REFINEMENT_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
+export const STRUCTURE_REFINEMENT_MAX_STRING_LENGTH = 256;
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
 export const ANIMATION_FRAME_COMMAND_ID = 'project.animation.frame';
 export const ANIMATION_CEL_LINK_COMMAND_ID = 'project.animation.cel.link';
@@ -151,7 +158,7 @@ export const transactionCatalog = Object.freeze({
   requiresRevision: true,
   request: {
     profile: {
-      oneOf: ['layer-and-tag', 'static-structure', 'animation'],
+      oneOf: ['layer-and-tag', 'static-structure', 'structure-refinement', 'animation'],
       default: 'layer-and-tag',
     },
     target: { projectId: 'string' },
@@ -194,6 +201,28 @@ export const transactionCatalog = Object.freeze({
                   opacity: 'integer 0..255',
                   blendMode: 'supported blend mode',
                   continuous: 'optional boolean',
+                }],
+              },
+            },
+          },
+        },
+        'structure-refinement': {
+          exact: 1,
+          oneOf: [STRUCTURE_REFINEMENT_COMMAND_ID],
+          item: {
+            structure: {
+              command: STRUCTURE_REFINEMENT_COMMAND_ID,
+              input: {
+                kind: 'structure.refine',
+                layers: [{
+                  id: 'stable bounded string',
+                  name: 'bounded non-empty string',
+                  type: 'image | group | existing text',
+                  parentId: 'null | group identity',
+                }],
+                mergePairs: [{
+                  sourceLayerId: 'existing image layer identity',
+                  targetLayerId: 'existing image layer identity',
                 }],
               },
             },
@@ -315,6 +344,17 @@ export const transactionCatalog = Object.freeze({
       transactionId: 'string',
       domains: ['palette', 'layer-state', 'timeline', 'raster-content'] as const,
     },
+    compositeEquality: {
+      type: 'project.composite-equality',
+      allEqual: true,
+      frameCount: 'integer >= 1',
+      frames: [{
+        frameId: 'string',
+        equal: true,
+        beforeDigest: 'deterministic bounded digest',
+        afterDigest: 'deterministic bounded digest',
+      }],
+    },
     provenance: {
       source: 'automation',
       transactionId: 'string',
@@ -333,7 +373,7 @@ export const transactionCatalog = Object.freeze({
         toRevision: 'integer >= 0',
       }],
       children: [{
-        commandId: 'project.layer.state | project.animation.frame-tag | project.palette.declaration | project.layer.tree | project.animation.frame | project.animation.cel.link | project.animation.cel.unlink',
+        commandId: 'project.layer.state | project.layer.structure.refine | project.animation.frame-tag | project.palette.declaration | project.layer.tree | project.animation.frame | project.animation.cel.link | project.animation.cel.unlink',
         operation: 'concrete child kind',
         domains: ['palette | layer-state | timeline | raster-content'],
       }],
@@ -350,6 +390,10 @@ export const transactionCatalog = Object.freeze({
         'static-structure': {
           exact: 2,
           oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID],
+        },
+        'structure-refinement': {
+          exact: 1,
+          oneOf: [STRUCTURE_REFINEMENT_COMMAND_ID],
         },
         animation: {
           exact: 1,
@@ -372,6 +416,17 @@ export const transactionCatalog = Object.freeze({
         frames: { max: STATIC_STRUCTURE_MAX_FRAMES },
         cels: { max: STATIC_STRUCTURE_MAX_CELS },
         preparationBytes: { max: STATIC_STRUCTURE_MAX_PREPARATION_BYTES },
+      },
+      'structure-refinement': {
+        layers: { max: STRUCTURE_REFINEMENT_MAX_LAYERS },
+        frames: { max: STRUCTURE_REFINEMENT_MAX_FRAMES },
+        cels: { max: STRUCTURE_REFINEMENT_MAX_CELS },
+        mergePairs: { max: STRUCTURE_REFINEMENT_MAX_MERGE_PAIRS },
+        requestString: {
+          min: 1,
+          max: STRUCTURE_REFINEMENT_MAX_STRING_LENGTH,
+        },
+        preparationBytes: { max: STRUCTURE_REFINEMENT_MAX_PREPARATION_BYTES },
       },
       animation: {
         frames: { max: ANIMATION_MAX_FRAMES },
@@ -421,6 +476,39 @@ export const transactionCatalog = Object.freeze({
       },
       affectedDomains: ['palette', 'layer-state'],
     },
+    'structure-refinement': {
+      children: {
+        exact: 1,
+        oneOf: [STRUCTURE_REFINEMENT_COMMAND_ID],
+      },
+      structure: {
+        kind: 'structure.refine',
+        layers: {
+          id: 'stable bounded string',
+          name: 'bounded non-empty string',
+          type: 'image | group | existing text',
+          parentId: 'null | group identity',
+        },
+        maxLayers: STRUCTURE_REFINEMENT_MAX_LAYERS,
+        mergePairs: {
+          sourceLayerId: 'existing image layer identity',
+          targetLayerId: 'existing image layer identity',
+          max: STRUCTURE_REFINEMENT_MAX_MERGE_PAIRS,
+          nonOverlapping: true,
+        },
+        parentOrder: 'parent precedes child; acyclic',
+      },
+      preflight: {
+        renderer: 'createArtworkCompositionPlan + drawArtworkComposition',
+        frames: 'every frame',
+        equality: 'exact rgba8 bytes',
+      },
+      compatibility: {
+        text: 'existing text layers retain exact metadata and cels; no new, deleted, or merged text',
+        reference: 'unsupported',
+      },
+      affectedDomains: ['layer-state', 'raster-content'],
+    },
     animation: {
       children: {
         exact: 1,
@@ -462,6 +550,13 @@ export const transactionCatalog = Object.freeze({
       'static-structure': {
         guidedDrawing: 'unsupported',
         selection: 'none | selected; floating and transforming are rejected',
+      },
+      'structure-refinement': {
+        guidedDrawing: 'unsupported',
+        selection: 'none | selected; floating and transforming are rejected',
+        layers: 'image, group, and existing text; new identities are groups',
+        text: 'existing text layers are declared with exact metadata and cels; no new or removed text',
+        reference: 'unsupported',
       },
       animation: {
         guidedDrawing: 'unsupported',
@@ -972,6 +1067,20 @@ export const editorCatalog = Object.freeze({
       operation: 'layer-tree.declaration; supported only in static-structure transaction profile',
       affectedDomains: ['layer-state'] as const,
       availability: { guidedDrawing: 'unsupported' },
+      undo: 'one-session-history-entry',
+      errors: transactionCatalog.errors,
+    },
+    {
+      id: STRUCTURE_REFINEMENT_COMMAND_ID,
+      target: 'project',
+      requiresRevision: true,
+      operation: 'structure.refine; supported only in structure-refinement transaction profile',
+      affectedDomains: ['layer-state', 'raster-content'] as const,
+      availability: {
+        guidedDrawing: 'unsupported',
+        selection: 'floating and transforming rejected',
+        compatibility: 'existing text layers may move or group only when composites remain equal; references unsupported',
+      },
       undo: 'one-session-history-entry',
       errors: transactionCatalog.errors,
     },
