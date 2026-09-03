@@ -43,4 +43,48 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.reload.revision).toBe(journey.afterRedo.observation.revision);
     expect(journey.exact).toEqual({ document: true, render: true });
   });
+
+  it('proves one atomic layer-and-tag transaction through undo, redo, and reload', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+
+    const journey = await session.runTransaction();
+
+    expect(journey.negotiation.version).toBe('1.0');
+    expect(journey.initial.observation.revision).toBe(0);
+    expect(journey.transaction.type).toBe('project.transaction.execute');
+    expect(journey.transaction.fromRevision).toBe(0);
+    expect(journey.transaction.revision).toBe(1);
+    expect(journey.transaction.event.domains).toEqual(['layer-state', 'timeline']);
+    expect(journey.transaction.provenance).toMatchObject({
+      source: 'automation',
+      clientId: 'fixture-client',
+      sessionId: 'fixture-session',
+      runId: 'fixture-run',
+      operationId: 'fixture-transaction',
+      target: { projectId: 'fixture-project' },
+      fromRevision: 0,
+      toRevision: 1,
+      children: [
+        { commandId: 'project.layer.state', operation: 'layer.visibility' },
+        { commandId: 'project.animation.frame-tag', operation: 'tag.create' },
+      ],
+    });
+    expect(journey.afterTransaction.observation.history.undoCount).toBe(1);
+    expect(journey.afterTransaction.observation.history.undo[0]?.provenance)
+      .toEqual(journey.transaction.provenance);
+    expect(journey.afterTransaction.observation.lastEvent?.domains)
+      .toEqual(['layer-state', 'timeline']);
+    expect(journey.afterTransaction.observation.saveSafety.status).toBe('dirty');
+    expect(journey.afterUndo.observation.revision).toBe(2);
+    expect(journey.afterRedo.observation.revision).toBe(3);
+    expect(journey.afterUndo.observation.history.redo[0]?.provenance)
+      .toEqual(journey.transaction.provenance);
+    expect(journey.afterRedo.observation.history.undo[0]?.provenance)
+      .toEqual(journey.transaction.provenance);
+    expect(journey.save.saveSafety.status).toBe('saved');
+    expect(journey.reload.observation.saveSafety.status).toBe('saved');
+    expect(journey.reload.revision).toBe(journey.afterRedo.observation.revision);
+    expect(journey.exact).toEqual({ document: true, render: true });
+  });
 });

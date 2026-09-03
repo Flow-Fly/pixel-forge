@@ -9,6 +9,29 @@ export interface ProjectTarget {
   readonly projectId: string;
 }
 
+/**
+ * Bounded identity carried by an automation transaction and its history
+ * observation. Creative command arguments never cross this boundary.
+ */
+export interface AutomationTransactionProvenance {
+  readonly source: 'automation';
+  readonly transactionId: string;
+  readonly clientId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly operationId: string;
+  readonly target: ProjectTarget;
+  readonly fromRevision: number;
+  readonly toRevision: number;
+  readonly children: readonly AutomationTransactionChildSummary[];
+}
+
+export interface AutomationTransactionChildSummary {
+  readonly commandId: 'project.layer.state' | 'project.animation.frame-tag';
+  readonly operation: string;
+  readonly domains: readonly string[];
+}
+
 /** Stable categories exposed by the local project save boundary. */
 export type ProjectSaveFailureCategory =
   | 'storage_unavailable'

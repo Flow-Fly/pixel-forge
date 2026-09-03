@@ -9,6 +9,7 @@ import {
   RENDER_OBSERVATION_MAX_BYTES,
 } from './catalog';
 import type {
+  AutomationTransactionProvenance,
   EditorError,
   ProjectSaveSafetyObservation,
   ProjectTarget,
@@ -68,6 +69,7 @@ export interface HistoryEntryObservation {
   readonly id: string;
   readonly name: string;
   readonly timestamp?: number;
+  readonly provenance?: AutomationTransactionProvenance;
 }
 
 export interface ProjectHistoryObservation {
@@ -499,6 +501,28 @@ function observeHistoryEntry(command: Command): HistoryEntryObservation {
     id: command.id,
     name: command.name,
     ...(command.timestamp !== undefined ? { timestamp: command.timestamp } : {}),
+    ...(command.provenance ? { provenance: cloneAutomationProvenance(command.provenance) } : {}),
+  };
+}
+
+function cloneAutomationProvenance(
+  provenance: AutomationTransactionProvenance,
+): AutomationTransactionProvenance {
+  return {
+    source: 'automation',
+    transactionId: provenance.transactionId,
+    clientId: provenance.clientId,
+    sessionId: provenance.sessionId,
+    runId: provenance.runId,
+    operationId: provenance.operationId,
+    target: { projectId: provenance.target.projectId },
+    fromRevision: provenance.fromRevision,
+    toRevision: provenance.toRevision,
+    children: provenance.children.map((child) => ({
+      commandId: child.commandId,
+      operation: child.operation,
+      domains: [...child.domains],
+    })),
   };
 }
 

@@ -30,6 +30,20 @@ import {
   type ProjectSaveSafetyObservation,
   type ProjectTarget,
 } from './contracts';
+import {
+  EDITOR_TRANSACTION_OPERATION_ID,
+  executeEditorTransaction,
+  readEditorTransactionTarget,
+  type EditorTransactionResult,
+} from './transaction';
+
+export { EDITOR_TRANSACTION_OPERATION_ID } from './transaction';
+export type {
+  AutomationTransactionProvenanceInput,
+  EditorTransactionChildInput,
+  EditorTransactionRequest,
+  EditorTransactionResult,
+} from './transaction';
 
 export type ProjectTargetResolver = (target: ProjectTarget) => ProjectContext | undefined;
 
@@ -154,6 +168,9 @@ const SAFE_ERROR_DETAIL_KEYS = new Set([
   'limitId',
   'max',
   'requestedVersion',
+  'childIndex',
+  'family',
+  'phase',
 ]);
 
 /**
@@ -184,6 +201,7 @@ export class AutomationAdapter {
       'project.observe': async (input) => this.observeProject(input),
       'project.render.observe': async (input) => this.observeRender(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
+      [EDITOR_TRANSACTION_OPERATION_ID]: (input) => this.executeTransaction(input),
       'project.history.undo': (input) => this.undo(input),
       'project.history.redo': (input) => this.redo(input),
       'project.save': (input) => this.save(input),
@@ -296,6 +314,25 @@ export class AutomationAdapter {
         target: { projectId: request.target.projectId },
         revision: result.revision,
         event: cloneProjectChangeEvent(result.event),
+      });
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  async executeTransaction(
+    input: unknown,
+  ): Promise<AutomationResult<EditorTransactionResult>> {
+    try {
+      this.assertNegotiated();
+      const target = readEditorTransactionTarget(input);
+      const context = this.prepareContext(target);
+      const result = await executeEditorTransaction(context, input);
+      return success({
+        ...result,
+        target: { projectId: result.target.projectId },
+        event: cloneProjectChangeEvent(result.event),
+        provenance: structuredClone(result.provenance),
       });
     } catch (error) {
       return failureFromUnknown(error);

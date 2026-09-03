@@ -2,6 +2,7 @@ import { signal } from '../core/signal';
 import { userStore } from './user';
 import { log } from '../utils/log';
 import type { createPaletteStore } from './palette/store';
+import type { AutomationTransactionProvenance } from '../editor/contracts';
 
 // Configuration constants for history limits
 const MAX_HISTORY_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
@@ -15,6 +16,8 @@ export interface Command {
   memorySize?: number; // Optional for backwards compatibility
   /** Canvas Size owns its compact project-change event and revision. */
   managesProjectRevision?: boolean;
+  /** Bounded automation identity retained with the conventional history entry. */
+  provenance?: AutomationTransactionProvenance;
   execute(): void | Promise<void>;
   undo(): void | Promise<void>;
 }

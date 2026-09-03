@@ -92,6 +92,7 @@ describe('AutomationAdapter', () => {
       'project.observe',
       'project.render.observe',
       'project.canvas.resize',
+      'project.transaction.execute',
       'project.history.undo',
       'project.history.redo',
       'project.save',
@@ -118,6 +119,20 @@ describe('AutomationAdapter', () => {
     expect(operations.find((operation) => operation.id === 'project.render.observe')).toMatchObject({
       limits: { maxBytes: RENDER_OBSERVATION_MAX_BYTES },
       result: { type: 'render.observation', format: 'rgba8' },
+    });
+    expect(operations.find((operation) => operation.id === 'project.transaction.execute')).toMatchObject({
+      target: 'project',
+      requiresRevision: true,
+      request: {
+        provenance: expect.objectContaining({ clientId: 'bounded string' }),
+        children: expect.arrayContaining([
+          expect.objectContaining({ command: 'project.layer.state' }),
+          expect.objectContaining({ command: 'project.animation.frame-tag' }),
+        ]),
+      },
+      limits: { children: { exact: 2 } },
+      result: { type: 'project.transaction.execute' },
+      errors: expect.arrayContaining(['revision_conflict', 'limit_exceeded', 'internal']),
     });
     expect(operations.find((operation) => operation.id === 'project.reload')).toMatchObject({
       target: 'project',

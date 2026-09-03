@@ -173,6 +173,11 @@ type PreparedChange = {
   readonly tagId?: string;
 };
 
+/** Prepared timeline state used by the transaction boundary without history. */
+export type PreparedTimelineProjectStateChange = PreparedChange & {
+  readonly request: TimelineProjectStateRequest;
+};
+
 type ProjectStructure = {
   readonly layers: readonly Layer[];
   readonly cels: ReadonlyMapSnapshot;
@@ -328,20 +333,7 @@ class TimelineProjectStateCommand implements Command {
     tags: readonly FrameTag[] | undefined,
     cels: ReadonlyMap<string, Cel> | undefined,
   ): void {
-    if (layers) {
-      this.context.layers.layers.value = mergeLayerSemanticSnapshot(
-        this.context.layers.layers.value,
-        layers,
-      );
-      this.context.dirtyRect.requestFullRedraw();
-    }
-    if (tags) {
-      this.context.animation.tags.value = tags.map(cloneTag);
-      clearDeletedActiveTag(this.context);
-    }
-    if (cels) {
-      this.context.project.applyTimelineCelState(new Map(cels));
-    }
+    applyTimelineProjectStateSnapshot(this.context, layers, tags, cels);
   }
 }
 
@@ -440,14 +432,70 @@ export function createCelUnlinkRequest(
   }) as CelUnlinkRequest;
 }
 
+/**
+ * Normalize and prepare one timeline command without touching history,
+ * revision, events, or save state. Transactions use this seam to prepare all
+ * children against the same captured document state before applying either.
+ */
+export function prepareTimelineProjectStateChange(
+  context: ProjectContext,
+  input: unknown,
+): PreparedTimelineProjectStateChange {
+  const request = normalizeRequest(input);
+  return {
+    ...prepareChange(context, request),
+    request,
+  };
+}
+
+/** Apply a previously prepared timeline snapshot without creating a commit. */
+export function applyPreparedTimelineProjectStateChange(
+  context: ProjectContext,
+  prepared: PreparedTimelineProjectStateChange,
+  phase: 'before' | 'after',
+): void {
+  const layers = phase === 'after' ? prepared.afterLayers : prepared.beforeLayers;
+  const tags = phase === 'after' ? prepared.afterTags : prepared.beforeTags;
+  const cels = phase === 'after' ? prepared.afterCels : prepared.beforeCels;
+  applyTimelineProjectStateSnapshot(context, layers, tags, cels);
+}
+
+/**
+ * Recheck a prepared snapshot before replaying it. The initial transaction
+ * check is full-document; history replay keeps the existing family-specific
+ * semantic checks used by the standalone timeline command.
+ */
+export function assertPreparedTimelineProjectStateChange(
+  context: ProjectContext,
+  prepared: PreparedTimelineProjectStateChange,
+  phase: 'before' | 'after',
+  replayed = false,
+): void {
+  const expected = phase === 'after' ? prepared.afterStructure : prepared.beforeStructure;
+  const current = captureProjectStructure(context, prepared.request.kind === 'cel.unlink');
+  const matches = replayed
+    ? prepared.request.kind === 'cel.unlink'
+      ? sameCelUnlinkStructure(current, expected)
+      : prepared.request.kind.startsWith('layer.')
+        ? sameLayerSemanticArrays(current.layers, expected.layers)
+        : prepared.request.kind.startsWith('tag.')
+          ? sameTimelineStructure(current, expected)
+          : sameProjectStructure(current, expected)
+    : sameProjectStructure(current, expected);
+  if (!matches) {
+    throw timelineError('revision_conflict', true, {
+      reason: 'history_structure_changed',
+    });
+  }
+}
+
 export async function executeTimelineProjectState(
   context: ProjectContext,
   input: unknown,
 ): Promise<TimelineProjectStateResult> {
   try {
-    const request = normalizeRequest(input);
-    const prepared = prepareChange(context, request);
-    const command = new TimelineProjectStateCommand(context, request, prepared);
+    const prepared = prepareTimelineProjectStateChange(context, input);
+    const command = new TimelineProjectStateCommand(context, prepared.request, prepared);
     await context.history.execute(command);
 
     if (!command.event) {
@@ -745,6 +793,28 @@ function prepareChange(
     return prepareTagChange(context, request as FrameTagRequest);
   }
   return prepareCelUnlinkChange(context, request as CelUnlinkRequest);
+}
+
+function applyTimelineProjectStateSnapshot(
+  context: ProjectContext,
+  layers: readonly Layer[] | undefined,
+  tags: readonly FrameTag[] | undefined,
+  cels: ReadonlyMap<string, Cel> | undefined,
+): void {
+  if (layers) {
+    context.layers.layers.value = mergeLayerSemanticSnapshot(
+      context.layers.layers.value,
+      layers,
+    );
+    context.dirtyRect.requestFullRedraw();
+  }
+  if (tags) {
+    context.animation.tags.value = tags.map(cloneTag);
+    clearDeletedActiveTag(context);
+  }
+  if (cels) {
+    context.project.applyTimelineCelState(new Map(cels));
+  }
 }
 
 function validateTargetAndRevision(
