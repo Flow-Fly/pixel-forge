@@ -437,8 +437,8 @@ export function readEditorTransactionTarget(input: unknown): ProjectTarget {
 }
 
 /**
- * Prepare both bounded children before creating one history command. The
- * timeline seam performs all child validation and captures both snapshots
+ * Prepare the requested bounded profile before creating one history command.
+ * Each profile validates its children and captures before/after snapshots
  * without mutating the project.
  */
 export async function executeEditorTransaction(

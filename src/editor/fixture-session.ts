@@ -620,8 +620,8 @@ export class FixtureSession {
           kind: 'structure.refine',
           layers: [
             { id: 'fixture-refinement-group', name: 'Grouped', type: 'group', parentId: null },
-            { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: null },
-            { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: 'fixture-refinement-group' },
+            { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: 'fixture-refinement-group' },
+            { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: null },
           ],
           mergePairs: [{
             sourceLayerId: 'fixture-refinement-source',

@@ -854,8 +854,8 @@ describe('Automation Adapter Fixture Session', () => {
       parentId: layer.parentId,
     }))).toEqual([
       { id: 'fixture-refinement-group', name: 'Grouped', type: 'group', parentId: null },
-      { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: null },
-      { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: 'fixture-refinement-group' },
+      { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: 'fixture-refinement-group' },
+      { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: null },
     ]);
     expect(journey.afterTransaction.observation.history.undoCount).toBe(1);
     expect(journey.afterUndo.transition.revision).toBe(2);
@@ -908,127 +908,19 @@ describe('Automation Adapter Fixture Session', () => {
   });
 
   it('preserves the checked-in cup compatibility payload through structure-only refinement and reload', async () => {
-    const fixtureResponse = await fetch('/tests/fixtures/project-files/cup-compatibility.pf');
-    expect(fixtureResponse.ok).toBe(true);
-    const fixtureBytes = new Uint8Array(await fixtureResponse.arrayBuffer());
-    const fixtureDigest = await digestBytes(fixtureBytes);
-    const input = JSON.parse(pako.inflate(fixtureBytes, { to: 'string' })) as ProjectFileInput;
-    const source = decodeProjectFileWithDiagnostics(input).project;
-    const textSource = source.layers.find((layer) => layer.type === 'text');
-    if (!textSource) throw new Error('Cup fixture lost its text compatibility layer.');
+    const fixture = await prepareCupCompatibilityFixture();
+    const refinement = await refineCupCompatibilityFixture(fixture);
 
-    const context = createProjectContext();
-    contexts.push(context);
-    const repository = new FixtureProjectRepository();
-    const saveService = createAutoSaveService({ repository });
-    saveServices.push(saveService);
-    const projectId = 'cup-compatibility-refinement';
-    await saveService.runWithoutSaving(async () => {
-      await context.project.loadProject(input);
-      context.project.id.value = projectId;
-    }, context);
-    const initialProject = await context.project.saveProject({ rebuildIndexBuffers: false });
-    await repository.create(projectId, initialProject);
-    const adapter = createAutomationAdapter({
-      targetRegistry: new Map([[projectId, context]]),
-      repository,
-      saveService,
-    });
-    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
-    const initialObservationResult = await adapter.request({
-      operation: 'project.observe',
-      target: { projectId },
-      expectedRevision: 0,
-    });
-    if (!initialObservationResult.ok) throw new Error('Cup fixture observation failed.');
-    const initialObservation = initialObservationResult.result as ProjectObservation;
-    const refinementLayers = initialObservation.layers.filter((layer) => layer.type !== 'reference');
-    const initialRenders = await captureAdapterRenders(adapter, projectId, initialObservation);
-    const result = await adapter.request(makeStructureRefinementRequest(
-      { projectId },
-      initialObservation.revision,
-      refinementLayers.map((layer, index) => ({
-        id: layer.id,
-        name: index === 0 ? 'Coupe (refined)' : layer.name,
-        type: layer.type,
-        parentId: layer.parentId,
-      })),
-      [],
-      'cup-compatibility-refinement',
-    ));
-
-    expect(result).toMatchObject({
-      ok: true,
-      result: {
-        revision: 1,
-        compositeEquality: { type: 'project.composite-equality', allEqual: true, frameCount: 15 },
-      },
-    });
-    if (!result.ok) return;
-    expect(result.result.compositeEquality?.frames).toHaveLength(15);
-    const afterObservationResult = await adapter.request({
-      operation: 'project.observe',
-      target: { projectId },
-      expectedRevision: result.result.revision,
-    });
-    if (!afterObservationResult.ok) throw new Error('Cup refinement observation failed.');
-    const afterObservation = afterObservationResult.result as ProjectObservation;
-    const afterRenders = await captureAdapterRenders(adapter, projectId, afterObservation);
-    expect(renderPixelBytes(afterRenders)).toEqual(renderPixelBytes(initialRenders));
-    expect(afterObservation.layers.map((layer) => layer.type)).toEqual(['image', 'image', 'image', 'text']);
-    expect(afterObservation.layers[3]?.id).toBe(textSource.id);
-
-    const textRemoval = await adapter.request(makeStructureRefinementRequest(
-      { projectId },
-      result.result.revision,
-      refinementLayers
-        .filter((layer) => layer.id !== textSource.id)
-        .map((layer) => ({
-          id: layer.id,
-          name: layer.name,
-          type: layer.type,
-          parentId: layer.parentId,
-        })),
-      [],
-      'cup-compatibility-text-removal',
-    ));
-    expect(textRemoval).toEqual({
-      ok: false,
-      error: { code: 'unsupported', retryable: false, details: { reason: 'text_layer_removal' } },
-    });
-    expect(context.project.revision.value).toBe(result.result.revision);
-
-    const persistedText = await context.project.saveProject({ rebuildIndexBuffers: false });
-    expect(persistedText.layers.find((layer) => layer.id === textSource.id)).toMatchObject({
-      type: 'text',
-      textData: textSource.textData,
-    });
-    expect(textCelPayloads(persistedText, textSource.id)).toEqual(textCelPayloads(initialProject, textSource.id));
-
-    const saved = await adapter.request({
-      operation: 'project.save',
-      target: { projectId },
-      expectedRevision: result.result.revision,
-    });
-    expect(saved).toMatchObject({ ok: true, result: { saveSafety: { status: 'saved' } } });
-    const reloaded = await adapter.request({
-      operation: 'project.reload',
-      target: { projectId },
-      expectedRevision: result.result.revision,
-    });
-    expect(reloaded).toMatchObject({ ok: true, result: { revision: 1 } });
-    if (!reloaded.ok) return;
-    const reloadedRenders = await captureAdapterRenders(adapter, projectId, reloaded.result.observation);
-    expect(renderPixelBytes(reloadedRenders)).toEqual(renderPixelBytes(afterRenders));
-    const reloadedProject = await context.project.saveProject({ rebuildIndexBuffers: false });
-    expect(reloadedProject.layers.find((layer) => layer.id === textSource.id)).toMatchObject({
-      type: 'text',
-      textData: textSource.textData,
-    });
-    expect(textCelPayloads(reloadedProject, textSource.id)).toEqual(textCelPayloads(initialProject, textSource.id));
-
-    const fixtureResponseAfter = await fetch('/tests/fixtures/project-files/cup-compatibility.pf');
-    expect(await digestBytes(new Uint8Array(await fixtureResponseAfter.arrayBuffer()))).toBe(fixtureDigest);
+    expect(renderPixelBytes(refinement.afterRenders)).toEqual(renderPixelBytes(fixture.initialRenders));
+    expect(refinement.afterObservation.layers.map((layer) => layer.type)).toEqual([
+      'image',
+      'image',
+      'image',
+      'text',
+    ]);
+    expect(refinement.afterObservation.layers[3]?.id).toBe(fixture.textSource.id);
+    await assertCupTextRetention(fixture, refinement.transaction.revision);
+    await assertCupReload(fixture, refinement);
   });
 
   it('rejects floating selection before structure-refinement mutation', async () => {
@@ -1096,6 +988,77 @@ describe('Automation Adapter Fixture Session', () => {
     expect(targetContext.project.revision.value).toBe(1);
     expect(otherContext.layers.layers.value[0]?.name).toBe(otherLayer.name);
     expect(otherContext.project.revision.value).toBe(0);
+  });
+
+  it('rejects a new group that collides with an unrelated cel link identity atomically', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'refinement-link-group-collision';
+    context.project.id.value = projectId;
+    const layer = context.layers.layers.value[0];
+    const frame = context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Link-group collision fixture lost its layer or frame.');
+    const cel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+    if (!cel) throw new Error('Link-group collision fixture lost its cel.');
+    cel.linkedCelId = 'unrelated-link-group';
+    cel.linkType = 'hard';
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const adapter = createAutomationAdapter({ targetRegistry: new Map([[projectId, context]]) });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId },
+      0,
+      [
+        { id: 'unrelated-link-group', name: 'New group', type: 'group', parentId: null },
+        { id: layer.id, name: layer.name, type: 'image', parentId: 'unrelated-link-group' },
+      ],
+      [],
+      'fixture-refinement-link-group-collision',
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_request', retryable: false, details: { reason: 'entity_identity_collision' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
+  });
+
+  it('rejects a generated cel identity that collides with a new group atomically', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'refinement-generated-cel-collision';
+    context.project.id.value = projectId;
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Generated-cel collision fixture lost its layer.');
+    const beforeDocument = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+    const groupId = 'generated-cel-group';
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([[projectId, context]]),
+      entityIdFactory: () => groupId,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const result = await adapter.request(makeStructureRefinementRequest(
+      { projectId },
+      0,
+      [
+        { id: groupId, name: 'Generated group', type: 'group', parentId: null },
+        { id: layer.id, name: layer.name, type: 'image', parentId: groupId },
+      ],
+      [],
+      'fixture-refinement-generated-cel-collision',
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'cel_identity' } },
+    });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.history.undoStack.value).toHaveLength(0);
+    expect(await context.project.saveProject({ rebuildIndexBuffers: false })).toEqual(beforeDocument);
   });
 
   it('rejects opacity, blend, link, and index merge hazards before mutation', async () => {
@@ -1748,6 +1711,199 @@ function renderPixelBytes(renders: readonly RenderObservation[]): readonly numbe
   return renders.map((render) => Array.from(render.pixels));
 }
 
+async function requestAdapterSuccess<T>(
+  adapter: AutomationAdapter,
+  input: Record<string, unknown>,
+): Promise<T> {
+  const result = await adapter.request(input);
+  if (!result.ok) throw new Error(`Adapter request failed: ${result.error.code}`);
+  return result.result as T;
+}
+
+interface CupCompatibilityFixture {
+  readonly adapter: AutomationAdapter;
+  readonly context: ProjectContext;
+  readonly expectedProject: ProjectFile;
+  readonly fixtureDigest: string;
+  readonly initialProject: ProjectFile;
+  readonly initialObservation: ProjectObservation;
+  readonly initialRenders: readonly RenderObservation[];
+  readonly projectId: string;
+  readonly refinementLayers: readonly ProjectObservation['layers'][number][];
+  readonly textSource: ProjectFile['layers'][number];
+}
+
+interface CupRefinementResult {
+  readonly afterObservation: ProjectObservation;
+  readonly afterRenders: readonly RenderObservation[];
+  readonly transaction: EditorTransactionResult;
+}
+
+async function prepareCupCompatibilityFixture(): Promise<CupCompatibilityFixture> {
+  const fixtureResponse = await fetch('/tests/fixtures/project-files/cup-compatibility.pf');
+  expect(fixtureResponse.ok).toBe(true);
+  const fixtureBytes = new Uint8Array(await fixtureResponse.arrayBuffer());
+  const fixtureDigest = await digestBytes(fixtureBytes);
+  const input = JSON.parse(pako.inflate(fixtureBytes, { to: 'string' })) as ProjectFileInput;
+  const source = decodeProjectFileWithDiagnostics(input).project;
+  const textSource = source.layers.find((layer) => layer.type === 'text');
+  if (!textSource) throw new Error('Cup fixture lost its text compatibility layer.');
+
+  const context = createProjectContext();
+  contexts.push(context);
+  const repository = new FixtureProjectRepository();
+  const saveService = createAutoSaveService({ repository });
+  saveServices.push(saveService);
+  const projectId = 'cup-compatibility-refinement';
+  await saveService.runWithoutSaving(async () => {
+    await context.project.loadProject(input);
+    context.project.id.value = projectId;
+  }, context);
+  const initialProject = await context.project.saveProject({ rebuildIndexBuffers: false });
+  await repository.create(projectId, initialProject);
+  const adapter = createAutomationAdapter({
+    targetRegistry: new Map([[projectId, context]]),
+    repository,
+    saveService,
+  });
+  expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+  const initialObservation = await requestAdapterSuccess<ProjectObservation>(adapter, {
+    operation: 'project.observe',
+    target: { projectId },
+    expectedRevision: 0,
+  });
+  const refinementLayers = initialObservation.layers.filter((layer) => layer.type !== 'reference');
+  const renamedLayer = refinementLayers[0];
+  if (!renamedLayer) throw new Error('Cup fixture lost its first editable layer.');
+  const expectedProject = structuredClone(initialProject);
+  const expectedRenamedLayer = expectedProject.layers.find((layer) => layer.id === renamedLayer.id);
+  if (!expectedRenamedLayer) throw new Error('Cup fixture lost its expected renamed layer.');
+  expectedRenamedLayer.name = 'Coupe (refined)';
+
+  return {
+    adapter,
+    context,
+    expectedProject,
+    fixtureDigest,
+    initialProject,
+    initialObservation,
+    initialRenders: await captureAdapterRenders(adapter, projectId, initialObservation),
+    projectId,
+    refinementLayers,
+    textSource,
+  };
+}
+
+async function refineCupCompatibilityFixture(
+  fixture: CupCompatibilityFixture,
+): Promise<CupRefinementResult> {
+  const renamedLayer = fixture.refinementLayers[0];
+  if (!renamedLayer) throw new Error('Cup fixture lost its first editable layer.');
+  const result = await fixture.adapter.request(makeStructureRefinementRequest(
+    { projectId: fixture.projectId },
+    fixture.initialObservation.revision,
+    fixture.refinementLayers.map((layer) => ({
+      id: layer.id,
+      name: layer.id === renamedLayer.id ? 'Coupe (refined)' : layer.name,
+      type: layer.type,
+      parentId: layer.parentId,
+    })),
+    [],
+    'cup-compatibility-refinement',
+  ));
+  expect(result).toMatchObject({
+    ok: true,
+    result: {
+      revision: 1,
+      compositeEquality: { type: 'project.composite-equality', allEqual: true, frameCount: 15 },
+    },
+  });
+  if (!result.ok) throw new Error(`Cup refinement failed: ${result.error.code}`);
+  const transaction = result.result as EditorTransactionResult;
+  expect(transaction.compositeEquality?.frames).toHaveLength(15);
+  const afterObservation = await requestAdapterSuccess<ProjectObservation>(fixture.adapter, {
+    operation: 'project.observe',
+    target: { projectId: fixture.projectId },
+    expectedRevision: transaction.revision,
+  });
+  return {
+    afterObservation,
+    afterRenders: await captureAdapterRenders(fixture.adapter, fixture.projectId, afterObservation),
+    transaction,
+  };
+}
+
+async function assertCupTextRetention(
+  fixture: CupCompatibilityFixture,
+  revision: number,
+): Promise<void> {
+  const textRemoval = await fixture.adapter.request(makeStructureRefinementRequest(
+    { projectId: fixture.projectId },
+    revision,
+    fixture.refinementLayers
+      .filter((layer) => layer.id !== fixture.textSource.id)
+      .map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        type: layer.type,
+        parentId: layer.parentId,
+      })),
+    [],
+    'cup-compatibility-text-removal',
+  ));
+  expect(textRemoval).toEqual({
+    ok: false,
+    error: { code: 'unsupported', retryable: false, details: { reason: 'text_layer_removal' } },
+  });
+  expect(fixture.context.project.revision.value).toBe(revision);
+
+  const persistedText = await fixture.context.project.saveProject({ rebuildIndexBuffers: false });
+  expect(persistedText.layers.find((layer) => layer.id === fixture.textSource.id)).toMatchObject({
+    type: 'text',
+    textData: fixture.textSource.textData,
+  });
+  expect(textCelPayloads(persistedText, fixture.textSource.id)).toEqual(
+    textCelPayloads(fixture.initialProject, fixture.textSource.id),
+  );
+}
+
+async function assertCupReload(
+  fixture: CupCompatibilityFixture,
+  refinement: CupRefinementResult,
+): Promise<void> {
+  const saved = await fixture.adapter.request({
+    operation: 'project.save',
+    target: { projectId: fixture.projectId },
+    expectedRevision: refinement.transaction.revision,
+  });
+  expect(saved).toMatchObject({ ok: true, result: { saveSafety: { status: 'saved' } } });
+  const reloaded = await fixture.adapter.request({
+    operation: 'project.reload',
+    target: { projectId: fixture.projectId },
+    expectedRevision: refinement.transaction.revision,
+  });
+  expect(reloaded).toMatchObject({ ok: true, result: { revision: 1 } });
+  if (!reloaded.ok) throw new Error(`Cup reload failed: ${reloaded.error.code}`);
+  const reloadedRenders = await captureAdapterRenders(
+    fixture.adapter,
+    fixture.projectId,
+    reloaded.result.observation,
+  );
+  expect(renderPixelBytes(reloadedRenders)).toEqual(renderPixelBytes(refinement.afterRenders));
+  const reloadedProject = await fixture.context.project.saveProject({ rebuildIndexBuffers: false });
+  expect(normalizeProjectPayload(reloadedProject)).toEqual(normalizeProjectPayload(fixture.expectedProject));
+  expect(reloadedProject.layers.find((layer) => layer.id === fixture.textSource.id)).toMatchObject({
+    type: 'text',
+    textData: fixture.textSource.textData,
+  });
+  expect(textCelPayloads(reloadedProject, fixture.textSource.id)).toEqual(
+    textCelPayloads(fixture.initialProject, fixture.textSource.id),
+  );
+
+  const fixtureResponseAfter = await fetch('/tests/fixtures/project-files/cup-compatibility.pf');
+  expect(await digestBytes(new Uint8Array(await fixtureResponseAfter.arrayBuffer()))).toBe(fixture.fixtureDigest);
+}
+
 function textCelPayloads(
   project: ProjectFile,
   layerId: string,
@@ -1769,6 +1925,12 @@ function textCelPayloads(
       } : undefined;
     }),
   };
+}
+
+function normalizeProjectPayload(project: ProjectFile): unknown {
+  return JSON.parse(JSON.stringify(project, (_, value: unknown) =>
+    value instanceof Uint8Array ? Array.from(value) : value
+  ));
 }
 
 async function digestBytes(bytes: Uint8Array): Promise<string> {

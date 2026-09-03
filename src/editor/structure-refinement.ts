@@ -881,6 +881,7 @@ function createAfterCels(
 ): Map<string, Cel> {
   const after = retainCels(before.cels, structure.layers);
   const ids = collectProjectEntityIds(before);
+  for (const layer of structure.layers) ids.add(layer.id);
   const createId = entityIdFactory ?? (() => crypto.randomUUID());
   const existingIds = new Set(before.layers.map((layer) => layer.id));
   createNewLayerCels(context, before.frames, structure.layers, existingIds, after, ids, createId);
@@ -1266,7 +1267,10 @@ function collectProjectEntityIds(snapshot: StructureRefinementSnapshot): Set<str
   const ids = new Set<string>();
   for (const layer of snapshot.layers) ids.add(layer.id);
   for (const frame of snapshot.frames) ids.add(frame.id);
-  for (const cel of snapshot.cels.values()) ids.add(cel.id);
+  for (const cel of snapshot.cels.values()) {
+    ids.add(cel.id);
+    if (cel.linkedCelId) ids.add(cel.linkedCelId);
+  }
   for (const tag of snapshot.tags) ids.add(tag.id);
   for (const entry of snapshot.palette.entries) ids.add(entry.id);
   return ids;
