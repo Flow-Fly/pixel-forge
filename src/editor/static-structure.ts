@@ -119,8 +119,6 @@ export function prepareStaticStructureChange(
   validateExistingLayerTypes(before.layers);
   validatePaletteDeclaration(before.palette, request.palette);
   validateLayerDeclaration(before.layers, request.layerTree.layers);
-  validateLayerRemovals(context, before, request.layerTree.layers);
-
   const paletteChanged = !samePalette(before.palette, request.palette);
   const snapshotBytes = validatePreparationBounds(
     context,
@@ -128,6 +126,7 @@ export function prepareStaticStructureChange(
     request.layerTree.layers,
     paletteChanged,
   );
+  validateLayerRemovals(context, before, request.layerTree.layers);
   const beforeWithGroupData: StaticStructureSnapshot = {
     ...before,
     groupData: context.project.captureLoadedGroupLayerData(),
