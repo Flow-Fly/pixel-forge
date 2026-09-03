@@ -120,6 +120,13 @@ type ProjectRequestInput = {
   readonly expectedRevision: number;
 };
 
+interface ReloadSaveProof {
+  readonly context: ProjectContext;
+  readonly projectId: string;
+  readonly revision: number;
+  readonly saveSafety: ProjectSaveSafetyObservation;
+}
+
 const CURRENT_CATALOG_VERSION = editorCatalog.version;
 const CANONICAL_OPERATION_IDS: ReadonlySet<string> = new Set(
   editorCatalog.operations.map((operation) => operation.id),
@@ -161,6 +168,7 @@ export class AutomationAdapter {
   private readonly maxRenderBytes: number;
   private readonly latestEvents = new WeakMap<ProjectContext, ProjectChangeEvent>();
   private readonly eventCleanups = new WeakMap<ProjectContext, () => void>();
+  private readonly reloadSaveProofs = new WeakMap<ProjectContext, ReloadSaveProof>();
   private readonly requestHandlers: Readonly<Record<string, RequestHandler>>;
   private negotiatedVersion: string | null = null;
 
@@ -309,11 +317,24 @@ export class AutomationAdapter {
       const context = this.prepareContext(request.target);
       this.assertCurrentRevision(context, request.expectedRevision);
       await this.saveService.saveNow(context);
+      const revision = context.project.revision.value;
+      const persistedSaveSafety = this.saveService.getSaveSafetyObservation(context);
+      const saveSafety = cloneSaveSafetyObservation(persistedSaveSafety);
+      if (this.isExactSavedRevision(context, request.target, request.expectedRevision, persistedSaveSafety)) {
+        this.reloadSaveProofs.set(context, {
+          context,
+          projectId: request.target.projectId,
+          revision: request.expectedRevision,
+          saveSafety: persistedSaveSafety,
+        });
+      } else {
+        this.reloadSaveProofs.delete(context);
+      }
       return success({
         type: 'project.save',
         target: { projectId: request.target.projectId },
-        revision: context.project.revision.value,
-        saveSafety: cloneSaveSafetyObservation(this.saveService.getSaveSafetyObservation(context)),
+        revision,
+        saveSafety,
       });
     } catch (error) {
       return failureFromUnknown(error);
@@ -329,6 +350,9 @@ export class AutomationAdapter {
       if (!this.repository) {
         return failure('unsupported', false, { reason: 'reload_repository' });
       }
+      if (!this.hasExactReloadSaveProof(context, request.target, request.expectedRevision)) {
+        return failure('invalid_state', false, { reason: 'reload_save_required' });
+      }
 
       const storedProject = await this.repository.load(request.target.projectId);
       if (!storedProject) {
@@ -336,6 +360,9 @@ export class AutomationAdapter {
       }
 
       this.revalidateCapturedContext(context, request.target, request.expectedRevision);
+      if (!this.hasExactReloadSaveProof(context, request.target, request.expectedRevision)) {
+        return failure('invalid_state', false, { reason: 'reload_save_required' });
+      }
       await this.saveService.runWithoutSaving(async () => {
         await context.project.loadProject(storedProject, false, {
           preserveRevision: request.expectedRevision,
@@ -343,6 +370,7 @@ export class AutomationAdapter {
         context.project.id.value = request.target.projectId;
       }, context);
       this.latestEvents.delete(context);
+      this.reloadSaveProofs.delete(context);
 
       const observation = observeProject(context, request.target, {
         saveSafety: this.saveService.getSaveSafetyObservation(context),
@@ -458,6 +486,49 @@ export class AutomationAdapter {
         currentRevision,
       });
     }
+  }
+
+  private isExactSavedRevision(
+    context: ProjectContext,
+    target: ProjectTarget,
+    expectedRevision: number,
+    saveSafety: ProjectSaveSafetyObservation,
+  ): boolean {
+    let resolvedContext: ProjectContext | undefined;
+    try {
+      resolvedContext = this.resolveTarget(target);
+    } catch {
+      return false;
+    }
+
+    return !context.isDisposed
+      && context.project.id.value === target.projectId
+      && context.project.revision.value === expectedRevision
+      && saveSafety.target.projectId === target.projectId
+      && saveSafety.currentRevision === expectedRevision
+      && saveSafety.persistedRevision === expectedRevision
+      && saveSafety.status === 'saved'
+      && resolvedContext === context;
+  }
+
+  private hasExactReloadSaveProof(
+    context: ProjectContext,
+    target: ProjectTarget,
+    expectedRevision: number,
+  ): boolean {
+    const proof = this.reloadSaveProofs.get(context);
+    if (
+      !proof
+      || proof.context !== context
+      || proof.projectId !== target.projectId
+      || proof.revision !== expectedRevision
+    ) {
+      return false;
+    }
+
+    const saveSafety = this.saveService.getSaveSafetyObservation(context);
+    return proof.saveSafety === saveSafety
+      && this.isExactSavedRevision(context, target, expectedRevision, saveSafety);
   }
 
   private revalidateCapturedContext(

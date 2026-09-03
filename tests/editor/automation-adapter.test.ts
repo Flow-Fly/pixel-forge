@@ -15,12 +15,18 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from '../../src/stores/project-context';
-import { autoSaveService } from '../../src/services/auto-save';
+import {
+  autoSaveService,
+  createAutoSaveService,
+  type AutoSaveService,
+} from '../../src/services/auto-save';
 
 const contexts: ProjectContext[] = [];
+const saveServices: AutoSaveService[] = [];
 
 afterEach(() => {
   restoreDefaultProjectContext();
+  for (const saveService of saveServices.splice(0)) saveService.stop();
   for (const context of contexts.splice(0)) {
     autoSaveService.stop(context);
     context.dispose();
@@ -91,6 +97,40 @@ describe('AutomationAdapter', () => {
       'project.save',
       'project.reload',
     ]);
+
+    const operations = negotiated.result.catalog.operations;
+    for (const operation of operations) {
+      expect(operation).toHaveProperty('request');
+      expect(operation).toHaveProperty('result');
+      expect(operation).toHaveProperty('errors');
+      expect(operation).toHaveProperty('limits');
+      expect(operation).toHaveProperty('target');
+      expect(operation).toHaveProperty('requiresRevision');
+      expect(operation).toHaveProperty('revision');
+    }
+    expect(operations.find((operation) => operation.id === 'project.observe')).toMatchObject({
+      target: 'project',
+      requiresRevision: true,
+      limits: PROJECT_OBSERVATION_LIMITS,
+      result: { type: 'project.observation' },
+      errors: expect.arrayContaining(['revision_conflict', 'limit_exceeded']),
+    });
+    expect(operations.find((operation) => operation.id === 'project.render.observe')).toMatchObject({
+      limits: { maxBytes: RENDER_OBSERVATION_MAX_BYTES },
+      result: { type: 'render.observation', format: 'rgba8' },
+    });
+    expect(operations.find((operation) => operation.id === 'project.reload')).toMatchObject({
+      target: 'project',
+      requiresRevision: true,
+      preconditions: {
+        exactSave: {
+          operation: 'project.save',
+          revision: 'same expectedRevision',
+          saveSafety: { status: 'saved', persistedRevision: 'same expectedRevision' },
+        },
+      },
+      errors: expect.arrayContaining(['invalid_state']),
+    });
   });
 
   it('captures one explicit context even when the active tab changes', () => {
@@ -313,13 +353,37 @@ describe('AutomationAdapter', () => {
     }
   });
 
+  it('rejects reload without an exact adapter save proof before reading storage', async () => {
+    const context = createContext('project-a');
+    context.project.width.value = 9;
+    const repository = new DeferredProjectRepository();
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([['project-a', context]]),
+      repository,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    await expect(adapter.request({
+      operation: 'project.reload',
+      target: { projectId: 'project-a' },
+      expectedRevision: 0,
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'reload_save_required' },
+      },
+    });
+    expect(repository.loadCount).toBe(0);
+    expect(context.project.width.value).toBe(9);
+    expect(context.project.revision.value).toBe(0);
+  });
+
   it('reloads the captured target after an active-tab switch', async () => {
-    const { context, repository } = await createDeferredReloadFixture();
+    const { context, repository, adapter } = await createDeferredReloadFixture();
     const second = createContext('project-b');
     second.project.width.value = 7;
-    const registry = new Map([['project-a', context]]);
-    const adapter = createAutomationAdapter({ targetRegistry: registry, repository });
-    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
 
     setActiveProjectContext(context);
     const pending = adapter.request({
@@ -335,18 +399,13 @@ describe('AutomationAdapter', () => {
       ok: true,
       result: { type: 'project.reload', target: { projectId: 'project-a' } },
     });
-    expect(context.project.width.value).toBe(8);
+    expect(context.project.width.value).toBe(9);
     expect(context.project.revision.value).toBe(1);
     expect(second.project.width.value).toBe(7);
   });
 
   it('rejects reload when the captured revision drifts while storage is pending', async () => {
-    const { context, repository } = await createDeferredReloadFixture();
-    const adapter = createAutomationAdapter({
-      targetRegistry: new Map([['project-a', context]]),
-      repository,
-    });
-    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const { context, repository, adapter } = await createDeferredReloadFixture();
 
     const pending = adapter.request({
       operation: 'project.reload',
@@ -372,16 +431,13 @@ describe('AutomationAdapter', () => {
   it('rejects reload when the registry rebinds or disposes the captured target', async () => {
     const reboundFixture = await createDeferredReloadFixture();
     const rebound = createContext('project-rebound');
-    const registry = new Map([['project-a', reboundFixture.context]]);
-    const adapter = createAutomationAdapter({ targetRegistry: registry, repository: reboundFixture.repository });
-    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
-    const reboundPending = adapter.request({
+    const reboundPending = reboundFixture.adapter.request({
       operation: 'project.reload',
       target: { projectId: 'project-a' },
       expectedRevision: 1,
     });
     await reboundFixture.repository.loadStarted;
-    registry.set('project-a', rebound);
+    reboundFixture.registry.set('project-a', rebound);
     reboundFixture.repository.releaseLoad();
     await expect(reboundPending).resolves.toMatchObject({
       ok: false,
@@ -390,12 +446,7 @@ describe('AutomationAdapter', () => {
     expect(reboundFixture.context.project.width.value).toBe(9);
 
     const disposedFixture = await createDeferredReloadFixture();
-    const disposedAdapter = createAutomationAdapter({
-      targetRegistry: new Map([['project-a', disposedFixture.context]]),
-      repository: disposedFixture.repository,
-    });
-    expect(disposedAdapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
-    const disposedPending = disposedAdapter.request({
+    const disposedPending = disposedFixture.adapter.request({
       operation: 'project.reload',
       target: { projectId: 'project-a' },
       expectedRevision: 1,
@@ -424,18 +475,39 @@ function expectObservationLimit(
 async function createDeferredReloadFixture(): Promise<{
   readonly context: ProjectContext;
   readonly repository: DeferredProjectRepository;
+  readonly registry: Map<string, ProjectContext>;
+  readonly adapter: AutomationAdapter;
 }> {
   const context = createContext('project-a');
-  context.project.width.value = 8;
-  const storedProject = await context.project.saveProject();
   context.project.width.value = 9;
   context.project.advanceRevision();
   const repository = new DeferredProjectRepository();
-  await repository.save('project-a', storedProject);
-  return { context, repository };
+  const registry = new Map([['project-a', context]]);
+  const saveService = createAutoSaveService({ repository });
+  saveServices.push(saveService);
+  const adapter = createAutomationAdapter({ targetRegistry: registry, repository, saveService });
+  expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+  await expect(adapter.request({
+    operation: 'project.save',
+    target: { projectId: 'project-a' },
+    expectedRevision: 1,
+  })).resolves.toMatchObject({
+    ok: true,
+    result: {
+      revision: 1,
+      saveSafety: {
+        target: { projectId: 'project-a' },
+        currentRevision: 1,
+        persistedRevision: 1,
+        status: 'saved',
+      },
+    },
+  });
+  return { context, repository, registry, adapter };
 }
 
 class DeferredProjectRepository extends FixtureProjectRepository {
+  loadCount = 0;
   readonly loadStarted: Promise<void>;
   private readonly loadBarrier: Promise<void>;
   private resolveLoadStarted!: () => void;
@@ -452,6 +524,7 @@ class DeferredProjectRepository extends FixtureProjectRepository {
   }
 
   override async load(id: string) {
+    this.loadCount++;
     this.resolveLoadStarted();
     await this.loadBarrier;
     return super.load(id);
