@@ -20,6 +20,19 @@ import {
   drawArtworkComposition,
 } from '../services/export-composition';
 import {
+  applyProjectStructureSnapshot,
+  assertProjectSnapshot,
+  chooseActiveLayerId,
+  hasOpaquePixels,
+  sameBytes,
+  sameCanvas,
+  sameFrameTags,
+  sameGroupData,
+  sameLayerProperties,
+  samePaletteSnapshot,
+  validateProjectTargetAndRevision,
+} from './structure-support';
+import {
   hasOnlyKeys,
   isRecord,
   type EditorError,
@@ -167,13 +180,7 @@ export function applyPreparedStructureRefinementChange(
   phase: 'before' | 'after',
 ): void {
   const snapshot = phase === 'after' ? prepared.after : prepared.before;
-  context.project.applyStaticStructureState(
-    snapshot.layers,
-    new Map(snapshot.cels),
-    snapshot.palette,
-    snapshot.activeLayerId,
-    snapshot.groupData,
-  );
+  applyProjectStructureSnapshot(context, snapshot);
 }
 
 export function assertPreparedStructureRefinementChange(
@@ -182,10 +189,12 @@ export function assertPreparedStructureRefinementChange(
   phase: 'before' | 'after',
 ): void {
   const expected = phase === 'after' ? prepared.after : prepared.before;
-  const current = captureSnapshot(context);
-  if (!sameSnapshot(current, expected)) {
-    throw structureError('revision_conflict', true, { reason: 'history_structure_changed' });
-  }
+  assertProjectSnapshot(
+    captureSnapshot(context),
+    expected,
+    sameSnapshot,
+    structureError('revision_conflict', true, { reason: 'history_structure_changed' }),
+  );
 }
 
 function validateTargetAndRevision(
@@ -193,18 +202,17 @@ function validateTargetAndRevision(
   target: ProjectTarget,
   expectedRevision: number,
 ): void {
-  if (context.isDisposed || context.project.id.value !== target.projectId) {
-    throw structureError('target_not_found', true);
-  }
-  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
-    throw structureError('invalid_request', false, { reason: 'expected_revision' });
-  }
-  if (context.project.revision.value !== expectedRevision) {
-    throw structureError('revision_conflict', true, {
+  validateProjectTargetAndRevision(
+    context,
+    target,
+    expectedRevision,
+    structureError('target_not_found', true),
+    structureError('invalid_request', false, { reason: 'expected_revision' }),
+    (currentRevision) => structureError('revision_conflict', true, {
       expectedRevision,
-      currentRevision: context.project.revision.value,
-    });
-  }
+      currentRevision,
+    }),
+  );
   if (context.guidedDrawing.active) {
     throw structureError('unsupported', false, { feature: 'guided-drawing-structure-refinement' });
   }
@@ -221,28 +229,39 @@ function normalizeStructureRefinementChild(
     throw structureError('invalid_request', false, { reason: 'structure_child' });
   }
   const input = child.input;
+  const { layers, mergePairs } = validateStructureInput(input);
+
+  return {
+    kind: STRUCTURE_REFINEMENT_KIND,
+    layers: layers.map(normalizeLayerDeclaration),
+    mergePairs: mergePairs.map(normalizeMergePair),
+  };
+}
+
+function validateStructureInput(
+  input: Record<string, unknown>,
+): { readonly layers: readonly unknown[]; readonly mergePairs: readonly unknown[] } {
   assertExactKeys(input, ['kind', 'layers', 'mergePairs'], 'structure_input');
   if (input.kind !== STRUCTURE_REFINEMENT_KIND || !Array.isArray(input.layers) || !Array.isArray(input.mergePairs)) {
     throw structureError('invalid_request', false, { reason: 'structure_input' });
   }
-  if (input.layers.length === 0 || input.layers.length > STRUCTURE_REFINEMENT_MAX_LAYERS) {
+  validateStructureCounts(input.layers.length, input.mergePairs.length);
+  return { layers: input.layers, mergePairs: input.mergePairs };
+}
+
+function validateStructureCounts(layerCount: number, mergePairCount: number): void {
+  if (layerCount === 0 || layerCount > STRUCTURE_REFINEMENT_MAX_LAYERS) {
     throw structureError('limit_exceeded', false, {
       reason: 'structure_layers',
       max: STRUCTURE_REFINEMENT_MAX_LAYERS,
     });
   }
-  if (input.mergePairs.length > STRUCTURE_REFINEMENT_MAX_MERGE_PAIRS) {
+  if (mergePairCount > STRUCTURE_REFINEMENT_MAX_MERGE_PAIRS) {
     throw structureError('limit_exceeded', false, {
       reason: 'structure_merge_pairs',
       max: STRUCTURE_REFINEMENT_MAX_MERGE_PAIRS,
     });
   }
-
-  return {
-    kind: STRUCTURE_REFINEMENT_KIND,
-    layers: input.layers.map(normalizeLayerDeclaration),
-    mergePairs: input.mergePairs.map(normalizeMergePair),
-  };
 }
 
 function normalizeLayerDeclaration(value: unknown): StructureRefinementLayerDeclaration {
@@ -275,6 +294,17 @@ function validateExistingDocument(
   context: ProjectContext,
   snapshot: StructureRefinementSnapshot,
 ): void {
+  validateExistingLimits(snapshot);
+  const frameIds = collectExistingFrameIds(snapshot.frames);
+  const layerIds = collectExistingLayerIds(snapshot.layers);
+  validateExistingCels(snapshot, layerIds, frameIds);
+  if (!frameIds.has(snapshot.currentFrameId)) {
+    throw structureError('invalid_state', false, { reason: 'current_frame' });
+  }
+  validateCelMatrix(context, snapshot);
+}
+
+function validateExistingLimits(snapshot: StructureRefinementSnapshot): void {
   if (snapshot.layers.length === 0 || snapshot.layers.length > STRUCTURE_REFINEMENT_MAX_LAYERS) {
     throw structureError('limit_exceeded', false, {
       reason: 'existing_layers',
@@ -293,51 +323,95 @@ function validateExistingDocument(
       max: STRUCTURE_REFINEMENT_MAX_CELS,
     });
   }
-  const layerIds = new Set<string>();
-  const frameIds = new Set<string>();
-  for (const frame of snapshot.frames) {
-    if (typeof frame.id !== 'string' || frame.id.length === 0 || frameIds.has(frame.id)) {
+}
+
+function collectExistingFrameIds(frames: readonly Frame[]): Set<string> {
+  const ids = new Set<string>();
+  for (const frame of frames) {
+    if (typeof frame.id !== 'string' || frame.id.length === 0 || ids.has(frame.id)) {
       throw structureError('invalid_state', false, { reason: 'existing_frame_identity' });
     }
-    frameIds.add(frame.id);
+    ids.add(frame.id);
   }
-  for (const layer of snapshot.layers) {
-    if (layerIds.has(layer.id)) {
+  return ids;
+}
+
+function collectExistingLayerIds(layers: readonly Layer[]): Set<string> {
+  const ids = new Set<string>();
+  for (const layer of layers) {
+    if (ids.has(layer.id)) {
       throw structureError('invalid_state', false, { reason: 'existing_layer_identity' });
     }
-    layerIds.add(layer.id);
-    if (layer.type !== 'image' && layer.type !== 'group' && layer.type !== 'text' && layer.type !== 'reference') {
-      throw structureError('unsupported', false, { reason: 'existing_layer_type' });
-    }
-    if (layer.type === 'reference') {
-      throw structureError('unsupported', false, { reason: 'existing_layer_type' });
-    }
-    if (layer.type === 'text' && (!layer.textData || layer.referenceData)) {
-      throw structureError('unsupported', false, { reason: 'existing_text_payload' });
-    }
-    if ((layer.type === 'image' || layer.type === 'group') && (layer.textData || layer.referenceData)) {
-      throw structureError('unsupported', false, { reason: 'existing_layer_payload' });
-    }
+    ids.add(layer.id);
+    validateExistingLayer(layer);
   }
+  return ids;
+}
+
+function validateExistingLayer(layer: Layer): void {
+  validateSupportedLayerType(layer);
+  if (layer.type === 'text') {
+    validateTextLayerPayload(layer);
+    return;
+  }
+  validateRasterLayerPayload(layer);
+}
+
+function validateSupportedLayerType(layer: Layer): void {
+  if (layer.type !== 'image' && layer.type !== 'group' && layer.type !== 'text') {
+    throw structureError('unsupported', false, { reason: 'existing_layer_type' });
+  }
+}
+
+function validateTextLayerPayload(layer: Layer): void {
+  if (!layer.textData || layer.referenceData) {
+    throw structureError('unsupported', false, { reason: 'existing_text_payload' });
+  }
+}
+
+function validateRasterLayerPayload(layer: Layer): void {
+  if (layer.textData || layer.referenceData) {
+    throw structureError('unsupported', false, { reason: 'existing_layer_payload' });
+  }
+}
+
+function validateExistingCels(
+  snapshot: StructureRefinementSnapshot,
+  layerIds: ReadonlySet<string>,
+  frameIds: ReadonlySet<string>,
+): void {
   const celIds = new Set<string>();
   for (const [key, cel] of snapshot.cels) {
-    if (!layerIds.has(cel.layerId) || !frameIds.has(cel.frameId)) {
-      throw structureError('invalid_state', false, { reason: 'orphan_cel' });
-    }
-    if (key !== `${cel.layerId}:${cel.frameId}`) {
-      throw structureError('invalid_state', false, { reason: 'cel_key' });
-    }
-    if (cel.canvas.width <= 0 || cel.canvas.height <= 0) {
-      throw structureError('invalid_state', false, { reason: 'cel_shape' });
-    }
-    if (typeof cel.id !== 'string' || cel.id.length === 0 || celIds.has(cel.id)) {
-      throw structureError('invalid_state', false, { reason: 'existing_cel_identity' });
-    }
-    celIds.add(cel.id);
+    validateExistingCel(key, cel, layerIds, frameIds, celIds);
   }
-  if (!frameIds.has(snapshot.currentFrameId)) {
-    throw structureError('invalid_state', false, { reason: 'current_frame' });
+}
+
+function validateExistingCel(
+  key: string,
+  cel: Cel,
+  layerIds: ReadonlySet<string>,
+  frameIds: ReadonlySet<string>,
+  celIds: Set<string>,
+): void {
+  if (!layerIds.has(cel.layerId) || !frameIds.has(cel.frameId)) {
+    throw structureError('invalid_state', false, { reason: 'orphan_cel' });
   }
+  if (key !== `${cel.layerId}:${cel.frameId}`) {
+    throw structureError('invalid_state', false, { reason: 'cel_key' });
+  }
+  if (cel.canvas.width <= 0 || cel.canvas.height <= 0) {
+    throw structureError('invalid_state', false, { reason: 'cel_shape' });
+  }
+  if (typeof cel.id !== 'string' || cel.id.length === 0 || celIds.has(cel.id)) {
+    throw structureError('invalid_state', false, { reason: 'existing_cel_identity' });
+  }
+  celIds.add(cel.id);
+}
+
+function validateCelMatrix(
+  context: ProjectContext,
+  snapshot: StructureRefinementSnapshot,
+): void {
   for (const layer of snapshot.layers) {
     if (layer.type === 'reference') continue;
     for (const frame of snapshot.frames) {
@@ -361,32 +435,68 @@ function validateFinalDeclaration(
     declaration.filter((layer) => layer.type === 'group').map((layer) => layer.id),
   );
   const allExistingIds = collectProjectEntityIds(before);
-  declaration.forEach((layer, index) => {
-    if (declaredIds.has(layer.id)) {
-      throw structureError('invalid_request', false, { reason: 'layer_identity' });
-    }
-    declaredIds.add(layer.id);
-    const existing = beforeById.get(layer.id);
-    if (!existing && layer.type !== 'group') {
-      throw structureError('unsupported', false, { reason: 'new_image_layer' });
-    }
-    if (existing && existing.type !== layer.type) {
-      throw structureError('invalid_state', false, { reason: 'layer_type_change' });
-    }
-    if (!existing && allExistingIds.has(layer.id)) {
-      throw structureError('invalid_request', false, { reason: 'entity_identity_collision' });
-    }
-    if (layer.parentId !== null) {
-      if (!declaredGroups.has(layer.parentId)) {
-        throw structureError('invalid_request', false, { reason: 'parent_id' });
-      }
-      const parentIndex = declaration.findIndex((candidate) => candidate.id === layer.parentId);
-      if (parentIndex < 0 || parentIndex >= index) {
-        throw structureError('invalid_request', false, { reason: 'parent_order' });
-      }
-    }
-  });
-  for (const existing of before.layers) {
+  for (let index = 0; index < declaration.length; index++) {
+    const layer = declaration[index];
+    if (!layer) continue;
+    validateDeclaredLayer(layer, index, declaration, beforeById, declaredGroups, allExistingIds, declaredIds);
+  }
+  validateTextRetention(before.layers, declaredIds);
+}
+
+function validateDeclaredLayer(
+  layer: StructureRefinementLayerDeclaration,
+  index: number,
+  declaration: readonly StructureRefinementLayerDeclaration[],
+  beforeById: ReadonlyMap<string, Layer>,
+  declaredGroups: ReadonlySet<string>,
+  allExistingIds: ReadonlySet<string>,
+  declaredIds: Set<string>,
+): void {
+  if (declaredIds.has(layer.id)) {
+    throw structureError('invalid_request', false, { reason: 'layer_identity' });
+  }
+  declaredIds.add(layer.id);
+  const existing = beforeById.get(layer.id);
+  validateDeclaredLayerType(existing, layer);
+  if (!existing && allExistingIds.has(layer.id)) {
+    throw structureError('invalid_request', false, { reason: 'entity_identity_collision' });
+  }
+  validateDeclaredParent(layer, index, declaration, declaredGroups);
+}
+
+function validateDeclaredLayerType(
+  existing: Layer | undefined,
+  declared: StructureRefinementLayerDeclaration,
+): void {
+  if (!existing && declared.type !== 'group') {
+    throw structureError('unsupported', false, { reason: 'new_image_layer' });
+  }
+  if (existing && existing.type !== declared.type) {
+    throw structureError('invalid_state', false, { reason: 'layer_type_change' });
+  }
+}
+
+function validateDeclaredParent(
+  layer: StructureRefinementLayerDeclaration,
+  index: number,
+  declaration: readonly StructureRefinementLayerDeclaration[],
+  declaredGroups: ReadonlySet<string>,
+): void {
+  if (layer.parentId === null) return;
+  if (!declaredGroups.has(layer.parentId)) {
+    throw structureError('invalid_request', false, { reason: 'parent_id' });
+  }
+  const parentIndex = declaration.findIndex((candidate) => candidate.id === layer.parentId);
+  if (parentIndex < 0 || parentIndex >= index) {
+    throw structureError('invalid_request', false, { reason: 'parent_order' });
+  }
+}
+
+function validateTextRetention(
+  before: readonly Layer[],
+  declaredIds: ReadonlySet<string>,
+): void {
+  for (const existing of before) {
     if (existing.type === 'text' && !declaredIds.has(existing.id)) {
       throw structureError('unsupported', false, { reason: 'text_layer_removal' });
     }
@@ -400,39 +510,71 @@ function validateMergeShape(
   const beforeById = new Map(before.map((layer) => [layer.id, layer]));
   const declaredIds = new Set(structure.layers.map((layer) => layer.id));
   const usedIds = new Set<string>();
-  const sourceIds = new Set<string>();
   for (const pair of structure.mergePairs) {
-    if (pair.sourceLayerId === pair.targetLayerId) {
-      throw structureError('invalid_request', false, { reason: 'merge_overlap' });
-    }
-    if (usedIds.has(pair.sourceLayerId) || usedIds.has(pair.targetLayerId)) {
-      throw structureError('invalid_request', false, { reason: 'merge_overlap' });
-    }
-    usedIds.add(pair.sourceLayerId);
-    usedIds.add(pair.targetLayerId);
-    sourceIds.add(pair.sourceLayerId);
+    validateMergePairShape(before, beforeById, declaredIds, usedIds, pair);
+  }
+}
 
-    const source = beforeById.get(pair.sourceLayerId);
-    const target = beforeById.get(pair.targetLayerId);
-    if (!source || !target) {
-      throw structureError('target_not_found', true, { resource: 'merge_layer' });
-    }
-    if (source.type !== 'image' || target.type !== 'image') {
-      throw structureError('unsupported', false, { reason: 'merge_layer_type' });
-    }
-    if (declaredIds.has(pair.sourceLayerId)) {
-      throw structureError('invalid_request', false, { reason: 'merge_source_retained' });
-    }
-    if (!declaredIds.has(pair.targetLayerId)) {
-      throw structureError('invalid_request', false, { reason: 'merge_target_removed' });
-    }
-    const sourceIndex = before.findIndex((layer) => layer.id === source.id);
-    const targetIndex = before.findIndex((layer) => layer.id === target.id);
-    if (Math.abs(sourceIndex - targetIndex) !== 1 || source.parentId !== target.parentId) {
-      throw structureError('unsupported', false, { reason: 'merge_adjacency' });
-    }
-    validateMergeLayerState(source);
-    validateMergeLayerState(target);
+function validateMergePairShape(
+  before: readonly Layer[],
+  beforeById: ReadonlyMap<string, Layer>,
+  declaredIds: ReadonlySet<string>,
+  usedIds: Set<string>,
+  pair: StructureRefinementMergePair,
+): void {
+  validateMergePairOverlap(usedIds, pair);
+  usedIds.add(pair.sourceLayerId);
+  usedIds.add(pair.targetLayerId);
+  const source = beforeById.get(pair.sourceLayerId);
+  const target = beforeById.get(pair.targetLayerId);
+  if (!source || !target) {
+    throw structureError('target_not_found', true, { resource: 'merge_layer' });
+  }
+  validateMergePairTypes(source, target);
+  validateMergePairRetention(declaredIds, pair);
+  validateMergePairAdjacency(before, source, target);
+  validateMergeLayerState(source);
+  validateMergeLayerState(target);
+}
+
+function validateMergePairOverlap(
+  usedIds: ReadonlySet<string>,
+  pair: StructureRefinementMergePair,
+): void {
+  if (pair.sourceLayerId === pair.targetLayerId
+      || usedIds.has(pair.sourceLayerId)
+      || usedIds.has(pair.targetLayerId)) {
+    throw structureError('invalid_request', false, { reason: 'merge_overlap' });
+  }
+}
+
+function validateMergePairTypes(source: Layer, target: Layer): void {
+  if (source.type !== 'image' || target.type !== 'image') {
+    throw structureError('unsupported', false, { reason: 'merge_layer_type' });
+  }
+}
+
+function validateMergePairRetention(
+  declaredIds: ReadonlySet<string>,
+  pair: StructureRefinementMergePair,
+): void {
+  if (declaredIds.has(pair.sourceLayerId)) {
+    throw structureError('invalid_request', false, { reason: 'merge_source_retained' });
+  }
+  if (!declaredIds.has(pair.targetLayerId)) {
+    throw structureError('invalid_request', false, { reason: 'merge_target_removed' });
+  }
+}
+
+function validateMergePairAdjacency(
+  before: readonly Layer[],
+  source: Layer,
+  target: Layer,
+): void {
+  const sourceIndex = before.findIndex((layer) => layer.id === source.id);
+  const targetIndex = before.findIndex((layer) => layer.id === target.id);
+  if (Math.abs(sourceIndex - targetIndex) !== 1 || source.parentId !== target.parentId) {
+    throw structureError('unsupported', false, { reason: 'merge_adjacency' });
   }
 }
 
@@ -492,24 +634,55 @@ function validateLayerRemovals(
   for (const layer of before.layers) {
     if (retained.has(layer.id)) continue;
     if (mergeSources.has(layer.id)) continue;
-    if (layer.type === 'text') {
-      throw structureError('unsupported', false, { reason: 'text_layer_removal' });
-    }
-    if (layer.type === 'group') {
-      const retainedChild = before.layers.some((candidate) =>
-        candidate.parentId === layer.id
-          && retained.has(candidate.id)
-          && structure.layers.find((declared) => declared.id === candidate.id)?.parentId === layer.id);
-      if (retainedChild || !isLayerEmpty(before, layer.id) ||
-          context.project.getLoadedGroupLayerDataByteLength(layer.id) > 0) {
-        throw structureError('invalid_state', false, { reason: 'non_empty_layer_removal' });
-      }
-      continue;
-    }
-    if (!isLayerEmpty(before, layer.id)) {
-      throw structureError('invalid_state', false, { reason: 'non_empty_layer_removal' });
-    }
+    validateRemovedLayer(context, before, structure.layers, retained, layer);
   }
+}
+
+function validateRemovedLayer(
+  context: ProjectContext,
+  before: StructureRefinementSnapshot,
+  declaration: readonly StructureRefinementLayerDeclaration[],
+  retained: ReadonlySet<string>,
+  layer: Layer,
+): void {
+  if (layer.type === 'text') {
+    throw structureError('unsupported', false, { reason: 'text_layer_removal' });
+  }
+  if (layer.type === 'group') {
+    validateRemovedGroup(context, before, declaration, retained, layer);
+    return;
+  }
+  if (!isLayerEmpty(before, layer.id)) {
+    throw structureError('invalid_state', false, { reason: 'non_empty_layer_removal' });
+  }
+}
+
+function validateRemovedGroup(
+  context: ProjectContext,
+  before: StructureRefinementSnapshot,
+  declaration: readonly StructureRefinementLayerDeclaration[],
+  retained: ReadonlySet<string>,
+  layer: Layer,
+): void {
+  if (hasRetainedChild(before.layers, declaration, retained, layer.id)
+      || !isLayerEmpty(before, layer.id)
+      || context.project.getLoadedGroupLayerDataByteLength(layer.id) > 0) {
+    throw structureError('invalid_state', false, { reason: 'non_empty_layer_removal' });
+  }
+}
+
+function hasRetainedChild(
+  before: readonly Layer[],
+  declaration: readonly StructureRefinementLayerDeclaration[],
+  retained: ReadonlySet<string>,
+  parentId: string,
+): boolean {
+  for (const candidate of before) {
+    if (candidate.parentId !== parentId || !retained.has(candidate.id)) continue;
+    const declared = declaration.find((layer) => layer.id === candidate.id);
+    if (declared?.parentId === parentId) return true;
+  }
+  return false;
 }
 
 interface MergeCelInputs {
@@ -550,24 +723,51 @@ function validateMergeCel(
   target: Cel,
   participants: ReadonlySet<string>,
 ): void {
-  if (source.opacity !== undefined && source.opacity !== 100 ||
-      target.opacity !== undefined && target.opacity !== 100) {
-    throw structureError('unsupported', false, { reason: 'merge_cel_opacity' });
-  }
-  if (source.linkedCelId || source.linkType || source.textCelData ||
-      target.linkedCelId || target.linkType || target.textCelData) {
-    throw structureError('unsupported', false, { reason: 'merge_cel_payload' });
-  }
-  if (source.canvas.width !== target.canvas.width || source.canvas.height !== target.canvas.height ||
-      source.canvas.width !== context.project.width.value || source.canvas.height !== context.project.height.value) {
-    throw structureError('invalid_state', false, { reason: 'merge_cel_shape' });
-  }
+  validateMergeCelOpacity(source, target);
+  validateMergeCelPayload(source, target);
+  validateMergeCelShape(context, source, target);
   validateExactCelPalette(before.palette, source);
   validateExactCelPalette(before.palette, target);
-  if (isSharedWithOtherLayer(before.cels, source, participants) ||
-      isSharedWithOtherLayer(before.cels, target, participants)) {
+  if (hasSharedMergePayload(before.cels, source, target, participants)) {
     throw structureError('invalid_state', false, { reason: 'merge_shared_payload' });
   }
+}
+
+function validateMergeCelOpacity(source: Cel, target: Cel): void {
+  if (source.opacity !== undefined && source.opacity !== 100
+      || target.opacity !== undefined && target.opacity !== 100) {
+    throw structureError('unsupported', false, { reason: 'merge_cel_opacity' });
+  }
+}
+
+function validateMergeCelPayload(source: Cel, target: Cel): void {
+  if (hasUnsupportedMergePayload(source) || hasUnsupportedMergePayload(target)) {
+    throw structureError('unsupported', false, { reason: 'merge_cel_payload' });
+  }
+}
+
+function hasUnsupportedMergePayload(cel: Cel): boolean {
+  return !!cel.linkedCelId || !!cel.linkType || !!cel.textCelData;
+}
+
+function validateMergeCelShape(context: ProjectContext, source: Cel, target: Cel): void {
+  const sameShape = source.canvas.width === target.canvas.width
+    && source.canvas.height === target.canvas.height;
+  const matchesProject = source.canvas.width === context.project.width.value
+    && source.canvas.height === context.project.height.value;
+  if (!sameShape || !matchesProject) {
+    throw structureError('invalid_state', false, { reason: 'merge_cel_shape' });
+  }
+}
+
+function hasSharedMergePayload(
+  cels: ReadonlyMap<string, Cel>,
+  source: Cel,
+  target: Cel,
+  participants: ReadonlySet<string>,
+): boolean {
+  return isSharedWithOtherLayer(cels, source, participants)
+    || isSharedWithOtherLayer(cels, target, participants);
 }
 
 function validateExactCelPalette(
@@ -576,35 +776,84 @@ function validateExactCelPalette(
 ): void {
   const colors = palette.colors;
   const colorIndexes = createPaletteIndexMap(colors);
+  const pixels = readCelPixels(cel);
+  validateIndexBufferShape(cel);
+  for (let pixel = 0; pixel < cel.canvas.width * cel.canvas.height; pixel++) {
+    const paletteIndex = cel.indexBuffer?.[pixel];
+    if (paletteIndex !== undefined) {
+      validateIndexedPixel(colors, pixels, pixel, paletteIndex);
+      continue;
+    }
+    validateRgbaPixel(colorIndexes, pixels, pixel);
+  }
+}
+
+function readCelPixels(cel: Cel): Uint8ClampedArray {
   const context = cel.canvas.getContext('2d', { willReadFrequently: true });
   if (!context) throw structureError('internal', true, { reason: 'canvas_read' });
-  const pixels = context.getImageData(0, 0, cel.canvas.width, cel.canvas.height).data;
+  return context.getImageData(0, 0, cel.canvas.width, cel.canvas.height).data;
+}
+
+function validateIndexBufferShape(cel: Cel): void {
   if (cel.indexBuffer && cel.indexBuffer.length !== cel.canvas.width * cel.canvas.height) {
     throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
   }
-  for (let pixel = 0; pixel < cel.canvas.width * cel.canvas.height; pixel++) {
-    const offset = pixel * 4;
-    const alpha = pixels[offset + 3];
-    const paletteIndex = cel.indexBuffer?.[pixel];
-    if (paletteIndex !== undefined) {
-      if (paletteIndex > colors.length) {
-        throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
-      }
-      if (paletteIndex === 0) {
-        if (alpha !== 0) throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
-        continue;
-      }
-      const color = hexToRgb(colors[paletteIndex - 1] ?? '');
-      if (!color || alpha !== 255 || pixels[offset] !== color.r ||
-          pixels[offset + 1] !== color.g || pixels[offset + 2] !== color.b) {
-        throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
-      }
-      continue;
-    }
-    if (alpha === 0) continue;
-    if (alpha !== 255 || !colorIndexes.has(rgbToHex(pixels[offset], pixels[offset + 1], pixels[offset + 2]))) {
-      throw structureError('invalid_state', false, { reason: 'merge_palette_representation' });
-    }
+}
+
+function validateIndexedPixel(
+  colors: readonly string[],
+  pixels: ArrayLike<number>,
+  pixel: number,
+  paletteIndex: number,
+): void {
+  const offset = pixel * 4;
+  const alpha = pixels[offset + 3] ?? 0;
+  if (paletteIndex > colors.length) {
+    throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
+  }
+  if (paletteIndex === 0) {
+    validateTransparentIndexedPixel(alpha);
+    return;
+  }
+  const color = hexToRgb(colors[paletteIndex - 1] ?? '');
+  if (!color) {
+    throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
+  }
+  if (!matchesIndexedColor(pixels, offset, alpha, color)) {
+    throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
+  }
+}
+
+function validateTransparentIndexedPixel(alpha: number): void {
+  if (alpha !== 0) throw structureError('invalid_state', false, { reason: 'merge_index_payload' });
+}
+
+function matchesIndexedColor(
+  pixels: ArrayLike<number>,
+  offset: number,
+  alpha: number,
+  color: { readonly r: number; readonly g: number; readonly b: number },
+): boolean {
+  return alpha === 255
+    && pixels[offset] === color.r
+    && pixels[offset + 1] === color.g
+    && pixels[offset + 2] === color.b;
+}
+
+function validateRgbaPixel(
+  colorIndexes: ReadonlyMap<string, number>,
+  pixels: ArrayLike<number>,
+  pixel: number,
+): void {
+  const offset = pixel * 4;
+  const alpha = pixels[offset + 3] ?? 0;
+  if (alpha === 0) return;
+  if (alpha !== 255 || !colorIndexes.has(rgbToHex(
+    pixels[offset] ?? 0,
+    pixels[offset + 1] ?? 0,
+    pixels[offset + 2] ?? 0,
+  ))) {
+    throw structureError('invalid_state', false, { reason: 'merge_palette_representation' });
   }
 }
 
@@ -630,45 +879,80 @@ function createAfterCels(
   mergeInputs: ReadonlyMap<string, MergeCelInputs>,
   entityIdFactory: (() => string) | undefined,
 ): Map<string, Cel> {
-  const retained = new Set(
-    structure.layers.map((layer) => layer.id),
-  );
-  const after = new Map<string, Cel>();
-  for (const [key, cel] of before.cels) {
-    if (retained.has(cel.layerId)) after.set(key, cel);
-  }
-
+  const after = retainCels(before.cels, structure.layers);
   const ids = collectProjectEntityIds(before);
   const createId = entityIdFactory ?? (() => crypto.randomUUID());
-  for (const layer of structure.layers) {
-    if (before.layers.some((candidate) => candidate.id === layer.id)) continue;
-    for (const frame of before.frames) {
-      const celId = createUniqueEntityId(createId, ids, 'cel_identity');
-      const canvas = markRuntimeEmptyCanvas(createBlankCanvas(
-        context.project.width.value,
-        context.project.height.value,
-      ));
-      after.set(context.animation.getCelKey(layer.id, frame.id), {
-        id: celId,
-        layerId: layer.id,
-        frameId: frame.id,
-        canvas,
-      });
-    }
-  }
+  const existingIds = new Set(before.layers.map((layer) => layer.id));
+  createNewLayerCels(context, before.frames, structure.layers, existingIds, after, ids, createId);
+  createMergedLayerCels(context, before, structure.mergePairs, mergeInputs, after);
+  return after;
+}
 
-  const pairByTarget = new Map<string, StructureRefinementMergePair>();
-  for (const pair of structure.mergePairs) pairByTarget.set(pair.targetLayerId, pair);
-  for (const [targetLayerId, pair] of pairByTarget) {
+function retainCels(
+  cels: ReadonlyMap<string, Cel>,
+  declaration: readonly StructureRefinementLayerDeclaration[],
+): Map<string, Cel> {
+  const retained = new Set(declaration.map((layer) => layer.id));
+  const result = new Map<string, Cel>();
+  for (const [key, cel] of cels) {
+    if (retained.has(cel.layerId)) result.set(key, cel);
+  }
+  return result;
+}
+
+function createNewLayerCels(
+  context: ProjectContext,
+  frames: readonly Frame[],
+  declaration: readonly StructureRefinementLayerDeclaration[],
+  existingIds: ReadonlySet<string>,
+  after: Map<string, Cel>,
+  ids: Set<string>,
+  createId: () => string,
+): void {
+  for (const layer of declaration) {
+    if (existingIds.has(layer.id)) continue;
+    createNewGroupCels(context, frames, layer.id, after, ids, createId);
+  }
+}
+
+function createNewGroupCels(
+  context: ProjectContext,
+  frames: readonly Frame[],
+  layerId: string,
+  after: Map<string, Cel>,
+  ids: Set<string>,
+  createId: () => string,
+): void {
+  for (const frame of frames) {
+    const celId = createUniqueEntityId(createId, ids, 'cel_identity');
+    const canvas = markRuntimeEmptyCanvas(createBlankCanvas(
+      context.project.width.value,
+      context.project.height.value,
+    ));
+    after.set(context.animation.getCelKey(layerId, frame.id), {
+      id: celId,
+      layerId,
+      frameId: frame.id,
+      canvas,
+    });
+  }
+}
+
+function createMergedLayerCels(
+  context: ProjectContext,
+  before: StructureRefinementSnapshot,
+  mergePairs: readonly StructureRefinementMergePair[],
+  mergeInputs: ReadonlyMap<string, MergeCelInputs>,
+  after: Map<string, Cel>,
+): void {
+  for (const pair of mergePairs) {
     for (const frame of before.frames) {
-      const targetKey = context.animation.getCelKey(targetLayerId, frame.id);
+      const targetKey = context.animation.getCelKey(pair.targetLayerId, frame.id);
       const inputs = mergeInputs.get(targetKey);
       if (!inputs) throw structureError('internal', true, { reason: 'merge_inputs' });
-      const merged = createMergedCel(context, before, pair, frame.id, inputs);
-      after.set(targetKey, merged);
+      after.set(targetKey, createMergedCel(context, before, pair, frame.id, inputs));
     }
   }
-  return after;
 }
 
 function createMergedCel(
@@ -839,24 +1123,16 @@ function createPaletteIndexMap(colors: readonly string[]): Map<string, number> {
 
 function isLayerEmpty(snapshot: StructureRefinementSnapshot, layerId: string): boolean {
   const layer = snapshot.layers.find((candidate) => candidate.id === layerId);
-  if (layer?.canvas && hasOpaquePixels(layer.canvas)) return false;
+  if (layer?.canvas && hasOpaquePixels(layer.canvas, structureError('internal', true, { reason: 'canvas_read' }))) {
+    return false;
+  }
   for (const cel of snapshot.cels.values()) {
     if (cel.layerId !== layerId) continue;
     if (isRuntimeEmptyCel(cel)) continue;
     if (cel.indexBuffer?.some((index) => index !== 0)) return false;
-    if (hasOpaquePixels(cel.canvas)) return false;
+    if (hasOpaquePixels(cel.canvas, structureError('internal', true, { reason: 'canvas_read' }))) return false;
   }
   return true;
-}
-
-function hasOpaquePixels(canvas: HTMLCanvasElement): boolean {
-  const drawing = canvas.getContext('2d', { willReadFrequently: true });
-  if (!drawing) throw structureError('internal', true, { reason: 'canvas_read' });
-  const pixels = drawing.getImageData(0, 0, canvas.width, canvas.height).data;
-  for (let index = 3; index < pixels.length; index += 4) {
-    if (pixels[index] > 0) return true;
-  }
-  return false;
 }
 
 function captureSnapshot(context: ProjectContext, includeGroupData = true): StructureRefinementSnapshot {
@@ -876,10 +1152,10 @@ function sameSnapshot(first: StructureRefinementSnapshot, second: StructureRefin
   return sameLayers(first.layers, second.layers)
     && sameCels(first.cels, second.cels)
     && sameFrames(first.frames, second.frames)
-    && sameTags(first.tags, second.tags)
+    && sameFrameTags(first.tags, second.tags)
     && first.currentFrameId === second.currentFrameId
     && first.activeLayerId === second.activeLayerId
-    && samePalette(first.palette, second.palette)
+    && samePaletteSnapshot(first.palette, second.palette)
     && sameGroupData(first.groupData, second.groupData);
 }
 
@@ -888,15 +1164,7 @@ function sameLayers(first: readonly Layer[], second: readonly Layer[]): boolean 
   return first.every((layer, index) => {
     const other = second[index];
     return !!other
-      && layer.id === other.id
-      && layer.name === other.name
-      && layer.type === other.type
-      && layer.visible === other.visible
-      && layer.locked === other.locked
-      && layer.opacity === other.opacity
-      && layer.blendMode === other.blendMode
-      && (layer.continuous ?? false) === (other.continuous ?? false)
-      && layer.parentId === other.parentId
+      && sameLayerProperties(layer, other)
       && layer.canvas === other.canvas
       && sameTextData(layer.textData, other.textData)
       && sameReferenceData(layer.referenceData, other.referenceData);
@@ -980,17 +1248,6 @@ function sameStringMap(first: ReadonlyMap<string, string>, second: ReadonlyMap<s
   return true;
 }
 
-function sameCanvas(first: HTMLCanvasElement, second: HTMLCanvasElement): boolean {
-  if (first.width !== second.width || first.height !== second.height) return false;
-  const firstContext = first.getContext('2d', { willReadFrequently: true });
-  const secondContext = second.getContext('2d', { willReadFrequently: true });
-  if (!firstContext || !secondContext) return false;
-  return sameBytes(
-    new Uint8Array(firstContext.getImageData(0, 0, first.width, first.height).data),
-    new Uint8Array(secondContext.getImageData(0, 0, second.width, second.height).data),
-  );
-}
-
 function sameFrames(first: readonly Frame[], second: readonly Frame[]): boolean {
   return first.length === second.length && first.every((frame, index) => {
     const other = second[index];
@@ -998,53 +1255,11 @@ function sameFrames(first: readonly Frame[], second: readonly Frame[]): boolean 
   });
 }
 
-function sameTags(first: readonly FrameTag[], second: readonly FrameTag[]): boolean {
-  return first.length === second.length && first.every((tag, index) => {
-    const other = second[index];
-    return !!other && tag.id === other.id && tag.name === other.name && tag.color === other.color
-      && tag.startFrameIndex === other.startFrameIndex && tag.endFrameIndex === other.endFrameIndex
-      && tag.collapsed === other.collapsed;
-  });
-}
-
-function samePalette(first: ProjectPaletteSnapshot, second: ProjectPaletteSnapshot): boolean {
-  return first.currentPresetId === second.currentPresetId
-    && first.currentCustomPaletteId === second.currentCustomPaletteId
-    && first.isDirty === second.isDirty
-    && sameStrings(first.newColorFlags, second.newColorFlags)
-    && sameStrings(first.colors, second.colors)
-    && first.entries.length === second.entries.length
-    && first.entries.every((entry, index) => {
-      const other = second.entries[index];
-      return !!other && entry.id === other.id && entry.color === other.color;
-    });
-}
-
-function sameGroupData(first: ReadonlyMap<string, Uint8Array>, second: ReadonlyMap<string, Uint8Array>): boolean {
-  if (first.size !== second.size) return false;
-  for (const [layerId, bytes] of first) if (!sameBytes(bytes, second.get(layerId))) return false;
-  return true;
-}
-
 function sameTextCelData(
   first: Cel['textCelData'],
   second: Cel['textCelData'],
 ): boolean {
   return first?.content === second?.content && first?.x === second?.x && first?.y === second?.y;
-}
-
-function sameStrings(first: readonly string[], second: readonly string[]): boolean {
-  return first.length === second.length && first.every((value, index) => value === second[index]);
-}
-
-function sameBytes(first: ArrayLike<number> | undefined, second: ArrayLike<number> | undefined): boolean {
-  if (!first || !second) return first === second;
-  return first.length === second.length && Array.from(first).every((value, index) => value === second[index]);
-}
-
-function chooseActiveLayerId(activeLayerId: string | null, layers: readonly Layer[]): string | null {
-  if (activeLayerId && layers.some((layer) => layer.id === activeLayerId)) return activeLayerId;
-  return layers.find((layer) => layer.type === 'image')?.id ?? layers[0]?.id ?? null;
 }
 
 function collectProjectEntityIds(snapshot: StructureRefinementSnapshot): Set<string> {

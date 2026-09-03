@@ -32,6 +32,7 @@ import {
   type CelUnlinkGroupMember,
   type FrameTagRequest,
 } from './timeline-project-state';
+import { sameBytes } from './structure-support';
 
 export type AnimationFramePosition = 'start' | 'end' | 'before' | 'after';
 
@@ -815,11 +816,6 @@ function readCanvas(canvas: HTMLCanvasElement): Uint8ClampedArray {
   } catch {
     throw animationError('internal', true, { reason: 'canvas_read' });
   }
-}
-
-function sameBytes(first: ArrayLike<number> | undefined, second: ArrayLike<number> | undefined): boolean {
-  if (!first || !second) return first === second;
-  return first.length === second.length && Array.from(first).every((value, index) => value === second[index]);
 }
 
 function celPayloadBytes(cel: Cel): number {

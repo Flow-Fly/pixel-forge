@@ -23,6 +23,18 @@ import {
   type EditorError,
   type ProjectTarget,
 } from './contracts';
+import {
+  applyProjectStructureSnapshot,
+  assertProjectSnapshot,
+  chooseActiveLayerId,
+  hasOpaquePixels,
+  sameBytes,
+  sameCanvas,
+  sameGroupData,
+  sameLayerProperties,
+  samePaletteSnapshot,
+  validateProjectTargetAndRevision,
+} from './structure-support';
 
 const STATIC_STRUCTURE_DOMAINS: readonly ProjectChangeDomain[] = Object.freeze([
   'palette',
@@ -174,13 +186,7 @@ export function applyPreparedStaticStructureChange(
   phase: 'before' | 'after',
 ): void {
   const snapshot = phase === 'after' ? prepared.after : prepared.before;
-  context.project.applyStaticStructureState(
-    snapshot.layers,
-    new Map(snapshot.cels),
-    snapshot.palette,
-    snapshot.activeLayerId,
-    snapshot.groupData,
-  );
+  applyProjectStructureSnapshot(context, snapshot);
 }
 
 export function assertPreparedStaticStructureChange(
@@ -189,9 +195,12 @@ export function assertPreparedStaticStructureChange(
   phase: 'before' | 'after',
 ): void {
   const expected = phase === 'after' ? prepared.after : prepared.before;
-  if (!sameSnapshot(captureSnapshot(context), expected)) {
-    throw staticError('revision_conflict', true, { reason: 'history_structure_changed' });
-  }
+  assertProjectSnapshot(
+    captureSnapshot(context),
+    expected,
+    sameSnapshot,
+    staticError('revision_conflict', true, { reason: 'history_structure_changed' }),
+  );
 }
 
 function validateTargetAndRevision(
@@ -199,18 +208,17 @@ function validateTargetAndRevision(
   target: ProjectTarget,
   expectedRevision: number,
 ): void {
-  if (context.isDisposed || context.project.id.value !== target.projectId) {
-    throw staticError('target_not_found', true);
-  }
-  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
-    throw staticError('invalid_request', false, { reason: 'expected_revision' });
-  }
-  if (context.project.revision.value !== expectedRevision) {
-    throw staticError('revision_conflict', true, {
+  validateProjectTargetAndRevision(
+    context,
+    target,
+    expectedRevision,
+    staticError('target_not_found', true),
+    staticError('invalid_request', false, { reason: 'expected_revision' }),
+    (currentRevision) => staticError('revision_conflict', true, {
       expectedRevision,
-      currentRevision: context.project.revision.value,
-    });
-  }
+      currentRevision,
+    }),
+  );
   if (context.guidedDrawing.active) {
     throw staticError('unsupported', false, { feature: 'guided-drawing-static-structure' });
   }
@@ -570,11 +578,6 @@ function createAfterLayers(
   });
 }
 
-function chooseActiveLayerId(activeLayerId: string | null, layers: readonly Layer[]): string | null {
-  if (activeLayerId && layers.some((layer) => layer.id === activeLayerId)) return activeLayerId;
-  return layers.find((layer) => layer.type === 'image')?.id ?? layers[0]?.id ?? null;
-}
-
 // fallow-ignore-next-line complexity -- Indexed and RGBA payloads must be cloned and remapped together before commit.
 function cloneAndRemapCels(
   cels: ReadonlyMap<string, Cel>,
@@ -614,7 +617,7 @@ function cloneAndRemapCels(
       }
       validateCanvasMatchesIndices(cel.canvas, cel.indexBuffer, beforePalette.colors);
       rebuildCanvasFromIndices(copiedCanvas, copiedIndex, afterPalette.colors as string[]);
-    } else if (hasOpaquePixels(cel.canvas)) {
+    } else if (hasOpaquePixels(cel.canvas, staticError('internal', true, { reason: 'canvas_read' }))) {
       throw staticError('invalid_state', false, { reason: 'palette_unindexed_content' });
     }
 
@@ -640,38 +643,9 @@ function captureSnapshot(context: ProjectContext, includeGroupData = true): Stat
 function sameSnapshot(first: StaticStructureSnapshot, second: StaticStructureSnapshot): boolean {
   return sameLayerArrays(first.layers, second.layers)
     && first.activeLayerId === second.activeLayerId
-    && samePaletteSnapshots(first.palette, second.palette)
+    && samePaletteSnapshot(first.palette, second.palette)
     && sameCels(first.cels, second.cels)
     && sameGroupData(first.groupData, second.groupData);
-}
-
-function sameGroupData(
-  first: ReadonlyMap<string, Uint8Array>,
-  second: ReadonlyMap<string, Uint8Array>,
-): boolean {
-  if (first.size !== second.size) return false;
-  for (const [layerId, bytes] of first) {
-    const other = second.get(layerId);
-    if (!other || !sameBytes(bytes, other)) return false;
-  }
-  return true;
-}
-
-function samePaletteSnapshots(
-  first: ProjectPaletteSnapshot,
-  second: ProjectPaletteSnapshot,
-): boolean {
-  return first.currentPresetId === second.currentPresetId
-    && first.currentCustomPaletteId === second.currentCustomPaletteId
-    && first.isDirty === second.isDirty
-    && sameStrings(first.newColorFlags, second.newColorFlags)
-    && first.colors.length === second.colors.length
-    && first.colors.every((color, index) => color === second.colors[index])
-    && first.entries.length === second.entries.length
-    && first.entries.every((entry, index) => {
-      const other = second.entries[index];
-      return other?.id === entry.id && other.color === entry.color;
-    });
 }
 
 function samePalette(
@@ -690,16 +664,7 @@ function sameLayerArrays(first: readonly Layer[], second: readonly Layer[]): boo
   // fallow-ignore-next-line complexity -- Field-by-field equality is required for exact rollback snapshots.
   return first.length === second.length && first.every((layer, index) => {
     const other = second[index];
-    return !!other
-      && layer.id === other.id
-      && layer.name === other.name
-      && layer.type === other.type
-      && layer.visible === other.visible
-      && layer.locked === other.locked
-      && layer.opacity === other.opacity
-      && layer.blendMode === other.blendMode
-      && (layer.continuous ?? false) === (other.continuous ?? false)
-      && layer.parentId === other.parentId;
+    return !!other && sameLayerProperties(layer, other);
   });
 }
 
@@ -719,45 +684,21 @@ function sameCels(first: ReadonlyMap<string, Cel>, second: ReadonlyMap<string, C
   return true;
 }
 
-function sameBytes(first: Uint8Array | undefined, second: Uint8Array | undefined): boolean {
-  if (!first || !second) return first === second;
-  return first.length === second.length && first.every((value, index) => value === second[index]);
-}
-
-function sameCanvas(first: HTMLCanvasElement, second: HTMLCanvasElement): boolean {
-  if (first.width !== second.width || first.height !== second.height) return false;
-  const firstContext = first.getContext('2d', { willReadFrequently: true });
-  const secondContext = second.getContext('2d', { willReadFrequently: true });
-  if (!firstContext || !secondContext) return false;
-  const firstPixels = firstContext.getImageData(0, 0, first.width, first.height).data;
-  const secondPixels = secondContext.getImageData(0, 0, second.width, second.height).data;
-  return firstPixels.length === secondPixels.length
-    && firstPixels.every((value, index) => value === secondPixels[index]);
-}
-
 function cloneLayer(layer: Layer): Layer {
   return { ...layer };
 }
 
 function isLayerEmpty(snapshot: StaticStructureSnapshot, layerId: string): boolean {
   const layer = snapshot.layers.find((candidate) => candidate.id === layerId);
-  if (layer?.canvas && hasOpaquePixels(layer.canvas)) return false;
+  if (layer?.canvas && hasOpaquePixels(layer.canvas, staticError('internal', true, { reason: 'canvas_read' }))) {
+    return false;
+  }
   for (const cel of snapshot.cels.values()) {
     if (cel.layerId !== layerId) continue;
     if (cel.indexBuffer?.some((index) => index !== 0)) return false;
-    if (hasOpaquePixels(cel.canvas)) return false;
+    if (hasOpaquePixels(cel.canvas, staticError('internal', true, { reason: 'canvas_read' }))) return false;
   }
   return true;
-}
-
-function hasOpaquePixels(canvas: HTMLCanvasElement): boolean {
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) throw staticError('internal', true, { reason: 'canvas_read' });
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-  for (let index = 3; index < pixels.length; index += 4) {
-    if (pixels[index] > 0) return true;
-  }
-  return false;
 }
 
 // fallow-ignore-next-line complexity -- Indexed safety checks every pixel before a palette declaration can commit.
@@ -859,10 +800,6 @@ function assertExactKeys(value: Record<string, unknown>, allowedKeys: readonly s
   if (!hasOnlyKeys(value, allowedKeys)) {
     throw staticError('invalid_request', false, { reason });
   }
-}
-
-function sameStrings(first: readonly string[], second: readonly string[]): boolean {
-  return first.length === second.length && first.every((value, index) => value === second[index]);
 }
 
 function staticError(
