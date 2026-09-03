@@ -124,13 +124,30 @@ describe('AutomationAdapter', () => {
       target: 'project',
       requiresRevision: true,
       request: {
-        provenance: expect.objectContaining({ clientId: 'bounded string' }),
-        children: expect.arrayContaining([
-          expect.objectContaining({ command: 'project.layer.state' }),
-          expect.objectContaining({ command: 'project.animation.frame-tag' }),
-        ]),
+        expectedRevision: 'integer >= 0',
+        provenance: expect.objectContaining({
+          clientId: 'non-empty bounded string',
+        }),
+        children: expect.objectContaining({
+          exact: 2,
+          order: 'either',
+          oneOfEach: ['project.layer.state', 'project.animation.frame-tag'],
+        }),
       },
-      limits: { children: { exact: 2 } },
+      limits: {
+        children: {
+          exact: 2,
+          order: 'either',
+          oneOfEach: ['project.layer.state', 'project.animation.frame-tag'],
+        },
+        provenance: {
+          stringLength: { min: 1, max: 256 },
+          transitions: { max: 16 },
+        },
+      },
+      availability: {
+        guidedDrawing: { layerState: 'unsupported', frameTag: 'supported' },
+      },
       result: { type: 'project.transaction.execute' },
       errors: expect.arrayContaining(['revision_conflict', 'limit_exceeded', 'internal']),
     });

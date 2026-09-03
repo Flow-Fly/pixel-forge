@@ -54,6 +54,11 @@ export interface ProjectChangeEvent {
   domains: readonly ProjectChangeDomain[];
 }
 
+export interface PreparedProjectChange {
+  readonly event: ProjectChangeEvent;
+  commit(): void;
+}
+
 type ProjectAnimationStore = ReturnType<typeof createAnimationStore>;
 type ProjectDirtyRectStore = ReturnType<typeof createDirtyRectStore>;
 type ProjectHistoryStore = ReturnType<typeof createHistoryStore>;
@@ -213,6 +218,16 @@ class ProjectStore {
     transactionId: string,
     domains: readonly ProjectChangeDomain[]
   ): ProjectChangeEvent {
+    const prepared = this.prepareChange(transactionId, domains);
+    prepared.commit();
+    return prepared.event;
+  }
+
+  /** Prepare a revision and event without publishing either one. */
+  prepareChange(
+    transactionId: string,
+    domains: readonly ProjectChangeDomain[],
+  ): PreparedProjectChange {
     const fromRevision = this.revision.value;
     const event: ProjectChangeEvent = {
       type: 'project-change',
@@ -222,12 +237,21 @@ class ProjectStore {
       transactionId,
       domains: [...domains],
     };
+    let committed = false;
 
-    this.revision.value = event.toRevision;
-    this.changeEvents.dispatchEvent(
-      new CustomEvent<ProjectChangeEvent>('project-change', { detail: event })
-    );
-    return event;
+    return {
+      event,
+      commit: () => {
+        if (committed || this.revision.value !== event.fromRevision) {
+          throw new Error('Project change is no longer current.');
+        }
+        this.revision.value = event.toRevision;
+        committed = true;
+        this.changeEvents.dispatchEvent(
+          new CustomEvent<ProjectChangeEvent>('project-change', { detail: event })
+        );
+      },
+    };
   }
 
   /**

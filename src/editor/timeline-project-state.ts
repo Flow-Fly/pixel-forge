@@ -144,6 +144,10 @@ type RequestWithoutContext<T> = T extends unknown
 export type TimelineProjectStateRequestInput = RequestWithoutContext<TimelineProjectStateRequest>;
 export type FrameTagRequestInput = RequestWithoutContext<FrameTagRequest>;
 
+export interface TimelineProjectStatePrepareOptions {
+  readonly tagIdFactory?: () => string;
+}
+
 export interface TimelineProjectStateSuccess {
   readonly ok: true;
   readonly revision: number;
@@ -431,10 +435,11 @@ export function createCelUnlinkRequest(
 export function prepareTimelineProjectStateChange(
   context: ProjectContext,
   input: unknown,
+  options: TimelineProjectStatePrepareOptions = {},
 ): PreparedTimelineProjectStateChange {
   const request = normalizeRequest(input);
   return {
-    ...prepareChange(context, request),
+    ...prepareChange(context, request, options),
     request,
   };
 }
@@ -773,6 +778,7 @@ function requiredInteger(value: unknown, reason: string): number {
 function prepareChange(
   context: ProjectContext,
   request: TimelineProjectStateRequest,
+  options: TimelineProjectStatePrepareOptions = {},
 ): PreparedChange {
   validateTargetAndRevision(context, request);
   validateAvailability(context, request);
@@ -781,7 +787,7 @@ function prepareChange(
     return prepareLayerChange(context, request as LayerStateRequest);
   }
   if (request.kind.startsWith('tag.')) {
-    return prepareTagChange(context, request as FrameTagRequest);
+    return prepareTagChange(context, request as FrameTagRequest, options);
   }
   return prepareCelUnlinkChange(context, request as CelUnlinkRequest);
 }
@@ -1025,10 +1031,11 @@ function cloneUnlinkedCel(cel: Cel): Cel {
 function prepareTagChange(
   context: ProjectContext,
   request: FrameTagRequest,
+  options: TimelineProjectStatePrepareOptions = {},
 ): PreparedChange {
   const beforeTags = context.animation.tags.value.map(cloneTag);
   const frameCount = context.animation.frames.value.length;
-  const afterTags = prepareTagSnapshot(beforeTags, request, frameCount);
+  const afterTags = prepareTagSnapshot(beforeTags, request, frameCount, options);
 
   if (sameTagArrays(beforeTags, afterTags)) {
     throw timelineError('invalid_request', false, { reason: 'no_change' });
@@ -1052,6 +1059,7 @@ function prepareTagSnapshot(
   tags: readonly FrameTag[],
   request: FrameTagRequest,
   frameCount: number,
+  options: TimelineProjectStatePrepareOptions = {},
 ): FrameTag[] {
   switch (request.kind) {
     case 'tag.create':
@@ -1062,6 +1070,7 @@ function prepareTagSnapshot(
         request.startFrameIndex,
         request.endFrameIndex,
         frameCount,
+        options.tagIdFactory,
       ));
     case 'tag.rename':
       return requireTagMutation(tagManager.updateFrameTagSnapshot(

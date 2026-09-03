@@ -56,8 +56,17 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.transaction.fromRevision).toBe(0);
     expect(journey.transaction.revision).toBe(1);
     expect(journey.transaction.event.domains).toEqual(['layer-state', 'timeline']);
+    expect(journey.transaction.event).toMatchObject({
+      type: 'project-change',
+      target: 'fixture-project',
+      fromRevision: 0,
+      toRevision: 1,
+      transactionId: 'fixture-transaction-1',
+      domains: ['layer-state', 'timeline'],
+    });
     expect(journey.transaction.provenance).toMatchObject({
       source: 'automation',
+      transactionId: 'fixture-transaction-1',
       clientId: 'fixture-client',
       sessionId: 'fixture-session',
       runId: 'fixture-run',
@@ -65,12 +74,23 @@ describe('Automation Adapter Fixture Session', () => {
       target: { projectId: 'fixture-project' },
       fromRevision: 0,
       toRevision: 1,
+      transitionCount: 1,
+      transitionsTruncated: false,
+      transitions: [{ phase: 'execute', fromRevision: 0, toRevision: 1 }],
       children: [
         { commandId: 'project.layer.state', operation: 'layer.visibility' },
         { commandId: 'project.animation.frame-tag', operation: 'tag.create' },
       ],
     });
     expect(journey.afterTransaction.observation.history.undoCount).toBe(1);
+    expect(journey.afterTransaction.observation.tags).toEqual([{
+      id: 'fixture-tag-1',
+      name: 'Fixture Tag',
+      color: '#123456',
+      startFrameIndex: 0,
+      endFrameIndex: 0,
+      collapsed: false,
+    }]);
     expect(journey.afterTransaction.observation.history.undo[0]?.provenance)
       .toEqual(journey.transaction.provenance);
     expect(journey.afterTransaction.observation.lastEvent?.domains)
@@ -78,10 +98,31 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.afterTransaction.observation.saveSafety.status).toBe('dirty');
     expect(journey.afterUndo.observation.revision).toBe(2);
     expect(journey.afterRedo.observation.revision).toBe(3);
-    expect(journey.afterUndo.observation.history.redo[0]?.provenance)
-      .toEqual(journey.transaction.provenance);
-    expect(journey.afterRedo.observation.history.undo[0]?.provenance)
-      .toEqual(journey.transaction.provenance);
+    expect(journey.afterUndo.observation.history.redo[0]?.provenance).toMatchObject({
+      transactionId: 'fixture-transaction-1',
+      fromRevision: 0,
+      toRevision: 2,
+      transitionCount: 2,
+      transitionsTruncated: false,
+      transitions: [
+        { phase: 'execute', fromRevision: 0, toRevision: 1 },
+        { phase: 'undo', fromRevision: 1, toRevision: 2 },
+      ],
+    });
+    expect(journey.afterRedo.observation.history.undo[0]?.provenance).toMatchObject({
+      transactionId: 'fixture-transaction-1',
+      fromRevision: 0,
+      toRevision: 3,
+      transitionCount: 3,
+      transitionsTruncated: false,
+      transitions: [
+        { phase: 'execute', fromRevision: 0, toRevision: 1 },
+        { phase: 'undo', fromRevision: 1, toRevision: 2 },
+        { phase: 'redo', fromRevision: 2, toRevision: 3 },
+      ],
+    });
+    expect(journey.afterRedo.document.tags).toEqual(journey.afterTransaction.document.tags);
+    expect(journey.afterRedo.document.tags?.[0]?.id).toBe('fixture-tag-1');
     expect(journey.save.saveSafety.status).toBe('saved');
     expect(journey.reload.observation.saveSafety.status).toBe('saved');
     expect(journey.reload.revision).toBe(journey.afterRedo.observation.revision);

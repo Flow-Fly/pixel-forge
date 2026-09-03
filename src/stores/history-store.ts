@@ -18,6 +18,10 @@ export interface Command {
   managesProjectRevision?: boolean;
   /** Bounded automation identity retained with the conventional history entry. */
   provenance?: AutomationTransactionProvenance;
+  /** Finalize a prepared transition after history bookkeeping succeeds. */
+  commitTransition?(): void | Promise<void>;
+  /** Restore a prepared transition when history bookkeeping fails. */
+  rollbackTransition?(): void | Promise<void>;
   execute(): void | Promise<void>;
   undo(): void | Promise<void>;
 }
@@ -35,6 +39,12 @@ interface HistoryContext {
   undoStack: Command[];
   redoStack: Command[];
   memoryUsage: number;
+}
+
+interface HistoryStateSnapshot extends HistoryContext {
+  canUndo: boolean;
+  canRedo: boolean;
+  version: number;
 }
 
 type HistoryPaletteStore = ReturnType<typeof createPaletteStore>;
@@ -72,7 +82,7 @@ class HistoryStore {
   // AutoSaveService (src/services/auto-save.ts) observes `version` and
   // saves the project; history only tracks commands.
 
-  async execute(command: Command) {
+  execute(command: Command) {
     // Auto-stamp with userId if not provided
     if (!command.userId) {
       command.userId = userStore.getCurrentUserId();
@@ -81,23 +91,15 @@ class HistoryStore {
       command.timestamp = Date.now();
     }
 
-    await command.execute();
-    this.onTransition?.({ phase: 'execute', command });
-
-    this.undoStack.value = [...this.undoStack.value, command];
-    this.redoStack.value = []; // Clear redo stack on new action
-
-    // Update memory tracking
-    if (command.memorySize) {
-      this.memoryUsage += command.memorySize;
-    }
-
-    // Enforce limits
-    this.enforceHistoryLimits();
-    this.updateComputed();
-
-    // Update palette usage indicators
-    this.palette.refreshUsedColors();
+    return this.runTransition(
+      command,
+      'execute',
+      () => command.execute(),
+      () => {
+        this.undoStack.value = [...this.undoStack.value, command];
+        this.redoStack.value = []; // Clear redo stack on new action
+      },
+    );
   }
 
   /**
@@ -132,7 +134,7 @@ class HistoryStore {
     return this.memoryUsage;
   }
 
-  async undo() {
+  undo() {
     const targetUserId = userStore.getCurrentUserId();
     const undoStack = this.undoStack.value;
 
@@ -150,24 +152,23 @@ class HistoryStore {
     if (commandIndex === -1) return;
 
     const command = undoStack[commandIndex];
-    await command.undo();
-    this.onTransition?.({ phase: 'undo', command });
+    return this.runTransition(
+      command,
+      'undo',
+      () => command.undo(),
+      () => {
+        // Remove from undo stack
+        const newUndoStack = [...undoStack];
+        newUndoStack.splice(commandIndex, 1);
+        this.undoStack.value = newUndoStack;
 
-    // Remove from undo stack
-    const newUndoStack = [...undoStack];
-    newUndoStack.splice(commandIndex, 1);
-    this.undoStack.value = newUndoStack;
-
-    // Add to redo stack
-    this.redoStack.value = [...this.redoStack.value, command];
-
-    this.updateComputed();
-
-    // Update palette usage indicators
-    this.palette.refreshUsedColors();
+        // Add to redo stack
+        this.redoStack.value = [...this.redoStack.value, command];
+      },
+    );
   }
 
-  async redo() {
+  redo() {
     const targetUserId = userStore.getCurrentUserId();
     const redoStack = this.redoStack.value;
 
@@ -184,21 +185,83 @@ class HistoryStore {
     if (commandIndex === -1) return;
 
     const command = redoStack[commandIndex];
-    await command.execute();
-    this.onTransition?.({ phase: 'redo', command });
+    return this.runTransition(
+      command,
+      'redo',
+      () => command.execute(),
+      () => {
+        // Remove from redo stack
+        const newRedoStack = [...redoStack];
+        newRedoStack.splice(commandIndex, 1);
+        this.redoStack.value = newRedoStack;
 
-    // Remove from redo stack
-    const newRedoStack = [...redoStack];
-    newRedoStack.splice(commandIndex, 1);
-    this.redoStack.value = newRedoStack;
+        // Add back to undo stack
+        this.undoStack.value = [...this.undoStack.value, command];
+      },
+    );
+  }
 
-    // Add back to undo stack
-    this.undoStack.value = [...this.undoStack.value, command];
+  // fallow-ignore-next-line complexity -- One transaction boundary sequences command, history, palette, and staged project commit.
+  private async runTransition(
+    command: Command,
+    phase: HistoryTransitionPhase,
+    applyCommand: () => void | Promise<void>,
+    updateStacks: () => void,
+  ): Promise<void> {
+    const transaction = getTransactionalCommand(command);
+    const previousState = transaction ? this.captureState() : undefined;
+    let transitionPrepared = false;
 
-    this.updateComputed();
+    try {
+      await applyCommand();
+      transitionPrepared = transaction !== undefined;
+      this.onTransition?.({ phase, command });
+      updateStacks();
+      if (phase === 'execute' && command.memorySize) {
+        this.memoryUsage += command.memorySize;
+      }
+      this.enforceHistoryLimits();
 
-    // Update palette usage indicators
-    this.palette.refreshUsedColors();
+      if (transaction) {
+        // Transaction commands stage their project event. The palette refresh
+        // is the last fallible history bookkeeping step before commit.
+        this.palette.refreshUsedColors();
+        await transaction.commitTransition();
+        // Signal.set only records local state and queues effects; it does not
+        // invoke observers synchronously. This is the final no-throw update.
+        this.updateComputed();
+      } else {
+        this.updateComputed();
+        this.palette.refreshUsedColors();
+      }
+    } catch (error) {
+      if (transaction && transitionPrepared && previousState) {
+        const rollbackError = await rollbackTransaction(transaction);
+        this.restoreState(previousState);
+        if (rollbackError) throw rollbackError;
+      }
+      throw error;
+    }
+  }
+
+  private captureState(): HistoryStateSnapshot {
+    return {
+      undoStack: this.undoStack.value,
+      redoStack: this.redoStack.value,
+      memoryUsage: this.memoryUsage,
+      canUndo: this.canUndo.value,
+      canRedo: this.canRedo.value,
+      version: this.version.value,
+    };
+  }
+
+  private restoreState(snapshot: HistoryStateSnapshot): void {
+    this.undoStack.value = snapshot.undoStack;
+    this.redoStack.value = snapshot.redoStack;
+    this.memoryUsage = snapshot.memoryUsage;
+    this.canUndo.value = snapshot.canUndo;
+    this.canRedo.value = snapshot.canRedo;
+    this.version.value = snapshot.version;
   }
 
   private updateComputed() {
@@ -256,6 +319,27 @@ class HistoryStore {
    */
   isInContext(): boolean {
     return this.contextStack.length > 0;
+  }
+}
+
+type TransactionalCommand = Command & {
+  commitTransition(): void | Promise<void>;
+  rollbackTransition(): void | Promise<void>;
+};
+
+function getTransactionalCommand(command: Command): TransactionalCommand | undefined {
+  return typeof command.commitTransition === 'function'
+    && typeof command.rollbackTransition === 'function'
+    ? command as TransactionalCommand
+    : undefined;
+}
+
+async function rollbackTransaction(command: TransactionalCommand): Promise<unknown | null> {
+  try {
+    await command.rollbackTransition();
+    return null;
+  } catch (error) {
+    return error;
   }
 }
 

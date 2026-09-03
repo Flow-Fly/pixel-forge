@@ -9,6 +9,14 @@ export interface ProjectTarget {
   readonly projectId: string;
 }
 
+export type AutomationTransactionTransitionPhase = 'execute' | 'undo' | 'redo';
+
+export interface AutomationTransactionRevisionTransition {
+  readonly phase: AutomationTransactionTransitionPhase;
+  readonly fromRevision: number;
+  readonly toRevision: number;
+}
+
 /**
  * Bounded identity carried by an automation transaction and its history
  * observation. Creative command arguments never cross this boundary.
@@ -23,6 +31,9 @@ export interface AutomationTransactionProvenance {
   readonly target: ProjectTarget;
   readonly fromRevision: number;
   readonly toRevision: number;
+  readonly transitionCount: number;
+  readonly transitionsTruncated: boolean;
+  readonly transitions: readonly AutomationTransactionRevisionTransition[];
   readonly children: readonly AutomationTransactionChildSummary[];
 }
 

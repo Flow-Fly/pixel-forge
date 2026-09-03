@@ -518,6 +518,13 @@ function cloneAutomationProvenance(
     target: { projectId: provenance.target.projectId },
     fromRevision: provenance.fromRevision,
     toRevision: provenance.toRevision,
+    transitionCount: provenance.transitionCount,
+    transitionsTruncated: provenance.transitionsTruncated,
+    transitions: provenance.transitions.map((transition) => ({
+      phase: transition.phase,
+      fromRevision: transition.fromRevision,
+      toRevision: transition.toRevision,
+    })),
     children: provenance.children.map((child) => ({
       commandId: child.commandId,
       operation: child.operation,

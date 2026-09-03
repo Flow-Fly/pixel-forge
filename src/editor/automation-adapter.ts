@@ -56,6 +56,8 @@ export interface AutomationAdapterDependencies {
   readonly saveService?: AutoSaveService;
   readonly repository?: ProjectRepository;
   readonly maxRenderBytes?: number;
+  readonly transactionIdFactory?: () => string;
+  readonly transactionTagIdFactory?: () => string;
 }
 
 export interface AutomationSuccess<T> {
@@ -178,6 +180,8 @@ export class AutomationAdapter {
   private readonly saveService: AutoSaveService;
   private readonly repository?: ProjectRepository;
   private readonly maxRenderBytes: number;
+  private readonly transactionIdFactory?: () => string;
+  private readonly transactionTagIdFactory?: () => string;
   private readonly latestEvents = new WeakMap<ProjectContext, ProjectChangeEvent>();
   private readonly eventCleanups = new WeakMap<ProjectContext, () => void>();
   private readonly reloadSaveProofs = new WeakMap<ProjectContext, ReloadSaveProof>();
@@ -190,6 +194,8 @@ export class AutomationAdapter {
     this.repository = dependencies.repository;
     this.maxRenderBytes = normalizeRenderByteLimit(dependencies.maxRenderBytes ?? NaN)
       ?? RENDER_OBSERVATION_MAX_BYTES;
+    this.transactionIdFactory = dependencies.transactionIdFactory;
+    this.transactionTagIdFactory = dependencies.transactionTagIdFactory;
     this.requestHandlers = {
       'catalog.negotiate': async (input) => this.negotiateCatalog(input),
       'project.target': async (input) => this.captureTargetRevision(input),
@@ -322,7 +328,10 @@ export class AutomationAdapter {
       this.assertNegotiated();
       const target = readEditorTransactionTarget(input);
       const context = this.prepareContext(target);
-      const result = await executeEditorTransaction(context, input);
+      const result = await executeEditorTransaction(context, input, {
+        transactionIdFactory: this.transactionIdFactory,
+        tagIdFactory: this.transactionTagIdFactory,
+      });
       return success({
         ...result,
         target: { projectId: result.target.projectId },
@@ -451,6 +460,7 @@ export class AutomationAdapter {
     });
   }
 
+  // fallow-ignore-next-line complexity -- Undo/redo validation and event restoration share one adapter boundary.
   private async runHistoryTransition(
     input: unknown,
     phase: 'undo' | 'redo',
@@ -466,11 +476,17 @@ export class AutomationAdapter {
         return failure('invalid_state', false, { reason: `history_${phase}` });
       }
 
+      const previousEvent = this.latestEvents.get(context);
       this.latestEvents.delete(context);
-      if (phase === 'undo') {
-        await context.history.undo();
-      } else {
-        await context.history.redo();
+      try {
+        if (phase === 'undo') {
+          await context.history.undo();
+        } else {
+          await context.history.redo();
+        }
+      } catch (error) {
+        if (previousEvent) this.latestEvents.set(context, previousEvent);
+        throw error;
       }
 
       const event = this.latestEvents.get(context);

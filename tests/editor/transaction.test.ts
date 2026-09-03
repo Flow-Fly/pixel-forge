@@ -11,6 +11,10 @@ import {
   setActiveProjectContext,
   type ProjectContext,
 } from '../../src/stores/project-context';
+import {
+  TRANSACTION_PROVENANCE_MAX_STRING_LENGTH,
+  TRANSACTION_PROVENANCE_MAX_TRANSITIONS,
+} from '../../src/editor/catalog';
 
 const contexts: ProjectContext[] = [];
 const saveServices: AutoSaveService[] = [];
@@ -96,6 +100,7 @@ function captureState(context: ProjectContext) {
 }
 
 describe('Automation Adapter editor transactions', () => {
+  // fallow-ignore-next-line complexity -- This public journey asserts all durable transaction evidence in one scenario.
   it('commits one layer and tag child as one revision, event, history entry, and provenance', async () => {
     const context = createContext('project-a');
     const adapter = createAdapter(['project-a', context]);
@@ -129,6 +134,9 @@ describe('Automation Adapter editor transactions', () => {
           target: { projectId: 'project-a' },
           fromRevision: 0,
           toRevision: 1,
+          transitionCount: 1,
+          transitionsTruncated: false,
+          transitions: [{ phase: 'execute', fromRevision: 0, toRevision: 1 }],
           children: [
             { commandId: 'project.layer.state', operation: 'layer.visibility', domains: ['layer-state'] },
             { commandId: 'project.animation.frame-tag', operation: 'tag.create', domains: ['timeline'] },
@@ -148,6 +156,8 @@ describe('Automation Adapter editor transactions', () => {
     expect(context.project.revision.value).toBe(1);
     expect(events).toHaveLength(1);
     expect(isDirty(context)).toBe(true);
+    expect(Object.isFrozen(context.history.undoStack.value[0]?.provenance)).toBe(true);
+    expect(Object.isFrozen(context.history.undoStack.value[0]?.provenance?.transitions)).toBe(true);
 
     const observed = await adapter.request({
       operation: 'project.observe',
@@ -175,7 +185,17 @@ describe('Automation Adapter editor transactions', () => {
     expect(undo).toMatchObject({ ok: true, result: { revision: 2 } });
     expect(context.layers.layers.value[0]?.visible).toBe(true);
     expect(context.animation.tags.value).toEqual([]);
-    expect(context.history.redoStack.value[0]?.provenance).toEqual(transaction.provenance);
+    expect(context.history.redoStack.value[0]?.provenance).toMatchObject({
+      transactionId: transaction.provenance.transactionId,
+      fromRevision: 0,
+      toRevision: 2,
+      transitionCount: 2,
+      transitionsTruncated: false,
+      transitions: [
+        { phase: 'execute', fromRevision: 0, toRevision: 1 },
+        { phase: 'undo', fromRevision: 1, toRevision: 2 },
+      ],
+    });
 
     const redo = await adapter.request({
       operation: 'project.history.redo',
@@ -183,28 +203,51 @@ describe('Automation Adapter editor transactions', () => {
       expectedRevision: 2,
     });
     expect(redo).toMatchObject({ ok: true, result: { revision: 3 } });
-    expect(context.history.undoStack.value[0]?.provenance).toEqual(transaction.provenance);
+    const retainedProvenance = context.history.undoStack.value[0]?.provenance;
+    expect(retainedProvenance).toMatchObject({
+      transactionId: transaction.provenance.transactionId,
+      fromRevision: 0,
+      toRevision: 3,
+      transitionCount: 3,
+      transitionsTruncated: false,
+      transitions: [
+        { phase: 'execute', fromRevision: 0, toRevision: 1 },
+        { phase: 'undo', fromRevision: 1, toRevision: 2 },
+        { phase: 'redo', fromRevision: 2, toRevision: 3 },
+      ],
+    });
     expect(context.layers.layers.value[0]?.visible).toBe(false);
     expect(context.animation.tags.value).toHaveLength(1);
     expect(events).toHaveLength(3);
+
+    const cloned = structuredClone(retainedProvenance);
+    if (!cloned) throw new Error('Expected retained provenance');
+    (cloned.transitions as Array<{ phase: string }>)[0].phase = 'tampered';
+    (cloned.children as Array<{ operation: string }>)[0].operation = 'tampered';
+    expect(context.history.undoStack.value[0]?.provenance?.transitions[0]?.phase).toBe('execute');
+    expect(context.history.undoStack.value[0]?.provenance?.children[0]?.operation)
+      .toBe('layer.visibility');
   });
 
+  // fallow-ignore-next-line complexity -- This table-driven boundary test covers each distinct prevalidation failure.
   it('prevalidates both children and rejects failures without changing any durable state', async () => {
     const context = createContext('project-a');
     const adapter = createAdapter(['project-a', context]);
     const layer = context.layers.layers.value[0];
     if (!layer) throw new Error('Expected a layer');
+    const validRequest = transactionRequest('project-a', 0, layer.id);
+    const validChildren = validRequest.children as Array<Record<string, unknown>>;
     const cases: readonly [string, Record<string, unknown>][] = [
-      ['missing', { ...transactionRequest('project-a', 0, layer.id), children: [] }],
+      ['missing', { ...validRequest, children: [] }],
       ['duplicate', {
-        ...transactionRequest('project-a', 0, layer.id),
+        ...validRequest,
         children: [
           { command: 'project.layer.state', input: { kind: 'layer.visibility', layerId: layer.id, visible: false } },
           { command: 'project.layer.state', input: { kind: 'layer.lock', layerId: layer.id, locked: true } },
         ],
       }],
       ['child revision', {
-        ...transactionRequest('project-a', 0, layer.id),
+        ...validRequest,
         children: [{
           command: 'project.layer.state',
           input: {
@@ -213,13 +256,11 @@ describe('Automation Adapter editor transactions', () => {
             layerId: layer.id,
             visible: false,
           },
-        }, transactionRequest('project-a', 0, layer.id).children instanceof Array
-          ? (transactionRequest('project-a', 0, layer.id).children as unknown[])[1]
-          : {}],
+        }, validChildren[1] ?? {}],
       }],
-      ['stale', transactionRequest('project-a', 1, layer.id)],
+      ['stale', { ...validRequest, expectedRevision: 1 }],
       ['invalid tag', {
-        ...transactionRequest('project-a', 0, layer.id),
+        ...validRequest,
         children: [
           { command: 'project.layer.state', input: { kind: 'layer.visibility', layerId: layer.id, visible: false } },
           { command: 'project.animation.frame-tag', input: {
@@ -227,12 +268,67 @@ describe('Automation Adapter editor transactions', () => {
           } },
         ],
       }],
+      ['revision alias', { ...validRequest, revision: 0 }],
+      ['envelope extra', { ...validRequest, extra: true }],
+      ['target extra', {
+        ...validRequest,
+        target: { projectId: 'project-a', extra: true },
+      }],
+      ['child command alias', {
+        ...validRequest,
+        children: [
+          { commandId: 'project.layer.state', input: (validChildren[0]?.input as Record<string, unknown>) ?? {} },
+          validChildren[1] ?? {},
+        ],
+      }],
+      ['child inline payload', {
+        ...validRequest,
+        children: [
+          { command: 'project.layer.state', kind: 'layer.visibility', layerId: layer.id, visible: false },
+          validChildren[1] ?? {},
+        ],
+      }],
+      ['child extra', {
+        ...validRequest,
+        children: [
+          {
+            command: 'project.layer.state',
+            input: { kind: 'layer.visibility', layerId: layer.id, visible: false, extra: true },
+          },
+          validChildren[1] ?? {},
+        ],
+      }],
+      ['empty provenance', {
+        ...validRequest,
+        provenance: { ...validRequest.provenance, clientId: '' },
+      }],
+      ['wrong provenance type', {
+        ...validRequest,
+        provenance: { ...validRequest.provenance, clientId: 1 },
+      }],
+      ['oversized provenance', {
+        ...validRequest,
+        provenance: {
+          ...validRequest.provenance,
+          clientId: 'x'.repeat(TRANSACTION_PROVENANCE_MAX_STRING_LENGTH + 1),
+        },
+      }],
     ];
 
     for (const [name, input] of cases) {
       const before = captureState(context);
       const result = await adapter.request(input);
       expect(result.ok, name).toBe(false);
+      if (name === 'oversized provenance') {
+        expect(result).toEqual({
+          ok: false,
+          error: {
+            code: 'limit_exceeded',
+            retryable: false,
+            details: { reason: 'client_id', max: TRANSACTION_PROVENANCE_MAX_STRING_LENGTH },
+          },
+        });
+      }
       expect(captureState(context), name).toEqual(before);
       expect(context.layers.layers.value[0]?.visible, name).toBe(true);
       expect(context.animation.tags.value, name).toEqual([]);
@@ -276,6 +372,73 @@ describe('Automation Adapter editor transactions', () => {
     expect(isDirty(context)).toBe(false);
   });
 
+  it('keeps existing child validation bounds independent from provenance limits', async () => {
+    const context = createContext('project-a');
+    const adapter = createAdapter(['project-a', context]);
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a layer');
+    const request = transactionRequest('project-a', 0, layer.id);
+    const children = request.children as Array<Record<string, unknown>>;
+    const tagChild = children[1];
+    if (!tagChild || typeof tagChild.input !== 'object' || tagChild.input === null) {
+      throw new Error('Expected tag child');
+    }
+    const tagInput = tagChild.input as Record<string, unknown>;
+    const result = await adapter.request({
+      ...request,
+      children: [children[0], {
+        ...tagChild,
+        input: {
+          ...tagInput,
+          name: 'x'.repeat(TRANSACTION_PROVENANCE_MAX_STRING_LENGTH + 1),
+        },
+      }],
+    });
+
+    expect(result).toMatchObject({ ok: true, result: { revision: 1 } });
+    expect(context.animation.tags.value[0]?.name).toHaveLength(
+      TRANSACTION_PROVENANCE_MAX_STRING_LENGTH + 1,
+    );
+  });
+
+  it('rolls back when history bookkeeping fails after the command prepares its commit', async () => {
+    const context = createContext('project-a');
+    const adapter = createAdapter(['project-a', context]);
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a layer');
+    const events: unknown[] = [];
+    context.projectChangeEvents.addEventListener('project-change', (event) => {
+      events.push((event as CustomEvent).detail);
+    });
+    const before = captureState(context);
+    const refreshUsedColors = vi.spyOn(context.palette, 'refreshUsedColors')
+      .mockImplementationOnce(() => {
+        throw new Error('simulated history bookkeeping failure');
+      });
+
+    const result = await adapter.request(transactionRequest('project-a', 0, layer.id));
+
+    refreshUsedColors.mockRestore();
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'internal', retryable: true, details: { reason: 'history_bookkeeping' } },
+    });
+    expect(captureState(context)).toEqual(before);
+    expect(context.layers.layers.value[0]?.visible).toBe(true);
+    expect(context.animation.tags.value).toEqual([]);
+    expect(events).toEqual([]);
+    const observed = await adapter.request({
+      operation: 'project.observe',
+      target: { projectId: 'project-a' },
+      expectedRevision: 0,
+    });
+    expect(observed).toMatchObject({
+      ok: true,
+      result: { revision: 0, history: { undoCount: 0, redoCount: 0 } },
+    });
+    expect(isDirty(context)).toBe(false);
+  });
+
   it('returns a bounded non-retryable internal error when rollback itself cannot restore', async () => {
     const context = createContext('project-a');
     const adapter = createAdapter(['project-a', context]);
@@ -306,7 +469,7 @@ describe('Automation Adapter editor transactions', () => {
     setActiveProjectContext(first);
     setActiveProjectContext(second);
 
-    const result = await adapter.request(transactionRequest('project-a', 0, layer.id));
+    const result = await adapter.request(transactionRequest('project-a', 0, layer.id, 'tag-first'));
 
     expect(result).toMatchObject({ ok: true, result: { target: { projectId: 'project-a' } } });
     expect(first.layers.layers.value[0]?.visible).toBe(false);
@@ -315,5 +478,43 @@ describe('Automation Adapter editor transactions', () => {
     expect(second.layers.layers.value[0]?.visible).toBe(true);
     expect(second.animation.tags.value).toEqual([]);
     expect(second.project.revision.value).toBe(0);
+  });
+
+  it('bounds retained transition history without changing the transaction origin', async () => {
+    const context = createContext('project-a');
+    const adapter = createAdapter(['project-a', context]);
+    const layer = context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a layer');
+
+    await adapter.request(transactionRequest('project-a', 0, layer.id));
+    let revision = 1;
+    for (let index = 0; index < 10; index++) {
+      await adapter.request({
+        operation: 'project.history.undo',
+        target: { projectId: 'project-a' },
+        expectedRevision: revision,
+      });
+      revision++;
+      await adapter.request({
+        operation: 'project.history.redo',
+        target: { projectId: 'project-a' },
+        expectedRevision: revision,
+      });
+      revision++;
+    }
+
+    const provenance = context.history.undoStack.value[0]?.provenance;
+    expect(provenance).toMatchObject({
+      fromRevision: 0,
+      toRevision: revision,
+      transitionCount: 21,
+      transitionsTruncated: true,
+    });
+    expect(provenance?.transitions).toHaveLength(TRANSACTION_PROVENANCE_MAX_TRANSITIONS);
+    expect(provenance?.transitions.at(-1)).toEqual({
+      phase: 'redo',
+      fromRevision: revision - 1,
+      toRevision: revision,
+    });
   });
 });

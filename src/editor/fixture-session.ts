@@ -186,10 +186,14 @@ export class FixtureSession {
     this.saveService = options.saveService ?? createAutoSaveService({ repository: this.repository });
     const projectId = options.projectId ?? FIXTURE_PROJECT_ID;
     this.target = { projectId };
+    let transactionSequence = 0;
+    let tagSequence = 0;
     this.adapter = createAutomationAdapter({
       targetRegistry: new Map([[projectId, this.context]]),
       saveService: this.saveService,
       repository: this.repository,
+      transactionIdFactory: () => `fixture-transaction-${++transactionSequence}`,
+      transactionTagIdFactory: () => `fixture-tag-${++tagSequence}`,
     });
   }
 
