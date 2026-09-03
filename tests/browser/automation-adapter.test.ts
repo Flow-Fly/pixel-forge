@@ -45,6 +45,129 @@ afterEach(() => {
 });
 
 describe('Automation Adapter Fixture Session', () => {
+  it('observes a layer and composite Symbol Grid, then applies an atomic raster patch', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    context.project.id.value = 'symbol-grid-browser';
+    context.project.setSize(4, 4);
+    context.palette.setPalette(
+      ['#000000', '#ff0000', '#00ff00'],
+      false,
+      ['palette-black', 'palette-red', 'palette-green'],
+    );
+    const layer = context.layers.layers.value[0];
+    const frame = context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Expected a Symbol Grid layer and frame.');
+    const canvas = document.createElement('canvas');
+    canvas.width = 4;
+    canvas.height = 4;
+    const drawing = canvas.getContext('2d');
+    if (!drawing) throw new Error('Expected a Symbol Grid drawing context.');
+    drawing.fillStyle = '#ff0000';
+    drawing.fillRect(1, 1, 1, 1);
+    const cel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+    if (!cel) throw new Error('Expected a Symbol Grid cel.');
+    const indexBuffer = new Uint8Array(16);
+    indexBuffer[5] = 2;
+    context.layers.updateLayer(layer.id, { canvas });
+    context.animation.cels.value = new Map([[
+      context.animation.getCelKey(layer.id, frame.id),
+      { ...cel, canvas, indexBuffer },
+    ]]);
+    context.animation.syncLayerCanvases();
+
+    const saveService = createAutoSaveService({ repository: new FixtureProjectRepository() });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([['symbol-grid-browser', context]]),
+      saveService,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const layerObservation = await adapter.request({
+      operation: 'project.raster.observe',
+      target: { projectId: 'symbol-grid-browser' },
+      expectedRevision: 0,
+      source: { kind: 'layer', layerId: layer.id, frameId: frame.id, celId: cel.id },
+      region: { x: 0, y: 0, width: 4, height: 4 },
+    });
+    expect(layerObservation).toMatchObject({
+      ok: true,
+      result: {
+        type: 'project.raster.observation',
+        editable: true,
+        sourceKind: 'layer',
+        region: { x: 0, y: 0, width: 4, height: 4 },
+        rows: expect.any(Array),
+        legend: expect.arrayContaining([
+          expect.objectContaining({ paletteEntryId: 'palette-red', color: '#ff0000ff' }),
+        ]),
+        digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    if (!layerObservation.ok) return;
+    const observed = layerObservation.result as {
+      readonly source: { readonly celId: string };
+      readonly legend: readonly { readonly symbol: string; readonly paletteEntryId?: string; readonly color: string }[];
+      readonly digest: string;
+    };
+    const redSymbol = observed.legend.find((entry) => entry.paletteEntryId === 'palette-red')?.symbol;
+    if (!redSymbol) throw new Error('Expected a palette-backed Symbol Grid entry.');
+
+    const compositeObservation = await adapter.request({
+      operation: 'project.raster.observe',
+      target: { projectId: 'symbol-grid-browser' },
+      expectedRevision: 0,
+      source: { kind: 'composite', frameId: frame.id },
+      region: { x: 0, y: 0, width: 4, height: 4 },
+    });
+    expect(compositeObservation).toMatchObject({
+      ok: true,
+      result: { editable: false, sourceKind: 'composite', source: { kind: 'composite' } },
+    });
+
+    const transaction = await adapter.request({
+      operation: 'project.transaction.execute',
+      profile: 'raster-patch',
+      target: { projectId: 'symbol-grid-browser' },
+      expectedRevision: 0,
+      provenance: {
+        clientId: 'symbol-grid-client',
+        sessionId: 'symbol-grid-session',
+        runId: 'symbol-grid-run',
+        operationId: 'symbol-grid-patch',
+      },
+      children: [{
+        command: 'project.raster.patch',
+        input: {
+          kind: 'raster.patch',
+          layerId: layer.id,
+          frameId: frame.id,
+          celId: observed.source.celId,
+          region: { x: 0, y: 0, width: 4, height: 4 },
+          digest: observed.digest,
+          legend: [
+            { symbol: redSymbol, paletteEntryId: 'palette-red', color: '#ff0000ff' },
+            { symbol: 'g', color: '#00ff00ff' },
+          ],
+          patches: [
+            { x: 0, y: 0, width: 1, height: 1, rows: [redSymbol] },
+            { x: 2, y: 2, width: 1, height: 1, rows: ['g'] },
+          ],
+        },
+      }],
+    });
+    expect(transaction).toMatchObject({
+      ok: true,
+      result: {
+        revision: 1,
+        rasterPatch: { changedBounds: { x: 0, y: 0, width: 3, height: 3 } },
+      },
+    });
+    expect(context.history.undoStack.value).toHaveLength(1);
+    expect(context.project.revision.value).toBe(1);
+  });
+
   it('proves the catalog, explicit target, render, resize, recovery, and persistence journey', async () => {
     const session = createFixtureSession();
     sessions.push(session);
