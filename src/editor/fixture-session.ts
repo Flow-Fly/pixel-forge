@@ -10,6 +10,7 @@ import { PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../typ
 import {
   AutomationAdapter,
   createAutomationAdapter,
+  type AutomationFailure,
   type CatalogNegotiation,
   type CanvasResizeExecutionResult,
   type CanvasResizePreviewResult,
@@ -237,6 +238,22 @@ export interface FixtureAnimationJourneyResult extends FixtureAnimationLifecycle
   };
 }
 
+export interface FixtureRenderObservationJourneyResult {
+  readonly negotiation: CatalogNegotiation;
+  readonly composite: RenderObservation;
+  readonly layer: RenderObservation;
+  readonly solidBackground: RenderObservation;
+  readonly expectedDigest: RenderObservation;
+  readonly digestMismatch: AutomationFailure;
+  readonly inactiveTarget: RenderObservation;
+  readonly exact: {
+    readonly source: boolean;
+    readonly background: boolean;
+    readonly digest: boolean;
+    readonly document: boolean;
+  };
+}
+
 export interface FixtureAnimationCheckpoint {
   readonly observation: ProjectObservation;
   readonly renders: readonly RenderObservation[];
@@ -347,6 +364,96 @@ export class FixtureSession {
       expectedRevision: creation.revision,
     });
     return { creation, observation };
+  }
+
+  /**
+   * Exercise the explicit render observation boundary against real Canvas
+   * pixels while keeping the existing frame-only requests untouched.
+   */
+  // fallow-ignore-next-line complexity -- The fixture intentionally exercises every public observation checkpoint in one journey.
+  async runRenderObservation(): Promise<FixtureRenderObservationJourneyResult> {
+    await this.initialize();
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    const observation = await this.observeTarget(this.adapter, this.context.project.revision.value);
+    const frame = observation.frames.find((candidate) => candidate.id === observation.currentFrameId);
+    const layer = observation.layers.find((candidate) => candidate.type !== 'reference');
+    const cel = frame?.cels.find((candidate) => candidate.layerId === layer?.id);
+    if (!frame || !layer || !cel) throw new Error('Fixture render observation source is incomplete.');
+
+    const documentBefore = await this.serializeDocument();
+    const crop = { x: 0, y: 0, width: 2, height: 2 };
+    const compositeRequest = {
+      operation: 'project.render.observe',
+      target: this.target,
+      expectedRevision: observation.revision,
+      source: { kind: 'composite' as const, frameId: frame.id },
+      region: crop,
+      background: { kind: 'transparent' as const },
+      scale: 4,
+      expectedDigest: null,
+    };
+    const composite = await requestSuccess<RenderObservation>(this.adapter, compositeRequest);
+    const layerResult = await requestSuccess<RenderObservation>(this.adapter, {
+      ...compositeRequest,
+      source: { kind: 'layer', layerId: layer.id, frameId: frame.id, celId: cel.id },
+    });
+    const solidBackground = await requestSuccess<RenderObservation>(this.adapter, {
+      ...compositeRequest,
+      background: { kind: 'solid', color: '#0000ff' },
+      scale: 1,
+    });
+    const expectedDigest = await requestSuccess<RenderObservation>(this.adapter, {
+      ...compositeRequest,
+      expectedDigest: composite.digest,
+    });
+    const digestMismatch = await requestFailure(this.adapter, {
+      ...compositeRequest,
+      expectedDigest: '0'.repeat(64),
+    });
+
+    const inactiveContext = createProjectContext();
+    await this.saveService.runWithoutSaving(async () => {
+      await inactiveContext.project.loadProject(createFixtureProject());
+      inactiveContext.project.id.value = 'fixture-inactive';
+    }, inactiveContext);
+    seedFixturePixel(inactiveContext);
+    this.targetContexts.set('fixture-inactive', inactiveContext);
+    const inactiveTarget = await requestSuccess<RenderObservation>(this.adapter, {
+      ...compositeRequest,
+      target: { projectId: 'fixture-inactive' },
+      expectedRevision: inactiveContext.project.revision.value,
+    });
+    const documentAfter = await this.serializeDocument();
+
+    return {
+      negotiation,
+      composite,
+      layer: layerResult,
+      solidBackground,
+      expectedDigest,
+      digestMismatch,
+      inactiveTarget,
+      exact: {
+        source: composite.sourceKind === 'composite'
+          && layerResult.sourceKind === 'layer'
+          && layerResult.source.kind === 'layer'
+          && layerResult.source.layerId === layer.id
+          && layerResult.source.celId === cel.id,
+        background: solidBackground.background.kind === 'solid'
+          && solidBackground.pixels[3] === 255
+          && composite.background.kind === 'transparent'
+          && composite.pixels[3] === 0,
+        digest: composite.digest === expectedDigest.digest
+          && sameBytes(composite.pixels, expectedDigest.pixels)
+          && digestMismatch.error.code === 'revision_conflict'
+          && digestMismatch.error.retryable,
+        document: sameProjectFile(documentBefore, documentAfter)
+          && observation.revision === this.context.project.revision.value,
+      },
+    };
   }
 
   async run(): Promise<FixtureJourneyResult> {
@@ -1440,6 +1547,15 @@ async function requestSuccess<T>(adapter: AutomationAdapter, input: Record<strin
   return result.result as T;
 }
 
+async function requestFailure(
+  adapter: AutomationAdapter,
+  input: Record<string, unknown>,
+): Promise<AutomationFailure> {
+  const result = await adapter.request(input);
+  if (result.ok) throw new Error('Fixture adapter request unexpectedly succeeded.');
+  return result;
+}
+
 async function requestAnimationTransaction(
   adapter: AutomationAdapter,
   target: { readonly projectId: string },
@@ -1493,9 +1609,14 @@ function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
   return first.length === second.length && first.every((value, index) => value === second[index]);
 }
 
+// fallow-ignore-next-line complexity -- Exact fixture comparison keeps every public render field visible.
 function sameRender(first: RenderObservation, second: RenderObservation): boolean {
   return first.target.projectId === second.target.projectId
     && first.frameId === second.frameId
+    && JSON.stringify(first.source) === JSON.stringify(second.source)
+    && JSON.stringify(first.region) === JSON.stringify(second.region)
+    && JSON.stringify(first.background) === JSON.stringify(second.background)
+    && first.scale === second.scale
     && first.width === second.width
     && first.height === second.height
     && first.format === second.format

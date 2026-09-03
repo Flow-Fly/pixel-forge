@@ -20,15 +20,21 @@ import {
   normalizeRenderByteLimit,
   observeProject,
   renderProject,
+  renderProjectObservation,
+  type LegacyRenderObservation,
   type ProjectObservation,
   type ProjectObservationFailure,
   type ProjectObservationResult,
+  type RenderObservationRequest,
+  type RenderObservationResult,
   type RenderObservation,
 } from './observations';
 import {
   editorCatalog,
   RASTER_GRID_MAX_STRING_LENGTH,
   RASTER_OBSERVATION_ID,
+  RENDER_OBSERVATION_MAX_SCALE,
+  RENDER_OBSERVATION_MIN_SCALE,
   RENDER_OBSERVATION_MAX_BYTES,
 } from './catalog';
 import {
@@ -245,7 +251,7 @@ export class AutomationAdapter {
       'project.create': async (input) => this.createProject(input),
       'project.target': async (input) => this.captureTargetRevision(input),
       'project.observe': async (input) => this.observeProject(input),
-      'project.render.observe': async (input) => this.observeRender(input),
+      'project.render.observe': (input) => this.observeRenderRequest(input),
       [RASTER_OBSERVATION_ID]: async (input) => this.observeRaster(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
       [EDITOR_TRANSACTION_OPERATION_ID]: (input) => this.executeTransaction(input),
@@ -391,13 +397,31 @@ export class AutomationAdapter {
     }
   }
 
-  observeRender(input: unknown): AutomationResult<RenderObservation> {
+  /**
+   * Keep the original synchronous frame-only method for direct callers. The
+   * catalog request path uses the explicit asynchronous observation below.
+   */
+  observeRender(input: unknown): AutomationResult<LegacyRenderObservation> {
     try {
       this.assertNegotiated();
       const request = normalizeRenderRequest(input);
       const context = this.prepareContext(request.target);
       this.assertCurrentRevision(context, request.expectedRevision);
       const result = renderProject(context, request.target, request.frameId, this.maxRenderBytes);
+      if (isRenderObservationFailure(result)) return result;
+      return success(result);
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  async observeRenderRequest(input: unknown): Promise<AutomationResult<RenderObservation>> {
+    try {
+      this.assertNegotiated();
+      const request = normalizeRenderObservationRequest(input);
+      const context = this.prepareContext(request.target);
+      this.assertCurrentRevision(context, request.expectedRevision);
+      const result = await renderProjectObservation(context, request, this.maxRenderBytes);
       if (isRenderObservationFailure(result)) return result;
       return success(result);
     } catch (error) {
@@ -995,6 +1019,10 @@ function validateRasterTargetLength(target: ProjectTarget): void {
 
 function normalizeRenderRequest(input: unknown): ProjectRequestInput & { readonly frameId: string } {
   if (!isRecord(input)) throw adapterError('invalid_request', false, { reason: 'request' });
+  assertExactKeys(input, ['operation', 'target', 'expectedRevision', 'revision', 'frameId'], 'render_compatibility');
+  if (input.operation !== undefined && input.operation !== 'project.render.observe') {
+    throw adapterError('invalid_request', false, { reason: 'operation' });
+  }
   const frameId = input.frameId;
   if (typeof frameId !== 'string' || frameId.length === 0) {
     throw adapterError('invalid_request', false, { reason: 'frame_id' });
@@ -1003,6 +1031,145 @@ function normalizeRenderRequest(input: unknown): ProjectRequestInput & { readonl
     ...normalizeProjectRequest(input),
     frameId,
   };
+}
+
+// fallow-ignore-next-line complexity -- The adapter keeps legacy and explicit request validation at one public boundary.
+function normalizeRenderObservationRequest(input: unknown): RenderObservationRequest {
+  if (!isRecord(input)) throw adapterError('invalid_request', false, { reason: 'request' });
+  assertExactKeys(input, [
+    'operation',
+    'target',
+    'expectedRevision',
+    'revision',
+    'frameId',
+    'source',
+    'region',
+    'background',
+    'scale',
+    'expectedDigest',
+  ], 'render_request');
+  if (input.operation !== undefined && input.operation !== 'project.render.observe') {
+    throw adapterError('invalid_request', false, { reason: 'operation' });
+  }
+
+  const target = normalizeTarget(input.target);
+  const expectedRevision = normalizeRevision(input.expectedRevision ?? input.revision);
+  const hasExplicitShape = input.source !== undefined
+    || input.region !== undefined
+    || input.background !== undefined
+    || input.scale !== undefined
+    || input.expectedDigest !== undefined;
+  if (!hasExplicitShape) {
+    if (typeof input.frameId !== 'string' || input.frameId.length === 0) {
+      throw adapterError('invalid_request', false, { reason: 'frame_id' });
+    }
+    return {
+      target,
+      expectedRevision,
+      source: { kind: 'composite', frameId: normalizeRenderIdentity(input.frameId, 'frame_id') },
+      background: { kind: 'transparent' },
+      scale: RENDER_OBSERVATION_MIN_SCALE,
+      expectedDigest: null,
+    };
+  }
+
+  if (input.frameId !== undefined) {
+    throw adapterError('invalid_request', false, { reason: 'source' });
+  }
+  if (input.source === undefined || input.background === undefined
+      || input.scale === undefined || input.expectedDigest === undefined) {
+    throw adapterError('invalid_request', false, { reason: 'render_fields' });
+  }
+  return {
+    target,
+    expectedRevision,
+    source: normalizeRenderSource(input.source),
+    ...(input.region === undefined ? {} : { region: normalizeRenderRegion(input.region) }),
+    background: normalizeRenderBackground(input.background),
+    scale: normalizeRenderScale(input.scale),
+    expectedDigest: normalizeRenderDigest(input.expectedDigest),
+  };
+}
+
+function normalizeRenderSource(value: unknown): RenderObservationRequest['source'] {
+  if (!isRecord(value)) throw adapterError('invalid_request', false, { reason: 'source' });
+  if (value.kind === 'composite') {
+    assertExactKeys(value, ['kind', 'frameId'], 'composite_source');
+    return { kind: 'composite', frameId: normalizeRenderIdentity(value.frameId, 'frame_id') };
+  }
+  if (value.kind === 'layer') {
+    assertExactKeys(value, ['kind', 'layerId', 'frameId', 'celId'], 'layer_source');
+    return {
+      kind: 'layer',
+      layerId: normalizeRenderIdentity(value.layerId, 'layer_id'),
+      frameId: normalizeRenderIdentity(value.frameId, 'frame_id'),
+      ...(value.celId === undefined ? {} : { celId: normalizeRenderIdentity(value.celId, 'cel_id') }),
+    };
+  }
+  throw adapterError('invalid_request', false, { reason: 'source_kind' });
+}
+
+function normalizeRenderRegion(value: unknown): NonNullable<RenderObservationRequest['region']> {
+  if (!isRecord(value)) throw adapterError('invalid_request', false, { reason: 'region' });
+  assertExactKeys(value, ['x', 'y', 'width', 'height'], 'region');
+  const x = normalizeRenderInteger(value.x, 'region_x');
+  const y = normalizeRenderInteger(value.y, 'region_y');
+  const width = normalizeRenderInteger(value.width, 'region_width');
+  const height = normalizeRenderInteger(value.height, 'region_height');
+  if (width < 1 || height < 1) {
+    throw adapterError('bounds_exceeded', false, { reason: 'region_extent', min: 1 });
+  }
+  return { x, y, width, height };
+}
+
+function normalizeRenderBackground(value: unknown): RenderObservationRequest['background'] {
+  if (!isRecord(value)) throw adapterError('invalid_request', false, { reason: 'background' });
+  if (value.kind === 'transparent') {
+    assertExactKeys(value, ['kind'], 'transparent_background');
+    return { kind: 'transparent' };
+  }
+  if (value.kind === 'solid') {
+    assertExactKeys(value, ['kind', 'color'], 'solid_background');
+    if (typeof value.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(value.color)) {
+      throw adapterError('invalid_request', false, { reason: 'background_color' });
+    }
+    return { kind: 'solid', color: value.color.toLowerCase() };
+  }
+  throw adapterError('unsupported', false, { reason: 'background_kind' });
+}
+
+function normalizeRenderScale(value: unknown): number {
+  if (!Number.isSafeInteger(value)
+      || (value as number) < RENDER_OBSERVATION_MIN_SCALE
+      || (value as number) > RENDER_OBSERVATION_MAX_SCALE) {
+    throw adapterError('bounds_exceeded', false, {
+      reason: 'scale',
+      min: RENDER_OBSERVATION_MIN_SCALE,
+      max: RENDER_OBSERVATION_MAX_SCALE,
+    });
+  }
+  return value as number;
+}
+
+function normalizeRenderDigest(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+    throw adapterError('invalid_request', false, { reason: 'digest' });
+  }
+  return value;
+}
+
+function normalizeRenderIdentity(value: unknown, reason: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw adapterError('invalid_request', false, { reason });
+  }
+  if (value.length > 256) throw adapterError('limit_exceeded', false, { reason, max: 256 });
+  return value;
+}
+
+function normalizeRenderInteger(value: unknown, reason: string): number {
+  if (!Number.isSafeInteger(value)) throw adapterError('invalid_request', false, { reason });
+  return value as number;
 }
 
 function normalizeCanvasSizeRequest(input: unknown): CanvasSizeRequest {
@@ -1021,11 +1188,12 @@ function normalizeTarget(value: unknown): ProjectTarget {
   if (!isRecord(value) || typeof value.projectId !== 'string' || value.projectId.length === 0) {
     throw adapterError('invalid_request', false, { reason: 'target' });
   }
-  return { projectId: value.projectId };
+  assertExactKeys(value, ['projectId'], 'target');
+  return { projectId: normalizeRenderIdentity(value.projectId, 'target') };
 }
 
 function normalizeRevision(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw adapterError('invalid_request', false, { reason: 'expected_revision' });
   }
   return value;
@@ -1080,8 +1248,8 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 function isRenderObservationFailure(
-  value: RenderObservation | { readonly ok: false; readonly error: EditorError },
-): value is { readonly ok: false; readonly error: EditorError } {
+  value: RenderObservationResult | LegacyRenderObservation,
+): value is Extract<RenderObservationResult, { readonly ok: false }> {
   return 'ok' in value && value.ok === false;
 }
 

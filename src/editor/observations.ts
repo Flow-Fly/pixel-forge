@@ -1,7 +1,7 @@
 import type { ProjectContext } from '../stores/project-context';
 import type { ProjectChangeEvent } from '../stores/project-store';
 import type { Command } from '../stores/history-store';
-import type { Cel, FrameTag } from '../types/animation';
+import type { Cel, Frame, FrameTag } from '../types/animation';
 import { createArtworkCompositionPlan, drawArtworkComposition } from '../services/export-composition';
 import { autoSaveService } from '../services/auto-save';
 import {
@@ -20,6 +20,7 @@ import type {
   ProjectSaveSafetyObservation,
   ProjectTarget,
 } from './contracts';
+import { isRecord } from './contracts';
 import type { Layer } from '../types/layer';
 
 export interface ProjectLayerObservation {
@@ -165,6 +166,8 @@ export interface RenderObservation {
   readonly type: 'render.observation';
   readonly target: ProjectTarget;
   readonly revision: number;
+  /** Compatibility alias for the captured source frame. */
+  readonly frameId: string;
   readonly source: RenderObservationSource;
   readonly sourceKind: 'composite' | 'layer';
   readonly region: RenderRegion;
@@ -280,7 +283,7 @@ export function renderProject(
   target: ProjectTarget,
   frameId: string,
   maxBytes = RENDER_OBSERVATION_MAX_BYTES,
-): RenderObservation | RenderObservationFailure {
+): LegacyRenderObservation | RenderObservationFailure {
   const renderLimit = normalizeRenderByteLimit(maxBytes);
   if (renderLimit === null) {
     return {
@@ -381,6 +384,431 @@ export function renderProject(
       },
     };
   }
+}
+
+/**
+ * Capture a bounded, explicit render observation. The compositor receives
+ * only captured store values and the returned bytes never retain a canvas.
+ */
+export async function renderProjectObservation(
+  context: ProjectContext,
+  request: RenderObservationRequest,
+  maxBytes = RENDER_OBSERVATION_MAX_BYTES,
+): Promise<RenderObservationResult> {
+  try {
+    const renderLimit = normalizeRenderByteLimit(maxBytes);
+    if (renderLimit === null) {
+      throw renderObservationError('limit_exceeded', false, {
+        limitId: 'render-bytes-config',
+        max: RENDER_OBSERVATION_MAX_BYTES,
+      });
+    }
+
+    validateRenderRequest(request);
+    if (context.isDisposed || context.project.id.value !== request.target.projectId) {
+      throw renderObservationError('target_not_found', true);
+    }
+    if (context.project.revision.value !== request.expectedRevision) {
+      throw renderObservationError('revision_conflict', true, {
+        expectedRevision: request.expectedRevision,
+        currentRevision: context.project.revision.value,
+      });
+    }
+
+    const width = context.project.width.value;
+    const height = context.project.height.value;
+    validateCanvasDimensions(width, height);
+    const region = normalizeRenderRegion(request.region, width, height);
+    const regionBytes = region.width * region.height * 4;
+    if (!Number.isSafeInteger(regionBytes) || regionBytes > renderLimit) {
+      throw renderObservationError('limit_exceeded', false, {
+        limitId: 'render-bytes',
+        max: renderLimit,
+      });
+    }
+    if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') {
+      throw renderObservationError('internal', true, { reason: 'digest_support' });
+    }
+
+    const captured = captureRenderSource(context, request.source);
+    const background = normalizeRenderBackground(request.background);
+    const pixels = renderCapturedPixels(context, captured, region, background);
+    const source = captured.source;
+    const stride = region.width * 4;
+    const digest = await createRenderObservationDigest({
+      target: request.target,
+      revision: request.expectedRevision,
+      source,
+      region,
+      background,
+      scale: request.scale,
+      width: region.width,
+      height: region.height,
+      stride,
+      pixels,
+    });
+
+    revalidateCapturedRender(context, request, captured);
+    if (request.expectedDigest !== null && request.expectedDigest !== digest) {
+      throw renderObservationError('revision_conflict', true, { reason: 'render_digest' });
+    }
+
+    return {
+      type: 'render.observation',
+      target: { projectId: request.target.projectId },
+      revision: request.expectedRevision,
+      frameId: source.frameId,
+      source,
+      sourceKind: source.kind,
+      region,
+      background,
+      scale: request.scale,
+      width: region.width,
+      height: region.height,
+      format: 'rgba8',
+      stride,
+      pixels,
+      digest,
+    };
+  } catch (error) {
+    return { ok: false, error: toRenderObservationError(error) };
+  }
+}
+
+interface CapturedRenderSource {
+  readonly source: RenderObservationSource;
+  readonly frameId: string;
+  readonly frame: Frame;
+  readonly frames: readonly Frame[];
+  readonly layers: readonly Layer[];
+  readonly cels: ReadonlyMap<string, Cel>;
+  readonly layer?: Layer;
+  readonly cel?: Cel;
+}
+
+interface RenderDigestInput {
+  readonly target: ProjectTarget;
+  readonly revision: number;
+  readonly source: RenderObservationSource;
+  readonly region: RenderRegion;
+  readonly background: RenderBackgroundPolicy;
+  readonly scale: number;
+  readonly width: number;
+  readonly height: number;
+  readonly stride: number;
+  readonly pixels: Uint8Array;
+}
+
+// fallow-ignore-next-line complexity -- The explicit observation boundary validates each bounded field before any Canvas work.
+function validateRenderRequest(request: RenderObservationRequest): void {
+  if (!isRecord(request.target)
+      || typeof request.target.projectId !== 'string'
+      || request.target.projectId.length === 0
+      || request.target.projectId.length > 256) {
+    throw renderObservationError('invalid_request', false, { reason: 'target' });
+  }
+  if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) {
+    throw renderObservationError('invalid_request', false, { reason: 'expected_revision' });
+  }
+  if (!isRecord(request.source)) {
+    throw renderObservationError('invalid_request', false, { reason: 'source' });
+  }
+  if (request.source.kind === 'composite') {
+    validateRenderIdentity(request.source.frameId, 'frame_id');
+  } else if (request.source.kind === 'layer') {
+    validateRenderIdentity(request.source.layerId, 'layer_id');
+    validateRenderIdentity(request.source.frameId, 'frame_id');
+    if (request.source.celId !== undefined) {
+      validateRenderIdentity(request.source.celId, 'cel_id');
+    }
+  } else {
+    throw renderObservationError('invalid_request', false, { reason: 'source_kind' });
+  }
+  if (!Number.isSafeInteger(request.scale)
+      || request.scale < RENDER_OBSERVATION_MIN_SCALE
+      || request.scale > RENDER_OBSERVATION_MAX_SCALE) {
+    throw renderObservationError('bounds_exceeded', false, {
+      reason: 'scale',
+      min: RENDER_OBSERVATION_MIN_SCALE,
+      max: RENDER_OBSERVATION_MAX_SCALE,
+    });
+  }
+  if (!isRecord(request.background)) {
+    throw renderObservationError('invalid_request', false, { reason: 'background' });
+  }
+  normalizeRenderBackground(request.background);
+  if (request.expectedDigest !== null
+      && (typeof request.expectedDigest !== 'string' || !/^[0-9a-f]{64}$/.test(request.expectedDigest))) {
+    throw renderObservationError('invalid_request', false, { reason: 'digest' });
+  }
+  if (request.region !== undefined && !isRecord(request.region)) {
+    throw renderObservationError('invalid_request', false, { reason: 'region' });
+  }
+}
+
+function validateRenderIdentity(value: unknown, reason: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw renderObservationError('invalid_request', false, { reason });
+  }
+  if (value.length > 256) {
+    throw renderObservationError('limit_exceeded', false, { reason, max: 256 });
+  }
+}
+
+function validateCanvasDimensions(width: number, height: number): void {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
+    throw renderObservationError('invalid_state', false, { reason: 'canvas_shape' });
+  }
+}
+
+// fallow-ignore-next-line complexity -- Region validation keeps allocation and containment checks in one preflight.
+function normalizeRenderRegion(
+  requested: RenderRegion | undefined,
+  canvasWidth: number,
+  canvasHeight: number,
+): RenderRegion {
+  if (requested === undefined) {
+    return { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
+  }
+  const region = requested;
+  if (!Number.isSafeInteger(region.x) || !Number.isSafeInteger(region.y)
+      || !Number.isSafeInteger(region.width) || !Number.isSafeInteger(region.height)) {
+    throw renderObservationError('invalid_request', false, { reason: 'region_integer' });
+  }
+  const isFullProjectRegion = region.x === 0 && region.y === 0
+    && region.width === canvasWidth && region.height === canvasHeight;
+  if (region.width < 1 || region.height < 1
+      || (!isFullProjectRegion && (
+        region.width > RENDER_OBSERVATION_MAX_REGION_WIDTH
+        || region.height > RENDER_OBSERVATION_MAX_REGION_HEIGHT))) {
+    throw renderObservationError('bounds_exceeded', false, {
+      reason: 'region_extent',
+      max: Math.max(RENDER_OBSERVATION_MAX_REGION_WIDTH, RENDER_OBSERVATION_MAX_REGION_HEIGHT),
+    });
+  }
+  if (!isFullProjectRegion && region.width * region.height > RENDER_OBSERVATION_MAX_PIXELS) {
+    throw renderObservationError('limit_exceeded', false, {
+      reason: 'region_pixels',
+      max: RENDER_OBSERVATION_MAX_PIXELS,
+    });
+  }
+  if (region.x < 0 || region.y < 0
+      || region.x > canvasWidth - region.width
+      || region.y > canvasHeight - region.height) {
+    throw renderObservationError('bounds_exceeded', false, { reason: 'canvas_bounds' });
+  }
+  return { x: region.x, y: region.y, width: region.width, height: region.height };
+}
+
+function normalizeRenderBackground(value: RenderBackgroundPolicy): RenderBackgroundPolicy {
+  if (!isRecord(value) || value.kind === 'transparent') return { kind: 'transparent' };
+  if (value.kind === 'solid' && typeof value.color === 'string' && /^#[0-9a-f]{6}$/i.test(value.color)) {
+    return { kind: 'solid', color: value.color.toLowerCase() };
+  }
+  throw renderObservationError('invalid_request', false, { reason: 'background' });
+}
+
+// fallow-ignore-next-line complexity -- Source capture validates frame, layer, cel, and canvas identity together.
+function captureRenderSource(
+  context: ProjectContext,
+  source: RenderObservationSourceRequest,
+): CapturedRenderSource {
+  const frames = context.animation.frames.value;
+  const layers = context.layers.layers.value;
+  const cels = context.animation.cels.value;
+  const frame = frames.find((candidate) => candidate.id === source.frameId);
+  if (!frame) throw renderObservationError('target_not_found', true, { resource: 'frame' });
+
+  if (source.kind === 'composite') {
+    return {
+      source: { kind: 'composite', frameId: source.frameId },
+      frameId: source.frameId,
+      frame,
+      frames,
+      layers,
+      cels,
+    };
+  }
+
+  const layer = layers.find((candidate) => candidate.id === source.layerId);
+  if (!layer) throw renderObservationError('target_not_found', true, { resource: 'layer' });
+  if (layer.type === 'reference') {
+    throw renderObservationError('unsupported', false, { reason: 'reference_layer' });
+  }
+  if (layer.type !== 'image' && layer.type !== 'group' && layer.type !== 'text') {
+    throw renderObservationError('unsupported', false, { reason: 'layer_type' });
+  }
+  const cel = cels.get(context.animation.getCelKey(layer.id, source.frameId));
+  if (!cel) throw renderObservationError('target_not_found', true, { resource: 'cel' });
+  if (cel.layerId !== layer.id || cel.frameId !== source.frameId) {
+    throw renderObservationError('invalid_state', false, { reason: 'cel_identity' });
+  }
+  if (source.celId !== undefined && source.celId !== cel.id) {
+    throw renderObservationError('revision_conflict', true, { reason: 'cel_changed' });
+  }
+  validateSourceCanvas(cel);
+  return {
+    source: { kind: 'layer', layerId: layer.id, frameId: source.frameId, celId: cel.id },
+    frameId: source.frameId,
+    frame,
+    frames,
+    layers,
+    cels,
+    layer,
+    cel,
+  };
+}
+
+function validateSourceCanvas(cel: Cel): void {
+  if (!cel.canvas || !Number.isSafeInteger(cel.canvas.width) || !Number.isSafeInteger(cel.canvas.height)
+      || cel.canvas.width < 1 || cel.canvas.height < 1) {
+    throw renderObservationError('invalid_state', false, { reason: 'canvas_shape' });
+  }
+}
+
+function renderCapturedPixels(
+  context: ProjectContext,
+  captured: CapturedRenderSource,
+  region: RenderRegion,
+  background: RenderBackgroundPolicy,
+): Uint8Array {
+  let canvas: HTMLCanvasElement;
+  let drawing: CanvasRenderingContext2D | null;
+  try {
+    canvas = document.createElement('canvas');
+    canvas.width = region.width;
+    canvas.height = region.height;
+    drawing = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  } catch {
+    throw renderObservationError('internal', true, { reason: 'render_surface' });
+  }
+  if (!drawing) throw renderObservationError('invalid_state', false, { reason: 'render_context' });
+
+  try {
+    drawing.imageSmoothingEnabled = false;
+    drawing.clearRect(0, 0, region.width, region.height);
+    if (background.kind === 'solid') {
+      drawing.fillStyle = background.color;
+      drawing.fillRect(0, 0, region.width, region.height);
+    }
+    drawing.save();
+    try {
+      drawing.beginPath();
+      drawing.rect(0, 0, region.width, region.height);
+      drawing.clip();
+      drawing.translate(-region.x, -region.y);
+      drawArtworkComposition(
+        drawing,
+        createArtworkCompositionPlan({
+          frameId: captured.frameId,
+          layers: captured.layer ? [captured.layer] : captured.layers,
+          cels: captured.cels,
+          getCelKey: context.animation.getCelKey,
+        }),
+      );
+    } finally {
+      drawing.restore();
+    }
+    const imageData = drawing.getImageData(0, 0, region.width, region.height);
+    const pixels = new Uint8Array(imageData.data);
+    if (pixels.length !== region.width * region.height * 4) {
+      throw renderObservationError('invalid_state', false, { reason: 'render_readback' });
+    }
+    return pixels;
+  } catch (error) {
+    if (isRenderObservationError(error)) throw error;
+    throw renderObservationError('invalid_state', false, { reason: 'render_readback' });
+  }
+}
+
+async function createRenderObservationDigest(input: RenderDigestInput): Promise<string> {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') {
+    throw renderObservationError('internal', true, { reason: 'digest_support' });
+  }
+  const metadata = JSON.stringify({
+    representation: RENDER_OBSERVATION_REPRESENTATION_VERSION,
+    target: input.target,
+    revision: input.revision,
+    sourceKind: input.source.kind,
+    source: input.source,
+    region: input.region,
+    background: input.background,
+    scale: input.scale,
+    format: 'rgba8',
+    width: input.width,
+    height: input.height,
+    stride: input.stride,
+  });
+  const metadataBytes = new TextEncoder().encode(metadata);
+  const bytes = new Uint8Array(metadataBytes.length + 1 + input.pixels.length);
+  bytes.set(metadataBytes);
+  bytes[metadataBytes.length] = 0;
+  bytes.set(input.pixels, metadataBytes.length + 1);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+// fallow-ignore-next-line code-duplication -- Source revalidation intentionally repeats the boundary's identity checks.
+// fallow-ignore-next-line complexity -- Async render work must recheck every captured identity before returning bytes.
+function revalidateCapturedRender(
+  context: ProjectContext,
+  request: RenderObservationRequest,
+  captured: CapturedRenderSource,
+): void {
+  if (context.isDisposed || context.project.id.value !== request.target.projectId) {
+    throw renderObservationError('target_not_found', true);
+  }
+  const currentRevision = context.project.revision.value;
+  if (currentRevision !== request.expectedRevision) {
+    throw renderObservationError('revision_conflict', true, {
+      expectedRevision: request.expectedRevision,
+      currentRevision,
+    });
+  }
+  if (context.animation.frames.value !== captured.frames || context.layers.layers.value !== captured.layers
+      || context.animation.cels.value !== captured.cels) {
+    throw renderObservationError('revision_conflict', true, { reason: 'source_changed' });
+  }
+  const currentFrame = context.animation.frames.value.find((candidate) => candidate.id === captured.frameId);
+  if (currentFrame !== captured.frame) {
+    throw renderObservationError('revision_conflict', true, { reason: 'frame_changed' });
+  }
+  if (captured.layer) {
+    const currentLayer = context.layers.layers.value.find((candidate) => candidate.id === captured.layer!.id);
+    const currentCel = context.animation.cels.value.get(
+      context.animation.getCelKey(captured.layer.id, captured.frameId),
+    );
+    if (currentLayer !== captured.layer || currentCel !== captured.cel) {
+      throw renderObservationError('revision_conflict', true, { reason: 'source_changed' });
+    }
+  }
+}
+
+class RenderObservationError extends Error {
+  readonly editorError: EditorError;
+
+  constructor(editorError: EditorError) {
+    super(editorError.code);
+    this.name = 'RenderObservationError';
+    this.editorError = editorError;
+  }
+}
+
+function renderObservationError(
+  code: EditorError['code'],
+  retryable: boolean,
+  details?: Readonly<Record<string, string | number>>,
+): RenderObservationError {
+  return new RenderObservationError({ code, retryable, ...(details ? { details } : {}) });
+}
+
+function isRenderObservationError(error: unknown): error is RenderObservationError {
+  return error instanceof RenderObservationError;
+}
+
+function toRenderObservationError(error: unknown): EditorError {
+  if (isRenderObservationError(error)) return error.editorError;
+  return { code: 'internal', retryable: true, details: { reason: 'unexpected_failure' } };
 }
 
 export function normalizeRenderByteLimit(value: number): number | null {

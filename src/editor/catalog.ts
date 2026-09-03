@@ -1056,6 +1056,7 @@ export const renderObservationCatalog = Object.freeze({
   request: {
     target: { projectId: 'string' },
     expectedRevision: 'integer >= 0',
+    frameId: 'compatibility frame-only source identity',
     source: {
       oneOf: {
         composite: { kind: 'composite', frameId: 'non-empty bounded string' },
@@ -1082,6 +1083,7 @@ export const renderObservationCatalog = Object.freeze({
     type: 'render.observation',
     target: { projectId: 'string' },
     revision: 'integer >= 0',
+    frameId: 'source frame identity (compatibility alias)',
     source: 'exact normalized composite or layer/cel identity',
     sourceKind: 'composite | layer',
     region: 'normalized in-bounds region',
@@ -1195,6 +1197,7 @@ const automationOperationCatalog = Object.freeze([
     request: {
       target: { projectId: 'string' },
       expectedRevision: 'integer >= 0',
+      frameId: renderObservationCatalog.request.frameId,
       source: renderObservationCatalog.request.source,
       region: renderObservationCatalog.request.region,
       background: renderObservationCatalog.request.background,
