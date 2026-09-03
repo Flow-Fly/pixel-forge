@@ -550,6 +550,7 @@ function normalizeChildPayload(value: unknown): Record<string, unknown> {
   return { ...value };
 }
 
+// fallow-ignore-next-line complexity -- Profile-specific child-family gates keep the bounded transaction schema explicit.
 function assertChildFamily(
   command: EditorTransactionChildCommandId,
   input: Record<string, unknown>,

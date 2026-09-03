@@ -81,7 +81,6 @@ export const STATIC_STRUCTURE_MAX_FRAMES = 16;
 export const STATIC_STRUCTURE_MAX_CELS = STATIC_STRUCTURE_MAX_LAYERS * STATIC_STRUCTURE_MAX_FRAMES;
 export const STATIC_STRUCTURE_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
 export const STATIC_STRUCTURE_SELECTION_ERROR_REASON = 'selection_in_progress';
-// fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
 export const ANIMATION_FRAME_COMMAND_ID = 'project.animation.frame';
 export const ANIMATION_CEL_LINK_COMMAND_ID = 'project.animation.cel.link';

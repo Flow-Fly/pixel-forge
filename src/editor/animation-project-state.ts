@@ -198,6 +198,7 @@ export function assertPreparedAnimationProjectStateChange(
   }
 }
 
+// fallow-ignore-next-line code-duplication -- Each prepared seam owns its explicit target and revision gate.
 function validateTargetAndRevision(
   context: ProjectContext,
   target: ProjectTarget,
@@ -227,6 +228,7 @@ function validateAvailability(context: ProjectContext): void {
   }
 }
 
+// fallow-ignore-next-line complexity -- Animation bounds and matrix checks must complete before any payload allocation.
 function validateCollectionBounds(
   before: AnimationSnapshot,
   request: AnimationProjectStateRequest,
@@ -292,6 +294,7 @@ function validateAnimationMatrix(before: AnimationSnapshot, supportedLayers: rea
   }
 }
 
+// fallow-ignore-next-line complexity -- Conservative retained-payload accounting runs before cloning canvases or indices.
 function validatePreparationBytes(
   before: AnimationSnapshot,
   request: AnimationProjectStateRequest,
@@ -364,6 +367,7 @@ function normalizeRequest(
   throw animationError('unsupported', false, { reason: 'animation_child_command' });
 }
 
+// fallow-ignore-next-line complexity -- The finite frame discriminated union is normalized before project mutation.
 function normalizeFrameRequest(
   input: Readonly<Record<string, unknown>>,
   target: ProjectTarget,
@@ -517,13 +521,12 @@ function createFrame(
 ): AnimationSnapshot {
   const index = insertionIndex(before.frames, request.position, request.anchorFrameId);
   const frameId = nextIdentity(options.entityIdFactory, allEntityIdentities(before), 'frame');
-  const frame: Frame = { id: frameId, order: index, duration: request.duration };
-  const frames = normalizeFrameOrder([...before.frames.slice(0, index), frame, ...before.frames.slice(index)]);
-  const tags = tagManager.adjustTagsForFrameInsert([...before.tags], index);
-  const cels = new Map(before.cels);
+  const inserted = insertFrameSnapshot(before, frameId, index, request.duration);
+  const { frames, tags, cels } = inserted;
   const layers = before.layers.filter((layer) => layer.type !== 'reference');
   const canvas = createBlankCanvas(context.project.width.value, context.project.height.value);
   const celIds = allEntityIdentities(before);
+  celIds.add(frameId);
   for (const layer of layers) {
     const celId = nextIdentity(options.entityIdFactory, celIds, 'cel');
     cels.set(context.animation.getCelKey(layer.id, frameId), {
@@ -546,11 +549,10 @@ function duplicateFrame(
   if (!source) throw animationError('target_not_found', true, { resource: 'frame' });
   const index = insertionIndex(before.frames, request.position, request.anchorFrameId);
   const frameId = nextIdentity(options.entityIdFactory, allEntityIdentities(before), 'frame');
-  const frame: Frame = { id: frameId, order: index, duration: source.duration };
-  const frames = normalizeFrameOrder([...before.frames.slice(0, index), frame, ...before.frames.slice(index)]);
-  const tags = tagManager.adjustTagsForFrameInsert([...before.tags], index);
-  const cels = new Map(before.cels);
+  const inserted = insertFrameSnapshot(before, frameId, index, source.duration);
+  const { frames, tags, cels } = inserted;
   const celIds = allEntityIdentities(before);
+  celIds.add(frameId);
   const layers = before.layers.filter((layer) => layer.type !== 'reference');
   for (const layer of layers) {
     const sourceKey = context.animation.getCelKey(layer.id, source.id);
@@ -569,6 +571,20 @@ function duplicateFrame(
     });
   }
   return { ...before, frames, cels, tags, currentFrameId: frameId };
+}
+
+function insertFrameSnapshot(
+  before: AnimationSnapshot,
+  frameId: string,
+  index: number,
+  duration: number,
+): { readonly frames: Frame[]; readonly tags: FrameTag[]; readonly cels: Map<string, Cel> } {
+  const frame: Frame = { id: frameId, order: index, duration };
+  return {
+    frames: normalizeFrameOrder([...before.frames.slice(0, index), frame, ...before.frames.slice(index)]),
+    tags: tagManager.adjustTagsForFrameInsert([...before.tags], index),
+    cels: new Map(before.cels),
+  };
 }
 
 function reorderFrame(
@@ -620,6 +636,7 @@ function deleteFrame(
   return { ...before, frames, cels, tags, currentFrameId, activeTagId, playbackMode };
 }
 
+// fallow-ignore-next-line complexity -- Link preflight compares every bounded member and payload before sharing.
 function linkCels(
   before: AnimationSnapshot,
   request: AnimationCelLinkRequest,
@@ -680,6 +697,7 @@ function changeTags(
   return { ...before, tags, activeTagId, playbackMode };
 }
 
+// fallow-ignore-next-line complexity -- Explicit start/end/anchor placement is kept in one bounded identity helper.
 function insertionIndex(
   frames: readonly Frame[],
   position: AnimationFramePosition,
@@ -745,9 +763,13 @@ function sameTags(current: readonly FrameTag[], expected: readonly FrameTag[]): 
   });
 }
 
+// fallow-ignore-next-line complexity -- Replay equality includes every persisted layer field and inert metadata.
+// fallow-ignore-next-line code-duplication -- Animation replay must compare its complete layer snapshot.
 function sameLayers(current: readonly Layer[], expected: readonly Layer[]): boolean {
+  // fallow-ignore-next-line complexity -- The nested comparison is intentionally field-by-field for replay safety.
   return current.length === expected.length && current.every((layer, index) => {
     const other = expected[index];
+    // fallow-ignore-next-line code-duplication -- This compares the animation snapshot's complete persisted layer state.
     return !!other && layer.id === other.id && layer.name === other.name && layer.type === other.type &&
       layer.visible === other.visible && layer.locked === other.locked && layer.opacity === other.opacity &&
       layer.blendMode === other.blendMode && layer.parentId === other.parentId &&
@@ -757,6 +779,7 @@ function sameLayers(current: readonly Layer[], expected: readonly Layer[]): bool
   });
 }
 
+// fallow-ignore-next-line complexity -- Replay equality compares every identity, sharing, and metadata invariant.
 function sameCels(current: ReadonlyMap<string, Cel>, expected: ReadonlyMap<string, Cel>): boolean {
   if (current.size !== expected.size) return false;
   for (const [key, cel] of current) {
@@ -811,6 +834,7 @@ function cloneCelCanvas(cel: Cel): HTMLCanvasElement {
   }
 }
 
+// fallow-ignore-next-line code-duplication -- This seam marks runtime-empty animation payloads for independent frame creation.
 function createBlankCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;

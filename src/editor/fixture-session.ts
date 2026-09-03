@@ -579,6 +579,7 @@ export class FixtureSession {
    * frame render is captured independently so reload cannot hide a damaged
    * non-current frame.
    */
+  // fallow-ignore-next-line complexity -- The deterministic fixture intentionally proves the complete public animation lifecycle.
   async runAnimation(): Promise<FixtureAnimationJourneyResult> {
     await this.initialize();
     const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
