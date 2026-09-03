@@ -349,7 +349,7 @@ export const transactionCatalog = Object.freeze({
             kind: 'raster.patch',
             layerId: 'bounded non-empty string (1..256)',
             frameId: 'bounded non-empty string (1..256)',
-            celId: 'optional captured cel identity',
+            celId: 'captured cel identity',
             region: {
               x: 'integer',
               y: 'integer',
@@ -406,6 +406,15 @@ export const transactionCatalog = Object.freeze({
         beforeDigest: 'deterministic bounded digest',
         afterDigest: 'deterministic bounded digest',
       }],
+    },
+    rasterPatch: {
+      type: 'project.raster.patch',
+      changedBounds: {
+        x: 'integer',
+        y: 'integer',
+        width: 'positive integer',
+        height: 'positive integer',
+      },
     },
     provenance: {
       source: 'automation',
@@ -916,7 +925,7 @@ export const rasterPatchCatalog = Object.freeze({
     expectedRevision: 'integer >= 0',
     layerId: 'bounded non-empty string (1..256)',
     frameId: 'bounded non-empty string (1..256)',
-    celId: 'optional captured cel identity',
+    celId: 'captured cel identity',
     region: {
       x: 'integer',
       y: 'integer',
@@ -1193,21 +1202,6 @@ const automationOperationCatalog = Object.freeze([
     undo: transactionCatalog.undo,
     availability: transactionCatalog.availability,
     errors: transactionCatalog.errors,
-  },
-  {
-    id: RASTER_PATCH_COMMAND_ID,
-    kind: rasterPatchCatalog.kind,
-    target: rasterPatchCatalog.target,
-    requiresRevision: rasterPatchCatalog.requiresRevision,
-    request: rasterPatchCatalog.request,
-    result: rasterPatchCatalog.result,
-    limits: rasterPatchCatalog.limits,
-    affectedDomains: rasterPatchCatalog.affectedDomains,
-    availability: rasterPatchCatalog.availability,
-    undo: rasterPatchCatalog.undo,
-    privacy: rasterPatchCatalog.privacy,
-    revision: 'transaction expectedRevision must equal the captured project revision; execute advances it once',
-    errors: rasterPatchCatalog.errors,
   },
   {
     id: 'project.history.undo',

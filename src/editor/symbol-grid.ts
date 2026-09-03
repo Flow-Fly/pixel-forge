@@ -12,6 +12,7 @@ import {
   RASTER_GRID_MAX_REGION_WIDTH,
   RASTER_GRID_MAX_STRING_LENGTH,
   RASTER_GRID_REPRESENTATION_VERSION,
+  RASTER_PATCH_COMMAND_ID,
   RASTER_OBSERVATION_ID,
 } from './catalog';
 import { hasOnlyKeys, isRecord } from './contracts';
@@ -120,7 +121,7 @@ export interface RasterPatchRequest {
   readonly kind: typeof RASTER_PATCH_KIND;
   readonly layerId: string;
   readonly frameId: string;
-  readonly celId?: string;
+  readonly celId: string;
   readonly region: RasterRegion;
   readonly digest: string;
   readonly legend: readonly RasterPatchLegendEntry[];
@@ -128,6 +129,7 @@ export interface RasterPatchRequest {
 }
 
 export interface RasterPatchResult {
+  readonly type: typeof RASTER_PATCH_COMMAND_ID;
   readonly changedBounds: RasterRegion;
 }
 
@@ -139,9 +141,7 @@ export interface RasterPatchChildInput {
 interface RasterPixelRead {
   readonly pixels: Uint8ClampedArray;
   readonly indices?: Uint8Array;
-  readonly canvas: HTMLCanvasElement;
-  readonly drawing: CanvasRenderingContext2D;
-  readonly cel: Cel;
+  readonly celId?: string;
 }
 
 interface ResolvedPatchColor {
@@ -162,7 +162,6 @@ export interface PreparedRasterPatchChange {
   readonly frameId: string;
   readonly canvas: HTMLCanvasElement;
   readonly drawing: CanvasRenderingContext2D;
-  readonly originalIndexBuffer?: Uint8Array;
   readonly before: PreparedRasterPatchSnapshot;
   readonly after: PreparedRasterPatchSnapshot;
   readonly changedBounds: RasterRegion;
@@ -294,7 +293,6 @@ export async function prepareRasterPatchChange(
   validatePreparationBytes(canvas.width, canvas.height, Boolean(indexBuffer));
 
   const colors = resolvePatchLegend(context, request.legend);
-  validateIndexedPatchColors(colors, Boolean(indexBuffer));
   const beforePixels = readFullPixels(drawing, canvas);
   const beforeIndices = indexBuffer ? new Uint8Array(indexBuffer) : undefined;
   if (beforeIndices) validateIndexedPixels(beforePixels, beforeIndices, context);
@@ -319,7 +317,6 @@ export async function prepareRasterPatchChange(
     frameId: request.frameId,
     canvas,
     drawing,
-    ...(indexBuffer ? { originalIndexBuffer: indexBuffer } : {}),
     before: {
       pixels: beforePixels,
       ...(beforeIndices ? { indices: beforeIndices } : {}),
@@ -335,18 +332,6 @@ export async function prepareRasterPatchChange(
   };
 }
 
-function validateIndexedPatchColors(
-  colors: ReadonlyMap<string, ResolvedPatchColor>,
-  indexed: boolean,
-): void {
-  if (!indexed) return;
-  for (const { rgba } of colors.values()) {
-    if (rgba[3] !== 255) {
-      throw symbolGridError('unsupported', false, { reason: 'indexed_alpha' });
-    }
-  }
-}
-
 export function applyPreparedRasterPatchChange(
   context: ProjectContext,
   prepared: PreparedRasterPatchChange,
@@ -356,7 +341,6 @@ export function applyPreparedRasterPatchChange(
   const snapshot = phase === 'after' ? prepared.after : prepared.before;
   const currentIndexBuffer = getCurrentIndexBuffer(context, prepared);
   const previousPixels = readFullPixels(prepared.drawing, prepared.canvas);
-  const previousIndices = currentIndexBuffer ? new Uint8Array(currentIndexBuffer) : undefined;
   try {
     writeFullPixels(prepared.drawing, prepared.canvas, snapshot.pixels);
     applyIndexSnapshot(context, prepared, snapshot.indices);
@@ -364,7 +348,7 @@ export function applyPreparedRasterPatchChange(
   } catch (error) {
     try {
       writeFullPixels(prepared.drawing, prepared.canvas, previousPixels);
-      restoreIndexSnapshot(context, prepared, currentIndexBuffer, previousIndices);
+      restoreIndexSnapshot(context, prepared, currentIndexBuffer);
     } catch {
       throw symbolGridError('internal', false, { reason: 'raster_patch_rollback' });
     }
@@ -377,29 +361,17 @@ function applyIndexSnapshot(
   prepared: PreparedRasterPatchChange,
   indices: Uint8Array | undefined,
 ): void {
-  if (prepared.originalIndexBuffer) {
-    if (!indices || indices.length !== prepared.originalIndexBuffer.length) {
-      throw symbolGridError('internal', false, { reason: 'index_snapshot' });
-    }
-    prepared.originalIndexBuffer.set(indices);
-    return;
+  if (indices && indices.length !== prepared.canvas.width * prepared.canvas.height) {
+    throw symbolGridError('internal', false, { reason: 'index_snapshot' });
   }
-
-  setCurrentIndexBuffer(context, prepared, indices);
+  setCurrentIndexBuffer(context, prepared, indices ? new Uint8Array(indices) : undefined);
 }
 
 function restoreIndexSnapshot(
   context: ProjectContext,
   prepared: PreparedRasterPatchChange,
   previousIndexBuffer: Uint8Array | undefined,
-  previousIndices: Uint8Array | undefined,
 ): void {
-  if (prepared.originalIndexBuffer) {
-    if (previousIndices) prepared.originalIndexBuffer.set(previousIndices);
-    return;
-  }
-
-  if (previousIndexBuffer && previousIndices) previousIndexBuffer.set(previousIndices);
   setCurrentIndexBuffer(context, prepared, previousIndexBuffer);
 }
 
@@ -437,9 +409,11 @@ export function assertPreparedRasterPatchChange(
     throw symbolGridError('revision_conflict', true, { reason: 'cel_changed' });
   }
   const currentIndexBuffer = getCurrentIndexBuffer(context, prepared);
-  if (prepared.originalIndexBuffer !== currentIndexBuffer
-      && !isDerivedIndexBuffer(context, prepared, currentIndexBuffer)) {
+  if (currentIndexBuffer && currentIndexBuffer.length !== prepared.canvas.width * prepared.canvas.height) {
     throw symbolGridError('revision_conflict', true, { reason: 'index_buffer_changed' });
+  }
+  if (currentIndexBuffer && hasSharedIndexBuffer(context, cel, currentIndexBuffer)) {
+    throw symbolGridError('unsupported', false, { reason: 'shared_index_buffer' });
   }
   const currentPixels = readFullPixels(prepared.drawing, prepared.canvas);
   const expected = phase === 'after' ? prepared.after : prepared.before;
@@ -532,7 +506,7 @@ function normalizePatchRequest(input: Readonly<Record<string, unknown>>): Raster
     kind: RASTER_PATCH_KIND,
     layerId,
     frameId,
-    ...(input.celId === undefined ? {} : { celId: normalizeString(input.celId, 'cel_id') }),
+    celId: normalizeString(input.celId, 'cel_id'),
     region: normalizeRegion(input.region),
     digest,
     legend,
@@ -545,7 +519,8 @@ function normalizePatchLegendEntry(value: unknown): RasterPatchLegendEntry {
   if (!isRecord(value)) throw symbolGridError('invalid_request', false, { reason: 'legend_entry' });
   assertExactKeys(value, ['symbol', 'color', 'paletteEntryId', 'paletteIndex'], 'legend_entry');
   const symbol = value.symbol;
-  if (typeof symbol !== 'string' || Array.from(symbol).length !== 1 || symbol === '.') {
+  if (typeof symbol !== 'string' || symbol.length > RASTER_GRID_MAX_STRING_LENGTH
+      || Array.from(symbol).length !== 1 || symbol === '.') {
     throw symbolGridError('invalid_request', false, { reason: 'legend_symbol' });
   }
   const color = value.color === undefined ? undefined : normalizeRgba(value.color, 'legend_color');
@@ -600,7 +575,8 @@ function normalizePatchRectangle(value: unknown): RasterPatchRectangle {
     throw symbolGridError('invalid_request', false, { reason: 'patch_rows' });
   }
   const rows = value.rows.map((row) => {
-    if (typeof row !== 'string' || Array.from(row).length !== width || row.length > RASTER_GRID_MAX_STRING_LENGTH) {
+    if (typeof row !== 'string' || row.length > RASTER_GRID_MAX_STRING_LENGTH
+        || Array.from(row).length !== width) {
       throw symbolGridError('invalid_request', false, { reason: 'patch_row_width' });
     }
     return row;
@@ -756,16 +732,15 @@ async function readObservationPixels(
   }
   const pixels = readRegionPixels(drawing, request.region);
   const indices = indexBuffer ? readRegionIndices(indexBuffer, cel.canvas.width, request.region) : undefined;
-  if (indices) validateIndexedPixels(pixels, indices, context, true);
-  return { pixels, ...(indices ? { indices } : {}), canvas: cel.canvas, drawing, cel };
+  if (indices) validateIndexedPixels(pixels, indices, context);
+  return { pixels, ...(indices ? { indices } : {}), celId: cel.id };
 }
 
 function readCompositePixels(
   context: ProjectContext,
   request: RasterObservationRequest,
 ): RasterPixelRead {
-  const width = context.project.width.value;
-  const height = context.project.height.value;
+  const { width, height } = request.region;
   const bytes = width * height * 4;
   if (!Number.isSafeInteger(bytes) || bytes > RASTER_GRID_MAX_COMPOSITE_BYTES) {
     throw symbolGridError('limit_exceeded', false, { reason: 'composite_bytes', max: RASTER_GRID_MAX_COMPOSITE_BYTES });
@@ -773,25 +748,26 @@ function readCompositePixels(
   const canvas = createCanvas(width, height);
   const drawing = getDrawingContext(canvas);
   drawing.clearRect(0, 0, width, height);
-  drawArtworkComposition(
-    drawing,
-    createArtworkCompositionPlan({
-      frameId: request.source.frameId,
-      layers: context.layers.layers.value,
-      cels: context.animation.cels.value,
-      getCelKey: context.animation.getCelKey,
-    }),
-  );
+  drawing.save();
+  try {
+    drawing.beginPath();
+    drawing.rect(0, 0, width, height);
+    drawing.clip();
+    drawing.translate(-request.region.x, -request.region.y);
+    drawArtworkComposition(
+      drawing,
+      createArtworkCompositionPlan({
+        frameId: request.source.frameId,
+        layers: context.layers.layers.value,
+        cels: context.animation.cels.value,
+        getCelKey: context.animation.getCelKey,
+      }),
+    );
+  } finally {
+    drawing.restore();
+  }
   return {
-    pixels: readRegionPixels(drawing, request.region),
-    canvas,
-    drawing,
-    cel: {
-      id: '',
-      layerId: '',
-      frameId: request.source.frameId,
-      canvas,
-    },
+    pixels: readRegionPixels(drawing, { x: 0, y: 0, width, height }),
   };
 }
 
@@ -848,14 +824,18 @@ function buildSymbolGrid(
     }
     rows.push(row);
   }
-  const source: RasterObservationSource = request.source.kind === 'layer'
-    ? {
+  let source: RasterObservationSource;
+  if (request.source.kind === 'layer') {
+    if (!read.celId) throw symbolGridError('internal', true, { reason: 'layer_cel_identity' });
+    source = {
       kind: 'layer',
       layerId: request.source.layerId,
       frameId: request.source.frameId,
-      celId: read.cel.id,
-    }
-    : { kind: 'composite', frameId: request.source.frameId };
+      celId: read.celId,
+    };
+  } else {
+    source = { kind: 'composite', frameId: request.source.frameId };
+  }
   return { rows, legend: entries, source };
 }
 
@@ -1128,12 +1108,11 @@ function readRegionIndices(
   return indices;
 }
 
-// fallow-ignore-next-line complexity -- Exact palette/index coherence enumerates transparent and opaque invariants for every cell.
+// fallow-ignore-next-line complexity -- Exact palette/index coherence enumerates transparent and non-transparent invariants for every cell.
 function validateIndexedPixels(
   pixels: Uint8ClampedArray,
   indices: Uint8Array,
   context: ProjectContext,
-  regionOnly = false,
 ): void {
   const expectedPixels = indices.length * 4;
   if (pixels.length !== expectedPixels) {
@@ -1152,10 +1131,8 @@ function validateIndexedPixels(
     const color = entries[paletteIndex - 1]?.color;
     const rgb = color ? hexToRgb(color) : null;
     if (!rgb || pixels[offset] !== rgb.r || pixels[offset + 1] !== rgb.g || pixels[offset + 2] !== rgb.b
-        || pixels[offset + 3] !== 255) {
-      throw symbolGridError('invalid_state', false, {
-        reason: regionOnly ? 'indexed_content_incoherent' : 'indexed_content_incoherent',
-      });
+        || pixels[offset + 3] === 0) {
+      throw symbolGridError('invalid_state', false, { reason: 'indexed_content_incoherent' });
     }
   }
 }
@@ -1185,8 +1162,7 @@ function isDerivedIndexBuffer(
   prepared: PreparedRasterPatchChange,
   indexBuffer: Uint8Array | undefined,
 ): boolean {
-  if (prepared.originalIndexBuffer || !indexBuffer
-      || indexBuffer.length !== prepared.canvas.width * prepared.canvas.height) {
+  if (!indexBuffer || indexBuffer.length !== prepared.canvas.width * prepared.canvas.height) {
     return false;
   }
   try {
@@ -1225,34 +1201,7 @@ function parseRgba(value: string): readonly [number, number, number, number] {
 
 function toEditorError(error: unknown): EditorError {
   if (error instanceof SymbolGridError) return error.editorError;
-  if (isRecord(error) && isRecord(error.editorError)) {
-    return normalizeEditorError(error.editorError);
-  }
   return { code: 'internal', retryable: true, details: { reason: 'unexpected_failure' } };
-}
-
-function normalizeEditorError(value: Record<string, unknown>): EditorError {
-  const codes = new Set<EditorError['code']>([
-    'invalid_request',
-    'capability_denied',
-    'project_not_found',
-    'target_not_found',
-    'revision_conflict',
-    'invalid_state',
-    'bounds_exceeded',
-    'limit_exceeded',
-    'cancelled',
-    'unsupported',
-    'internal',
-  ]);
-  const code = codes.has(value.code as EditorError['code'])
-    ? value.code as EditorError['code']
-    : 'internal';
-  return {
-    code,
-    retryable: value.retryable === true,
-    ...(isRecord(value.details) ? { details: value.details as Readonly<Record<string, string | number>> } : {}),
-  };
 }
 
 function symbolGridError(

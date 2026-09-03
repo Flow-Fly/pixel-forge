@@ -27,6 +27,7 @@ import {
 } from './observations';
 import {
   editorCatalog,
+  RASTER_GRID_MAX_STRING_LENGTH,
   RASTER_OBSERVATION_ID,
   RENDER_OBSERVATION_MAX_BYTES,
 } from './catalog';
@@ -408,6 +409,7 @@ export class AutomationAdapter {
     try {
       this.assertNegotiated();
       const request = normalizeProjectRequest(input);
+      validateRasterTargetLength(request.target);
       const context = this.prepareContext(request.target);
       const result = await observeRaster(context, input);
       if (isRasterObservationFailure(result)) return result;
@@ -980,6 +982,15 @@ function normalizeProjectRequest(input: unknown): ProjectRequestInput {
     target: normalizeTarget(input.target),
     expectedRevision: normalizeRevision(input.expectedRevision ?? input.revision),
   };
+}
+
+function validateRasterTargetLength(target: ProjectTarget): void {
+  if (target.projectId.length > RASTER_GRID_MAX_STRING_LENGTH) {
+    throw adapterError('limit_exceeded', false, {
+      reason: 'target',
+      max: RASTER_GRID_MAX_STRING_LENGTH,
+    });
+  }
 }
 
 function normalizeRenderRequest(input: unknown): ProjectRequestInput & { readonly frameId: string } {

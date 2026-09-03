@@ -63,6 +63,7 @@ import {
   ANIMATION_FRAME_COMMAND_ID,
   CEL_UNLINK_COMMAND_ID,
   STRUCTURE_REFINEMENT_COMMAND_ID,
+  RASTER_GRID_MAX_STRING_LENGTH,
   RASTER_PATCH_COMMAND_ID,
 } from './catalog';
 
@@ -472,7 +473,7 @@ export function readEditorTransactionTarget(input: unknown): ProjectTarget {
   if (!isRecord(input)) {
     throw transactionError('invalid_request', false, { reason: 'request' });
   }
-  return normalizeTarget(input.target);
+  return normalizeTarget(input.target, input.profile === 'raster-patch');
 }
 
 /**
@@ -587,7 +588,12 @@ export async function executeEditorTransaction(
       ? { compositeEquality: structureRefinementPrepared.compositeEquality }
       : {}),
     ...(rasterPatchPrepared
-      ? { rasterPatch: { changedBounds: { ...rasterPatchPrepared.changedBounds } } }
+      ? {
+        rasterPatch: {
+          type: 'project.raster.patch',
+          changedBounds: { ...rasterPatchPrepared.changedBounds },
+        },
+      }
       : {}),
   };
 }
@@ -601,10 +607,10 @@ function normalizeTransactionRequest(input: unknown): EditorTransactionRequest {
   if (input.operation !== undefined && input.operation !== EDITOR_TRANSACTION_OPERATION_ID) {
     throw transactionError('invalid_request', false, { reason: 'operation' });
   }
-  const target = normalizeTarget(input.target);
+  const profile = normalizeProfile(input.profile);
+  const target = normalizeTarget(input.target, profile === 'raster-patch');
   const expectedRevision = normalizeRevision(input.expectedRevision);
   const provenance = normalizeProvenance(input.provenance);
-  const profile = normalizeProfile(input.profile);
   const children = normalizeChildren(input.children, profile);
 
   return { profile, target, expectedRevision, provenance, children };
@@ -811,11 +817,17 @@ function normalizeProvenance(value: unknown): AutomationTransactionProvenanceInp
   };
 }
 
-function normalizeTarget(value: unknown): ProjectTarget {
+function normalizeTarget(value: unknown, enforceRasterBound = false): ProjectTarget {
   if (!isRecord(value) || typeof value.projectId !== 'string' || value.projectId.length === 0) {
     throw transactionError('invalid_request', false, { reason: 'target' });
   }
   assertExactKeys(value, ['projectId'], 'target');
+  if (enforceRasterBound && value.projectId.length > RASTER_GRID_MAX_STRING_LENGTH) {
+    throw transactionError('limit_exceeded', false, {
+      reason: 'target',
+      max: RASTER_GRID_MAX_STRING_LENGTH,
+    });
+  }
   return { projectId: value.projectId };
 }
 

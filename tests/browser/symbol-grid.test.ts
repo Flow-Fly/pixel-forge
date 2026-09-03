@@ -14,9 +14,12 @@ afterEach(() => {
   for (const context of contexts.splice(0)) context.dispose();
 });
 
+// fallow-ignore-next-line complexity -- These public boundary cases intentionally share one browser fixture and lifecycle.
 describe('Symbol Grid raster boundary', () => {
+  // fallow-ignore-next-line complexity -- This public journey proves palette, alpha, and fresh-buffer undo/redo behavior together.
   it('round-trips transparency and explicit RGBA without mutating the palette', async () => {
     const fixture = createRasterFixture();
+    const initialIndexBuffer = fixture.cel.indexBuffer;
     const beforePalette = fixture.context.palette.getProjectPaletteEntries();
     const before = await observeLayer(fixture);
     const red = before.legend.find((entry) => entry.paletteEntryId === 'palette-red');
@@ -28,25 +31,32 @@ describe('Symbol Grid raster boundary', () => {
     expect(clear).toMatchObject({ ok: true, result: { revision: 1 } });
     const cleared = await observeLayer(fixture, 1);
     expect(cleared.rows[1]?.[1]).toBe('.');
-    expect(fixture.cel.indexBuffer?.[5]).toBe(0);
+    const clearedCel = currentCel(fixture);
+    expect(clearedCel?.indexBuffer?.[5]).toBe(0);
+    expect(clearedCel?.indexBuffer).not.toBe(initialIndexBuffer);
+    expect(initialIndexBuffer?.[5]).toBe(2);
 
     const green = await patch(fixture, cleared, [{ x: 2, y: 2, width: 1, height: 1, rows: ['g'] }], [
       { symbol: 'g', color: '#00ff00ff' },
     ]);
     expect(green).toMatchObject({ ok: true, result: { revision: 2 } });
-    expect(fixture.cel.indexBuffer?.[10]).toBe(3);
+    const greenCel = currentCel(fixture);
+    expect(greenCel?.indexBuffer?.[10]).toBe(3);
+    expect(greenCel?.indexBuffer).not.toBe(clearedCel?.indexBuffer);
     expect(fixture.context.palette.getProjectPaletteEntries()).toEqual(beforePalette);
 
     const undo = await fixture.adapter.request({
       operation: 'project.history.undo', target: fixture.target, expectedRevision: 2,
     });
     expect(undo).toMatchObject({ ok: true, result: { revision: 3 } });
-    expect(fixture.cel.indexBuffer?.[10]).toBe(0);
+    expect(currentCel(fixture)?.indexBuffer?.[10]).toBe(0);
+    expect(greenCel?.indexBuffer?.[10]).toBe(3);
     const redo = await fixture.adapter.request({
       operation: 'project.history.redo', target: fixture.target, expectedRevision: 3,
     });
     expect(redo).toMatchObject({ ok: true, result: { revision: 4 } });
-    expect(fixture.cel.indexBuffer?.[10]).toBe(3);
+    expect(currentCel(fixture)?.indexBuffer?.[10]).toBe(3);
+    expect(currentCel(fixture)?.indexBuffer).not.toBe(greenCel?.indexBuffer);
   });
 
   // fallow-ignore-next-line complexity -- The public no-index journey proves alpha persistence, replay, and exact absence together.
@@ -93,6 +103,83 @@ describe('Symbol Grid raster boundary', () => {
     expect(currentCel(fixture)?.indexBuffer).toBeUndefined();
   });
 
+  it('renders a nonzero-origin composite into the requested region', async () => {
+    const fixture = createRasterFixture('composite-region-raster-project');
+    const result = await fixture.adapter.request({
+      operation: 'project.raster.observe',
+      target: fixture.target,
+      expectedRevision: 0,
+      source: { kind: 'composite', frameId: fixture.frame.id },
+      region: { x: 1, y: 1, width: 2, height: 2 },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        source: { kind: 'composite', frameId: fixture.frame.id },
+        region: { x: 1, y: 1, width: 2, height: 2 },
+        rows: ['a.', '..'],
+      },
+    });
+  });
+
+  it('bounds raster targets before resolution and strings before symbol expansion', async () => {
+    const fixture = createRasterFixture('raster-boundary-project');
+    let resolutionCount = 0;
+    const adapter = createAutomationAdapter({
+      targetRegistry: () => {
+        resolutionCount++;
+        return fixture.context;
+      },
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const oversizedTarget = { projectId: 't'.repeat(257) };
+    const observation = await adapter.request({
+      operation: 'project.raster.observe',
+      target: oversizedTarget,
+      expectedRevision: 0,
+    });
+    expect(observation).toMatchObject({
+      ok: false,
+      error: { code: 'limit_exceeded', details: { reason: 'target', max: 256 } },
+    });
+    const transaction = await adapter.request({
+      operation: 'project.transaction.execute',
+      profile: 'raster-patch',
+      target: oversizedTarget,
+      expectedRevision: 0,
+      provenance: {
+        clientId: 'test-client',
+        sessionId: 'test-session',
+        runId: 'test-run',
+        operationId: 'test-patch',
+      },
+      children: [],
+    });
+    expect(transaction).toMatchObject({
+      ok: false,
+      error: { code: 'limit_exceeded', details: { reason: 'target', max: 256 } },
+    });
+    expect(resolutionCount).toBe(0);
+
+    const before = await observeLayer(fixture);
+    const red = before.legend.find((entry) => entry.paletteEntryId === 'palette-red');
+    if (!red) throw new Error('Expected the red legend entry.');
+    const oversizedRow = await patch(fixture, before, [
+      { x: 0, y: 0, width: 1, height: 1, rows: ['x'.repeat(257)] },
+    ], [{ symbol: red.symbol, paletteEntryId: 'palette-red' }]);
+    expect(oversizedRow).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'patch_row_width' } },
+    });
+    const oversizedSymbol = await patch(fixture, before, [
+      { x: 0, y: 0, width: 1, height: 1, rows: ['.'] },
+    ], [{ symbol: 'x'.repeat(257), paletteEntryId: 'palette-red' }]);
+    expect(oversizedSymbol).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'legend_symbol' } },
+    });
+  });
+
   it('rejects malformed rows, symbols, overlap, and bounds before history mutation', async () => {
     const fixture = createRasterFixture();
     const before = await observeLayer(fixture);
@@ -122,9 +209,74 @@ describe('Symbol Grid raster boundary', () => {
     ], [{ symbol: red.symbol, paletteEntryId: 'palette-red', color: red.color }]);
     expect(ambiguousLegend).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
     expect(captureFixtureState(fixture)).toEqual(baseline);
+
+    const missingCelId = await patch(fixture, before, [
+      { x: 0, y: 0, width: 1, height: 1, rows: [red.symbol] },
+    ], [{ symbol: red.symbol, paletteEntryId: 'palette-red' }], { omitCelId: true });
+    expect(missingCelId).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'cel_id' } },
+    });
+    expect(captureFixtureState(fixture)).toEqual(baseline);
   });
 
-  it('rejects stale digests, missing colors, and incoherent indexed payloads atomically', async () => {
+  // fallow-ignore-next-line complexity -- The public journey proves alpha, fresh-buffer, rebuild, and persistence invariants together.
+  it('supports partial indexed alpha through rebuild and save-load', async () => {
+    const alphaFixture = createRasterFixture('partial-alpha-raster-project');
+    const alphaBefore = await observeLayer(alphaFixture);
+    const originalAlphaIndexBuffer = currentCel(alphaFixture)?.indexBuffer;
+    const originalAlphaIndices = Array.from(originalAlphaIndexBuffer ?? []);
+    const partialIndexedAlpha = await patch(alphaFixture, alphaBefore, [
+      { x: 0, y: 0, width: 1, height: 1, rows: ['p'] },
+    ], [{ symbol: 'p', color: '#ff000080' }]);
+    expect(partialIndexedAlpha).toMatchObject({
+      ok: true,
+      result: {
+        revision: 1,
+        rasterPatch: {
+          type: 'project.raster.patch',
+          changedBounds: { x: 0, y: 0, width: 1, height: 1 },
+        },
+      },
+    });
+    const partialAlphaCel = currentCel(alphaFixture);
+    expect(partialAlphaCel?.indexBuffer).not.toBe(originalAlphaIndexBuffer);
+    expect(Array.from(originalAlphaIndexBuffer ?? [])).toEqual(originalAlphaIndices);
+    expect(partialAlphaCel?.indexBuffer?.[0]).toBe(2);
+    const partialAlphaObservation = await observeLayer(alphaFixture, 1);
+    expect(partialAlphaObservation.rows[0]?.[0]).toBe('a');
+    expect(partialAlphaObservation.legend).toContainEqual(expect.objectContaining({
+      symbol: 'a',
+      color: '#ff000080',
+      paletteEntryId: 'palette-red',
+      paletteIndex: 2,
+    }));
+
+    alphaFixture.context.animation.rebuildAllCelCanvases();
+    const rebuiltAlphaObservation = await observeLayer(alphaFixture, 1);
+    expect(rebuiltAlphaObservation.legend).toContainEqual(expect.objectContaining({
+      color: '#ff000080',
+      paletteEntryId: 'palette-red',
+      paletteIndex: 2,
+    }));
+    const savedAlpha = await alphaFixture.context.project.saveProject();
+    const reopenedAlpha = createProjectContext();
+    contexts.push(reopenedAlpha);
+    await reopenedAlpha.project.loadProject(savedAlpha);
+    const reopenedAlphaLayer = reopenedAlpha.layers.layers.value[0];
+    const reopenedAlphaFrame = reopenedAlpha.animation.frames.value[0];
+    const reopenedAlphaCel = reopenedAlphaLayer && reopenedAlphaFrame
+      ? reopenedAlpha.animation.cels.value.get(
+        reopenedAlpha.animation.getCelKey(reopenedAlphaLayer.id, reopenedAlphaFrame.id),
+      )
+      : undefined;
+    expect(reopenedAlphaCel?.indexBuffer?.[0]).toBe(2);
+    expect(reopenedAlphaCel?.canvas.getContext('2d')?.getImageData(0, 0, 1, 1).data).toEqual(
+      new Uint8ClampedArray([255, 0, 0, 128]),
+    );
+  });
+
+  it('rejects stale, missing, or incoherent payloads atomically', async () => {
     const fixture = createRasterFixture();
     const before = await observeLayer(fixture);
     const red = before.legend.find((entry) => entry.paletteEntryId === 'palette-red');
@@ -134,22 +286,17 @@ describe('Symbol Grid raster boundary', () => {
       { x: 0, y: 0, width: 1, height: 1, rows: [red.symbol] },
     ], [{ symbol: red.symbol, paletteEntryId: 'palette-red' }]);
     expect(stale).toMatchObject({ ok: false, error: { code: 'revision_conflict' } });
+    expect(captureFixtureState(fixture)).toEqual(baseline);
 
     const missingColor = await patch(fixture, before, [
       { x: 0, y: 0, width: 1, height: 1, rows: ['x'] },
     ], [{ symbol: 'x', color: '#112233ff' }]);
     expect(missingColor).toMatchObject({ ok: false, error: { code: 'target_not_found' } });
-
-    const partialIndexedAlpha = await patch(fixture, before, [
-      { x: 0, y: 0, width: 1, height: 1, rows: ['p'] },
-    ], [{ symbol: 'p', color: '#ff000080' }]);
-    expect(partialIndexedAlpha).toMatchObject({
-      ok: false,
-      error: { code: 'unsupported', details: { reason: 'indexed_alpha' } },
-    });
     expect(captureFixtureState(fixture)).toEqual(baseline);
 
-    fixture.cel.indexBuffer![0] = 2;
+    const currentFixtureCel = currentCel(fixture);
+    if (!currentFixtureCel?.indexBuffer) throw new Error('Expected indexed fixture data.');
+    currentFixtureCel.indexBuffer[0] = 2;
     const incoherent = await fixture.adapter.request({
       operation: 'project.raster.observe',
       target: fixture.target,
@@ -342,6 +489,7 @@ async function patch(
   observation: { readonly revision: number; readonly source: { readonly celId: string }; readonly digest: string; readonly region: unknown },
   patches: readonly Readonly<Record<string, unknown>>[],
   legend: readonly Readonly<Record<string, unknown>>[],
+  options: { readonly omitCelId?: boolean } = {},
 ) {
   return fixture.adapter.request({
     operation: 'project.transaction.execute',
@@ -355,7 +503,7 @@ async function patch(
         kind: 'raster.patch',
         layerId: fixture.layer.id,
         frameId: fixture.frame.id,
-        celId: observation.source.celId,
+        ...(options.omitCelId ? {} : { celId: observation.source.celId }),
         region: observation.region,
         digest: observation.digest,
         legend,
@@ -372,11 +520,12 @@ function captureFixtureState(fixture: RasterFixture): {
   readonly palette: unknown;
   readonly history: number;
 } {
-  const drawing = fixture.cel.canvas.getContext('2d');
+  const cel = currentCel(fixture);
+  const drawing = cel?.canvas.getContext('2d');
   if (!drawing) throw new Error('Fixture lost its drawing context.');
   return {
     revision: fixture.context.project.revision.value,
-    indices: Array.from(fixture.cel.indexBuffer ?? []),
+    indices: Array.from(cel?.indexBuffer ?? []),
     pixels: Array.from(drawing.getImageData(0, 0, fixture.width, fixture.height).data),
     palette: fixture.context.palette.getProjectPaletteEntries(),
     history: fixture.context.history.undoStack.value.length,

@@ -97,7 +97,6 @@ describe('AutomationAdapter', () => {
       'project.raster.observe',
       'project.canvas.resize',
       'project.transaction.execute',
-      'project.raster.patch',
       'project.history.undo',
       'project.history.redo',
       'project.save',
@@ -165,6 +164,17 @@ describe('AutomationAdapter', () => {
             },
           }),
         }),
+      },
+      result: {
+        rasterPatch: {
+          type: 'project.raster.patch',
+          changedBounds: {
+            x: 'integer',
+            y: 'integer',
+            width: 'positive integer',
+            height: 'positive integer',
+          },
+        },
       },
       limits: {
         children: {
