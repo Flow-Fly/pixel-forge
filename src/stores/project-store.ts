@@ -284,6 +284,28 @@ class ProjectStore {
     this.dirtyRect.requestFullRedraw();
   }
 
+  /** Apply one prepared animation snapshot without publishing a partial state. */
+  applyTimelineAnimationState(
+    frames: readonly Frame[],
+    cels: Map<string, Cel>,
+    tags: readonly import('../types/animation').FrameTag[],
+    currentFrameId: string,
+    activeTagId: string | null,
+    playbackMode: 'all' | 'tag',
+  ) {
+    this.animation.frames.value = frames.map((frame) => ({ ...frame }));
+    this.animation.cels.value = cels;
+    this.animation.tags.value = tags.map((tag) => ({ ...tag }));
+    this.animation.currentFrameId.value = currentFrameId;
+    if (playbackMode === 'tag' && activeTagId) {
+      this.animation.setPlaybackMode('tag', activeTagId);
+    } else {
+      this.animation.setPlaybackMode('all');
+    }
+    this.syncCurrentFrameLayerCanvases(cels);
+    this.dirtyRect.requestFullRedraw();
+  }
+
   /**
    * Apply a fully prepared static structure without firing palette events.
    * The enclosing history command publishes the single project transition.

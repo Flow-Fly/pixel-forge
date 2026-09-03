@@ -157,6 +157,109 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.exact).toEqual({ document: true, render: true });
   });
 
+  it('proves the bounded one-child animation journey through canvas sharing and reopen', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+
+    const journey = await session.runAnimation();
+
+    expect(journey.negotiation.version).toBe('1.0');
+    expect(journey.initial.observation.frames).toHaveLength(1);
+    expect(journey.operations.create.revision).toBe(1);
+    expect(journey.operations.duplicate.revision).toBe(2);
+    expect(journey.operations.duration.revision).toBe(3);
+    expect(journey.operations.reorder.revision).toBe(4);
+    expect(journey.operations.link.revision).toBe(5);
+    expect(journey.operations.unlink.revision).toBe(6);
+    expect(journey.operations.firstTag.revision).toBe(7);
+    expect(journey.operations.secondTag.revision).toBe(8);
+    expect(journey.afterOperations.observation.frames).toHaveLength(3);
+    expect(journey.afterOperations.observation.tags.map((tag) => tag.name)).toEqual([
+      'Fixture Intro',
+      'Fixture Motion',
+    ]);
+    expect(journey.afterOperations.renders).toHaveLength(3);
+    expect(journey.afterUndo.transition.revision).toBe(9);
+    expect(journey.afterRedo.transition.revision).toBe(10);
+    expect(journey.reopened.reload.revision).toBe(10);
+    expect(journey.reopened.renders).toHaveLength(3);
+    expect(journey.exact).toEqual({ document: true, render: true, structure: true });
+  });
+
+  it('rejects unequal cel payloads, last-frame deletion, and wrong animation targets atomically', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    context.project.id.value = 'animation-rejections';
+    const saveService = createAutoSaveService({ repository: new FixtureProjectRepository() });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([['animation-rejections', context]]),
+      saveService,
+      entityIdFactory: (() => {
+        let index = 0;
+        return () => `rejection-entity-${++index}`;
+      })(),
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const frame = context.animation.frames.value[0];
+    const layer = context.layers.layers.value.find((candidate) => candidate.type !== 'reference');
+    if (!frame || !layer) throw new Error('Expected animation fixture state.');
+    const beforeCels = context.animation.cels.value;
+
+    const lastFrame = await adapter.request({
+      operation: 'project.transaction.execute', profile: 'animation',
+      target: { projectId: 'animation-rejections' }, expectedRevision: 0,
+      provenance: { clientId: 'c', sessionId: 's', runId: 'r', operationId: 'last-frame' },
+      children: [{ command: 'project.animation.frame', input: { kind: 'frame.delete', frameId: frame.id } }],
+    });
+    expect(lastFrame).toMatchObject({ ok: false, error: { code: 'invalid_state' } });
+    expect(context.project.revision.value).toBe(0);
+    expect(context.animation.cels.value).toBe(beforeCels);
+
+    const created = await adapter.request({
+      operation: 'project.transaction.execute', profile: 'animation',
+      target: { projectId: 'animation-rejections' }, expectedRevision: 0,
+      provenance: { clientId: 'c', sessionId: 's', runId: 'r', operationId: 'create' },
+      children: [{ command: 'project.animation.frame', input: { kind: 'frame.create', position: 'end', duration: 100 } }],
+    });
+    expect(created).toMatchObject({ ok: true, result: { revision: 1 } });
+    const secondFrame = context.animation.frames.value[1];
+    if (!secondFrame) throw new Error('Expected second frame.');
+    const secondCel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, secondFrame.id));
+    if (!secondCel) throw new Error('Expected second cel.');
+    const drawing = secondCel.canvas.getContext('2d');
+    if (!drawing) throw new Error('Expected second cel drawing context.');
+    drawing.fillStyle = '#00ff00';
+    drawing.fillRect(0, 0, 1, 1);
+    const firstCel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+    if (!firstCel) throw new Error('Expected first cel.');
+    const members = [firstCel, secondCel].map((cel) => ({
+      key: context.animation.getCelKey(cel.layerId, cel.frameId),
+      celId: cel.id,
+      layerId: cel.layerId,
+      frameId: cel.frameId,
+    }));
+    const unequal = await adapter.request({
+      operation: 'project.transaction.execute', profile: 'animation',
+      target: { projectId: 'animation-rejections' }, expectedRevision: 1,
+      provenance: { clientId: 'c', sessionId: 's', runId: 'r', operationId: 'unequal' },
+      children: [{ command: 'project.animation.cel.link', input: { kind: 'cel.link', layerId: layer.id, members } }],
+    });
+    expect(unequal).toMatchObject({ ok: false, error: { code: 'invalid_state' } });
+    expect(context.project.revision.value).toBe(1);
+    expect(firstCel.linkedCelId).toBeUndefined();
+    expect(secondCel.linkedCelId).toBeUndefined();
+
+    const wrongTarget = await adapter.request({
+      operation: 'project.transaction.execute', profile: 'animation',
+      target: { projectId: 'other-animation-project' }, expectedRevision: 1,
+      provenance: { clientId: 'c', sessionId: 's', runId: 'r', operationId: 'wrong-target' },
+      children: [{ command: 'project.animation.frame', input: { kind: 'frame.create', position: 'end', duration: 100 } }],
+    });
+    expect(wrongTarget).toMatchObject({ ok: false, error: { code: 'target_not_found' } });
+    expect(context.project.revision.value).toBe(1);
+  });
+
   it('proves a static structure transaction preserves pixels through palette reorder, undo, redo, save, and reload', async () => {
     const session = createFixtureSession();
     sessions.push(session);

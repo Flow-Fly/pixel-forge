@@ -131,7 +131,7 @@ describe('AutomationAdapter', () => {
         expectedRevision: 'integer >= 0',
         profile: {
           default: 'layer-and-tag',
-          oneOf: ['layer-and-tag', 'static-structure'],
+          oneOf: ['layer-and-tag', 'static-structure', 'animation'],
         },
         provenance: expect.objectContaining({
           clientId: 'non-empty bounded string',
@@ -139,40 +139,66 @@ describe('AutomationAdapter', () => {
         children: expect.objectContaining({
           exact: 2,
           order: 'either',
-          profiles: {
+          profiles: expect.objectContaining({
             'layer-and-tag': { oneOfEach: ['project.layer.state', 'project.animation.frame-tag'] },
             'static-structure': expect.objectContaining({
               oneOfEach: ['project.palette.declaration', 'project.layer.tree'],
             }),
-          },
+            animation: expect.objectContaining({
+              exact: 1,
+              oneOf: [
+                'project.animation.frame',
+                'project.animation.cel.link',
+                'project.animation.cel.unlink',
+                'project.animation.frame-tag',
+              ],
+            }),
+          }),
         }),
       },
       limits: {
         children: {
           exact: 2,
           order: 'either',
-          profiles: {
+          profiles: expect.objectContaining({
             'layer-and-tag': { oneOfEach: ['project.layer.state', 'project.animation.frame-tag'] },
             'static-structure': expect.objectContaining({
               oneOfEach: ['project.palette.declaration', 'project.layer.tree'],
             }),
-          },
+            animation: expect.objectContaining({
+              exact: 1,
+              oneOf: [
+                'project.animation.frame',
+                'project.animation.cel.link',
+                'project.animation.cel.unlink',
+                'project.animation.frame-tag',
+              ],
+            }),
+          }),
         },
         provenance: {
           stringLength: { min: 1, max: 256 },
           transitions: { max: 16 },
         },
-        profiles: {
+        profiles: expect.objectContaining({
           'layer-and-tag': {},
           'static-structure': expect.objectContaining({
             frames: { max: 16 },
             cels: { max: 256 },
             preparationBytes: { max: 32 * 1024 * 1024 },
           }),
-        },
+          animation: expect.objectContaining({
+            frames: { max: 16 },
+            layers: { max: 16 },
+            cels: { max: 256 },
+            duration: { min: 10, max: 2000 },
+            linkMembers: { max: 16 },
+            preparationBytes: { max: 32 * 1024 * 1024 },
+          }),
+        }),
       },
       availability: {
-        profiles: {
+        profiles: expect.objectContaining({
           'layer-and-tag': {
             guidedDrawing: { layerState: 'unsupported', frameTag: 'supported' },
           },
@@ -180,7 +206,12 @@ describe('AutomationAdapter', () => {
             guidedDrawing: 'unsupported',
             selection: 'none | selected; floating and transforming are rejected',
           },
-        },
+          animation: {
+            guidedDrawing: 'unsupported',
+            selection: 'none | selected; floating and transforming are rejected',
+            layers: 'supported non-reference layers only',
+          },
+        }),
       },
       result: { type: 'project.transaction.execute' },
       errors: expect.arrayContaining(['revision_conflict', 'limit_exceeded', 'internal']),

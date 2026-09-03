@@ -83,6 +83,15 @@ export const STATIC_STRUCTURE_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
 export const STATIC_STRUCTURE_SELECTION_ERROR_REASON = 'selection_in_progress';
 // fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
+export const ANIMATION_FRAME_COMMAND_ID = 'project.animation.frame';
+export const ANIMATION_CEL_LINK_COMMAND_ID = 'project.animation.cel.link';
+export const ANIMATION_MAX_FRAMES = 16;
+export const ANIMATION_MAX_LAYERS = 16;
+export const ANIMATION_MAX_CELS = 256;
+export const ANIMATION_MAX_LINK_MEMBERS = 16;
+export const ANIMATION_FRAME_DURATION_MIN = 10;
+export const ANIMATION_FRAME_DURATION_MAX = 2000;
+export const ANIMATION_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
 export const TRANSACTION_COMMAND_ID = 'project.transaction.execute';
 
 // fallow-ignore-next-line unused-export -- Public command catalog consumed by editor tooling.
@@ -139,7 +148,7 @@ export const transactionCatalog = Object.freeze({
   requiresRevision: true,
   request: {
     profile: {
-      oneOf: ['layer-and-tag', 'static-structure'],
+      oneOf: ['layer-and-tag', 'static-structure', 'animation'],
       default: 'layer-and-tag',
     },
     target: { projectId: 'string' },
@@ -183,6 +192,10 @@ export const transactionCatalog = Object.freeze({
               },
             },
           },
+        },
+        animation: {
+          exact: 1,
+          oneOf: [ANIMATION_FRAME_COMMAND_ID, ANIMATION_CEL_LINK_COMMAND_ID, CEL_UNLINK_COMMAND_ID, FRAME_TAG_COMMAND_ID],
         },
       },
       item: {
@@ -229,6 +242,30 @@ export const transactionCatalog = Object.freeze({
             ],
           },
         },
+        animationFrame: {
+          command: ANIMATION_FRAME_COMMAND_ID,
+          input: {
+            oneOf: [
+              { kind: 'frame.create', position: 'start | end | before | after', anchorFrameId: 'optional existing frame identity', duration: 'integer 10..2000' },
+              { kind: 'frame.duplicate', sourceFrameId: 'existing frame identity', position: 'start | end | before | after', anchorFrameId: 'optional existing frame identity' },
+              { kind: 'frame.reorder', frameId: 'existing frame identity', position: 'start | end | before | after', anchorFrameId: 'optional existing frame identity' },
+              { kind: 'frame.duration', frameId: 'existing frame identity', duration: 'integer 10..2000' },
+              { kind: 'frame.delete', frameId: 'existing frame identity' },
+            ],
+          },
+        },
+        animationCelLink: {
+          command: ANIMATION_CEL_LINK_COMMAND_ID,
+          input: {
+            kind: 'cel.link',
+            layerId: 'existing supported layer identity',
+            members: [{ key: 'observed cel key', celId: 'observed cel identity', layerId: 'same layer identity', frameId: 'observed frame identity' }],
+          },
+        },
+        animationCelUnlink: {
+          command: CEL_UNLINK_COMMAND_ID,
+          input: 'existing project.animation.cel.unlink request shape',
+        },
       },
     },
   },
@@ -243,7 +280,7 @@ export const transactionCatalog = Object.freeze({
       fromRevision: 'integer >= 0',
       toRevision: 'integer >= 0',
       transactionId: 'string',
-      domains: ['palette', 'layer-state', 'timeline'] as const,
+      domains: ['palette', 'layer-state', 'timeline', 'raster-content'] as const,
     },
     provenance: {
       source: 'automation',
@@ -263,9 +300,9 @@ export const transactionCatalog = Object.freeze({
         toRevision: 'integer >= 0',
       }],
       children: [{
-        commandId: 'project.layer.state | project.animation.frame-tag | project.palette.declaration | project.layer.tree',
+        commandId: 'project.layer.state | project.animation.frame-tag | project.palette.declaration | project.layer.tree | project.animation.frame | project.animation.cel.link | project.animation.cel.unlink',
         operation: 'concrete child kind',
-        domains: ['palette | layer-state | timeline'],
+        domains: ['palette | layer-state | timeline | raster-content'],
       }],
     },
   },
@@ -276,6 +313,10 @@ export const transactionCatalog = Object.freeze({
       profiles: {
         'layer-and-tag': { oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
         'static-structure': { oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID] },
+        animation: {
+          exact: 1,
+          oneOf: [ANIMATION_FRAME_COMMAND_ID, ANIMATION_CEL_LINK_COMMAND_ID, CEL_UNLINK_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+        },
       },
     },
     provenance: {
@@ -294,6 +335,14 @@ export const transactionCatalog = Object.freeze({
         cels: { max: STATIC_STRUCTURE_MAX_CELS },
         preparationBytes: { max: STATIC_STRUCTURE_MAX_PREPARATION_BYTES },
       },
+        animation: {
+          frames: { max: ANIMATION_MAX_FRAMES },
+          layers: { max: ANIMATION_MAX_LAYERS },
+          cels: { max: ANIMATION_MAX_CELS },
+          duration: { min: ANIMATION_FRAME_DURATION_MIN, max: ANIMATION_FRAME_DURATION_MAX },
+          linkMembers: { max: ANIMATION_MAX_LINK_MEMBERS },
+          preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
+        },
     },
   },
   profiles: {
@@ -332,8 +381,27 @@ export const transactionCatalog = Object.freeze({
       },
       affectedDomains: ['palette', 'layer-state'],
     },
+    animation: {
+      children: {
+        exact: 1,
+        oneOf: [ANIMATION_FRAME_COMMAND_ID, ANIMATION_CEL_LINK_COMMAND_ID, CEL_UNLINK_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+      },
+      frame: {
+        operations: ['create', 'duplicate', 'reorder', 'duration', 'delete'],
+        maxFrames: ANIMATION_MAX_FRAMES,
+        maxLayers: ANIMATION_MAX_LAYERS,
+        maxCels: ANIMATION_MAX_CELS,
+        duration: { min: ANIMATION_FRAME_DURATION_MIN, max: ANIMATION_FRAME_DURATION_MAX },
+      },
+      celLink: {
+        maxMembers: ANIMATION_MAX_LINK_MEMBERS,
+        member: 'exact observed key, cel, layer, and frame identity',
+      },
+      preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
+      affectedDomains: ['timeline', 'raster-content'],
+    },
   },
-  affectedDomains: ['palette', 'layer-state', 'timeline'] as const,
+  affectedDomains: ['palette', 'layer-state', 'timeline', 'raster-content'] as const,
   availability: {
     profiles: {
       'layer-and-tag': {
@@ -345,6 +413,11 @@ export const transactionCatalog = Object.freeze({
       'static-structure': {
         guidedDrawing: 'unsupported',
         selection: 'none | selected; floating and transforming are rejected',
+      },
+      animation: {
+        guidedDrawing: 'unsupported',
+        selection: 'none | selected; floating and transforming are rejected',
+        layers: 'supported non-reference layers only',
       },
     },
   },
@@ -848,6 +921,26 @@ export const editorCatalog = Object.freeze({
       errors: transactionCatalog.errors,
     },
     celUnlinkCatalog,
+    {
+      id: ANIMATION_FRAME_COMMAND_ID,
+      target: 'project',
+      requiresRevision: true,
+      operation: 'frame.create | frame.duplicate | frame.reorder | frame.duration | frame.delete; supported only in animation transaction profile',
+      affectedDomains: ['timeline', 'raster-content'] as const,
+      availability: { guidedDrawing: 'unsupported', selection: 'floating and transforming rejected' },
+      undo: 'one-session-history-entry',
+      errors: transactionCatalog.errors,
+    },
+    {
+      id: ANIMATION_CEL_LINK_COMMAND_ID,
+      target: 'project',
+      requiresRevision: true,
+      operation: 'cel.link; supported only in animation transaction profile',
+      affectedDomains: ['timeline', 'raster-content'] as const,
+      availability: { guidedDrawing: 'unsupported', selection: 'floating and transforming rejected' },
+      undo: 'one-session-history-entry',
+      errors: transactionCatalog.errors,
+    },
     rasterFillCatalog,
     rasterGradientCatalog,
   ]),
