@@ -95,6 +95,16 @@ export interface PaletteStoreDependencies {
   refs: StoreRefs;
 }
 
+/** Runtime palette state captured by prepared structure transactions. */
+export interface ProjectPaletteSnapshot {
+  readonly colors: readonly string[];
+  readonly entries: readonly ProjectPaletteEntryFile[];
+  readonly currentPresetId: string | null;
+  readonly currentCustomPaletteId: string | null;
+  readonly isDirty: boolean;
+  readonly newColorFlags: readonly string[];
+}
+
 class PaletteStore {
   // ==========================================
   // State (Signals)
@@ -209,6 +219,30 @@ class PaletteStore {
       id: entryIds[index],
       color,
     }));
+  }
+
+  /** Capture only project-owned palette state for an atomic editor transaction. */
+  captureProjectSnapshot(): ProjectPaletteSnapshot {
+    return {
+      colors: [...this.mainColors.value],
+      entries: this.getProjectPaletteEntries().map((entry) => ({ ...entry })),
+      currentPresetId: this.currentPresetId.value,
+      currentCustomPaletteId: this.currentCustomPaletteId.value,
+      isDirty: this.isDirty.value,
+      newColorFlags: [...this.newColorFlags.value],
+    };
+  }
+
+  /** Apply a prepared palette without dispatching manual-editor remap events. */
+  applyProjectSnapshot(snapshot: ProjectPaletteSnapshot): void {
+    this.mainColors.value = [...snapshot.colors];
+    this.paletteEntryIds.value = snapshot.entries.map((entry) => entry.id);
+    this.paletteIdentityColors = [...snapshot.colors];
+    this.currentPresetId.value = snapshot.currentPresetId;
+    this.currentCustomPaletteId.value = snapshot.currentCustomPaletteId;
+    this.isDirty.value = snapshot.isDirty;
+    this.newColorFlags.value = new Set(snapshot.newColorFlags);
+    this.rebuildColorMap();
   }
 
   // ==========================================
@@ -411,6 +445,7 @@ class PaletteStore {
 
     const oldMainColors = [...this.mainColors.value];
     this.replaceColors(this.withUsedColorsPreserved(preset.colors));
+    // fallow-ignore-next-line code-duplication -- Existing preset and custom-palette loading retain parallel event semantics.
     this.currentPresetId.value = id;
     this.currentCustomPaletteId.value = null;
     this.isDirty.value = false;

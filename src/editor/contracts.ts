@@ -38,7 +38,11 @@ export interface AutomationTransactionProvenance {
 }
 
 export interface AutomationTransactionChildSummary {
-  readonly commandId: 'project.layer.state' | 'project.animation.frame-tag';
+  readonly commandId:
+    | 'project.layer.state'
+    | 'project.animation.frame-tag'
+    | 'project.palette.declaration'
+    | 'project.layer.tree';
   readonly operation: string;
   readonly domains: readonly string[];
 }
@@ -94,4 +98,12 @@ export interface EditorError {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+export function hasOnlyKeys(
+  value: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): boolean {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(value).every((key) => allowed.has(key));
 }

@@ -14,6 +14,7 @@ import {
   type CanvasResizeExecutionResult,
   type CanvasResizePreviewResult,
   type HistoryTransitionResult,
+  type ProjectCreateResult,
   type ReloadResult,
   type SaveResult,
 } from './automation-adapter';
@@ -79,6 +80,12 @@ export interface FixtureSessionOptions {
   readonly repository?: ProjectRepository;
   readonly saveService?: AutoSaveService;
   readonly projectId?: string;
+  readonly projectIdFactory?: () => string;
+}
+
+export interface FixtureBlankProjectResult {
+  readonly creation: ProjectCreateResult;
+  readonly observation: ProjectObservation;
 }
 
 export interface FixtureJourneyResult {
@@ -204,7 +211,32 @@ export class FixtureSession {
       repository: this.repository,
       transactionIdFactory: () => `fixture-transaction-${++transactionSequence}`,
       transactionTagIdFactory: () => `fixture-tag-${++tagSequence}`,
+      projectIdFactory: options.projectIdFactory,
     });
+  }
+
+  /** Create one isolated Preview-sized target without changing the fixture tab. */
+  async createBlankProject(
+    name: string,
+    width: number,
+    height: number,
+  ): Promise<FixtureBlankProjectResult> {
+    await this.initialize();
+    const negotiation = this.adapter.negotiateCatalog({ version: '1.0' });
+    if (!negotiation.ok) throw new Error(`Fixture catalog negotiation failed: ${negotiation.error.code}`);
+    const creation = await requestSuccess<ProjectCreateResult>(this.adapter, {
+      operation: 'project.create',
+      kind: 'blank',
+      name,
+      width,
+      height,
+    });
+    const observation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
+      target: creation.target,
+      expectedRevision: creation.revision,
+    });
+    return { creation, observation };
   }
 
   async run(): Promise<FixtureJourneyResult> {

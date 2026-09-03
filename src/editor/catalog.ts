@@ -73,6 +73,10 @@ export const canvasSizeCatalog = Object.freeze({
 
 export const LAYER_STATE_COMMAND_ID = 'project.layer.state';
 export const FRAME_TAG_COMMAND_ID = 'project.animation.frame-tag';
+export const STATIC_PALETTE_COMMAND_ID = 'project.palette.declaration';
+export const STATIC_LAYER_TREE_COMMAND_ID = 'project.layer.tree';
+export const STATIC_STRUCTURE_MAX_PALETTE_ENTRIES = 32;
+export const STATIC_STRUCTURE_MAX_LAYERS = 16;
 // fallow-ignore-next-line unused-export -- Stable command IDs are part of the public catalog contract.
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
 export const TRANSACTION_COMMAND_ID = 'project.transaction.execute';
@@ -130,6 +134,7 @@ export const transactionCatalog = Object.freeze({
   target: 'project',
   requiresRevision: true,
   request: {
+    profile: 'optional layer-and-tag | static-structure (default layer-and-tag)',
     target: { projectId: 'string' },
     expectedRevision: 'integer >= 0',
     provenance: {
@@ -200,7 +205,7 @@ export const transactionCatalog = Object.freeze({
       fromRevision: 'integer >= 0',
       toRevision: 'integer >= 0',
       transactionId: 'string',
-      domains: ['layer-state', 'timeline'],
+      domains: ['palette', 'layer-state', 'timeline'] as const,
     },
     provenance: {
       source: 'automation',
@@ -220,9 +225,9 @@ export const transactionCatalog = Object.freeze({
         toRevision: 'integer >= 0',
       }],
       children: [{
-        commandId: 'project.layer.state | project.animation.frame-tag',
+        commandId: 'project.layer.state | project.animation.frame-tag | project.palette.declaration | project.layer.tree',
         operation: 'concrete child kind',
-        domains: ['layer-state | timeline'],
+        domains: ['palette | layer-state | timeline'],
       }],
     },
   },
@@ -236,7 +241,44 @@ export const transactionCatalog = Object.freeze({
       transitions: { max: TRANSACTION_PROVENANCE_MAX_TRANSITIONS },
     },
   },
-  affectedDomains: ['layer-state', 'timeline'] as const,
+  profiles: {
+    'layer-and-tag': {
+      children: {
+        exact: 2,
+        oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+      },
+      affectedDomains: ['layer-state', 'timeline'],
+    },
+    'static-structure': {
+      children: {
+        exact: 2,
+        oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID],
+      },
+      palette: {
+        kind: 'palette.declaration',
+        entries: { id: 'stable bounded string', color: 'six-digit hex color' },
+        maxEntries: STATIC_STRUCTURE_MAX_PALETTE_ENTRIES,
+      },
+      layerTree: {
+        kind: 'layer-tree.declaration',
+        layers: {
+          id: 'stable bounded string',
+          name: 'bounded non-empty string',
+          type: 'image | group',
+          parentId: 'null | existing group identity',
+          visible: 'boolean',
+          locked: 'boolean',
+          opacity: 'integer 0..255',
+          blendMode: 'normal | multiply | screen | overlay | darken | lighten',
+          continuous: 'optional boolean',
+        },
+        maxLayers: STATIC_STRUCTURE_MAX_LAYERS,
+        parentOrder: 'parent precedes child; acyclic',
+      },
+      affectedDomains: ['palette', 'layer-state'],
+    },
+  },
+  affectedDomains: ['palette', 'layer-state', 'timeline'] as const,
   availability: {
     guidedDrawing: {
       layerState: 'unsupported',
@@ -286,6 +328,53 @@ export const celUnlinkCatalog = Object.freeze({
     'target_not_found',
     'revision_conflict',
     'invalid_state',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
+// fallow-ignore-next-line unused-export -- Public creation operation is negotiated by adapters.
+export const projectCreateCatalog = Object.freeze({
+  id: 'project.create',
+  kind: 'creation-command',
+  target: 'none',
+  requiresRevision: false,
+  request: {
+    kind: 'blank | safe-copy',
+    blank: {
+      name: 'bounded non-empty string',
+      width: 'integer 16..64',
+      height: 'integer 16..64',
+    },
+    safeCopy: {
+      name: 'optional bounded non-empty string; default Copy of source name',
+      source: {
+        target: { projectId: 'string' },
+        expectedRevision: 'integer >= 0',
+      },
+    },
+  },
+  result: {
+    type: 'project.create',
+    target: { projectId: 'fresh string' },
+    revision: 0,
+    kind: 'blank | safe-copy',
+  },
+  limits: {
+    name: { max: PROJECT_OBSERVATION_LIMITS.maxStringLength },
+    dimension: { min: 16, max: 64 },
+  },
+  revision: 'safe-copy source expectedRevision must equal one captured source revision; new target starts at zero',
+  affectedDomains: [] as const,
+  availability: { guidedDrawing: 'supported' },
+  undo: 'none',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'bounds_exceeded',
+    'invalid_state',
+    'limit_exceeded',
     'unsupported',
     'internal',
   ] as const,
@@ -443,6 +532,17 @@ const automationOperationCatalog = Object.freeze([
     limits: {},
     revision: 'not applicable',
     errors: ['invalid_request', 'unsupported', 'internal'] as const,
+  },
+  {
+    id: 'project.create',
+    kind: projectCreateCatalog.kind,
+    target: projectCreateCatalog.target,
+    requiresRevision: projectCreateCatalog.requiresRevision,
+    request: projectCreateCatalog.request,
+    result: projectCreateCatalog.result,
+    limits: projectCreateCatalog.limits,
+    revision: projectCreateCatalog.revision,
+    errors: projectCreateCatalog.errors,
   },
   {
     id: 'project.target',
@@ -659,10 +759,31 @@ export const editorCatalog = Object.freeze({
     renderObservationCatalog,
   ]),
   commands: Object.freeze([
+    projectCreateCatalog,
     canvasSizeCatalog.command,
     transactionCatalog,
     layerStateCatalog,
     frameTagCatalog,
+    {
+      id: STATIC_PALETTE_COMMAND_ID,
+      target: 'project',
+      requiresRevision: true,
+      operation: 'palette.declaration; supported only in static-structure transaction profile',
+      affectedDomains: ['palette'] as const,
+      availability: { guidedDrawing: 'unsupported' },
+      undo: 'one-session-history-entry',
+      errors: transactionCatalog.errors,
+    },
+    {
+      id: STATIC_LAYER_TREE_COMMAND_ID,
+      target: 'project',
+      requiresRevision: true,
+      operation: 'layer-tree.declaration; supported only in static-structure transaction profile',
+      affectedDomains: ['layer-state'] as const,
+      availability: { guidedDrawing: 'unsupported' },
+      undo: 'one-session-history-entry',
+      errors: transactionCatalog.errors,
+    },
     celUnlinkCatalog,
     rasterFillCatalog,
     rasterGradientCatalog,

@@ -88,6 +88,7 @@ describe('AutomationAdapter', () => {
     ]);
     expect(negotiated.result.catalog.operations.map((operation) => operation.id)).toEqual([
       'catalog.negotiate',
+      'project.create',
       'project.target',
       'project.observe',
       'project.render.observe',
@@ -491,6 +492,95 @@ describe('AutomationAdapter', () => {
       error: { code: 'target_not_found', details: { reason: 'disposed' } },
     });
   });
+
+  it('creates a bounded blank target and applies one static structure transaction with undo and redo', async () => {
+    const source = createContext('source');
+    const registry = new Map<string, ProjectContext>([['source', source]]);
+    const repository = new FixtureProjectRepository();
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: registry,
+      repository,
+      saveService,
+      projectIdFactory: () => 'created-project',
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const created = await adapter.request({
+      operation: 'project.create',
+      kind: 'blank',
+      name: 'Structured asset',
+      width: 16,
+      height: 16,
+    });
+    expect(created).toEqual({
+      ok: true,
+      result: {
+        type: 'project.create',
+        kind: 'blank',
+        target: { projectId: 'created-project' },
+        revision: 0,
+      },
+    });
+    expect(registry.has('created-project')).toBe(true);
+  });
+
+  it('safe-copies an explicit source without overwriting a fresh-id collision', async () => {
+    const source = createContext('source-copy');
+    source.project.name.value = 'Source Project';
+    const registry = new Map<string, ProjectContext>([['source-copy', source]]);
+    const repository = new FixtureProjectRepository();
+    const sourceDocument = structuredClone(await source.project.saveProject({ rebuildIndexBuffers: false }));
+    await repository.save('source-copy', sourceDocument);
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: registry,
+      repository,
+      saveService,
+      projectIdFactory: () => 'copy-project',
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const copied = await adapter.request({
+      operation: 'project.create',
+      kind: 'safe-copy',
+      source: { target: { projectId: 'source-copy' }, expectedRevision: 0 },
+    });
+    expect(copied).toMatchObject({
+      ok: true,
+      result: {
+        kind: 'safe-copy',
+        target: { projectId: 'copy-project' },
+        revision: 0,
+      },
+    });
+    expect((await repository.load('source-copy'))).toEqual(sourceDocument);
+    expect(source.project.revision.value).toBe(0);
+    expect(source.history.undoStack.value).toHaveLength(0);
+    expect(source.project.name.value).toBe('Source Project');
+    expect((await repository.load('copy-project'))?.name).toBe('Copy of Source Project');
+
+    const collision = await adapter.request({
+      operation: 'project.create',
+      kind: 'safe-copy',
+      source: { target: { projectId: 'source-copy' }, expectedRevision: 0 },
+    });
+    expect(collision).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'project_id_collision' },
+      },
+    });
+    expect((await repository.list()).map((project) => project.id).sort()).toEqual([
+      'copy-project',
+      'source-copy',
+    ]);
+  });
+
 });
 
 function expectObservationLimit(
