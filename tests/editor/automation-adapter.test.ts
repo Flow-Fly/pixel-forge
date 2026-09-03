@@ -81,6 +81,7 @@ describe('AutomationAdapter', () => {
     if (!negotiated.ok) return;
     expect(negotiated.result.version).toBe('1.0');
     expect(negotiated.result.catalog).not.toBe(editorCatalog);
+    expect(editorCatalog.operations[0]?.id).toBe('catalog.negotiate');
     expect(negotiated.result.catalog.observations.map((item) => item.id)).toEqual([
       'project.save-safety',
       'project.observe',
@@ -88,6 +89,7 @@ describe('AutomationAdapter', () => {
     ]);
     expect(negotiated.result.catalog.operations.map((operation) => operation.id)).toEqual([
       'catalog.negotiate',
+      'project.create',
       'project.target',
       'project.observe',
       'project.render.observe',
@@ -98,6 +100,8 @@ describe('AutomationAdapter', () => {
       'project.save',
       'project.reload',
     ]);
+    (negotiated.result.catalog.operations as Array<{ id: string }>)[0]!.id = 'mutated';
+    expect(editorCatalog.operations[0]?.id).toBe('catalog.negotiate');
 
     const operations = negotiated.result.catalog.operations;
     for (const operation of operations) {
@@ -125,28 +129,58 @@ describe('AutomationAdapter', () => {
       requiresRevision: true,
       request: {
         expectedRevision: 'integer >= 0',
+        profile: {
+          default: 'layer-and-tag',
+          oneOf: ['layer-and-tag', 'static-structure'],
+        },
         provenance: expect.objectContaining({
           clientId: 'non-empty bounded string',
         }),
         children: expect.objectContaining({
           exact: 2,
           order: 'either',
-          oneOfEach: ['project.layer.state', 'project.animation.frame-tag'],
+          profiles: {
+            'layer-and-tag': { oneOfEach: ['project.layer.state', 'project.animation.frame-tag'] },
+            'static-structure': expect.objectContaining({
+              oneOfEach: ['project.palette.declaration', 'project.layer.tree'],
+            }),
+          },
         }),
       },
       limits: {
         children: {
           exact: 2,
           order: 'either',
-          oneOfEach: ['project.layer.state', 'project.animation.frame-tag'],
+          profiles: {
+            'layer-and-tag': { oneOfEach: ['project.layer.state', 'project.animation.frame-tag'] },
+            'static-structure': expect.objectContaining({
+              oneOfEach: ['project.palette.declaration', 'project.layer.tree'],
+            }),
+          },
         },
         provenance: {
           stringLength: { min: 1, max: 256 },
           transitions: { max: 16 },
         },
+        profiles: {
+          'layer-and-tag': {},
+          'static-structure': expect.objectContaining({
+            frames: { max: 16 },
+            cels: { max: 256 },
+            preparationBytes: { max: 32 * 1024 * 1024 },
+          }),
+        },
       },
       availability: {
-        guidedDrawing: { layerState: 'unsupported', frameTag: 'supported' },
+        profiles: {
+          'layer-and-tag': {
+            guidedDrawing: { layerState: 'unsupported', frameTag: 'supported' },
+          },
+          'static-structure': {
+            guidedDrawing: 'unsupported',
+            selection: 'none | selected; floating and transforming are rejected',
+          },
+        },
       },
       result: { type: 'project.transaction.execute' },
       errors: expect.arrayContaining(['revision_conflict', 'limit_exceeded', 'internal']),
@@ -491,6 +525,175 @@ describe('AutomationAdapter', () => {
       error: { code: 'target_not_found', details: { reason: 'disposed' } },
     });
   });
+
+  it('creates a bounded blank target and applies one static structure transaction with undo and redo', async () => {
+    const source = createContext('source');
+    const registry = new Map<string, ProjectContext>([['source', source]]);
+    const repository = new FixtureProjectRepository();
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: registry,
+      repository,
+      saveService,
+      projectIdFactory: () => 'created-project',
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const created = await adapter.request({
+      operation: 'project.create',
+      kind: 'blank',
+      name: 'Structured asset',
+      width: 16,
+      height: 16,
+    });
+    expect(created).toEqual({
+      ok: true,
+      result: {
+        type: 'project.create',
+        kind: 'blank',
+        target: { projectId: 'created-project' },
+        revision: 0,
+      },
+    });
+    expect(registry.has('created-project')).toBe(true);
+  });
+
+  it('safe-copies an explicit source without overwriting a fresh-id collision', async () => {
+    const source = createContext('source-copy');
+    source.project.name.value = 'Source Project';
+    const registry = new Map<string, ProjectContext>([['source-copy', source]]);
+    const repository = new FixtureProjectRepository();
+    const sourceDocument = structuredClone(await source.project.saveProject({ rebuildIndexBuffers: false }));
+    await repository.save('source-copy', sourceDocument);
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: registry,
+      repository,
+      saveService,
+      projectIdFactory: () => 'copy-project',
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const copied = await adapter.request({
+      operation: 'project.create',
+      kind: 'safe-copy',
+      source: { target: { projectId: 'source-copy' }, expectedRevision: 0 },
+    });
+    expect(copied).toMatchObject({
+      ok: true,
+      result: {
+        kind: 'safe-copy',
+        target: { projectId: 'copy-project' },
+        revision: 0,
+      },
+    });
+    expect((await repository.load('source-copy'))).toEqual(sourceDocument);
+    expect(source.project.revision.value).toBe(0);
+    expect(source.history.undoStack.value).toHaveLength(0);
+    expect(source.project.name.value).toBe('Source Project');
+    expect((await repository.load('copy-project'))?.name).toBe('Copy of Source Project');
+
+    const collision = await adapter.request({
+      operation: 'project.create',
+      kind: 'safe-copy',
+      source: { target: { projectId: 'source-copy' }, expectedRevision: 0 },
+    });
+    expect(collision).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'project_id_collision' },
+      },
+    });
+    expect((await repository.list()).map((project) => project.id).sort()).toEqual([
+      'copy-project',
+      'source-copy',
+    ]);
+  });
+
+  it('releases a reserved target when fresh persistence fails without changing repository state', async () => {
+    const source = createContext('source-failure');
+    const registry = new Map<string, ProjectContext>([['source-failure', source]]);
+    const repository = new FailingCreateRepository();
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: registry,
+      repository,
+      saveService,
+      projectIdFactory: () => 'failed-project',
+      entityIdFactory: (() => {
+        let sequence = 0;
+        return () => `entity-${++sequence}`;
+      })(),
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const beforeRegistry = [...registry.entries()];
+    const beforeProjects = await repository.list();
+
+    await expect(adapter.request({
+      operation: 'project.create',
+      kind: 'blank',
+      name: 'Failed project',
+      width: 16,
+      height: 16,
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    });
+    expect([...registry.entries()]).toEqual(beforeRegistry);
+    expect(await repository.list()).toEqual(beforeProjects);
+    await expect(adapter.request({
+      operation: 'project.observe',
+      target: { projectId: 'failed-project' },
+      expectedRevision: 0,
+    })).resolves.toMatchObject({ ok: false, error: { code: 'target_not_found' } });
+  });
+
+  it('keeps a late repository and registry collision intact while releasing only its own reservation', async () => {
+    const source = createContext('source-late-collision');
+    const registry = new Map<string, ProjectContext>([['source-late-collision', source]]);
+    const repository = new DeferredCreateRepository();
+    const saveService = createAutoSaveService({ repository });
+    saveServices.push(saveService);
+    const adapter = createAutomationAdapter({
+      targetRegistry: registry,
+      repository,
+      saveService,
+      projectIdFactory: () => 'late-project',
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+
+    const pending = adapter.request({
+      operation: 'project.create',
+      kind: 'blank',
+      name: 'Late project',
+      width: 16,
+      height: 16,
+    });
+    await repository.createStarted;
+
+    const lateContext = createContext('late-project');
+    registry.set('late-project', lateContext);
+    const existing = structuredClone(await source.project.saveProject({ rebuildIndexBuffers: false }));
+    await repository.save('late-project', existing);
+    repository.releaseCreate();
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_state',
+        retryable: false,
+        details: { reason: 'project_id_collision' },
+      },
+    });
+    expect(registry.get('late-project')).toBe(lateContext);
+    expect(await repository.load('late-project')).toEqual(existing);
+  });
+
 });
 
 function expectObservationLimit(
@@ -564,5 +767,38 @@ class DeferredProjectRepository extends FixtureProjectRepository {
 
   releaseLoad(): void {
     this.releaseLoadBarrier();
+  }
+}
+
+class FailingCreateRepository extends FixtureProjectRepository {
+  override async create(): Promise<void> {
+    throw new Error('injected create failure');
+  }
+}
+
+class DeferredCreateRepository extends FixtureProjectRepository {
+  readonly createStarted: Promise<void>;
+  private readonly createBarrier: Promise<void>;
+  private resolveCreateStarted!: () => void;
+  private releaseCreateBarrier!: () => void;
+
+  constructor() {
+    super();
+    this.createStarted = new Promise((resolve) => {
+      this.resolveCreateStarted = resolve;
+    });
+    this.createBarrier = new Promise((resolve) => {
+      this.releaseCreateBarrier = resolve;
+    });
+  }
+
+  override async create(id: string, project: Parameters<FixtureProjectRepository['create']>[1]): Promise<void> {
+    this.resolveCreateStarted();
+    await this.createBarrier;
+    return super.create(id, project);
+  }
+
+  releaseCreate(): void {
+    this.releaseCreateBarrier();
   }
 }

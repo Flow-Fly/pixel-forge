@@ -11,6 +11,7 @@ import { isRecord, type EditorError, type ProjectTarget } from './contracts';
 import {
   CANVAS_SIZE_MAX_DIMENSION,
 } from './catalog';
+import { estimateCelPayloadBytes } from './payload-memory';
 
 export {
   CANVAS_SIZE_COMMAND_ID,
@@ -235,7 +236,7 @@ class ResizeCanvasCommand implements Command {
     this.before = prepared.before;
     this.after = prepared.after;
     this.initialRevision = request.expectedRevision;
-    this.memorySize = estimateMemorySize(prepared.after.cels);
+    this.memorySize = estimateCelPayloadBytes(prepared.after.cels);
   }
 
   get lastEvent(): ProjectChangeEvent | null {
@@ -903,24 +904,6 @@ function resizeIndexBuffer(
   } catch {
     throw editorError('limit_exceeded', false, { limitId: 'canvas-size-allocation' });
   }
-}
-
-function estimateMemorySize(cels: Map<string, Cel>): number {
-  const canvases = new Set<HTMLCanvasElement>();
-  const indexBuffers = new Set<Uint8Array>();
-  let bytes = 0;
-
-  for (const cel of cels.values()) {
-    if (!canvases.has(cel.canvas)) {
-      canvases.add(cel.canvas);
-      bytes += cel.canvas.width * cel.canvas.height * 4;
-    }
-    if (cel.indexBuffer && !indexBuffers.has(cel.indexBuffer)) {
-      indexBuffers.add(cel.indexBuffer);
-      bytes += cel.indexBuffer.byteLength;
-    }
-  }
-  return bytes;
 }
 
 function changedDomains(): readonly ProjectChangeDomain[] {

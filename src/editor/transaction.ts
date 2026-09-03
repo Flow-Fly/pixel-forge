@@ -12,6 +12,14 @@ import {
   type PreparedTimelineProjectStateChange,
 } from './timeline-project-state';
 import {
+  assertPreparedStaticStructureChange,
+  applyPreparedStaticStructureChange,
+  prepareStaticStructureChange,
+  type PreparedStaticStructureChange,
+  type StaticStructureChildInput,
+} from './static-structure';
+import {
+  hasOnlyKeys,
   isRecord,
   type AutomationTransactionChildSummary,
   type AutomationTransactionProvenance,
@@ -23,6 +31,8 @@ import {
 import {
   FRAME_TAG_COMMAND_ID,
   LAYER_STATE_COMMAND_ID,
+  STATIC_LAYER_TREE_COMMAND_ID,
+  STATIC_PALETTE_COMMAND_ID,
   TRANSACTION_PROVENANCE_MAX_STRING_LENGTH,
   TRANSACTION_PROVENANCE_MAX_TRANSITIONS,
   TRANSACTION_COMMAND_ID,
@@ -33,7 +43,11 @@ const EDITOR_TRANSACTION_MAX_CHILDREN = 2;
 
 export type EditorTransactionChildCommandId =
   | typeof LAYER_STATE_COMMAND_ID
-  | typeof FRAME_TAG_COMMAND_ID;
+  | typeof FRAME_TAG_COMMAND_ID
+  | typeof STATIC_PALETTE_COMMAND_ID
+  | typeof STATIC_LAYER_TREE_COMMAND_ID;
+
+export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure';
 
 export interface AutomationTransactionProvenanceInput {
   readonly clientId: string;
@@ -49,6 +63,7 @@ export interface EditorTransactionChildInput {
 
 // fallow-ignore-next-line unused-type -- Public prepared request shape documents the transaction boundary.
 export interface EditorTransactionRequest {
+  readonly profile: EditorTransactionProfile;
   readonly target: ProjectTarget;
   readonly expectedRevision: number;
   readonly provenance: AutomationTransactionProvenanceInput;
@@ -64,14 +79,22 @@ export interface EditorTransactionResult {
   readonly provenance: AutomationTransactionProvenance;
 }
 
-type PreparedTransactionChild = {
-  readonly command: EditorTransactionChildCommandId;
+type PreparedTimelineTransactionChild = {
+  readonly command: typeof LAYER_STATE_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID;
   readonly prepared: PreparedTimelineProjectStateChange;
 };
+
+type PreparedTransactionChild =
+  | PreparedTimelineTransactionChild
+  | {
+      readonly command: typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID;
+      readonly input: Readonly<Record<string, unknown>>;
+    };
 
 interface EditorTransactionExecutionOptions {
   readonly transactionIdFactory?: () => string;
   readonly tagIdFactory?: () => string;
+  readonly entityIdFactory?: () => string;
 }
 
 interface PendingTransactionTransition {
@@ -92,6 +115,8 @@ const TRANSACTION_DOMAINS: readonly ProjectChangeDomain[] = Object.freeze([
 const TRANSACTION_CHILD_COMMANDS: ReadonlySet<string> = new Set([
   LAYER_STATE_COMMAND_ID,
   FRAME_TAG_COMMAND_ID,
+  STATIC_PALETTE_COMMAND_ID,
+  STATIC_LAYER_TREE_COMMAND_ID,
 ]);
 
 class EditorTransactionError extends Error {
@@ -108,11 +133,12 @@ class EditorTransactionCommand implements Command {
   readonly id: string;
   readonly name = 'Automation Transaction';
   readonly managesProjectRevision = true;
-  readonly memorySize = 0;
+  readonly memorySize: number;
 
   private readonly context: ProjectContext;
   private readonly request: EditorTransactionRequest;
   private readonly children: readonly PreparedTransactionChild[];
+  private readonly staticPrepared: PreparedStaticStructureChange | null;
   private currentProvenance: AutomationTransactionProvenance;
   private hasExecuted = false;
   private applied = false;
@@ -123,11 +149,14 @@ class EditorTransactionCommand implements Command {
     context: ProjectContext,
     request: EditorTransactionRequest,
     children: readonly PreparedTransactionChild[],
+    staticPrepared: PreparedStaticStructureChange | null,
     transactionIdFactory?: () => string,
   ) {
     this.context = context;
     this.request = request;
     this.children = children;
+    this.staticPrepared = staticPrepared;
+    this.memorySize = staticPrepared?.snapshotBytes ?? 0;
     this.id = transactionIdFactory?.() ?? crypto.randomUUID();
     this.currentProvenance = freezeProvenance(request, this.id, children, []);
   }
@@ -211,12 +240,17 @@ class EditorTransactionCommand implements Command {
     if (!pending) return;
 
     try {
-      for (const child of [...this.children].reverse()) {
-        applyPreparedTimelineProjectStateChange(
-          this.context,
-          child.prepared,
-          pending.rollbackPhase,
-        );
+      if (this.staticPrepared) {
+        applyPreparedStaticStructureChange(this.context, this.staticPrepared, pending.rollbackPhase);
+      } else {
+        for (const child of [...this.children].reverse()) {
+          if (!('prepared' in child)) continue;
+          applyPreparedTimelineProjectStateChange(
+            this.context,
+            child.prepared,
+            pending.rollbackPhase,
+          );
+        }
       }
       this.assertPreparedState(
         pending.rollbackPhase,
@@ -247,18 +281,23 @@ class EditorTransactionCommand implements Command {
   }
 
   private assertPreparedState(phase: 'before' | 'after', replayed: boolean): void {
+    if (this.staticPrepared) {
+      assertPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
+      return;
+    }
     for (const child of this.children) {
-      assertPreparedTimelineProjectStateChange(
-        this.context,
-        child.prepared,
-        phase,
-        replayed,
-      );
+      if (!('prepared' in child)) continue;
+      assertPreparedTimelineProjectStateChange(this.context, child.prepared, phase, replayed);
     }
   }
 
   private applyChildren(phase: 'before' | 'after'): void {
+    if (this.staticPrepared) {
+      applyPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
+      return;
+    }
     for (const child of this.children) {
+      if (!('prepared' in child)) continue;
       applyPreparedTimelineProjectStateChange(this.context, child.prepared, phase);
     }
   }
@@ -274,7 +313,10 @@ class EditorTransactionCommand implements Command {
       rollbackPhase,
       wasApplied,
       hadExecuted,
-      change: this.context.project.prepareChange(this.id, TRANSACTION_DOMAINS),
+      change: this.context.project.prepareChange(
+        this.id,
+        this.staticPrepared ? this.staticPrepared.domains : TRANSACTION_DOMAINS,
+      ),
     };
   }
 
@@ -286,8 +328,13 @@ class EditorTransactionCommand implements Command {
   ): never {
     let restored = true;
     try {
-      for (const child of [...this.children].reverse()) {
-        applyPreparedTimelineProjectStateChange(this.context, child.prepared, phase);
+      if (this.staticPrepared) {
+        applyPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
+      } else {
+        for (const child of [...this.children].reverse()) {
+          if (!('prepared' in child)) continue;
+          applyPreparedTimelineProjectStateChange(this.context, child.prepared, phase);
+        }
       }
       this.assertPreparedState(phase, phase === 'after');
       this.pendingTransition = null;
@@ -323,20 +370,35 @@ export async function executeEditorTransaction(
   options: EditorTransactionExecutionOptions = {},
 ): Promise<EditorTransactionResult> {
   const request = normalizeTransactionRequest(input);
-  const children = request.children.map((child) => ({
-    command: child.command,
-    prepared: prepareTimelineProjectStateChange(context, {
-      ...child.input,
-      target: request.target,
-      expectedRevision: request.expectedRevision,
-    }, {
-      tagIdFactory: options.tagIdFactory,
-    }),
-  }));
+  const staticPrepared = request.profile === 'static-structure'
+    ? prepareStaticStructureChange(
+      context,
+      request.children as readonly StaticStructureChildInput[],
+      request.target,
+      request.expectedRevision,
+      { entityIdFactory: options.entityIdFactory },
+    )
+    : null;
+  const children: PreparedTransactionChild[] = request.profile === 'static-structure'
+    ? request.children.map((child) => ({
+      command: child.command as typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID,
+      input: child.input,
+    }))
+    : request.children.map((child) => ({
+      command: child.command as typeof LAYER_STATE_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID,
+      prepared: prepareTimelineProjectStateChange(context, {
+        ...child.input,
+        target: request.target,
+        expectedRevision: request.expectedRevision,
+      }, {
+        tagIdFactory: options.tagIdFactory,
+      }),
+    }));
   const command = new EditorTransactionCommand(
     context,
     request,
     children,
+    staticPrepared,
     options.transactionIdFactory,
   );
   try {
@@ -364,19 +426,21 @@ function normalizeTransactionRequest(input: unknown): EditorTransactionRequest {
     throw transactionError('invalid_request', false, { reason: 'request' });
   }
 
-  assertExactKeys(input, ['operation', 'target', 'expectedRevision', 'provenance', 'children'], 'request');
+  assertExactKeys(input, ['operation', 'profile', 'target', 'expectedRevision', 'provenance', 'children'], 'request');
   if (input.operation !== undefined && input.operation !== EDITOR_TRANSACTION_OPERATION_ID) {
     throw transactionError('invalid_request', false, { reason: 'operation' });
   }
   const target = normalizeTarget(input.target);
   const expectedRevision = normalizeRevision(input.expectedRevision);
   const provenance = normalizeProvenance(input.provenance);
-  const children = normalizeChildren(input.children);
+  const profile = normalizeProfile(input.profile);
+  const children = normalizeChildren(input.children, profile);
 
-  return { target, expectedRevision, provenance, children };
+  return { profile, target, expectedRevision, provenance, children };
 }
 
-function normalizeChildren(value: unknown): EditorTransactionChildInput[] {
+// fallow-ignore-next-line complexity -- The bounded profile gate keeps child count and command-family validation atomic.
+function normalizeChildren(value: unknown, profile: EditorTransactionProfile): EditorTransactionChildInput[] {
   if (!Array.isArray(value)) {
     throw transactionError('invalid_request', false, { reason: 'children' });
   }
@@ -390,18 +454,22 @@ function normalizeChildren(value: unknown): EditorTransactionChildInput[] {
     throw transactionError('invalid_request', false, { reason: 'children_count' });
   }
 
-  const children = value.map(normalizeChild);
+  const children = value.map((child) => normalizeChild(child, profile));
   const commands = new Set(children.map((child) => child.command));
   if (commands.size !== EDITOR_TRANSACTION_MAX_CHILDREN) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   }
-  if (!commands.has(LAYER_STATE_COMMAND_ID) || !commands.has(FRAME_TAG_COMMAND_ID)) {
+  if (profile === 'layer-and-tag') {
+    if (!commands.has(LAYER_STATE_COMMAND_ID) || !commands.has(FRAME_TAG_COMMAND_ID)) {
+      throw transactionError('invalid_request', false, { reason: 'child_family' });
+    }
+  } else if (!commands.has(STATIC_PALETTE_COMMAND_ID) || !commands.has(STATIC_LAYER_TREE_COMMAND_ID)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   }
   return children;
 }
 
-function normalizeChild(value: unknown): EditorTransactionChildInput {
+function normalizeChild(value: unknown, profile: EditorTransactionProfile): EditorTransactionChildInput {
   if (!isRecord(value)) {
     throw transactionError('invalid_request', false, { reason: 'child' });
   }
@@ -409,7 +477,7 @@ function normalizeChild(value: unknown): EditorTransactionChildInput {
   assertExactKeys(value, ['command', 'input'], 'child');
   const command = normalizeChildCommand(value.command);
   const input = normalizeChildPayload(value.input);
-  assertChildFamily(command, input);
+  assertChildFamily(command, input, profile);
 
   return { command, input };
 }
@@ -425,9 +493,19 @@ function normalizeChildPayload(value: unknown): Record<string, unknown> {
 function assertChildFamily(
   command: EditorTransactionChildCommandId,
   input: Record<string, unknown>,
+  profile: EditorTransactionProfile,
 ): void {
   if (typeof input.kind !== 'string') {
     throw transactionError('invalid_request', false, { reason: 'child_kind' });
+  }
+  if (profile === 'static-structure') {
+    const expectedKind = command === STATIC_PALETTE_COMMAND_ID
+      ? 'palette.declaration'
+      : 'layer-tree.declaration';
+    if (input.kind !== expectedKind) {
+      throw transactionError('invalid_request', false, { reason: 'child_family' });
+    }
+    return;
   }
   const prefix = command === LAYER_STATE_COMMAND_ID ? 'layer.' : 'tag.';
   if (!input.kind.startsWith(prefix)) {
@@ -451,6 +529,12 @@ function assertChildInputFields(value: Record<string, unknown>): void {
   assertExactKeys(value, fields, 'child_input');
 }
 
+function normalizeProfile(value: unknown): EditorTransactionProfile {
+  if (value === undefined || value === 'layer-and-tag') return 'layer-and-tag';
+  if (value === 'static-structure') return value;
+  throw transactionError('invalid_request', false, { reason: 'profile' });
+}
+
 // fallow-ignore-next-line complexity -- The exact child schema is an explicit bounded discriminated union.
 function childInputFields(kind: string): readonly string[] | undefined {
   switch (kind) {
@@ -465,6 +549,8 @@ function childInputFields(kind: string): readonly string[] | undefined {
     case 'tag.collapse': return ['kind', 'tagId', 'collapsed'];
     case 'tag.remove-frame': return ['kind', 'tagId', 'frameIndex'];
     case 'tag.delete': return ['kind', 'tagId'];
+    case 'palette.declaration': return ['kind', 'entries'];
+    case 'layer-tree.declaration': return ['kind', 'layers'];
     default: return undefined;
   }
 }
@@ -474,8 +560,7 @@ function assertExactKeys(
   allowedKeys: readonly string[],
   reason: string,
 ): void {
-  const allowed = new Set(allowedKeys);
-  if (Object.keys(value).some((key) => !allowed.has(key))) {
+  if (!hasOnlyKeys(value, allowedKeys)) {
     throw transactionError('invalid_request', false, { reason });
   }
 }
@@ -527,11 +612,20 @@ function freezeProvenance(
   children: readonly PreparedTransactionChild[],
   transitions: readonly AutomationTransactionRevisionTransition[],
 ): AutomationTransactionProvenance {
-  const summaries = children.map((child): AutomationTransactionChildSummary => Object.freeze({
-    commandId: child.command,
-    operation: child.prepared.request.kind,
-    domains: Object.freeze([...child.prepared.domains]),
-  }));
+  const summaries = children.map((child): AutomationTransactionChildSummary => {
+    if ('prepared' in child) {
+      return Object.freeze({
+        commandId: child.command,
+        operation: child.prepared.request.kind,
+        domains: Object.freeze([...child.prepared.domains]),
+      });
+    }
+    return Object.freeze({
+      commandId: child.command,
+      operation: child.input.kind as string,
+      domains: Object.freeze(['palette', 'layer-state']),
+    });
+  });
   const frozenTransitions = transitions.map((transition) => Object.freeze({ ...transition }));
   return Object.freeze({
     source: 'automation',

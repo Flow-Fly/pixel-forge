@@ -1,9 +1,11 @@
 import type { ProjectRepository } from '../services/persistence/project-repository';
 import {
+  ProjectAlreadyExistsError,
+} from '../services/persistence/project-repository';
+import {
   AutoSaveService,
   autoSaveService,
 } from '../services/auto-save';
-import type { ProjectContext } from '../stores/project-context';
 import type { ProjectChangeEvent } from '../stores/project-store';
 import {
   executeCanvasSize,
@@ -24,7 +26,15 @@ import {
   type RenderObservation,
 } from './observations';
 import { editorCatalog, RENDER_OBSERVATION_MAX_BYTES } from './catalog';
+import { DB32_COLORS } from '../stores/palette/types';
+import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 import {
+  createProjectContext,
+  type ProjectContext,
+} from '../stores/project-context';
+import { DEFAULT_PROJECT_NAME, normalizeProjectName } from '../services/project-defaults';
+import {
+  hasOnlyKeys,
   isRecord,
   type EditorError,
   type ProjectSaveSafetyObservation,
@@ -58,6 +68,8 @@ export interface AutomationAdapterDependencies {
   readonly maxRenderBytes?: number;
   readonly transactionIdFactory?: () => string;
   readonly transactionTagIdFactory?: () => string;
+  readonly projectIdFactory?: () => string;
+  readonly entityIdFactory?: () => string;
 }
 
 export interface AutomationSuccess<T> {
@@ -88,6 +100,13 @@ export interface ProjectTargetRevision {
   readonly type: 'project.target';
   readonly target: ProjectTarget;
   readonly revision: number;
+}
+
+export interface ProjectCreateResult {
+  readonly type: 'project.create';
+  readonly kind: 'blank' | 'safe-copy';
+  readonly target: ProjectTarget;
+  readonly revision: 0;
 }
 
 export interface CanvasResizePreviewResult {
@@ -138,6 +157,11 @@ interface ReloadSaveProof {
   readonly saveSafety: ProjectSaveSafetyObservation;
 }
 
+interface CreatedTargetReservation {
+  readonly target: ProjectTarget;
+  readonly context: ProjectContext;
+}
+
 const CURRENT_CATALOG_VERSION = editorCatalog.version;
 const CANONICAL_OPERATION_IDS: ReadonlySet<string> = new Set(
   editorCatalog.operations.map((operation) => operation.id),
@@ -182,6 +206,10 @@ export class AutomationAdapter {
   private readonly maxRenderBytes: number;
   private readonly transactionIdFactory?: () => string;
   private readonly transactionTagIdFactory?: () => string;
+  private readonly projectIdFactory: () => string;
+  private readonly entityIdFactory: () => string;
+  private readonly registeredTargets = new Map<string, ProjectContext>();
+  private readonly targetLookup?: ProjectTargetLookup;
   private readonly latestEvents = new WeakMap<ProjectContext, ProjectChangeEvent>();
   private readonly eventCleanups = new WeakMap<ProjectContext, () => void>();
   private readonly reloadSaveProofs = new WeakMap<ProjectContext, ReloadSaveProof>();
@@ -189,15 +217,21 @@ export class AutomationAdapter {
   private negotiatedVersion: string | null = null;
 
   constructor(dependencies: AutomationAdapterDependencies = {}) {
-    this.resolveTarget = createTargetResolver(dependencies.targetRegistry);
+    this.targetLookup = dependencies.targetRegistry;
+    const configuredResolver = createTargetResolver(dependencies.targetRegistry);
+    this.resolveTarget = (target) =>
+      this.registeredTargets.get(target.projectId) ?? configuredResolver(target);
     this.saveService = dependencies.saveService ?? autoSaveService;
     this.repository = dependencies.repository;
     this.maxRenderBytes = normalizeRenderByteLimit(dependencies.maxRenderBytes ?? NaN)
       ?? RENDER_OBSERVATION_MAX_BYTES;
     this.transactionIdFactory = dependencies.transactionIdFactory;
     this.transactionTagIdFactory = dependencies.transactionTagIdFactory;
+    this.projectIdFactory = dependencies.projectIdFactory ?? (() => crypto.randomUUID());
+    this.entityIdFactory = dependencies.entityIdFactory ?? (() => crypto.randomUUID());
     this.requestHandlers = {
       'catalog.negotiate': async (input) => this.negotiateCatalog(input),
+      'project.create': async (input) => this.createProject(input),
       'project.target': async (input) => this.captureTargetRevision(input),
       'project.observe': async (input) => this.observeProject(input),
       'project.render.observe': async (input) => this.observeRender(input),
@@ -247,6 +281,81 @@ export class AutomationAdapter {
         type: 'project.target',
         target: { projectId: target.projectId },
         revision: context.project.revision.value,
+      });
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  // fallow-ignore-next-line complexity -- Creation validates the fresh-only boundary, persistence, and context registration as one operation.
+  async createProject(input: unknown): Promise<AutomationResult<ProjectCreateResult>> {
+    try {
+      this.assertNegotiated();
+      if (!this.repository) {
+        return failure('unsupported', false, { reason: 'create_repository' });
+      }
+      const request = normalizeProjectCreateRequest(input);
+      const id = this.projectIdFactory();
+      if (typeof id !== 'string' || id.length === 0) {
+        return failure('internal', true, { reason: 'project_id' });
+      }
+      const target = { projectId: id };
+      if (this.resolveTarget(target)) {
+        return failure('invalid_state', false, { reason: 'project_id_collision' });
+      }
+
+      let project: ProjectFile;
+      if (request.kind === 'blank') {
+        project = createBlankProjectFile(request.name, request.width, request.height, this.entityIdFactory);
+      } else {
+        const source = this.resolveCapturedContext(request.source.target);
+        this.assertSourceRevision(source, request.source.expectedRevision);
+        project = structuredClone(await source.project.saveProject({ rebuildIndexBuffers: false }));
+        this.assertSourceRevision(source, request.source.expectedRevision);
+        project.name = request.name ?? `Copy of ${normalizeProjectName(project.name)}`;
+      }
+
+      let context: ProjectContext | undefined;
+      try {
+        context = createProjectContext();
+        await this.saveService.runWithoutSaving(async () => {
+          await context!.project.loadProject(project);
+          context!.project.id.value = id;
+          context!.project.lastSaved.value = Date.now();
+        }, context);
+      } catch (error) {
+        if (context) {
+          this.saveService.stop(context);
+          context.dispose();
+        }
+        throw error;
+      }
+
+      let reservation: CreatedTargetReservation | undefined;
+      try {
+        // Reserve the adapter target synchronously before persistence. The
+        // reservation is exact-identity reversible if the fresh-only create
+        // rejects, so no post-persistence registration can fail or overwrite.
+        reservation = this.reserveCreatedTarget(target, context);
+        // ProjectRepository.create is the fresh-only persistence boundary. It
+        // must reject a used key without changing the repository, so the only
+        // compensation needed here is releasing our in-memory reservation.
+        await this.repository.create(id, structuredClone(project));
+      } catch (error) {
+        if (reservation) this.rollbackCreatedTarget(reservation);
+        this.saveService.stop(context);
+        context.dispose();
+        if (error instanceof ProjectAlreadyExistsError) {
+          return failure('invalid_state', false, { reason: 'project_id_collision' });
+        }
+        throw error;
+      }
+
+      return success({
+        type: 'project.create',
+        kind: request.kind,
+        target,
+        revision: 0,
       });
     } catch (error) {
       return failureFromUnknown(error);
@@ -331,6 +440,7 @@ export class AutomationAdapter {
       const result = await executeEditorTransaction(context, input, {
         transactionIdFactory: this.transactionIdFactory,
         tagIdFactory: this.transactionTagIdFactory,
+        entityIdFactory: this.entityIdFactory,
       });
       return success({
         ...result,
@@ -509,6 +619,14 @@ export class AutomationAdapter {
   }
 
   private prepareContext(target: ProjectTarget): ProjectContext {
+    const context = this.resolveContext(target);
+
+    this.saveService.start(context);
+    this.trackEvents(context);
+    return context;
+  }
+
+  private resolveContext(target: ProjectTarget): ProjectContext {
     let context: ProjectContext | undefined;
     try {
       context = this.resolveTarget(target);
@@ -521,9 +639,55 @@ export class AutomationAdapter {
       });
     }
 
-    this.saveService.start(context);
-    this.trackEvents(context);
     return context;
+  }
+
+  private resolveCapturedContext(target: ProjectTarget): ProjectContext {
+    return this.resolveContext(target);
+  }
+
+  private assertSourceRevision(context: ProjectContext, expectedRevision: number): void {
+    const currentRevision = context.project.revision.value;
+    if (currentRevision !== expectedRevision) {
+      throw adapterError('revision_conflict', true, {
+        expectedRevision,
+        currentRevision,
+      });
+    }
+  }
+
+  private reserveCreatedTarget(
+    target: ProjectTarget,
+    context: ProjectContext,
+  ): CreatedTargetReservation {
+    if (this.registeredTargets.has(target.projectId)) {
+      throw adapterError('invalid_state', false, { reason: 'target_registration_collision' });
+    }
+    if (this.targetLookup instanceof Map && Map.prototype.has.call(this.targetLookup, target.projectId)) {
+      throw adapterError('invalid_state', false, { reason: 'target_registration_collision' });
+    }
+    this.registeredTargets.set(target.projectId, context);
+    try {
+      if (this.targetLookup instanceof Map) {
+        Map.prototype.set.call(this.targetLookup, target.projectId, context);
+      }
+    } catch (error) {
+      this.registeredTargets.delete(target.projectId);
+      throw error;
+    }
+    return { target, context };
+  }
+
+  private rollbackCreatedTarget(reservation: CreatedTargetReservation): void {
+    if (this.registeredTargets.get(reservation.target.projectId) === reservation.context) {
+      this.registeredTargets.delete(reservation.target.projectId);
+    }
+    if (
+      this.targetLookup instanceof Map
+      && Map.prototype.get.call(this.targetLookup, reservation.target.projectId) === reservation.context
+    ) {
+      Map.prototype.delete.call(this.targetLookup, reservation.target.projectId);
+    }
   }
 
   private assertCurrentRevision(context: ProjectContext, expectedRevision: number): void {
@@ -629,11 +793,12 @@ export function createProjectTargetRegistry(
 ): ProjectTargetRegistry {
   const targets = new Map<string, ProjectContext>();
   for (const context of contexts) targets.set(context.project.id.value, context);
-  return {
-    resolve(target) {
+  const registry: ProjectTargetRegistry = Object.freeze({
+    resolve(target: ProjectTarget) {
       return targets.get(target.projectId);
     },
-  };
+  });
+  return registry;
 }
 
 function createTargetResolver(lookup: ProjectTargetLookup | undefined): ProjectTargetResolver {
@@ -654,6 +819,127 @@ function normalizeCatalogNegotiation(input: unknown): CatalogNegotiationRequest 
     throw adapterError('invalid_request', false, { reason: 'catalog_version' });
   }
   return { version };
+}
+
+type ProjectCreateRequest =
+  | {
+      readonly kind: 'blank';
+      readonly name: string;
+      readonly width: number;
+      readonly height: number;
+    }
+  | {
+      readonly kind: 'safe-copy';
+      readonly name?: string;
+      readonly source: {
+        readonly target: ProjectTarget;
+        readonly expectedRevision: number;
+      };
+    };
+
+function normalizeProjectCreateRequest(input: unknown): ProjectCreateRequest {
+  if (!isRecord(input)) throw adapterError('invalid_request', false, { reason: 'create_request' });
+  if (input.operation !== undefined && input.operation !== 'project.create') {
+    throw adapterError('invalid_request', false, { reason: 'operation' });
+  }
+  if (input.kind === 'blank') {
+    assertExactKeys(input, ['operation', 'kind', 'name', 'width', 'height'], 'create_blank');
+    return {
+      kind: 'blank',
+      name: normalizeCreateName(input.name),
+      width: normalizeCreateDimension(input.width, 'width'),
+      height: normalizeCreateDimension(input.height, 'height'),
+    };
+  }
+  if (input.kind === 'safe-copy') {
+    assertExactKeys(input, ['operation', 'kind', 'name', 'source'], 'create_safe_copy');
+    if (!isRecord(input.source)) {
+      throw adapterError('invalid_request', false, { reason: 'source' });
+    }
+    assertExactKeys(input.source, ['target', 'expectedRevision'], 'source');
+    return {
+      kind: 'safe-copy',
+      ...(input.name === undefined ? {} : { name: normalizeCreateName(input.name) }),
+      source: {
+        target: normalizeTarget(input.source.target),
+        expectedRevision: normalizeRevision(input.source.expectedRevision),
+      },
+    };
+  }
+  throw adapterError('invalid_request', false, { reason: 'kind' });
+}
+
+function normalizeCreateName(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw adapterError('invalid_request', false, { reason: 'name' });
+  }
+  if (value.length > editorCatalog.limits.maxStringLength) {
+    throw adapterError('limit_exceeded', false, {
+      reason: 'name',
+      max: editorCatalog.limits.maxStringLength,
+    });
+  }
+  return value.trim();
+}
+
+function normalizeCreateDimension(value: unknown, reason: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 16 || value > 64) {
+    throw adapterError('bounds_exceeded', false, { reason, max: 64 });
+  }
+  return value;
+}
+
+function createBlankProjectFile(
+  name: string,
+  width: number,
+  height: number,
+  entityIdFactory: () => string = () => crypto.randomUUID(),
+): ProjectFile {
+  const layerId = entityIdFactory();
+  const frameId = entityIdFactory();
+  const palette = [...DB32_COLORS];
+  return {
+    version: PROJECT_VERSION,
+    name: name || DEFAULT_PROJECT_NAME,
+    width,
+    height,
+    palette,
+    paletteEntries: palette.map((color) => ({ id: entityIdFactory(), color })),
+    layers: [{
+      id: layerId,
+      name: 'Layer 1',
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 255,
+      blendMode: 'normal',
+      continuous: false,
+      parentId: null,
+      data: new Uint8Array(0),
+    }],
+    frames: [{
+      id: frameId,
+      duration: 100,
+      cels: [{
+        id: entityIdFactory(),
+        layerId,
+        data: new Uint8Array(0),
+        opacity: 100,
+      }],
+    }],
+    animation: { fps: 12, currentFrameIndex: 0 },
+    tags: [],
+  };
+}
+
+function assertExactKeys(
+  value: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  reason: string,
+): void {
+  if (!hasOnlyKeys(value, allowedKeys)) {
+    throw adapterError('invalid_request', false, { reason });
+  }
 }
 
 function normalizeTargetRequest(input: unknown): ProjectTarget {

@@ -1,7 +1,13 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { v4 as uuidv4 } from 'uuid';
 import type { ProjectFile, ProjectFileInput } from '../../types/project';
-import type { ProjectMeta, ProjectRepository, WorkspaceState } from './project-repository';
+import {
+  ProjectAlreadyExistsError,
+  type ProjectMeta,
+  type ProjectRepository,
+  type SaveProjectOptions,
+  type WorkspaceState,
+} from './project-repository';
 import { log } from '../../utils/log';
 
 /** Key of the single-project slot used before multi-project support. */
@@ -115,6 +121,27 @@ class IndexedDbProjectRepository implements ProjectRepository {
     });
   }
 
+  async create(
+    id: string,
+    project: ProjectFile,
+    options: SaveProjectOptions = {},
+  ): Promise<void> {
+    const db = await this.dbPromise;
+    try {
+      await db.add('sprites', {
+        id,
+        project,
+        lastModified: Date.now(),
+        thumbnail: options.thumbnail,
+      });
+    } catch (error) {
+      if (isConstraintError(error)) {
+        throw new ProjectAlreadyExistsError(id);
+      }
+      throw error;
+    }
+  }
+
   async delete(id: string): Promise<void> {
     const db = await this.dbPromise;
     await db.delete('sprites', id);
@@ -147,6 +174,10 @@ class IndexedDbProjectRepository implements ProjectRepository {
       });
     }
   }
+}
+
+function isConstraintError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'ConstraintError';
 }
 
 export const projectRepository: ProjectRepository = new IndexedDbProjectRepository();

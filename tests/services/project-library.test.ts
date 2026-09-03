@@ -5,6 +5,7 @@ const repositoryMock = vi.hoisted(() => ({
   list: vi.fn(),
   load: vi.fn(),
   save: vi.fn(),
+  create: vi.fn(),
   delete: vi.fn(),
   getLastOpenedProjectId: vi.fn(),
   setLastOpenedProjectId: vi.fn(),
@@ -150,6 +151,11 @@ beforeEach(async () => {
     return project ? cloneProject(project) : null;
   });
   repository.save.mockImplementation(async (id: string, project: ProjectFile) => {
+    const saved = cloneProject(project);
+    projects.set(id, saved);
+    savedProjects.push({ id, project: cloneProject(saved) });
+  });
+  repository.create.mockImplementation(async (id: string, project: ProjectFile) => {
     const saved = cloneProject(project);
     projects.set(id, saved);
     savedProjects.push({ id, project: cloneProject(saved) });

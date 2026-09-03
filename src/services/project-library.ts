@@ -65,7 +65,7 @@ export class ProjectLibraryService {
 
     const id = uuidv4();
     const project = createBlankProjectFile(options);
-    await this.repository.save(id, project);
+    await this.repository.create(id, project);
     await this.loadStoredProject(id, context);
 
     return id;
@@ -81,7 +81,7 @@ export class ProjectLibraryService {
     }
 
     const id = uuidv4();
-    await this.repository.save(id, structuredClone(project));
+    await this.repository.create(id, structuredClone(project));
     await this.loadStoredProject(id, context);
     return id;
   }
@@ -91,7 +91,7 @@ export class ProjectLibraryService {
     const id = uuidv4();
     const canonicalProject = decodeProjectFile(structuredClone(project));
 
-    await this.repository.save(id, {
+    await this.repository.create(id, {
       ...canonicalProject,
       version: PROJECT_VERSION,
     });
@@ -105,7 +105,7 @@ export class ProjectLibraryService {
     const copy = structuredClone(project);
     copy.name = `Copy of ${normalizeProjectName(project.name)}`;
 
-    await this.repository.save(copyId, copy, {
+    await this.repository.create(copyId, copy, {
       thumbnail: sourceMeta?.thumbnail,
     });
     return copyId;

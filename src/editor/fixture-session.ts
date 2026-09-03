@@ -1,4 +1,9 @@
-import type { ProjectRepository, ProjectMeta, WorkspaceState } from '../services/persistence/project-repository';
+import {
+  ProjectAlreadyExistsError,
+  type ProjectRepository,
+  type ProjectMeta,
+  type WorkspaceState,
+} from '../services/persistence/project-repository';
 import { AutoSaveService, createAutoSaveService } from '../services/auto-save';
 import { createProjectContext, type ProjectContext } from '../stores/project-context';
 import { PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../types/project';
@@ -9,6 +14,7 @@ import {
   type CanvasResizeExecutionResult,
   type CanvasResizePreviewResult,
   type HistoryTransitionResult,
+  type ProjectCreateResult,
   type ReloadResult,
   type SaveResult,
 } from './automation-adapter';
@@ -43,6 +49,11 @@ export class FixtureProjectRepository implements ProjectRepository {
     this.projects.set(id, cloneProject(project));
   }
 
+  async create(id: string, project: ProjectFile): Promise<void> {
+    if (this.projects.has(id)) throw new ProjectAlreadyExistsError(id);
+    this.projects.set(id, cloneProject(project));
+  }
+
   async delete(id: string): Promise<void> {
     this.projects.delete(id);
   }
@@ -69,6 +80,19 @@ export interface FixtureSessionOptions {
   readonly repository?: ProjectRepository;
   readonly saveService?: AutoSaveService;
   readonly projectId?: string;
+  readonly projectIdFactory?: () => string;
+  readonly entityIdFactory?: () => string;
+}
+
+export interface FixtureBlankProjectResult {
+  readonly creation: ProjectCreateResult;
+  readonly observation: ProjectObservation;
+}
+
+interface FixtureDocumentState {
+  readonly observation: ProjectObservation;
+  readonly render: RenderObservation;
+  readonly document: ProjectFile;
 }
 
 export interface FixtureJourneyResult {
@@ -105,29 +129,11 @@ export interface FixtureJourneyResult {
 
 export interface FixtureTransactionJourneyResult {
   readonly negotiation: CatalogNegotiation;
-  readonly initial: {
-    readonly observation: ProjectObservation;
-    readonly render: RenderObservation;
-    readonly document: ProjectFile;
-  };
+  readonly initial: FixtureDocumentState;
   readonly transaction: EditorTransactionResult;
-  readonly afterTransaction: {
-    readonly observation: ProjectObservation;
-    readonly render: RenderObservation;
-    readonly document: ProjectFile;
-  };
-  readonly afterUndo: {
-    readonly transition: HistoryTransitionResult;
-    readonly observation: ProjectObservation;
-    readonly render: RenderObservation;
-    readonly document: ProjectFile;
-  };
-  readonly afterRedo: {
-    readonly transition: HistoryTransitionResult;
-    readonly observation: ProjectObservation;
-    readonly render: RenderObservation;
-    readonly document: ProjectFile;
-  };
+  readonly afterTransaction: FixtureDocumentState;
+  readonly afterUndo: FixtureDocumentState & { readonly transition: HistoryTransitionResult };
+  readonly afterRedo: FixtureDocumentState & { readonly transition: HistoryTransitionResult };
   readonly save: SaveResult;
   readonly reload: ReloadResult;
   readonly exact: {
@@ -136,13 +142,32 @@ export interface FixtureTransactionJourneyResult {
   };
 }
 
-interface FixtureJourneyStart {
+export interface FixtureStaticStructureJourneyResult {
   readonly negotiation: CatalogNegotiation;
-  readonly initial: {
+  readonly creation: FixtureBlankProjectResult;
+  readonly initial: FixtureDocumentState;
+  readonly transaction: EditorTransactionResult;
+  readonly afterTransaction: FixtureDocumentState;
+  readonly afterUndo: FixtureDocumentState & { readonly transition: HistoryTransitionResult };
+  readonly afterRedo: FixtureDocumentState & { readonly transition: HistoryTransitionResult };
+  readonly save: SaveResult;
+  readonly reopened: {
+    readonly save: SaveResult;
+    readonly reload: ReloadResult;
     readonly observation: ProjectObservation;
     readonly render: RenderObservation;
     readonly document: ProjectFile;
   };
+  readonly exact: {
+    readonly document: boolean;
+    readonly render: boolean;
+    readonly structure: boolean;
+  };
+}
+
+interface FixtureJourneyStart {
+  readonly negotiation: CatalogNegotiation;
+  readonly initial: FixtureDocumentState;
 }
 
 interface FixtureHistoryReplay {
@@ -175,6 +200,7 @@ export class FixtureSession {
   readonly repository: ProjectRepository;
 
   private readonly context: ProjectContext;
+  private readonly targetContexts = new Map<string, ProjectContext>();
   private readonly saveService: AutoSaveService;
   private readonly ownsContext: boolean;
   private initialized = false;
@@ -186,15 +212,45 @@ export class FixtureSession {
     this.saveService = options.saveService ?? createAutoSaveService({ repository: this.repository });
     const projectId = options.projectId ?? FIXTURE_PROJECT_ID;
     this.target = { projectId };
+    this.targetContexts.set(projectId, this.context);
     let transactionSequence = 0;
     let tagSequence = 0;
+    let entitySequence = 0;
+    const entityIdFactory = options.entityIdFactory
+      ?? (() => `fixture-entity-${++entitySequence}`);
     this.adapter = createAutomationAdapter({
-      targetRegistry: new Map([[projectId, this.context]]),
+      targetRegistry: this.targetContexts,
       saveService: this.saveService,
       repository: this.repository,
       transactionIdFactory: () => `fixture-transaction-${++transactionSequence}`,
       transactionTagIdFactory: () => `fixture-tag-${++tagSequence}`,
+      projectIdFactory: options.projectIdFactory,
+      entityIdFactory,
     });
+  }
+
+  /** Create one isolated Preview-sized target without changing the fixture tab. */
+  async createBlankProject(
+    name: string,
+    width: number,
+    height: number,
+  ): Promise<FixtureBlankProjectResult> {
+    await this.initialize();
+    const negotiation = this.adapter.negotiateCatalog({ version: '1.0' });
+    if (!negotiation.ok) throw new Error(`Fixture catalog negotiation failed: ${negotiation.error.code}`);
+    const creation = await requestSuccess<ProjectCreateResult>(this.adapter, {
+      operation: 'project.create',
+      kind: 'blank',
+      name,
+      width,
+      height,
+    });
+    const observation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
+      target: creation.target,
+      expectedRevision: creation.revision,
+    });
+    return { creation, observation };
   }
 
   async run(): Promise<FixtureJourneyResult> {
@@ -347,6 +403,140 @@ export class FixtureSession {
     };
   }
 
+  /**
+   * Prove the static profile across its complete persisted lifecycle. The
+   * created target is closed before a fresh context loads it from the fixture
+   * repository and then exercises the adapter reload proof.
+   */
+  async runStaticStructure(): Promise<FixtureStaticStructureJourneyResult> {
+    await this.initialize();
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    const creation = await this.createBlankProject('Static structure fixture', 16, 16);
+    const target = creation.creation.target;
+    const createdContext = this.targetContexts.get(target.projectId);
+    if (!createdContext) throw new Error('Fixture project creation did not register its target.');
+
+    const initialObservation = creation.observation;
+    const initialRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
+      target,
+      expectedRevision: initialObservation.revision,
+      frameId: initialObservation.currentFrameId,
+    });
+    const initialDocument = structuredClone(
+      await createdContext.project.saveProject({ rebuildIndexBuffers: false }),
+    );
+    const transaction = await requestSuccess<EditorTransactionResult>(this.adapter,
+      makeStaticStructureRequest(target, initialObservation),
+    );
+    await settleEffects();
+
+    const afterTransactionObservation = await requestSuccess<ProjectObservation>(this.adapter, {
+      operation: 'project.observe',
+      target,
+      expectedRevision: transaction.revision,
+    });
+    const afterTransactionRender = await requestSuccess<RenderObservation>(this.adapter, {
+      operation: 'project.render.observe',
+      target,
+      expectedRevision: afterTransactionObservation.revision,
+      frameId: afterTransactionObservation.currentFrameId,
+    });
+    const afterTransactionDocument = structuredClone(
+      await createdContext.project.saveProject({ rebuildIndexBuffers: false }),
+    );
+
+    const afterUndo = await replayStaticHistory(this.adapter, target, afterTransactionObservation, createdContext);
+    const save = await requestSuccess<SaveResult>(this.adapter, {
+      operation: 'project.save',
+      target,
+      expectedRevision: afterUndo.afterRedo.observation.revision,
+    });
+
+    this.saveService.stop(createdContext);
+    createdContext.dispose();
+    this.targetContexts.delete(target.projectId);
+
+    const reopenedContext = createProjectContext();
+    const persisted = await this.repository.load(target.projectId);
+    if (!persisted) throw new Error('Fixture repository lost the created project.');
+    await this.saveService.runWithoutSaving(async () => {
+      await reopenedContext.project.loadProject(persisted, false, {
+        preserveRevision: afterUndo.afterRedo.observation.revision,
+      });
+      reopenedContext.project.id.value = target.projectId;
+    }, reopenedContext);
+    this.targetContexts.set(target.projectId, reopenedContext);
+    const reopenedAdapter = createAutomationAdapter({
+      targetRegistry: new Map([[target.projectId, reopenedContext]]),
+      repository: this.repository,
+      saveService: this.saveService,
+    });
+    const reopenedNegotiation = reopenedAdapter.negotiateCatalog({ version: '1.0' });
+    if (!reopenedNegotiation.ok) throw new Error('Fixture reload catalog negotiation failed.');
+    const reopenedSave = await requestSuccess<SaveResult>(reopenedAdapter, {
+      operation: 'project.save',
+      target,
+      expectedRevision: afterUndo.afterRedo.observation.revision,
+    });
+    const reopenedReload = await requestSuccess<ReloadResult>(reopenedAdapter, {
+      operation: 'project.reload',
+      target,
+      expectedRevision: afterUndo.afterRedo.observation.revision,
+    });
+    const reopenedObservation = reopenedReload.observation;
+    const reopenedRender = await requestSuccess<RenderObservation>(reopenedAdapter, {
+      operation: 'project.render.observe',
+      target,
+      expectedRevision: reopenedObservation.revision,
+      frameId: reopenedObservation.currentFrameId,
+    });
+    const reopenedDocument = structuredClone(
+      await reopenedContext.project.saveProject({ rebuildIndexBuffers: false }),
+    );
+
+    return {
+      negotiation,
+      creation,
+      initial: {
+        observation: initialObservation,
+        render: initialRender,
+        document: initialDocument,
+      },
+      transaction,
+      afterTransaction: {
+        observation: afterTransactionObservation,
+        render: afterTransactionRender,
+        document: afterTransactionDocument,
+      },
+      afterUndo: afterUndo.afterUndo,
+      afterRedo: afterUndo.afterRedo,
+      save,
+      reopened: {
+        save: reopenedSave,
+        reload: reopenedReload,
+        observation: reopenedObservation,
+        render: reopenedRender,
+        document: reopenedDocument,
+      },
+      exact: {
+        document: (() => {
+          const initialMatchesUndo = sameProjectFile(initialDocument, afterUndo.afterUndo.document);
+          const transactionMatchesRedo = sameProjectFile(afterTransactionDocument, afterUndo.afterRedo.document);
+          const redoMatchesReopened = sameProjectFileIgnoringEmptyIndices(afterUndo.afterRedo.document, reopenedDocument);
+          return initialMatchesUndo && transactionMatchesRedo && redoMatchesReopened;
+        })(),
+        render: sameRender(initialRender, afterUndo.afterUndo.render)
+          && sameRender(afterTransactionRender, afterUndo.afterRedo.render)
+          && sameRender(afterUndo.afterRedo.render, reopenedRender),
+        structure: sameStructure(afterUndo.afterRedo.observation, reopenedObservation),
+      },
+    };
+  }
+
   private async beginJourney(): Promise<FixtureJourneyStart> {
     const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
       operation: 'catalog.negotiate',
@@ -458,8 +648,11 @@ export class FixtureSession {
   }
 
   dispose(): void {
-    this.saveService.stop(this.context);
-    if (this.ownsContext) this.context.dispose();
+    for (const context of this.targetContexts.values()) {
+      this.saveService.stop(context);
+      if (context === this.context ? this.ownsContext : true) context.dispose();
+    }
+    this.targetContexts.clear();
   }
 
   private async initialize(): Promise<void> {
@@ -560,6 +753,22 @@ function sameProjectFile(first: ProjectFile, second: ProjectFile): boolean {
   );
 }
 
+function sameProjectFileIgnoringEmptyIndices(first: ProjectFile, second: ProjectFile): boolean {
+  return sameProjectFile(removeEmptyIndexData(first), removeEmptyIndexData(second));
+}
+
+function removeEmptyIndexData(project: ProjectFile): ProjectFile {
+  const copy = structuredClone(project);
+  for (const frame of copy.frames) {
+    for (const cel of frame.cels) {
+      if (cel.indexData?.every((index) => index === 0)) {
+        delete cel.indexData;
+      }
+    }
+  }
+  return copy;
+}
+
 function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
   return first.length === second.length && first.every((value, index) => value === second[index]);
 }
@@ -572,6 +781,165 @@ function sameRender(first: RenderObservation, second: RenderObservation): boolea
     && first.format === second.format
     && first.stride === second.stride
     && sameBytes(first.pixels, second.pixels);
+}
+
+function sameStructure(first: ProjectObservation, second: ProjectObservation): boolean {
+  return first.layers.map((layer) => ({
+    id: layer.id,
+    name: layer.name,
+    type: layer.type,
+    parentId: layer.parentId,
+    visible: layer.visible,
+    locked: layer.locked,
+    opacity: layer.opacity,
+    blendMode: layer.blendMode,
+  })).every((layer, index) => {
+    const other = second.layers[index];
+    return other !== undefined && JSON.stringify(layer) === JSON.stringify({
+      id: other.id,
+      name: other.name,
+      type: other.type,
+      parentId: other.parentId,
+      visible: other.visible,
+      locked: other.locked,
+      opacity: other.opacity,
+      blendMode: other.blendMode,
+    });
+  }) && first.layers.length === second.layers.length
+    && JSON.stringify(first.palette) === JSON.stringify(second.palette);
+}
+
+function makeStaticStructureRequest(
+  target: { readonly projectId: string },
+  observation: ProjectObservation,
+): Record<string, unknown> {
+  const baseLayer = observation.layers.find((layer) => layer.type === 'image');
+  if (!baseLayer) throw new Error('Fixture project has no image layer.');
+  return {
+    operation: 'project.transaction.execute',
+    profile: 'static-structure',
+    target,
+    expectedRevision: observation.revision,
+    provenance: {
+      clientId: 'fixture-static-client',
+      sessionId: 'fixture-static-session',
+      runId: 'fixture-static-run',
+      operationId: 'fixture-static-structure',
+    },
+    children: [
+      {
+        command: 'project.palette.declaration',
+        input: {
+          kind: 'palette.declaration',
+          entries: observation.palette.map(({ id, color }) => ({ id, color })),
+        },
+      },
+      {
+        command: 'project.layer.tree',
+        input: {
+          kind: 'layer-tree.declaration',
+          layers: [
+            {
+              id: 'fixture-static-group',
+              name: 'Static Group',
+              type: 'group',
+              parentId: null,
+              visible: true,
+              locked: false,
+              opacity: 255,
+              blendMode: 'normal',
+              continuous: false,
+            },
+            {
+              id: baseLayer.id,
+              name: 'Static Base',
+              type: 'image',
+              parentId: 'fixture-static-group',
+              visible: baseLayer.visible,
+              locked: baseLayer.locked,
+              opacity: baseLayer.opacity,
+              blendMode: baseLayer.blendMode,
+              continuous: baseLayer.continuous,
+            },
+            {
+              id: 'fixture-static-added',
+              name: 'Static Added',
+              type: 'image',
+              parentId: 'fixture-static-group',
+              visible: true,
+              locked: false,
+              opacity: 255,
+              blendMode: 'normal',
+              continuous: false,
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+async function replayStaticHistory(
+  adapter: AutomationAdapter,
+  target: { readonly projectId: string },
+  afterTransactionObservation: ProjectObservation,
+  context: ProjectContext,
+): Promise<{
+  readonly afterUndo: FixtureStaticStructureJourneyResult['afterUndo'];
+  readonly afterRedo: FixtureStaticStructureJourneyResult['afterRedo'];
+}> {
+  const undoTransition = await requestSuccess<HistoryTransitionResult>(adapter, {
+    operation: 'project.history.undo',
+    target,
+    expectedRevision: afterTransactionObservation.revision,
+  });
+  const afterUndoObservation = await requestSuccess<ProjectObservation>(adapter, {
+    operation: 'project.observe',
+    target,
+    expectedRevision: undoTransition.revision,
+  });
+  const afterUndoRender = await requestSuccess<RenderObservation>(adapter, {
+    operation: 'project.render.observe',
+    target,
+    expectedRevision: afterUndoObservation.revision,
+    frameId: afterUndoObservation.currentFrameId,
+  });
+  const afterUndoDocument = structuredClone(
+    await context.project.saveProject({ rebuildIndexBuffers: false }),
+  );
+  const redoTransition = await requestSuccess<HistoryTransitionResult>(adapter, {
+    operation: 'project.history.redo',
+    target,
+    expectedRevision: afterUndoObservation.revision,
+  });
+  const afterRedoObservation = await requestSuccess<ProjectObservation>(adapter, {
+    operation: 'project.observe',
+    target,
+    expectedRevision: redoTransition.revision,
+  });
+  const afterRedoRender = await requestSuccess<RenderObservation>(adapter, {
+    operation: 'project.render.observe',
+    target,
+    expectedRevision: afterRedoObservation.revision,
+    frameId: afterRedoObservation.currentFrameId,
+  });
+  const afterRedoDocument = structuredClone(
+    await context.project.saveProject({ rebuildIndexBuffers: false }),
+  );
+  return {
+    afterUndo: {
+      transition: undoTransition,
+      observation: afterUndoObservation,
+      render: afterUndoRender,
+      document: afterUndoDocument,
+    },
+    afterRedo: {
+      transition: redoTransition,
+      observation: afterRedoObservation,
+      render: afterRedoRender,
+      document: afterRedoDocument,
+    },
+  };
 }
 
 async function settleEffects(): Promise<void> {

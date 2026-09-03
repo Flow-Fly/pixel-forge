@@ -2,7 +2,10 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { openDB } from 'idb';
 import type { ProjectFile } from '../../../src/types/project';
-import type { ProjectRepository } from '../../../src/services/persistence/project-repository';
+import {
+  ProjectAlreadyExistsError,
+  type ProjectRepository,
+} from '../../../src/services/persistence/project-repository';
 
 function makeProject(name: string, width = 8, height = 8): ProjectFile {
   return {
@@ -62,6 +65,16 @@ describe('IndexedDbProjectRepository', () => {
 
     const loaded = await repo.load('id-roundtrip');
     expect(loaded).toEqual(project);
+  });
+
+  it('creates fresh records atomically without overwriting a collision', async () => {
+    const original = makeProject('Original');
+    await repo.create('id-create-only', original);
+
+    await expect(repo.create('id-create-only', makeProject('Replacement'))).rejects.toBeInstanceOf(
+      ProjectAlreadyExistsError
+    );
+    expect(await repo.load('id-create-only')).toEqual(original);
   });
 
   it('stores thumbnails as metadata without changing the project file', async () => {
