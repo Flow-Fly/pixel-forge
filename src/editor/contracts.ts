@@ -40,6 +40,7 @@ export interface AutomationTransactionProvenance {
 export interface AutomationTransactionChildSummary {
   readonly commandId:
     | 'project.layer.state'
+    | 'project.layer.structure.refine'
     | 'project.animation.frame-tag'
     | 'project.animation.frame'
     | 'project.animation.cel.link'
@@ -48,6 +49,24 @@ export interface AutomationTransactionChildSummary {
     | 'project.layer.tree';
   readonly operation: string;
   readonly domains: readonly string[];
+}
+
+/**
+ * Bounded proof that a structure refinement did not change any frame render.
+ * Digests are deterministic observations, not artwork logs.
+ */
+export interface ProjectCompositeEqualityFrame {
+  readonly frameId: string;
+  readonly equal: true;
+  readonly beforeDigest: string;
+  readonly afterDigest: string;
+}
+
+export interface ProjectCompositeEqualityEvidence {
+  readonly type: 'project.composite-equality';
+  readonly allEqual: true;
+  readonly frameCount: number;
+  readonly frames: readonly ProjectCompositeEqualityFrame[];
 }
 
 /** Stable categories exposed by the local project save boundary. */

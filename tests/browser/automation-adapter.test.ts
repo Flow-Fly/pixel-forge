@@ -826,6 +826,81 @@ describe('Automation Adapter Fixture Session', () => {
     expect(reloaded.observation.canvas).toEqual({ width: 16, height: 16 });
   });
 
+  it('proves a lossless structure refinement through every frame and persisted lifecycle', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+
+    const journey = await session.runStructureRefinement();
+
+    expect(journey.negotiation.version).toBe('1.0');
+    expect(journey.transaction.revision).toBe(1);
+    expect(journey.transaction.event.domains).toEqual(['layer-state', 'raster-content']);
+    expect(journey.transaction.compositeEquality).toMatchObject({
+      type: 'project.composite-equality',
+      allEqual: true,
+      frameCount: 2,
+    });
+    expect(journey.transaction.compositeEquality?.frames).toHaveLength(2);
+    expect(journey.afterTransaction.observation.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      type: layer.type,
+      parentId: layer.parentId,
+    }))).toEqual([
+      { id: 'fixture-refinement-group', name: 'Grouped', type: 'group', parentId: null },
+      { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: null },
+      { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: 'fixture-refinement-group' },
+    ]);
+    expect(journey.afterTransaction.observation.history.undoCount).toBe(1);
+    expect(journey.afterUndo.transition.revision).toBe(2);
+    expect(journey.afterRedo.transition.revision).toBe(3);
+    expect(journey.save.saveSafety.status).toBe('saved');
+    expect(journey.reopened.reload.revision).toBe(3);
+    expect(journey.exact).toEqual({ document: true, render: true, structure: true });
+  });
+
+  it('rejects non-empty removal before changing the refinement document', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+    const journey = await session.runStructureRefinement();
+    const before = journey.reopened.observation;
+    const bottom = before.layers.find((layer) => layer.id === 'fixture-refinement-bottom');
+    if (!bottom) throw new Error('Refinement fixture lost its retained image.');
+
+    const result = await session.adapter.request({
+      operation: 'project.transaction.execute',
+      profile: 'structure-refinement',
+      target: session.target,
+      expectedRevision: before.revision,
+      provenance: {
+        clientId: 'fixture-refinement-failure-client',
+        sessionId: 'fixture-refinement-failure-session',
+        runId: 'fixture-refinement-failure-run',
+        operationId: 'fixture-refinement-non-empty-removal',
+      },
+      children: [{
+        command: 'project.layer.structure.refine',
+        input: {
+          kind: 'structure.refine',
+          layers: [{ id: bottom.id, name: bottom.name, type: 'image', parentId: null }],
+          mergePairs: [],
+        },
+      }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'non_empty_layer_removal' } },
+    });
+    const after = await requestSuccess<ProjectObservation>(session, {
+      operation: 'project.observe',
+      target: session.target,
+      expectedRevision: before.revision,
+    });
+    expect(after.layers).toEqual(before.layers);
+    expect(after.history).toEqual(before.history);
+  });
+
   it('proves deterministic static creation through close, repository reopen, and reload', async () => {
     const session = createFixtureSession({
       projectIdFactory: () => 'fixture-static-lifecycle',

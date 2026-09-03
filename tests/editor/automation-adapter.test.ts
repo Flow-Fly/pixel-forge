@@ -131,7 +131,7 @@ describe('AutomationAdapter', () => {
         expectedRevision: 'integer >= 0',
         profile: {
           default: 'layer-and-tag',
-          oneOf: ['layer-and-tag', 'static-structure', 'animation'],
+          oneOf: ['layer-and-tag', 'static-structure', 'structure-refinement', 'animation'],
         },
         provenance: expect.objectContaining({
           clientId: 'non-empty bounded string',

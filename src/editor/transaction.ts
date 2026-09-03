@@ -26,6 +26,13 @@ import {
   type PreparedAnimationProjectStateChange,
 } from './animation-project-state';
 import {
+  applyPreparedStructureRefinementChange,
+  assertPreparedStructureRefinementChange,
+  prepareStructureRefinementChange,
+  type PreparedStructureRefinementChange,
+  type StructureRefinementChildInput,
+} from './structure-refinement';
+import {
   hasOnlyKeys,
   isRecord,
   type AutomationTransactionChildSummary,
@@ -33,6 +40,7 @@ import {
   type AutomationTransactionRevisionTransition,
   type AutomationTransactionTransitionPhase,
   type EditorError,
+  type ProjectCompositeEqualityEvidence,
   type ProjectTarget,
 } from './contracts';
 import {
@@ -46,6 +54,7 @@ import {
   ANIMATION_CEL_LINK_COMMAND_ID,
   ANIMATION_FRAME_COMMAND_ID,
   CEL_UNLINK_COMMAND_ID,
+  STRUCTURE_REFINEMENT_COMMAND_ID,
 } from './catalog';
 
 export const EDITOR_TRANSACTION_OPERATION_ID = TRANSACTION_COMMAND_ID;
@@ -58,9 +67,10 @@ export type EditorTransactionChildCommandId =
   | typeof STATIC_LAYER_TREE_COMMAND_ID
   | typeof ANIMATION_FRAME_COMMAND_ID
   | typeof ANIMATION_CEL_LINK_COMMAND_ID
-  | typeof CEL_UNLINK_COMMAND_ID;
+  | typeof CEL_UNLINK_COMMAND_ID
+  | typeof STRUCTURE_REFINEMENT_COMMAND_ID;
 
-export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure' | 'animation';
+export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure' | 'structure-refinement' | 'animation';
 
 export interface AutomationTransactionProvenanceInput {
   readonly clientId: string;
@@ -90,6 +100,7 @@ export interface EditorTransactionResult {
   readonly revision: number;
   readonly event: ProjectChangeEvent;
   readonly provenance: AutomationTransactionProvenance;
+  readonly compositeEquality?: ProjectCompositeEqualityEvidence;
 }
 
 type PreparedTimelineTransactionChild = {
@@ -107,6 +118,11 @@ type PreparedAnimationTransactionChild = {
 type PreparedTransactionChild =
   | PreparedTimelineTransactionChild
   | PreparedAnimationTransactionChild
+  | {
+      readonly kind: 'structure-refinement';
+      readonly command: typeof STRUCTURE_REFINEMENT_COMMAND_ID;
+      readonly prepared: PreparedStructureRefinementChange;
+    }
   | {
       readonly command: typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID;
       readonly input: Readonly<Record<string, unknown>>;
@@ -141,6 +157,7 @@ const TRANSACTION_CHILD_COMMANDS: ReadonlySet<string> = new Set([
   ANIMATION_FRAME_COMMAND_ID,
   ANIMATION_CEL_LINK_COMMAND_ID,
   CEL_UNLINK_COMMAND_ID,
+  STRUCTURE_REFINEMENT_COMMAND_ID,
 ]);
 
 class EditorTransactionError extends Error {
@@ -163,6 +180,7 @@ class EditorTransactionCommand implements Command {
   private readonly request: EditorTransactionRequest;
   private readonly children: readonly PreparedTransactionChild[];
   private readonly staticPrepared: PreparedStaticStructureChange | null;
+  private readonly structureRefinementPrepared: PreparedStructureRefinementChange | null;
   private readonly animationPrepared: PreparedAnimationProjectStateChange | null;
   private currentProvenance: AutomationTransactionProvenance;
   private hasExecuted = false;
@@ -175,6 +193,7 @@ class EditorTransactionCommand implements Command {
     request: EditorTransactionRequest,
     children: readonly PreparedTransactionChild[],
     staticPrepared: PreparedStaticStructureChange | null,
+    structureRefinementPrepared: PreparedStructureRefinementChange | null,
     animationPrepared: PreparedAnimationProjectStateChange | null,
     transactionIdFactory?: () => string,
   ) {
@@ -182,8 +201,12 @@ class EditorTransactionCommand implements Command {
     this.request = request;
     this.children = children;
     this.staticPrepared = staticPrepared;
+    this.structureRefinementPrepared = structureRefinementPrepared;
     this.animationPrepared = animationPrepared;
-    this.memorySize = staticPrepared?.snapshotBytes ?? animationPrepared?.snapshotBytes ?? 0;
+    this.memorySize = staticPrepared?.snapshotBytes
+      ?? structureRefinementPrepared?.snapshotBytes
+      ?? animationPrepared?.snapshotBytes
+      ?? 0;
     this.id = transactionIdFactory?.() ?? crypto.randomUUID();
     this.currentProvenance = freezeProvenance(request, this.id, children, []);
   }
@@ -269,6 +292,8 @@ class EditorTransactionCommand implements Command {
     try {
       if (this.staticPrepared) {
         applyPreparedStaticStructureChange(this.context, this.staticPrepared, pending.rollbackPhase);
+      } else if (this.structureRefinementPrepared) {
+        applyPreparedStructureRefinementChange(this.context, this.structureRefinementPrepared, pending.rollbackPhase);
       } else if (this.animationPrepared) {
         applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, pending.rollbackPhase);
       } else {
@@ -314,6 +339,10 @@ class EditorTransactionCommand implements Command {
       assertPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
       return;
     }
+    if (this.structureRefinementPrepared) {
+      assertPreparedStructureRefinementChange(this.context, this.structureRefinementPrepared, phase);
+      return;
+    }
     if (this.animationPrepared) {
       assertPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
       return;
@@ -327,6 +356,10 @@ class EditorTransactionCommand implements Command {
   private applyChildren(phase: 'before' | 'after'): void {
     if (this.staticPrepared) {
       applyPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
+      return;
+    }
+    if (this.structureRefinementPrepared) {
+      applyPreparedStructureRefinementChange(this.context, this.structureRefinementPrepared, phase);
       return;
     }
     if (this.animationPrepared) {
@@ -352,7 +385,10 @@ class EditorTransactionCommand implements Command {
       hadExecuted,
       change: this.context.project.prepareChange(
         this.id,
-        this.staticPrepared?.domains ?? this.animationPrepared?.domains ?? TRANSACTION_DOMAINS,
+        this.staticPrepared?.domains
+          ?? this.structureRefinementPrepared?.domains
+          ?? this.animationPrepared?.domains
+          ?? TRANSACTION_DOMAINS,
       ),
     };
   }
@@ -367,6 +403,8 @@ class EditorTransactionCommand implements Command {
     try {
       if (this.staticPrepared) {
         applyPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
+      } else if (this.structureRefinementPrepared) {
+        applyPreparedStructureRefinementChange(this.context, this.structureRefinementPrepared, phase);
       } else if (this.animationPrepared) {
         applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
       } else {
@@ -427,12 +465,27 @@ export async function executeEditorTransaction(
       { entityIdFactory: options.entityIdFactory },
     )
     : null;
+  const structureRefinementPrepared = request.profile === 'structure-refinement'
+    ? prepareStructureRefinementChange(
+      context,
+      request.children[0] as StructureRefinementChildInput,
+      request.target,
+      request.expectedRevision,
+      { entityIdFactory: options.entityIdFactory },
+    )
+    : null;
   const children: PreparedTransactionChild[] = request.profile === 'static-structure'
     ? request.children.map((child) => ({
       command: child.command as typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID,
       input: child.input,
     }))
-    : request.profile === 'animation'
+    : request.profile === 'structure-refinement'
+      ? [{
+        kind: 'structure-refinement' as const,
+        command: request.children[0].command as typeof STRUCTURE_REFINEMENT_COMMAND_ID,
+        prepared: structureRefinementPrepared as PreparedStructureRefinementChange,
+      }]
+      : request.profile === 'animation'
       ? [{
         kind: 'animation' as const,
         command: request.children[0].command as typeof ANIMATION_FRAME_COMMAND_ID | typeof ANIMATION_CEL_LINK_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID | typeof CEL_UNLINK_COMMAND_ID,
@@ -454,6 +507,7 @@ export async function executeEditorTransaction(
     request,
     children,
     staticPrepared,
+    structureRefinementPrepared,
     animationPrepared,
     options.transactionIdFactory,
   );
@@ -474,6 +528,9 @@ export async function executeEditorTransaction(
     revision: command.event.toRevision,
     event: command.event,
     provenance: command.provenance,
+    ...(structureRefinementPrepared
+      ? { compositeEquality: structureRefinementPrepared.compositeEquality }
+      : {}),
   };
 }
 
@@ -500,7 +557,9 @@ function normalizeChildren(value: unknown, profile: EditorTransactionProfile): E
   if (!Array.isArray(value)) {
     throw transactionError('invalid_request', false, { reason: 'children' });
   }
-  const expectedCount = profile === 'animation' ? 1 : EDITOR_TRANSACTION_MAX_CHILDREN;
+  const expectedCount = profile === 'animation' || profile === 'structure-refinement'
+    ? 1
+    : EDITOR_TRANSACTION_MAX_CHILDREN;
   if (value.length > EDITOR_TRANSACTION_MAX_CHILDREN) {
     throw transactionError('limit_exceeded', false, {
       reason: 'transaction_children',
@@ -522,6 +581,8 @@ function normalizeChildren(value: unknown, profile: EditorTransactionProfile): E
     }
   } else if (profile === 'static-structure' &&
       (!commands.has(STATIC_PALETTE_COMMAND_ID) || !commands.has(STATIC_LAYER_TREE_COMMAND_ID))) {
+    throw transactionError('invalid_request', false, { reason: 'child_family' });
+  } else if (profile === 'structure-refinement' && !commands.has(STRUCTURE_REFINEMENT_COMMAND_ID)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   } else if (profile === 'animation' && !isAnimationChildCommand([...commands][0])) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
@@ -579,6 +640,12 @@ function assertChildFamily(
     if (!valid) throw transactionError('invalid_request', false, { reason: 'child_family' });
     return;
   }
+  if (profile === 'structure-refinement') {
+    if (command !== STRUCTURE_REFINEMENT_COMMAND_ID || input.kind !== 'structure.refine') {
+      throw transactionError('invalid_request', false, { reason: 'child_family' });
+    }
+    return;
+  }
   const prefix = command === LAYER_STATE_COMMAND_ID ? 'layer.' : 'tag.';
   if (!input.kind.startsWith(prefix)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
@@ -611,6 +678,7 @@ function assertChildInputFields(value: Record<string, unknown>): void {
 function normalizeProfile(value: unknown): EditorTransactionProfile {
   if (value === undefined || value === 'layer-and-tag') return 'layer-and-tag';
   if (value === 'static-structure') return value;
+  if (value === 'structure-refinement') return value;
   if (value === 'animation') return value;
   throw transactionError('invalid_request', false, { reason: 'profile' });
 }
@@ -638,6 +706,7 @@ function childInputFields(kind: string): readonly string[] | undefined {
     case 'frame.delete': return ['kind', 'frameId'];
     case 'cel.link': return ['kind', 'layerId', 'members'];
     case 'cel.unlink': return ['kind', 'layerId', 'frameId', 'celId', 'linkedCelId', 'linkGroup'];
+    case 'structure.refine': return ['kind', 'layers', 'mergePairs'];
     default: return undefined;
   }
 }
@@ -703,7 +772,9 @@ function freezeProvenance(
     if ('prepared' in child) {
       return Object.freeze({
         commandId: child.command,
-        operation: child.prepared.request.kind,
+        operation: child.kind === 'structure-refinement'
+          ? child.prepared.request.structure.kind
+          : child.prepared.request.kind,
         domains: Object.freeze([...child.prepared.domains]),
       });
     }

@@ -20,6 +20,8 @@ import {
 } from './automation-adapter';
 import type { ProjectObservation, RenderObservation } from './observations';
 import type { EditorTransactionResult } from './transaction';
+import type { Cel, Frame } from '../types/animation';
+import type { Layer } from '../types/layer';
 
 // fallow-ignore-next-line unused-export -- Stable fixture identity is part of conformance setup.
 export const FIXTURE_PROJECT_ID = 'fixture-project';
@@ -156,6 +158,34 @@ export interface FixtureStaticStructureJourneyResult {
     readonly reload: ReloadResult;
     readonly observation: ProjectObservation;
     readonly render: RenderObservation;
+    readonly document: ProjectFile;
+  };
+  readonly exact: {
+    readonly document: boolean;
+    readonly render: boolean;
+    readonly structure: boolean;
+  };
+}
+
+export interface FixtureStructureRefinementJourneyResult {
+  readonly negotiation: CatalogNegotiation;
+  readonly initial: FixtureDocumentState & { readonly renders: readonly RenderObservation[] };
+  readonly transaction: EditorTransactionResult;
+  readonly afterTransaction: FixtureDocumentState & { readonly renders: readonly RenderObservation[] };
+  readonly afterUndo: FixtureDocumentState & {
+    readonly renders: readonly RenderObservation[];
+    readonly transition: HistoryTransitionResult;
+  };
+  readonly afterRedo: FixtureDocumentState & {
+    readonly renders: readonly RenderObservation[];
+    readonly transition: HistoryTransitionResult;
+  };
+  readonly save: SaveResult;
+  readonly reopened: {
+    readonly save: SaveResult;
+    readonly reload: ReloadResult;
+    readonly observation: ProjectObservation;
+    readonly renders: readonly RenderObservation[];
     readonly document: ProjectFile;
   };
   readonly exact: {
@@ -588,6 +618,131 @@ export class FixtureSession {
   }
 
   /**
+   * Prove the lossless structure-refinement profile with one complete final
+   * declaration and one exact adjacent merge through every public lifecycle.
+   */
+  // fallow-ignore-next-line complexity -- The deterministic fixture proves the complete public refinement lifecycle.
+  async runStructureRefinement(): Promise<FixtureStructureRefinementJourneyResult> {
+    await this.initialize();
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    prepareStructureRefinementFixture(this.context);
+    const initial = await this.captureAnimationState(this.context, this.adapter, 0);
+    const transaction = await requestSuccess<EditorTransactionResult>(this.adapter, {
+      operation: 'project.transaction.execute',
+      profile: 'structure-refinement',
+      target: this.target,
+      expectedRevision: initial.observation.revision,
+      provenance: {
+        clientId: 'fixture-refinement-client',
+        sessionId: 'fixture-refinement-session',
+        runId: 'fixture-refinement-run',
+        operationId: 'fixture-structure-refinement',
+      },
+      children: [{
+        command: 'project.layer.structure.refine',
+        input: {
+          kind: 'structure.refine',
+          layers: [
+            { id: 'fixture-refinement-group', name: 'Grouped', type: 'group', parentId: null },
+            { id: 'fixture-refinement-target', name: 'Merged target', type: 'image', parentId: null },
+            { id: 'fixture-refinement-bottom', name: 'Bottom renamed', type: 'image', parentId: 'fixture-refinement-group' },
+          ],
+          mergePairs: [{
+            sourceLayerId: 'fixture-refinement-source',
+            targetLayerId: 'fixture-refinement-target',
+          }],
+        },
+      }],
+    });
+    await settleEffects();
+    const afterTransaction = await this.captureAnimationState(this.context, this.adapter, transaction.revision);
+
+    const undoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
+      operation: 'project.history.undo',
+      target: this.target,
+      expectedRevision: transaction.revision,
+    });
+    const afterUndo = await this.captureAnimationState(this.context, this.adapter, undoTransition.revision, undoTransition);
+    const redoTransition = await requestSuccess<HistoryTransitionResult>(this.adapter, {
+      operation: 'project.history.redo',
+      target: this.target,
+      expectedRevision: undoTransition.revision,
+    });
+    const afterRedo = await this.captureAnimationState(this.context, this.adapter, redoTransition.revision, redoTransition);
+    const save = await requestSuccess<SaveResult>(this.adapter, {
+      operation: 'project.save',
+      target: this.target,
+      expectedRevision: afterRedo.observation.revision,
+    });
+
+    this.saveService.stop(this.context);
+    this.context.dispose();
+    this.targetContexts.delete(this.target.projectId);
+    const reopenedContext = createProjectContext();
+    const persisted = await this.repository.load(this.target.projectId);
+    if (!persisted) throw new Error('Fixture repository lost the refinement project.');
+    await this.saveService.runWithoutSaving(async () => {
+      await reopenedContext.project.loadProject(persisted, false, {
+        preserveRevision: afterRedo.observation.revision,
+      });
+      reopenedContext.project.id.value = this.target.projectId;
+    }, reopenedContext);
+    this.targetContexts.set(this.target.projectId, reopenedContext);
+    const reopenedAdapter = createAutomationAdapter({
+      targetRegistry: new Map([[this.target.projectId, reopenedContext]]),
+      repository: this.repository,
+      saveService: this.saveService,
+    });
+    if (!reopenedAdapter.negotiateCatalog({ version: '1.0' }).ok) {
+      throw new Error('Fixture refinement reopen negotiation failed.');
+    }
+    const reopenedSave = await requestSuccess<SaveResult>(reopenedAdapter, {
+      operation: 'project.save',
+      target: this.target,
+      expectedRevision: afterRedo.observation.revision,
+    });
+    const reopenedReload = await requestSuccess<ReloadResult>(reopenedAdapter, {
+      operation: 'project.reload',
+      target: this.target,
+      expectedRevision: afterRedo.observation.revision,
+    });
+    const reopened = await this.captureAnimationState(
+      reopenedContext,
+      reopenedAdapter,
+      reopenedReload.revision,
+    );
+
+    return {
+      negotiation,
+      initial,
+      transaction,
+      afterTransaction,
+      afterUndo: { ...afterUndo, transition: undoTransition },
+      afterRedo: { ...afterRedo, transition: redoTransition },
+      save,
+      reopened: {
+        save: reopenedSave,
+        reload: reopenedReload,
+        observation: reopened.observation,
+        renders: reopened.renders,
+        document: reopened.document,
+      },
+      exact: {
+        document: sameProjectFile(initial.document, afterUndo.document)
+          && sameProjectFile(afterTransaction.document, afterRedo.document)
+          && sameProjectFile(afterRedo.document, reopened.document),
+        render: sameRenders(initial.renders, afterUndo.renders)
+          && sameRenders(afterTransaction.renders, afterRedo.renders)
+          && sameRenders(afterRedo.renders, reopened.renders),
+        structure: sameStructure(afterRedo.observation, reopened.observation),
+      },
+    };
+  }
+
+  /**
    * Prove one-child animation commands through history and persistence. Every
    * frame render is captured independently so reload cannot hide a damaged
    * non-current frame.
@@ -1004,6 +1159,77 @@ function seedFixturePixel(context: ProjectContext): void {
   indexBuffer[cel.canvas.width + 1] = 2;
   context.animation.updateCelIndexBuffer(layer.id, frame.id, indexBuffer);
   context.animation.syncLayerCanvases();
+}
+
+function prepareStructureRefinementFixture(context: ProjectContext): void {
+  const firstFrame = context.animation.frames.value[0];
+  if (!firstFrame) throw new Error('Refinement fixture did not load its first frame.');
+  const frames: Frame[] = [
+    { ...firstFrame, id: 'fixture-refinement-frame-1', order: 0, duration: 100 },
+    { ...firstFrame, id: 'fixture-refinement-frame-2', order: 1, duration: 125 },
+  ];
+  const layers: Layer[] = [
+    makeRefinementLayer('fixture-refinement-old-group', 'Old Group', 'group', null),
+    makeRefinementLayer('fixture-refinement-bottom', 'Bottom', 'image', 'fixture-refinement-old-group'),
+    makeRefinementLayer('fixture-refinement-source', 'Merge source', 'image', null),
+    makeRefinementLayer('fixture-refinement-target', 'Merge target', 'image', null),
+    makeRefinementLayer('fixture-refinement-empty', 'Empty', 'image', null),
+  ];
+  const pixels = new Map<string, { readonly x: number; readonly y: number }>([
+    ['fixture-refinement-bottom', { x: 0, y: 0 }],
+    ['fixture-refinement-source', { x: 1, y: 0 }],
+    ['fixture-refinement-target', { x: 2, y: 0 }],
+  ]);
+  const cels = new Map<string, Cel>();
+  for (const frame of frames) {
+    for (const layer of layers) {
+      const point = pixels.get(layer.id);
+      const canvas = document.createElement('canvas');
+      canvas.width = context.project.width.value;
+      canvas.height = context.project.height.value;
+      const drawing = canvas.getContext('2d');
+      if (!drawing) throw new Error('Refinement fixture could not create a canvas.');
+      if (point) {
+        drawing.fillStyle = '#ff0000';
+        drawing.fillRect(point.x, frame.id.endsWith('2') ? 1 : point.y, 1, 1);
+      }
+      const indexBuffer = new Uint8Array(canvas.width * canvas.height);
+      if (point) indexBuffer[(frame.id.endsWith('2') ? 1 : point.y) * canvas.width + point.x] = 2;
+      cels.set(context.animation.getCelKey(layer.id, frame.id), {
+        id: `fixture-refinement-cel-${layer.id}-${frame.id}`,
+        layerId: layer.id,
+        frameId: frame.id,
+        canvas,
+        indexBuffer,
+        opacity: 100,
+      });
+    }
+  }
+  context.layers.layers.value = layers;
+  context.layers.activeLayerId.value = 'fixture-refinement-bottom';
+  context.animation.frames.value = frames;
+  context.animation.cels.value = cels;
+  context.animation.currentFrameId.value = frames[0].id;
+  context.animation.syncLayerCanvases();
+}
+
+function makeRefinementLayer(
+  id: string,
+  name: string,
+  type: Layer['type'],
+  parentId: string | null,
+): Layer {
+  return {
+    id,
+    name,
+    type,
+    visible: true,
+    locked: false,
+    opacity: 255,
+    blendMode: 'normal',
+    parentId,
+    continuous: false,
+  };
 }
 
 function cloneProject<T extends ProjectFileInput>(project: T): T {

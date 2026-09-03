@@ -448,6 +448,9 @@ export class AutomationAdapter {
         target: { projectId: result.target.projectId },
         event: cloneProjectChangeEvent(result.event),
         provenance: structuredClone(result.provenance),
+        ...(result.compositeEquality
+          ? { compositeEquality: structuredClone(result.compositeEquality) }
+          : {}),
       });
     } catch (error) {
       return failureFromUnknown(error);
