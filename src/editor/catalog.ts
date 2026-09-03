@@ -217,7 +217,7 @@ export const transactionCatalog = Object.freeze({
                 layers: [{
                   id: 'stable bounded string',
                   name: 'bounded non-empty string',
-                  type: 'image | group',
+                  type: 'image | group | existing text',
                   parentId: 'null | group identity',
                 }],
                 mergePairs: [{
@@ -486,7 +486,7 @@ export const transactionCatalog = Object.freeze({
         layers: {
           id: 'stable bounded string',
           name: 'bounded non-empty string',
-          type: 'image | group',
+          type: 'image | group | existing text',
           parentId: 'null | group identity',
         },
         maxLayers: STRUCTURE_REFINEMENT_MAX_LAYERS,
@@ -502,6 +502,10 @@ export const transactionCatalog = Object.freeze({
         renderer: 'createArtworkCompositionPlan + drawArtworkComposition',
         frames: 'every frame',
         equality: 'exact rgba8 bytes',
+      },
+      compatibility: {
+        text: 'existing text layers retain exact metadata and cels; no new, deleted, or merged text',
+        reference: 'unsupported',
       },
       affectedDomains: ['layer-state', 'raster-content'],
     },
@@ -550,7 +554,9 @@ export const transactionCatalog = Object.freeze({
       'structure-refinement': {
         guidedDrawing: 'unsupported',
         selection: 'none | selected; floating and transforming are rejected',
-        layers: 'image and group only; new identities are groups',
+        layers: 'image, group, and existing text; new identities are groups',
+        text: 'existing text layers are declared with exact metadata and cels; no new or removed text',
+        reference: 'unsupported',
       },
       animation: {
         guidedDrawing: 'unsupported',
@@ -1073,6 +1079,7 @@ export const editorCatalog = Object.freeze({
       availability: {
         guidedDrawing: 'unsupported',
         selection: 'floating and transforming rejected',
+        compatibility: 'existing text layers may move or group only when composites remain equal; references unsupported',
       },
       undo: 'one-session-history-entry',
       errors: transactionCatalog.errors,

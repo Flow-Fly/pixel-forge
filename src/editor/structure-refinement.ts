@@ -39,7 +39,7 @@ const STRUCTURE_REFINEMENT_MERGE_DOMAINS: readonly ProjectChangeDomain[] = Objec
 export interface StructureRefinementLayerDeclaration {
   readonly id: string;
   readonly name: string;
-  readonly type: 'image' | 'group';
+  readonly type: 'image' | 'group' | 'text';
   readonly parentId: string | null;
 }
 
@@ -114,8 +114,8 @@ export function prepareStructureRefinementChange(
   validateTargetAndRevision(context, target, expectedRevision);
   const structure = normalizeStructureRefinementChild(child);
   const base = captureSnapshot(context, false);
-  validateExistingDocument(base);
-  validateFinalDeclaration(base.layers, structure.layers);
+  validateExistingDocument(context, base);
+  validateFinalDeclaration(base, structure.layers);
   validateMergeShape(base.layers, structure);
 
   const snapshotBytes = validatePreparationBounds(context, base, structure);
@@ -248,7 +248,7 @@ function normalizeStructureRefinementChild(
 function normalizeLayerDeclaration(value: unknown): StructureRefinementLayerDeclaration {
   if (!isRecord(value)) throw structureError('invalid_request', false, { reason: 'layer_declaration' });
   assertExactKeys(value, ['id', 'name', 'type', 'parentId'], 'layer_declaration');
-  if (value.type !== 'image' && value.type !== 'group') {
+  if (value.type !== 'image' && value.type !== 'group' && value.type !== 'text') {
     throw structureError('unsupported', false, { reason: 'layer_type' });
   }
   if (value.parentId !== null && typeof value.parentId !== 'string') {
@@ -271,7 +271,10 @@ function normalizeMergePair(value: unknown): StructureRefinementMergePair {
   };
 }
 
-function validateExistingDocument(snapshot: StructureRefinementSnapshot): void {
+function validateExistingDocument(
+  context: ProjectContext,
+  snapshot: StructureRefinementSnapshot,
+): void {
   if (snapshot.layers.length === 0 || snapshot.layers.length > STRUCTURE_REFINEMENT_MAX_LAYERS) {
     throw structureError('limit_exceeded', false, {
       reason: 'existing_layers',
@@ -291,19 +294,32 @@ function validateExistingDocument(snapshot: StructureRefinementSnapshot): void {
     });
   }
   const layerIds = new Set<string>();
-  const frameIds = new Set(snapshot.frames.map((frame) => frame.id));
+  const frameIds = new Set<string>();
+  for (const frame of snapshot.frames) {
+    if (typeof frame.id !== 'string' || frame.id.length === 0 || frameIds.has(frame.id)) {
+      throw structureError('invalid_state', false, { reason: 'existing_frame_identity' });
+    }
+    frameIds.add(frame.id);
+  }
   for (const layer of snapshot.layers) {
     if (layerIds.has(layer.id)) {
       throw structureError('invalid_state', false, { reason: 'existing_layer_identity' });
     }
     layerIds.add(layer.id);
-    if (layer.type !== 'image' && layer.type !== 'group') {
+    if (layer.type !== 'image' && layer.type !== 'group' && layer.type !== 'text' && layer.type !== 'reference') {
       throw structureError('unsupported', false, { reason: 'existing_layer_type' });
     }
-    if (layer.textData || layer.referenceData) {
+    if (layer.type === 'reference') {
+      throw structureError('unsupported', false, { reason: 'existing_layer_type' });
+    }
+    if (layer.type === 'text' && (!layer.textData || layer.referenceData)) {
+      throw structureError('unsupported', false, { reason: 'existing_text_payload' });
+    }
+    if ((layer.type === 'image' || layer.type === 'group') && (layer.textData || layer.referenceData)) {
       throw structureError('unsupported', false, { reason: 'existing_layer_payload' });
     }
   }
+  const celIds = new Set<string>();
   for (const [key, cel] of snapshot.cels) {
     if (!layerIds.has(cel.layerId) || !frameIds.has(cel.frameId)) {
       throw structureError('invalid_state', false, { reason: 'orphan_cel' });
@@ -314,20 +330,32 @@ function validateExistingDocument(snapshot: StructureRefinementSnapshot): void {
     if (cel.canvas.width <= 0 || cel.canvas.height <= 0) {
       throw structureError('invalid_state', false, { reason: 'cel_shape' });
     }
+    if (typeof cel.id !== 'string' || cel.id.length === 0 || celIds.has(cel.id)) {
+      throw structureError('invalid_state', false, { reason: 'existing_cel_identity' });
+    }
+    celIds.add(cel.id);
   }
   if (!frameIds.has(snapshot.currentFrameId)) {
     throw structureError('invalid_state', false, { reason: 'current_frame' });
   }
+  for (const layer of snapshot.layers) {
+    if (layer.type === 'reference') continue;
+    for (const frame of snapshot.frames) {
+      if (!snapshot.cels.has(context.animation.getCelKey(layer.id, frame.id))) {
+        throw structureError('invalid_state', false, { reason: 'cel_matrix' });
+      }
+    }
+  }
 }
 
 function validateFinalDeclaration(
-  before: readonly Layer[],
+  before: StructureRefinementSnapshot,
   declaration: readonly StructureRefinementLayerDeclaration[],
 ): void {
   if (!declaration.some((layer) => layer.type === 'image')) {
     throw structureError('invalid_state', false, { reason: 'image_layer_required' });
   }
-  const beforeById = new Map(before.map((layer) => [layer.id, layer]));
+  const beforeById = new Map(before.layers.map((layer) => [layer.id, layer]));
   const declaredIds = new Set<string>();
   const declaredGroups = new Set(
     declaration.filter((layer) => layer.type === 'group').map((layer) => layer.id),
@@ -358,6 +386,11 @@ function validateFinalDeclaration(
       }
     }
   });
+  for (const existing of before.layers) {
+    if (existing.type === 'text' && !declaredIds.has(existing.id)) {
+      throw structureError('unsupported', false, { reason: 'text_layer_removal' });
+    }
+  }
 }
 
 function validateMergeShape(
@@ -459,6 +492,9 @@ function validateLayerRemovals(
   for (const layer of before.layers) {
     if (retained.has(layer.id)) continue;
     if (mergeSources.has(layer.id)) continue;
+    if (layer.type === 'text') {
+      throw structureError('unsupported', false, { reason: 'text_layer_removal' });
+    }
     if (layer.type === 'group') {
       const retainedChild = before.layers.some((candidate) =>
         candidate.parentId === layer.id
@@ -594,7 +630,9 @@ function createAfterCels(
   mergeInputs: ReadonlyMap<string, MergeCelInputs>,
   entityIdFactory: (() => string) | undefined,
 ): Map<string, Cel> {
-  const retained = new Set(structure.layers.map((layer) => layer.id));
+  const retained = new Set(
+    structure.layers.map((layer) => layer.id),
+  );
   const after = new Map<string, Cel>();
   for (const [key, cel] of before.cels) {
     if (retained.has(cel.layerId)) after.set(key, cel);
@@ -680,7 +718,7 @@ function createAfterLayers(
   cels: ReadonlyMap<string, Cel>,
 ): Layer[] {
   const beforeById = new Map(before.layers.map((layer) => [layer.id, layer]));
-  return declaration.map((declared) => {
+  const createLayer = (declared: StructureRefinementLayerDeclaration): Layer => {
     const existing = beforeById.get(declared.id);
     const layer: Layer = existing
       ? { ...existing, name: declared.name, parentId: declared.parentId }
@@ -701,7 +739,9 @@ function createAfterLayers(
       layer.canvas = cel.canvas;
     }
     return layer;
-  });
+  };
+
+  return declaration.map(createLayer);
 }
 
 function createAfterGroupData(
@@ -857,8 +897,31 @@ function sameLayers(first: readonly Layer[], second: readonly Layer[]): boolean 
       && layer.blendMode === other.blendMode
       && (layer.continuous ?? false) === (other.continuous ?? false)
       && layer.parentId === other.parentId
-      && layer.canvas === other.canvas;
+      && layer.canvas === other.canvas
+      && sameTextData(layer.textData, other.textData)
+      && sameReferenceData(layer.referenceData, other.referenceData);
   });
+}
+
+function sameTextData(
+  first: Layer['textData'],
+  second: Layer['textData'],
+): boolean {
+  return first?.font === second?.font && first?.color === second?.color;
+}
+
+function sameReferenceData(
+  first: Layer['referenceData'],
+  second: Layer['referenceData'],
+): boolean {
+  if (!first || !second) return first === second;
+  return first.mimeType === second.mimeType
+    && first.x === second.x
+    && first.y === second.y
+    && first.scale === second.scale
+    && first.desaturate === second.desaturate
+    && first.position === second.position
+    && sameBytes(first.bytes, second.bytes);
 }
 
 function sameCels(first: ReadonlyMap<string, Cel>, second: ReadonlyMap<string, Cel>): boolean {
@@ -984,8 +1047,7 @@ function chooseActiveLayerId(activeLayerId: string | null, layers: readonly Laye
   return layers.find((layer) => layer.type === 'image')?.id ?? layers[0]?.id ?? null;
 }
 
-function collectProjectEntityIds(snapshot: StructureRefinementSnapshot | readonly Layer[]): Set<string> {
-  if ('layers' in snapshot === false) return new Set(snapshot.map((layer) => layer.id));
+function collectProjectEntityIds(snapshot: StructureRefinementSnapshot): Set<string> {
   const ids = new Set<string>();
   for (const layer of snapshot.layers) ids.add(layer.id);
   for (const frame of snapshot.frames) ids.add(frame.id);
