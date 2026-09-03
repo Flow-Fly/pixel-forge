@@ -41,6 +41,9 @@ export interface AutomationTransactionChildSummary {
   readonly commandId:
     | 'project.layer.state'
     | 'project.animation.frame-tag'
+    | 'project.animation.frame'
+    | 'project.animation.cel.link'
+    | 'project.animation.cel.unlink'
     | 'project.palette.declaration'
     | 'project.layer.tree';
   readonly operation: string;

@@ -187,6 +187,7 @@ const SAFE_ERROR_DETAIL_KEYS = new Set([
   'expectedRevision',
   'currentRevision',
   'limitId',
+  'min',
   'max',
   'requestedVersion',
   'childIndex',

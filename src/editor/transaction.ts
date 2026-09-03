@@ -19,6 +19,13 @@ import {
   type StaticStructureChildInput,
 } from './static-structure';
 import {
+  applyPreparedAnimationProjectStateChange,
+  assertPreparedAnimationProjectStateChange,
+  prepareAnimationProjectStateChange,
+  type AnimationProjectStateChildInput,
+  type PreparedAnimationProjectStateChange,
+} from './animation-project-state';
+import {
   hasOnlyKeys,
   isRecord,
   type AutomationTransactionChildSummary,
@@ -36,6 +43,9 @@ import {
   TRANSACTION_PROVENANCE_MAX_STRING_LENGTH,
   TRANSACTION_PROVENANCE_MAX_TRANSITIONS,
   TRANSACTION_COMMAND_ID,
+  ANIMATION_CEL_LINK_COMMAND_ID,
+  ANIMATION_FRAME_COMMAND_ID,
+  CEL_UNLINK_COMMAND_ID,
 } from './catalog';
 
 export const EDITOR_TRANSACTION_OPERATION_ID = TRANSACTION_COMMAND_ID;
@@ -45,9 +55,12 @@ export type EditorTransactionChildCommandId =
   | typeof LAYER_STATE_COMMAND_ID
   | typeof FRAME_TAG_COMMAND_ID
   | typeof STATIC_PALETTE_COMMAND_ID
-  | typeof STATIC_LAYER_TREE_COMMAND_ID;
+  | typeof STATIC_LAYER_TREE_COMMAND_ID
+  | typeof ANIMATION_FRAME_COMMAND_ID
+  | typeof ANIMATION_CEL_LINK_COMMAND_ID
+  | typeof CEL_UNLINK_COMMAND_ID;
 
-export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure';
+export type EditorTransactionProfile = 'layer-and-tag' | 'static-structure' | 'animation';
 
 export interface AutomationTransactionProvenanceInput {
   readonly clientId: string;
@@ -80,12 +93,20 @@ export interface EditorTransactionResult {
 }
 
 type PreparedTimelineTransactionChild = {
-  readonly command: typeof LAYER_STATE_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID;
+  readonly kind: 'timeline';
+  readonly command: typeof LAYER_STATE_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID | typeof CEL_UNLINK_COMMAND_ID;
   readonly prepared: PreparedTimelineProjectStateChange;
+};
+
+type PreparedAnimationTransactionChild = {
+  readonly kind: 'animation';
+  readonly command: typeof ANIMATION_FRAME_COMMAND_ID | typeof ANIMATION_CEL_LINK_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID | typeof CEL_UNLINK_COMMAND_ID;
+  readonly prepared: PreparedAnimationProjectStateChange;
 };
 
 type PreparedTransactionChild =
   | PreparedTimelineTransactionChild
+  | PreparedAnimationTransactionChild
   | {
       readonly command: typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID;
       readonly input: Readonly<Record<string, unknown>>;
@@ -117,6 +138,9 @@ const TRANSACTION_CHILD_COMMANDS: ReadonlySet<string> = new Set([
   FRAME_TAG_COMMAND_ID,
   STATIC_PALETTE_COMMAND_ID,
   STATIC_LAYER_TREE_COMMAND_ID,
+  ANIMATION_FRAME_COMMAND_ID,
+  ANIMATION_CEL_LINK_COMMAND_ID,
+  CEL_UNLINK_COMMAND_ID,
 ]);
 
 class EditorTransactionError extends Error {
@@ -139,6 +163,7 @@ class EditorTransactionCommand implements Command {
   private readonly request: EditorTransactionRequest;
   private readonly children: readonly PreparedTransactionChild[];
   private readonly staticPrepared: PreparedStaticStructureChange | null;
+  private readonly animationPrepared: PreparedAnimationProjectStateChange | null;
   private currentProvenance: AutomationTransactionProvenance;
   private hasExecuted = false;
   private applied = false;
@@ -150,13 +175,15 @@ class EditorTransactionCommand implements Command {
     request: EditorTransactionRequest,
     children: readonly PreparedTransactionChild[],
     staticPrepared: PreparedStaticStructureChange | null,
+    animationPrepared: PreparedAnimationProjectStateChange | null,
     transactionIdFactory?: () => string,
   ) {
     this.context = context;
     this.request = request;
     this.children = children;
     this.staticPrepared = staticPrepared;
-    this.memorySize = staticPrepared?.snapshotBytes ?? 0;
+    this.animationPrepared = animationPrepared;
+    this.memorySize = staticPrepared?.snapshotBytes ?? animationPrepared?.snapshotBytes ?? 0;
     this.id = transactionIdFactory?.() ?? crypto.randomUUID();
     this.currentProvenance = freezeProvenance(request, this.id, children, []);
   }
@@ -242,9 +269,11 @@ class EditorTransactionCommand implements Command {
     try {
       if (this.staticPrepared) {
         applyPreparedStaticStructureChange(this.context, this.staticPrepared, pending.rollbackPhase);
+      } else if (this.animationPrepared) {
+        applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, pending.rollbackPhase);
       } else {
         for (const child of [...this.children].reverse()) {
-          if (!('prepared' in child)) continue;
+          if (!('prepared' in child) || child.kind !== 'timeline') continue;
           applyPreparedTimelineProjectStateChange(
             this.context,
             child.prepared,
@@ -285,8 +314,12 @@ class EditorTransactionCommand implements Command {
       assertPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
       return;
     }
+    if (this.animationPrepared) {
+      assertPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
+      return;
+    }
     for (const child of this.children) {
-      if (!('prepared' in child)) continue;
+      if (!('prepared' in child) || child.kind !== 'timeline') continue;
       assertPreparedTimelineProjectStateChange(this.context, child.prepared, phase, replayed);
     }
   }
@@ -296,8 +329,12 @@ class EditorTransactionCommand implements Command {
       applyPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
       return;
     }
+    if (this.animationPrepared) {
+      applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
+      return;
+    }
     for (const child of this.children) {
-      if (!('prepared' in child)) continue;
+      if (!('prepared' in child) || child.kind !== 'timeline') continue;
       applyPreparedTimelineProjectStateChange(this.context, child.prepared, phase);
     }
   }
@@ -315,7 +352,7 @@ class EditorTransactionCommand implements Command {
       hadExecuted,
       change: this.context.project.prepareChange(
         this.id,
-        this.staticPrepared ? this.staticPrepared.domains : TRANSACTION_DOMAINS,
+        this.staticPrepared?.domains ?? this.animationPrepared?.domains ?? TRANSACTION_DOMAINS,
       ),
     };
   }
@@ -330,9 +367,11 @@ class EditorTransactionCommand implements Command {
     try {
       if (this.staticPrepared) {
         applyPreparedStaticStructureChange(this.context, this.staticPrepared, phase);
+      } else if (this.animationPrepared) {
+        applyPreparedAnimationProjectStateChange(this.context, this.animationPrepared, phase);
       } else {
         for (const child of [...this.children].reverse()) {
-          if (!('prepared' in child)) continue;
+          if (!('prepared' in child) || child.kind !== 'timeline') continue;
           applyPreparedTimelineProjectStateChange(this.context, child.prepared, phase);
         }
       }
@@ -370,6 +409,15 @@ export async function executeEditorTransaction(
   options: EditorTransactionExecutionOptions = {},
 ): Promise<EditorTransactionResult> {
   const request = normalizeTransactionRequest(input);
+  const animationPrepared = request.profile === 'animation'
+    ? prepareAnimationProjectStateChange(
+      context,
+      request.children[0] as AnimationProjectStateChildInput,
+      request.target,
+      request.expectedRevision,
+      { entityIdFactory: options.entityIdFactory, tagIdFactory: options.tagIdFactory },
+    )
+    : null;
   const staticPrepared = request.profile === 'static-structure'
     ? prepareStaticStructureChange(
       context,
@@ -384,7 +432,14 @@ export async function executeEditorTransaction(
       command: child.command as typeof STATIC_PALETTE_COMMAND_ID | typeof STATIC_LAYER_TREE_COMMAND_ID,
       input: child.input,
     }))
+    : request.profile === 'animation'
+      ? [{
+        kind: 'animation' as const,
+        command: request.children[0].command as typeof ANIMATION_FRAME_COMMAND_ID | typeof ANIMATION_CEL_LINK_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID | typeof CEL_UNLINK_COMMAND_ID,
+        prepared: animationPrepared as PreparedAnimationProjectStateChange,
+      }]
     : request.children.map((child) => ({
+      kind: 'timeline' as const,
       command: child.command as typeof LAYER_STATE_COMMAND_ID | typeof FRAME_TAG_COMMAND_ID,
       prepared: prepareTimelineProjectStateChange(context, {
         ...child.input,
@@ -399,6 +454,7 @@ export async function executeEditorTransaction(
     request,
     children,
     staticPrepared,
+    animationPrepared,
     options.transactionIdFactory,
   );
   try {
@@ -444,26 +500,30 @@ function normalizeChildren(value: unknown, profile: EditorTransactionProfile): E
   if (!Array.isArray(value)) {
     throw transactionError('invalid_request', false, { reason: 'children' });
   }
+  const expectedCount = profile === 'animation' ? 1 : EDITOR_TRANSACTION_MAX_CHILDREN;
   if (value.length > EDITOR_TRANSACTION_MAX_CHILDREN) {
     throw transactionError('limit_exceeded', false, {
       reason: 'transaction_children',
       max: EDITOR_TRANSACTION_MAX_CHILDREN,
     });
   }
-  if (value.length !== EDITOR_TRANSACTION_MAX_CHILDREN) {
+  if (value.length !== expectedCount) {
     throw transactionError('invalid_request', false, { reason: 'children_count' });
   }
 
   const children = value.map((child) => normalizeChild(child, profile));
   const commands = new Set(children.map((child) => child.command));
-  if (commands.size !== EDITOR_TRANSACTION_MAX_CHILDREN) {
+  if (commands.size !== expectedCount) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   }
   if (profile === 'layer-and-tag') {
     if (!commands.has(LAYER_STATE_COMMAND_ID) || !commands.has(FRAME_TAG_COMMAND_ID)) {
       throw transactionError('invalid_request', false, { reason: 'child_family' });
     }
-  } else if (!commands.has(STATIC_PALETTE_COMMAND_ID) || !commands.has(STATIC_LAYER_TREE_COMMAND_ID)) {
+  } else if (profile === 'static-structure' &&
+      (!commands.has(STATIC_PALETTE_COMMAND_ID) || !commands.has(STATIC_LAYER_TREE_COMMAND_ID))) {
+    throw transactionError('invalid_request', false, { reason: 'child_family' });
+  } else if (profile === 'animation' && !isAnimationChildCommand([...commands][0])) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
   }
   return children;
@@ -490,6 +550,7 @@ function normalizeChildPayload(value: unknown): Record<string, unknown> {
   return { ...value };
 }
 
+// fallow-ignore-next-line complexity -- Profile-specific child-family gates keep the bounded transaction schema explicit.
 function assertChildFamily(
   command: EditorTransactionChildCommandId,
   input: Record<string, unknown>,
@@ -507,6 +568,17 @@ function assertChildFamily(
     }
     return;
   }
+  if (profile === 'animation') {
+    const valid = command === ANIMATION_FRAME_COMMAND_ID
+      ? input.kind.startsWith('frame.')
+      : command === ANIMATION_CEL_LINK_COMMAND_ID
+        ? input.kind === 'cel.link'
+        : command === CEL_UNLINK_COMMAND_ID
+          ? input.kind === 'cel.unlink'
+          : input.kind.startsWith('tag.');
+    if (!valid) throw transactionError('invalid_request', false, { reason: 'child_family' });
+    return;
+  }
   const prefix = command === LAYER_STATE_COMMAND_ID ? 'layer.' : 'tag.';
   if (!input.kind.startsWith(prefix)) {
     throw transactionError('invalid_request', false, { reason: 'child_family' });
@@ -518,6 +590,13 @@ function normalizeChildCommand(value: unknown): EditorTransactionChildCommandId 
     throw transactionError('unsupported', false, { reason: 'child_command' });
   }
   return value as EditorTransactionChildCommandId;
+}
+
+function isAnimationChildCommand(command: string | undefined): boolean {
+  return command === ANIMATION_FRAME_COMMAND_ID ||
+    command === ANIMATION_CEL_LINK_COMMAND_ID ||
+    command === CEL_UNLINK_COMMAND_ID ||
+    command === FRAME_TAG_COMMAND_ID;
 }
 
 function assertChildInputFields(value: Record<string, unknown>): void {
@@ -532,6 +611,7 @@ function assertChildInputFields(value: Record<string, unknown>): void {
 function normalizeProfile(value: unknown): EditorTransactionProfile {
   if (value === undefined || value === 'layer-and-tag') return 'layer-and-tag';
   if (value === 'static-structure') return value;
+  if (value === 'animation') return value;
   throw transactionError('invalid_request', false, { reason: 'profile' });
 }
 
@@ -551,6 +631,13 @@ function childInputFields(kind: string): readonly string[] | undefined {
     case 'tag.delete': return ['kind', 'tagId'];
     case 'palette.declaration': return ['kind', 'entries'];
     case 'layer-tree.declaration': return ['kind', 'layers'];
+    case 'frame.create': return ['kind', 'position', 'anchorFrameId', 'duration'];
+    case 'frame.duplicate': return ['kind', 'sourceFrameId', 'position', 'anchorFrameId'];
+    case 'frame.reorder': return ['kind', 'frameId', 'position', 'anchorFrameId'];
+    case 'frame.duration': return ['kind', 'frameId', 'duration'];
+    case 'frame.delete': return ['kind', 'frameId'];
+    case 'cel.link': return ['kind', 'layerId', 'members'];
+    case 'cel.unlink': return ['kind', 'layerId', 'frameId', 'celId', 'linkedCelId', 'linkGroup'];
     default: return undefined;
   }
 }
@@ -710,7 +797,7 @@ function sanitizeErrorDetails(
   details: Record<string, unknown>,
 ): TransactionErrorDetails {
   const safe: Record<string, string | number> = {};
-  for (const key of ['reason', 'resource', 'feature', 'expectedRevision', 'currentRevision', 'max']) {
+  for (const key of ['reason', 'resource', 'feature', 'expectedRevision', 'currentRevision', 'min', 'max']) {
     const value = details[key];
     if (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) {
       safe[key] = value;
