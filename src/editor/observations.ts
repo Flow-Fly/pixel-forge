@@ -6,7 +6,13 @@ import { createArtworkCompositionPlan, drawArtworkComposition } from '../service
 import { autoSaveService } from '../services/auto-save';
 import {
   PROJECT_OBSERVATION_LIMITS,
+  RENDER_OBSERVATION_MAX_PIXELS,
   RENDER_OBSERVATION_MAX_BYTES,
+  RENDER_OBSERVATION_MAX_REGION_HEIGHT,
+  RENDER_OBSERVATION_MAX_REGION_WIDTH,
+  RENDER_OBSERVATION_MAX_SCALE,
+  RENDER_OBSERVATION_MIN_SCALE,
+  RENDER_OBSERVATION_REPRESENTATION_VERSION,
 } from './catalog';
 import type {
   AutomationTransactionProvenance,
@@ -14,6 +20,7 @@ import type {
   ProjectSaveSafetyObservation,
   ProjectTarget,
 } from './contracts';
+import type { Layer } from '../types/layer';
 
 export interface ProjectLayerObservation {
   readonly id: string;
@@ -101,7 +108,78 @@ export interface ProjectObservation {
   readonly lastEvent?: ProjectChangeEvent;
 }
 
+export interface RenderRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type RenderBackgroundPolicy =
+  | { readonly kind: 'transparent' }
+  | { readonly kind: 'solid'; readonly color: string };
+
+export interface RenderCompositeSourceRequest {
+  readonly kind: 'composite';
+  readonly frameId: string;
+}
+
+export interface RenderLayerSourceRequest {
+  readonly kind: 'layer';
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId?: string;
+}
+
+export type RenderObservationSourceRequest =
+  | RenderCompositeSourceRequest
+  | RenderLayerSourceRequest;
+
+export interface RenderObservationRequest {
+  readonly target: ProjectTarget;
+  readonly expectedRevision: number;
+  readonly source: RenderObservationSourceRequest;
+  readonly region?: RenderRegion;
+  readonly background: RenderBackgroundPolicy;
+  readonly scale: number;
+  readonly expectedDigest: string | null;
+}
+
+export interface RenderCompositeObservationSource {
+  readonly kind: 'composite';
+  readonly frameId: string;
+}
+
+export interface RenderLayerObservationSource {
+  readonly kind: 'layer';
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly celId: string;
+}
+
+export type RenderObservationSource =
+  | RenderCompositeObservationSource
+  | RenderLayerObservationSource;
+
 export interface RenderObservation {
+  readonly type: 'render.observation';
+  readonly target: ProjectTarget;
+  readonly revision: number;
+  readonly source: RenderObservationSource;
+  readonly sourceKind: 'composite' | 'layer';
+  readonly region: RenderRegion;
+  readonly background: RenderBackgroundPolicy;
+  readonly scale: number;
+  readonly width: number;
+  readonly height: number;
+  readonly format: 'rgba8';
+  readonly stride: number;
+  readonly pixels: Uint8Array;
+  readonly digest: string;
+}
+
+/** The pre-explicit-shape result retained for direct compatibility callers. */
+export interface LegacyRenderObservation {
   readonly type: 'render.observation';
   readonly target: ProjectTarget;
   readonly revision: number;
@@ -123,6 +201,8 @@ export interface RenderObservationFailure {
   readonly ok: false;
   readonly error: EditorError;
 }
+
+export type RenderObservationResult = RenderObservation | RenderObservationFailure;
 
 export interface ProjectObservationFailure {
   readonly ok: false;
