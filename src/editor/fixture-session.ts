@@ -178,6 +178,14 @@ export interface FixtureAnimationJourneyResult {
     readonly firstTag: EditorTransactionResult;
     readonly secondTag: EditorTransactionResult;
   };
+  readonly checkpoints: {
+    readonly afterCreate: FixtureAnimationCheckpoint;
+    readonly afterDuplicate: FixtureAnimationCheckpoint;
+    readonly afterDuration: FixtureAnimationCheckpoint;
+    readonly afterReorder: FixtureAnimationCheckpoint;
+    readonly afterLink: FixtureAnimationCheckpoint;
+    readonly afterUnlink: FixtureAnimationCheckpoint;
+  };
   readonly afterOperations: FixtureDocumentState & { readonly renders: readonly RenderObservation[] };
   readonly afterUndo: FixtureDocumentState & {
     readonly renders: readonly RenderObservation[];
@@ -200,6 +208,11 @@ export interface FixtureAnimationJourneyResult {
     readonly render: boolean;
     readonly structure: boolean;
   };
+}
+
+export interface FixtureAnimationCheckpoint {
+  readonly observation: ProjectObservation;
+  readonly renders: readonly RenderObservation[];
 }
 
 interface FixtureJourneyStart {
@@ -600,11 +613,11 @@ export class FixtureSession {
       input: { kind: 'frame.create', position: 'end', duration: 180 },
       operationId: 'fixture-animation-create',
     });
-    const afterCreate = await this.observeTarget(this.adapter, create.revision);
-    const createdFrame = afterCreate.frames.find((frame) => frame.id !== firstFrame.id);
+    const afterCreate = await this.captureAnimationCheckpoint(this.adapter, create.revision);
+    const createdFrame = afterCreate.observation.frames.find((frame) => frame.id !== firstFrame.id);
     if (!createdFrame) throw new Error('Animation frame creation did not produce a frame.');
 
-    const duplicate = await requestAnimationTransaction(this.adapter, this.target, afterCreate, {
+    const duplicate = await requestAnimationTransaction(this.adapter, this.target, afterCreate.observation, {
       command: 'project.animation.frame',
       input: {
         kind: 'frame.duplicate',
@@ -614,40 +627,40 @@ export class FixtureSession {
       },
       operationId: 'fixture-animation-duplicate',
     });
-    const afterDuplicate = await this.observeTarget(this.adapter, duplicate.revision);
-    const duplicateFrame = afterDuplicate.frames.find((frame) =>
+    const afterDuplicate = await this.captureAnimationCheckpoint(this.adapter, duplicate.revision);
+    const duplicateFrame = afterDuplicate.observation.frames.find((frame) =>
       frame.id !== firstFrame.id && frame.id !== createdFrame.id);
     if (!duplicateFrame) throw new Error('Animation duplication did not produce a frame.');
 
-    const duration = await requestAnimationTransaction(this.adapter, this.target, afterDuplicate, {
+    const duration = await requestAnimationTransaction(this.adapter, this.target, afterDuplicate.observation, {
       command: 'project.animation.frame',
       input: { kind: 'frame.duration', frameId: duplicateFrame.id, duration: 420 },
       operationId: 'fixture-animation-duration',
     });
-    const afterDuration = await this.observeTarget(this.adapter, duration.revision);
-    const reorder = await requestAnimationTransaction(this.adapter, this.target, afterDuration, {
+    const afterDuration = await this.captureAnimationCheckpoint(this.adapter, duration.revision);
+    const reorder = await requestAnimationTransaction(this.adapter, this.target, afterDuration.observation, {
       command: 'project.animation.frame',
       input: { kind: 'frame.reorder', frameId: duplicateFrame.id, position: 'start' },
       operationId: 'fixture-animation-reorder',
     });
-    const afterReorder = await this.observeTarget(this.adapter, reorder.revision);
+    const afterReorder = await this.captureAnimationCheckpoint(this.adapter, reorder.revision);
 
     const linkMembers = [firstFrame.id, duplicateFrame.id].map((frameId) => {
-      const frame = afterReorder.frames.find((candidate) => candidate.id === frameId);
+      const frame = afterReorder.observation.frames.find((candidate) => candidate.id === frameId);
       const cel = frame?.cels.find((candidate) => candidate.layerId === layer.id);
       if (!cel) throw new Error('Fixture animation cel observation is incomplete.');
       return { key: cel.key, celId: cel.id, layerId: cel.layerId, frameId: cel.frameId };
     });
-    const link = await requestAnimationTransaction(this.adapter, this.target, afterReorder, {
+    const link = await requestAnimationTransaction(this.adapter, this.target, afterReorder.observation, {
       command: 'project.animation.cel.link',
       input: { kind: 'cel.link', layerId: layer.id, members: linkMembers },
       operationId: 'fixture-animation-link',
     });
-    const afterLink = await this.observeTarget(this.adapter, link.revision);
-    const linkedCel = afterLink.frames.find((frame) => frame.id === firstFrame.id)?.cels
+    const afterLink = await this.captureAnimationCheckpoint(this.adapter, link.revision);
+    const linkedCel = afterLink.observation.frames.find((frame) => frame.id === firstFrame.id)?.cels
       .find((cel) => cel.layerId === layer.id);
     if (!linkedCel?.linkedCelId) throw new Error('Fixture animation link did not produce a hard link.');
-    const unlink = await requestAnimationTransaction(this.adapter, this.target, afterLink, {
+    const unlink = await requestAnimationTransaction(this.adapter, this.target, afterLink.observation, {
       command: 'project.animation.cel.unlink',
       input: {
         kind: 'cel.unlink',
@@ -655,7 +668,7 @@ export class FixtureSession {
         frameId: linkedCel.frameId,
         celId: linkedCel.id,
         linkedCelId: linkedCel.linkedCelId,
-        linkGroup: afterLink.frames.flatMap((frame) => frame.cels)
+        linkGroup: afterLink.observation.frames.flatMap((frame) => frame.cels)
           .filter((cel) => cel.linkedCelId === linkedCel.linkedCelId)
           .map((cel) => ({
             key: cel.key,
@@ -668,8 +681,8 @@ export class FixtureSession {
       },
       operationId: 'fixture-animation-unlink',
     });
-    const afterUnlink = await this.observeTarget(this.adapter, unlink.revision);
-    const firstTag = await requestAnimationTransaction(this.adapter, this.target, afterUnlink, {
+    const afterUnlink = await this.captureAnimationCheckpoint(this.adapter, unlink.revision);
+    const firstTag = await requestAnimationTransaction(this.adapter, this.target, afterUnlink.observation, {
       command: 'project.animation.frame-tag',
       input: { kind: 'tag.create', name: 'Fixture Intro', color: '#123456', startFrameIndex: 0, endFrameIndex: 0 },
       operationId: 'fixture-animation-tag-intro',
@@ -729,6 +742,14 @@ export class FixtureSession {
       negotiation,
       initial,
       operations: { create, duplicate, duration, reorder, link, unlink, firstTag, secondTag },
+      checkpoints: {
+        afterCreate,
+        afterDuplicate,
+        afterDuration,
+        afterReorder,
+        afterLink,
+        afterUnlink,
+      },
       afterOperations,
       afterUndo: { ...afterUndo, transition: undoTransition },
       afterRedo: { ...afterRedo, transition: redoTransition },
@@ -756,19 +777,26 @@ export class FixtureSession {
     });
   }
 
+  private async captureAnimationCheckpoint(
+    adapter: AutomationAdapter,
+    revision: number,
+  ): Promise<FixtureAnimationCheckpoint> {
+    const observation = await this.observeTarget(adapter, revision);
+    const renders = await Promise.all(observation.frames.map((frame) => requestSuccess<RenderObservation>(adapter, {
+      operation: 'project.render.observe', target: this.target,
+      expectedRevision: revision, frameId: frame.id,
+    })));
+    return { observation, renders };
+  }
+
   private async captureAnimationState(
     context: ProjectContext,
     adapter: AutomationAdapter,
     revision: number,
     transition?: HistoryTransitionResult,
   ): Promise<FixtureDocumentState & { readonly renders: readonly RenderObservation[] }> {
-    const observation = await requestSuccess<ProjectObservation>(adapter, {
-      operation: 'project.observe', target: this.target, expectedRevision: revision,
-    });
-    const renders = await Promise.all(observation.frames.map((frame) => requestSuccess<RenderObservation>(adapter, {
-      operation: 'project.render.observe', target: this.target,
-      expectedRevision: revision, frameId: frame.id,
-    })));
+    const checkpoint = await this.captureAnimationCheckpoint(adapter, revision);
+    const { observation, renders } = checkpoint;
     return {
       observation: transition ? { ...observation, lastEvent: transition.event } : observation,
       render: renders[0] ?? await requestSuccess<RenderObservation>(adapter, {

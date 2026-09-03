@@ -797,7 +797,7 @@ function sanitizeErrorDetails(
   details: Record<string, unknown>,
 ): TransactionErrorDetails {
   const safe: Record<string, string | number> = {};
-  for (const key of ['reason', 'resource', 'feature', 'expectedRevision', 'currentRevision', 'max']) {
+  for (const key of ['reason', 'resource', 'feature', 'expectedRevision', 'currentRevision', 'min', 'max']) {
     const value = details[key];
     if (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) {
       safe[key] = value;

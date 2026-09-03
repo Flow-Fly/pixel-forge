@@ -157,6 +157,7 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.exact).toEqual({ document: true, render: true });
   });
 
+  // fallow-ignore-next-line complexity -- The browser fixture proves the complete public animation lifecycle.
   it('proves the bounded one-child animation journey through canvas sharing and reopen', async () => {
     const session = createFixtureSession();
     sessions.push(session);
@@ -174,6 +175,41 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.operations.firstTag.revision).toBe(7);
     expect(journey.operations.secondTag.revision).toBe(8);
     expect(journey.afterOperations.observation.frames).toHaveLength(3);
+    const initialFrame = journey.initial.observation.frames[0];
+    const createdFrame = journey.checkpoints.afterCreate.observation.frames.find((frame) =>
+      frame.id !== initialFrame?.id);
+    const duplicateFrame = journey.checkpoints.afterDuplicate.observation.frames.find((frame) =>
+      frame.id !== initialFrame?.id && frame.id !== createdFrame?.id);
+    expect(initialFrame).toBeDefined();
+    expect(createdFrame).toMatchObject({ id: expect.any(String), order: 1, duration: 180 });
+    expect(duplicateFrame).toMatchObject({ id: expect.any(String), order: 2, duration: 100 });
+    expect(duplicateFrame?.id).not.toBe(createdFrame?.id);
+    expect(journey.checkpoints.afterDuplicate.renders[0]?.pixels)
+      .toEqual(journey.checkpoints.afterDuplicate.renders[2]?.pixels);
+    expect(journey.checkpoints.afterDuration.observation.frames.find((frame) => frame.id === duplicateFrame?.id))
+      .toMatchObject({ order: 2, duration: 420 });
+    expect(journey.checkpoints.afterReorder.observation.frames.map((frame) => ({
+      id: frame.id,
+      order: frame.order,
+      duration: frame.duration,
+    }))).toEqual([
+      { id: duplicateFrame?.id, order: 0, duration: 420 },
+      { id: initialFrame?.id, order: 1, duration: 100 },
+      { id: createdFrame?.id, order: 2, duration: 180 },
+    ]);
+    const linkedFrames = journey.checkpoints.afterLink.observation.frames.filter((frame) =>
+      frame.id === initialFrame?.id || frame.id === duplicateFrame?.id);
+    expect(linkedFrames).toHaveLength(2);
+    expect(linkedFrames.flatMap((frame) => frame.cels).filter((cel) => cel.linkedCelId)).toEqual([
+      expect.objectContaining({ linkType: 'hard' }),
+      expect.objectContaining({ linkType: 'hard' }),
+    ]);
+    const unlinkedFrames = journey.checkpoints.afterUnlink.observation.frames;
+    const unlinkedFirst = unlinkedFrames.find((frame) => frame.id === initialFrame?.id)?.cels[0];
+    const unlinkedDuplicate = unlinkedFrames.find((frame) => frame.id === duplicateFrame?.id)?.cels[0];
+    expect(unlinkedFirst?.linkedCelId).toBeUndefined();
+    expect(unlinkedFirst?.linkType).toBeUndefined();
+    expect(unlinkedDuplicate).toMatchObject({ linkType: 'hard', linkedCelId: expect.any(String) });
     expect(journey.afterOperations.observation.tags.map((tag) => tag.name)).toEqual([
       'Fixture Intro',
       'Fixture Motion',
@@ -184,6 +220,213 @@ describe('Automation Adapter Fixture Session', () => {
     expect(journey.reopened.reload.revision).toBe(10);
     expect(journey.reopened.renders).toHaveLength(3);
     expect(journey.exact).toEqual({ document: true, render: true, structure: true });
+  });
+
+  // fallow-ignore-next-line complexity -- The browser regression proves payload independence and target isolation together.
+  it('creates independent blank cels across layers while another registered tab is active', async () => {
+    const targetContext = createProjectContext();
+    const otherContext = createProjectContext();
+    contexts.push(targetContext, otherContext);
+    const projectId = 'animation-multilayer';
+    const otherProjectId = 'animation-other-tab';
+    targetContext.project.id.value = projectId;
+    otherContext.project.id.value = otherProjectId;
+
+    const firstFrame = targetContext.animation.frames.value[0];
+    const firstLayer = targetContext.layers.layers.value[0];
+    if (!firstFrame || !firstLayer) throw new Error('Expected the target animation fixture state.');
+    const { width, height } = targetContext.project;
+    const secondLayer = targetContext.layers.addLayer('Second artwork', width.value, height.value);
+    const secondCanvas = document.createElement('canvas');
+    secondCanvas.width = width.value;
+    secondCanvas.height = height.value;
+    const cels = new Map(targetContext.animation.cels.value);
+    cels.set(targetContext.animation.getCelKey(secondLayer.id, firstFrame.id), {
+      id: 'animation-second-cel',
+      layerId: secondLayer.id,
+      frameId: firstFrame.id,
+      canvas: secondCanvas,
+    });
+    targetContext.animation.cels.value = cels;
+    targetContext.animation.syncLayerCanvases();
+
+    let entitySequence = 0;
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([
+        [projectId, targetContext],
+        [otherProjectId, otherContext],
+      ]),
+      entityIdFactory: () => `multilayer-entity-${++entitySequence}`,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    setActiveProjectContext(otherContext);
+
+    const created = await adapter.request({
+      operation: 'project.transaction.execute',
+      profile: 'animation',
+      target: { projectId },
+      expectedRevision: 0,
+      provenance: {
+        clientId: 'multilayer-client',
+        sessionId: 'multilayer-session',
+        runId: 'multilayer-run',
+        operationId: 'multilayer-create',
+      },
+      children: [{
+        command: 'project.animation.frame',
+        input: { kind: 'frame.create', position: 'end', duration: 160 },
+      }],
+    });
+    expect(created).toMatchObject({ ok: true, result: { revision: 1 } });
+    if (!created.ok) return;
+
+    const observationResult = await adapter.request({
+      operation: 'project.observe',
+      target: { projectId },
+      expectedRevision: created.result.revision,
+    });
+    expect(observationResult).toMatchObject({ ok: true });
+    if (!observationResult.ok) return;
+    const createdFrame = observationResult.result.frames.find((frame) => frame.id !== firstFrame.id);
+    expect(createdFrame).toMatchObject({ order: 1, duration: 160 });
+    if (!createdFrame) return;
+    const createdCels = createdFrame.cels.filter((cel) => cel.layerId === firstLayer.id || cel.layerId === secondLayer.id);
+    expect(createdCels).toHaveLength(2);
+    expect(createdCels.every((cel) => !cel.hasNonTransparentPixels)).toBe(true);
+
+    const firstCreatedCel = targetContext.animation.cels.value.get(
+      targetContext.animation.getCelKey(firstLayer.id, createdFrame.id),
+    );
+    const secondCreatedCel = targetContext.animation.cels.value.get(
+      targetContext.animation.getCelKey(secondLayer.id, createdFrame.id),
+    );
+    expect(firstCreatedCel?.canvas).toBeDefined();
+    expect(secondCreatedCel?.canvas).toBeDefined();
+    expect(firstCreatedCel?.canvas).not.toBe(secondCreatedCel?.canvas);
+    const firstDrawing = firstCreatedCel?.canvas.getContext('2d');
+    const secondDrawing = secondCreatedCel?.canvas.getContext('2d');
+    if (!firstDrawing || !secondDrawing || !firstCreatedCel || !secondCreatedCel) {
+      throw new Error('Expected independent animation canvas payloads.');
+    }
+    firstDrawing.fillStyle = '#00ff00';
+    firstDrawing.fillRect(0, 0, 1, 1);
+    expect(Array.from(secondDrawing.getImageData(0, 0, 1, 1).data)).toEqual([0, 0, 0, 0]);
+    expect(otherContext.project.revision.value).toBe(0);
+    expect(otherContext.animation.frames.value).toHaveLength(1);
+  });
+
+  // fallow-ignore-next-line complexity -- The public transaction journey covers each supported frame-tag operation.
+  it('runs every frame-tag operation as one animation child', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'animation-tags';
+    context.project.id.value = projectId;
+    let entitySequence = 0;
+    const adapter = createAutomationAdapter({
+      targetRegistry: new Map([[projectId, context]]),
+      transactionTagIdFactory: () => 'animation-tag-1',
+      entityIdFactory: () => `animation-tag-entity-${++entitySequence}`,
+    });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const target = { projectId };
+    let revision = 0;
+    const execute = async (
+      input: Record<string, unknown>,
+      command = 'project.animation.frame-tag',
+    ): Promise<EditorTransactionResult> => {
+      const result = await adapter.request({
+        operation: 'project.transaction.execute',
+        profile: 'animation',
+        target,
+        expectedRevision: revision,
+        provenance: {
+          clientId: 'tag-client',
+          sessionId: 'tag-session',
+          runId: 'tag-run',
+          operationId: String(input.kind),
+        },
+        children: [{ command, input }],
+      });
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error(`Animation tag operation failed: ${result.error.code}`);
+      revision = result.result.revision;
+      expect(result.result.provenance.children).toHaveLength(1);
+      return result.result as EditorTransactionResult;
+    };
+    const observe = async (): Promise<ProjectObservation> => {
+      const result = await adapter.request({ operation: 'project.observe', target, expectedRevision: revision });
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error(`Animation tag observation failed: ${result.error.code}`);
+      return result.result as ProjectObservation;
+    };
+
+    const created = await execute({ kind: 'tag.create', name: 'Draft', color: '#123456', startFrameIndex: 0, endFrameIndex: 0 });
+    let observation = await observe();
+    const tagId = observation.tags[0]?.id;
+    expect(created.provenance.children[0]?.operation).toBe('tag.create');
+    if (!tagId) throw new Error('Expected a public tag identity.');
+
+    const renamed = await execute({ kind: 'tag.rename', tagId, name: 'Renamed' });
+    expect(renamed.provenance.children[0]?.operation).toBe('tag.rename');
+    const recolored = await execute({ kind: 'tag.recolor', tagId, color: '#654321' });
+    expect(recolored.provenance.children[0]?.operation).toBe('tag.recolor');
+    const frameCreated = await execute(
+      { kind: 'frame.create', position: 'end', duration: 120 },
+      'project.animation.frame',
+    );
+    expect(frameCreated.provenance.children[0]?.operation).toBe('frame.create');
+    observation = await observe();
+    expect(observation.frames.map((frame) => ({ id: frame.id, order: frame.order, duration: frame.duration }))).toEqual([
+      { id: observation.frames[0]?.id, order: 0, duration: 100 },
+      { id: observation.frames[1]?.id, order: 1, duration: 120 },
+    ]);
+
+    const ranged = await execute({ kind: 'tag.range', tagId, startFrameIndex: 0, endFrameIndex: 1 });
+    expect(ranged.provenance.children[0]?.operation).toBe('tag.range');
+    observation = await observe();
+    expect(observation.tags[0]).toMatchObject({ id: tagId, startFrameIndex: 0, endFrameIndex: 1 });
+    const collapsed = await execute({ kind: 'tag.collapse', tagId, collapsed: true });
+    expect(collapsed.provenance.children[0]?.operation).toBe('tag.collapse');
+    observation = await observe();
+    expect(observation.tags[0]).toMatchObject({ id: tagId, collapsed: true });
+    const removed = await execute({ kind: 'tag.remove-frame', tagId, frameIndex: 1 });
+    expect(removed.provenance.children[0]?.operation).toBe('tag.remove-frame');
+    observation = await observe();
+    expect(observation.tags[0]).toMatchObject({ id: tagId, startFrameIndex: 0, endFrameIndex: 0 });
+    const deleted = await execute({ kind: 'tag.delete', tagId });
+    expect(deleted.provenance.children[0]?.operation).toBe('tag.delete');
+    observation = await observe();
+    expect(observation.tags).toEqual([]);
+    expect(revision).toBe(8);
+  });
+
+  it('reports stable bounds errors before cel member normalization', async () => {
+    const context = createProjectContext();
+    contexts.push(context);
+    const projectId = 'animation-bounds';
+    context.project.id.value = projectId;
+    const adapter = createAutomationAdapter({ targetRegistry: new Map([[projectId, context]]) });
+    expect(adapter.negotiateCatalog({ version: '1.0' }).ok).toBe(true);
+    const provenance = { clientId: 'bounds-client', sessionId: 'bounds-session', runId: 'bounds-run', operationId: 'bounds' };
+    const base = { operation: 'project.transaction.execute', profile: 'animation', target: { projectId }, expectedRevision: 0, provenance };
+    const link = await adapter.request({
+      ...base,
+      children: [{ command: 'project.animation.cel.link', input: { kind: 'cel.link', layerId: 'layer', members: [{}] } }],
+    });
+    expect(link).toMatchObject({ ok: false, error: { code: 'bounds_exceeded', details: { min: 2, max: 16 } } });
+    const unlink = await adapter.request({
+      ...base,
+      children: [{ command: 'project.animation.cel.unlink', input: {
+        kind: 'cel.unlink', layerId: 'layer', frameId: 'frame', celId: 'cel', linkedCelId: 'link', linkGroup: [],
+      } }],
+    });
+    expect(unlink).toMatchObject({ ok: false, error: { code: 'bounds_exceeded', details: { min: 2, max: 16 } } });
+    const duration = await adapter.request({
+      ...base,
+      children: [{ command: 'project.animation.frame', input: { kind: 'frame.duration', frameId: 'missing', duration: 2001 } }],
+    });
+    expect(duration).toMatchObject({ ok: false, error: { code: 'bounds_exceeded' } });
+    expect(context.project.revision.value).toBe(0);
   });
 
   it('rejects unequal cel payloads, last-frame deletion, and wrong animation targets atomically', async () => {

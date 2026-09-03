@@ -10,6 +10,9 @@ import {
   ANIMATION_FRAME_COMMAND_ID,
   ANIMATION_FRAME_DURATION_MAX,
   ANIMATION_FRAME_DURATION_MIN,
+  ANIMATION_MIN_LINK_MEMBERS,
+  ANIMATION_REQUEST_STRING_MAX,
+  ANIMATION_REQUEST_STRING_MIN,
   ANIMATION_MAX_CELS,
   ANIMATION_MAX_FRAMES,
   ANIMATION_MAX_LAYERS,
@@ -303,22 +306,21 @@ function validatePreparationBytes(
   const currentBytes = estimateCelPayloadBytes(before.cels);
   let additionalBytes = 0;
   if (request.kind === 'frame.create') {
-    additionalBytes = canvasPayloadBytes(before);
+    additionalBytes = multiplyPayloadBytes(canvasPayloadBytes(before), supportedLayers.length);
   } else if (request.kind === 'frame.duplicate') {
     const source = before.frames.find((frame) => frame.id === request.sourceFrameId);
     if (!source) throw animationError('target_not_found', true, { resource: 'frame' });
     for (const layer of supportedLayers) {
       const sourceCel = before.cels.get(`${layer.id}:${source.id}`);
       if (!sourceCel) throw animationError('invalid_state', false, { reason: 'animation_matrix' });
-      additionalBytes += sourceCel.canvas.width * sourceCel.canvas.height * 4;
-      additionalBytes += sourceCel.indexBuffer?.byteLength ?? 0;
+      additionalBytes = addPayloadBytes(additionalBytes, celPayloadBytes(sourceCel));
     }
   } else if (request.kind === 'cel.unlink') {
     const cel = before.cels.get(`${request.layerId}:${request.frameId}`);
     if (!cel) throw animationError('target_not_found', true, { resource: 'cel' });
-    additionalBytes = cel.canvas.width * cel.canvas.height * 4 + (cel.indexBuffer?.byteLength ?? 0);
+    additionalBytes = celPayloadBytes(cel);
   }
-  const snapshotBytes = currentBytes + currentBytes + additionalBytes;
+  const snapshotBytes = addPayloadBytes(addPayloadBytes(currentBytes, currentBytes), additionalBytes);
   if (!Number.isSafeInteger(snapshotBytes) || snapshotBytes > ANIMATION_MAX_PREPARATION_BYTES) {
     throw animationError('limit_exceeded', false, {
       reason: 'animation_preparation_bytes',
@@ -333,7 +335,7 @@ function canvasPayloadBytes(before: AnimationSnapshot): number {
   if (!layer || !frame) throw animationError('invalid_state', false, { reason: 'animation_matrix' });
   const cel = before.cels.get(`${layer.id}:${frame.id}`);
   if (!cel) throw animationError('invalid_state', false, { reason: 'animation_matrix' });
-  const bytes = cel.canvas.width * cel.canvas.height * 4;
+  const bytes = celPayloadBytes(cel);
   if (!Number.isSafeInteger(bytes) || bytes < 0) {
     throw animationError('limit_exceeded', false, {
       reason: 'animation_preparation_bytes',
@@ -441,6 +443,7 @@ function normalizeCelLinkRequest(
   if (input.kind !== 'cel.link' || !Array.isArray(input.members)) {
     throw animationError('invalid_request', false, { reason: 'cel_link' });
   }
+  validateMemberBounds(input.members.length, 'cel_link_members');
   return {
     kind: 'cel.link',
     target,
@@ -485,6 +488,7 @@ function normalizeCelUnlinkRequest(
   if (input.kind !== 'cel.unlink' || !Array.isArray(input.linkGroup)) {
     throw animationError('invalid_request', false, { reason: 'cel_unlink' });
   }
+  validateMemberBounds(input.linkGroup.length, 'cel_unlink_group');
   return {
     kind: 'cel.unlink',
     target,
@@ -524,7 +528,6 @@ function createFrame(
   const inserted = insertFrameSnapshot(before, frameId, index, request.duration);
   const { frames, tags, cels } = inserted;
   const layers = before.layers.filter((layer) => layer.type !== 'reference');
-  const canvas = createBlankCanvas(context.project.width.value, context.project.height.value);
   const celIds = allEntityIdentities(before);
   celIds.add(frameId);
   for (const layer of layers) {
@@ -533,7 +536,7 @@ function createFrame(
       id: celId,
       layerId: layer.id,
       frameId,
-      canvas,
+      canvas: createBlankCanvas(context.project.width.value, context.project.height.value),
     });
   }
   return { ...before, frames, cels, tags, currentFrameId: frameId };
@@ -819,6 +822,44 @@ function sameBytes(first: ArrayLike<number> | undefined, second: ArrayLike<numbe
   return first.length === second.length && Array.from(first).every((value, index) => value === second[index]);
 }
 
+function celPayloadBytes(cel: Cel): number {
+  const canvasBytes = safePayloadProduct(cel.canvas.width, cel.canvas.height, 4);
+  return addPayloadBytes(canvasBytes, cel.indexBuffer?.byteLength ?? 0);
+}
+
+function multiplyPayloadBytes(bytes: number, count: number): number {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || !Number.isSafeInteger(count) || count < 0 ||
+      (count > 0 && bytes > Number.MAX_SAFE_INTEGER / count)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return bytes * count;
+}
+
+function addPayloadBytes(first: number, second: number): number {
+  if (!Number.isSafeInteger(first) || first < 0 || !Number.isSafeInteger(second) || second < 0 ||
+      first > Number.MAX_SAFE_INTEGER - second) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return first + second;
+}
+
+function safePayloadProduct(first: number, second: number, multiplier: number): number {
+  if (!Number.isSafeInteger(first) || first < 0 || !Number.isSafeInteger(second) || second < 0) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return multiplyPayloadBytes(multiplyPayloadBytes(first, second), multiplier);
+}
+
+function validateMemberBounds(length: number, reason: string): void {
+  if (length < ANIMATION_MIN_LINK_MEMBERS || length > ANIMATION_MAX_LINK_MEMBERS) {
+    throw animationError('bounds_exceeded', false, {
+      reason,
+      min: ANIMATION_MIN_LINK_MEMBERS,
+      max: ANIMATION_MAX_LINK_MEMBERS,
+    });
+  }
+}
+
 function cloneCelCanvas(cel: Cel): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = cel.canvas.width;
@@ -886,7 +927,8 @@ function normalizeDuration(value: unknown): number {
 }
 
 function requiredString(value: unknown, reason: string): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+  if (typeof value !== 'string' || value.length < ANIMATION_REQUEST_STRING_MIN ||
+      value.length > ANIMATION_REQUEST_STRING_MAX) {
     throw animationError('invalid_request', false, { reason });
   }
   return value;

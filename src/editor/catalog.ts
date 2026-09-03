@@ -84,6 +84,10 @@ export const STATIC_STRUCTURE_SELECTION_ERROR_REASON = 'selection_in_progress';
 export const CEL_UNLINK_COMMAND_ID = 'project.animation.cel.unlink';
 export const ANIMATION_FRAME_COMMAND_ID = 'project.animation.frame';
 export const ANIMATION_CEL_LINK_COMMAND_ID = 'project.animation.cel.link';
+export const ANIMATION_REQUEST_STRING_MIN = 1;
+export const ANIMATION_REQUEST_STRING_MAX = 256;
+export const ANIMATION_MIN_LINK_MEMBERS = 2;
+const ANIMATION_MIN_UNLINK_MEMBERS = 2;
 export const ANIMATION_MAX_FRAMES = 16;
 export const ANIMATION_MAX_LAYERS = 16;
 export const ANIMATION_MAX_CELS = 256;
@@ -159,11 +163,14 @@ export const transactionCatalog = Object.freeze({
       operationId: 'non-empty bounded string',
     },
     children: {
-      exact: 2,
       order: 'either',
       profiles: {
-        'layer-and-tag': { oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
+        'layer-and-tag': {
+          exact: 2,
+          oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+        },
         'static-structure': {
+          exact: 2,
           oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID],
           item: {
             palette: {
@@ -245,11 +252,11 @@ export const transactionCatalog = Object.freeze({
           command: ANIMATION_FRAME_COMMAND_ID,
           input: {
             oneOf: [
-              { kind: 'frame.create', position: 'start | end | before | after', anchorFrameId: 'optional existing frame identity', duration: 'integer 10..2000' },
-              { kind: 'frame.duplicate', sourceFrameId: 'existing frame identity', position: 'start | end | before | after', anchorFrameId: 'optional existing frame identity' },
-              { kind: 'frame.reorder', frameId: 'existing frame identity', position: 'start | end | before | after', anchorFrameId: 'optional existing frame identity' },
-              { kind: 'frame.duration', frameId: 'existing frame identity', duration: 'integer 10..2000' },
-              { kind: 'frame.delete', frameId: 'existing frame identity' },
+              { kind: 'frame.create', position: 'start | end | before | after', anchorFrameId: 'optional bounded non-empty string (1..256)', duration: 'integer 10..2000' },
+              { kind: 'frame.duplicate', sourceFrameId: 'bounded non-empty string (1..256)', position: 'start | end | before | after', anchorFrameId: 'optional bounded non-empty string (1..256)' },
+              { kind: 'frame.reorder', frameId: 'bounded non-empty string (1..256)', position: 'start | end | before | after', anchorFrameId: 'optional bounded non-empty string (1..256)' },
+              { kind: 'frame.duration', frameId: 'bounded non-empty string (1..256)', duration: 'integer 10..2000' },
+              { kind: 'frame.delete', frameId: 'bounded non-empty string (1..256)' },
             ],
           },
         },
@@ -257,13 +264,40 @@ export const transactionCatalog = Object.freeze({
           command: ANIMATION_CEL_LINK_COMMAND_ID,
           input: {
             kind: 'cel.link',
-            layerId: 'existing supported layer identity',
-            members: [{ key: 'observed cel key', celId: 'observed cel identity', layerId: 'same layer identity', frameId: 'observed frame identity' }],
+            layerId: 'bounded non-empty string (1..256)',
+            members: {
+              min: ANIMATION_MIN_LINK_MEMBERS,
+              max: ANIMATION_MAX_LINK_MEMBERS,
+              item: {
+                key: 'bounded non-empty string (1..256)',
+                celId: 'bounded non-empty string (1..256)',
+                layerId: 'bounded non-empty string (1..256)',
+                frameId: 'bounded non-empty string (1..256)',
+              },
+            },
           },
         },
         animationCelUnlink: {
           command: CEL_UNLINK_COMMAND_ID,
-          input: 'existing project.animation.cel.unlink request shape',
+          input: {
+            kind: 'cel.unlink',
+            layerId: 'bounded non-empty string (1..256)',
+            frameId: 'bounded non-empty string (1..256)',
+            celId: 'bounded non-empty string (1..256)',
+            linkedCelId: 'bounded non-empty string (1..256)',
+            linkGroup: {
+              min: ANIMATION_MIN_UNLINK_MEMBERS,
+              max: ANIMATION_MAX_LINK_MEMBERS,
+              item: {
+                key: 'bounded non-empty string (1..256)',
+                celId: 'bounded non-empty string (1..256)',
+                layerId: 'bounded non-empty string (1..256)',
+                frameId: 'bounded non-empty string (1..256)',
+                linkedCelId: 'bounded non-empty string (1..256)',
+                linkType: 'hard',
+              },
+            },
+          },
         },
       },
     },
@@ -307,11 +341,16 @@ export const transactionCatalog = Object.freeze({
   },
   limits: {
     children: {
-      exact: 2,
       order: 'either',
       profiles: {
-        'layer-and-tag': { oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID] },
-        'static-structure': { oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID] },
+        'layer-and-tag': {
+          exact: 2,
+          oneOfEach: [LAYER_STATE_COMMAND_ID, FRAME_TAG_COMMAND_ID],
+        },
+        'static-structure': {
+          exact: 2,
+          oneOfEach: [STATIC_PALETTE_COMMAND_ID, STATIC_LAYER_TREE_COMMAND_ID],
+        },
         animation: {
           exact: 1,
           oneOf: [ANIMATION_FRAME_COMMAND_ID, ANIMATION_CEL_LINK_COMMAND_ID, CEL_UNLINK_COMMAND_ID, FRAME_TAG_COMMAND_ID],
@@ -325,23 +364,25 @@ export const transactionCatalog = Object.freeze({
       },
       transitions: { max: TRANSACTION_PROVENANCE_MAX_TRANSITIONS },
     },
-      profiles: {
-        'layer-and-tag': {},
-        'static-structure': {
-          paletteEntries: { max: STATIC_STRUCTURE_MAX_PALETTE_ENTRIES },
-          layers: { max: STATIC_STRUCTURE_MAX_LAYERS },
-          frames: { max: STATIC_STRUCTURE_MAX_FRAMES },
+    profiles: {
+      'layer-and-tag': {},
+      'static-structure': {
+        paletteEntries: { max: STATIC_STRUCTURE_MAX_PALETTE_ENTRIES },
+        layers: { max: STATIC_STRUCTURE_MAX_LAYERS },
+        frames: { max: STATIC_STRUCTURE_MAX_FRAMES },
         cels: { max: STATIC_STRUCTURE_MAX_CELS },
         preparationBytes: { max: STATIC_STRUCTURE_MAX_PREPARATION_BYTES },
       },
-        animation: {
-          frames: { max: ANIMATION_MAX_FRAMES },
-          layers: { max: ANIMATION_MAX_LAYERS },
-          cels: { max: ANIMATION_MAX_CELS },
-          duration: { min: ANIMATION_FRAME_DURATION_MIN, max: ANIMATION_FRAME_DURATION_MAX },
-          linkMembers: { max: ANIMATION_MAX_LINK_MEMBERS },
-          preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
-        },
+      animation: {
+        frames: { max: ANIMATION_MAX_FRAMES },
+        layers: { max: ANIMATION_MAX_LAYERS },
+        cels: { max: ANIMATION_MAX_CELS },
+        duration: { min: ANIMATION_FRAME_DURATION_MIN, max: ANIMATION_FRAME_DURATION_MAX },
+        linkMembers: { min: ANIMATION_MIN_LINK_MEMBERS, max: ANIMATION_MAX_LINK_MEMBERS },
+        unlinkGroup: { min: ANIMATION_MIN_UNLINK_MEMBERS, max: ANIMATION_MAX_LINK_MEMBERS },
+        requestString: { min: ANIMATION_REQUEST_STRING_MIN, max: ANIMATION_REQUEST_STRING_MAX },
+        preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
+      },
     },
   },
   profiles: {
@@ -393,8 +434,17 @@ export const transactionCatalog = Object.freeze({
         duration: { min: ANIMATION_FRAME_DURATION_MIN, max: ANIMATION_FRAME_DURATION_MAX },
       },
       celLink: {
+        minMembers: ANIMATION_MIN_LINK_MEMBERS,
         maxMembers: ANIMATION_MAX_LINK_MEMBERS,
         member: 'exact observed key, cel, layer, and frame identity',
+      },
+      celUnlink: {
+        minMembers: ANIMATION_MIN_UNLINK_MEMBERS,
+        maxMembers: ANIMATION_MAX_LINK_MEMBERS,
+      },
+      requestString: {
+        min: ANIMATION_REQUEST_STRING_MIN,
+        max: ANIMATION_REQUEST_STRING_MAX,
       },
       preparationBytes: { max: ANIMATION_MAX_PREPARATION_BYTES },
       affectedDomains: ['timeline', 'raster-content'],
@@ -427,6 +477,7 @@ export const transactionCatalog = Object.freeze({
     'target_not_found',
     'revision_conflict',
     'invalid_state',
+    'bounds_exceeded',
     'limit_exceeded',
     'unsupported',
     'internal',
@@ -440,20 +491,24 @@ export const celUnlinkCatalog = Object.freeze({
   requiresRevision: true,
   operation: 'unlink-active-hard-linked-cel',
   request: {
-    target: { projectId: 'string' },
+    target: { projectId: 'bounded non-empty string (1..256)' },
     expectedRevision: 'integer >= 0',
-    layerId: 'string',
-    frameId: 'string',
-    celId: 'string',
-    linkedCelId: 'string',
-    linkGroup: [{
-      key: 'string',
-      celId: 'string',
-      layerId: 'string',
-      frameId: 'string',
-      linkedCelId: 'string',
-      linkType: 'hard',
-    }],
+    layerId: 'bounded non-empty string (1..256)',
+    frameId: 'bounded non-empty string (1..256)',
+    celId: 'bounded non-empty string (1..256)',
+    linkedCelId: 'bounded non-empty string (1..256)',
+    linkGroup: {
+      min: ANIMATION_MIN_UNLINK_MEMBERS,
+      max: ANIMATION_MAX_LINK_MEMBERS,
+      item: {
+        key: 'bounded non-empty string (1..256)',
+        celId: 'bounded non-empty string (1..256)',
+        layerId: 'bounded non-empty string (1..256)',
+        frameId: 'bounded non-empty string (1..256)',
+        linkedCelId: 'bounded non-empty string (1..256)',
+        linkType: 'hard',
+      },
+    },
   },
   affectedDomains: ['timeline', 'raster-content'] as const,
   availability: { guidedDrawing: 'unsupported' },
@@ -463,6 +518,7 @@ export const celUnlinkCatalog = Object.freeze({
     'target_not_found',
     'revision_conflict',
     'invalid_state',
+    'bounds_exceeded',
     'unsupported',
     'internal',
   ] as const,
