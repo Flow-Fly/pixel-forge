@@ -78,6 +78,91 @@ export interface SymbolGridLegendEntry {
   readonly paletteIndex?: number;
 }
 
+export interface SymbolGridPaletteEntry {
+  readonly id: string;
+  readonly color: string;
+}
+
+export interface SymbolGridEncoding {
+  readonly rows: readonly string[];
+  readonly legend: readonly SymbolGridLegendEntry[];
+}
+
+/**
+ * Encode detached RGBA pixels with the same deterministic Symbol Grid rules
+ * used by raster observation. Palette identities are attached only for an
+ * exact opaque RGB match; no nearest-color mapping is allowed.
+ */
+export function encodeSymbolGridPixels(
+  pixels: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+  paletteEntries: readonly SymbolGridPaletteEntry[] = [],
+  existingLegend: readonly SymbolGridLegendEntry[] = [],
+): SymbolGridEncoding {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+      || width < 1 || height < 1 || width * height > RASTER_GRID_MAX_CELLS
+      || pixels.length !== width * height * 4) {
+    throw symbolGridError('invalid_state', false, { reason: 'symbol_grid_pixels' });
+  }
+
+  const paletteMatches = new Map<string, { readonly id: string; readonly index: number }[]>();
+  paletteEntries.forEach((entry, index) => {
+    const rgb = hexToRgb(entry.color);
+    if (!rgb) return;
+    const key = `${rgb.r},${rgb.g},${rgb.b}`;
+    const matches = paletteMatches.get(key) ?? [];
+    matches.push({ id: entry.id, index: index + 1 });
+    paletteMatches.set(key, matches);
+  });
+
+  const entries: SymbolGridLegendEntry[] = existingLegend.map((entry) => ({ ...entry }));
+  const keys = new Map<string, string>();
+  entries.forEach((entry) => keys.set(entry.color, entry.symbol));
+  const rows: string[] = [];
+  for (let y = 0; y < height; y++) {
+    let row = '';
+    for (let x = 0; x < width; x++) {
+      const cell = y * width + x;
+      const pixelOffset = cell * 4;
+      const r = pixels[pixelOffset] ?? 0;
+      const g = pixels[pixelOffset + 1] ?? 0;
+      const b = pixels[pixelOffset + 2] ?? 0;
+      const a = pixels[pixelOffset + 3] ?? 0;
+      if (a === 0) {
+        if (r !== 0 || g !== 0 || b !== 0) {
+          throw symbolGridError('invalid_state', false, { reason: 'transparent_rgba' });
+        }
+        row += '.';
+        continue;
+      }
+
+      const paletteCandidates = a === 255 ? paletteMatches.get(`${r},${g},${b}`) : undefined;
+      const paletteMatch = paletteCandidates?.length === 1 ? paletteCandidates[0] : undefined;
+      const key = rgbaToHex(r, g, b, a);
+      let symbol = keys.get(key);
+      if (!symbol) {
+        if (entries.length >= RASTER_GRID_MAX_LEGEND_ENTRIES) {
+          throw symbolGridError('limit_exceeded', false, {
+            reason: 'legend',
+            max: RASTER_GRID_MAX_LEGEND_ENTRIES,
+          });
+        }
+        symbol = SYMBOL_ALPHABET[entries.length] ?? '';
+        keys.set(key, symbol);
+        entries.push({
+          symbol,
+          color: rgbaToHex(r, g, b, a),
+          ...(paletteMatch ? { paletteEntryId: paletteMatch.id, paletteIndex: paletteMatch.index } : {}),
+        });
+      }
+      row += symbol;
+    }
+    rows.push(row);
+  }
+  return { rows, legend: entries };
+}
+
 export interface RasterObservation {
   readonly type: typeof RASTER_OBSERVATION_TYPE;
   readonly target: ProjectTarget;
@@ -777,6 +862,28 @@ function buildSymbolGrid(
   request: RasterObservationRequest,
   read: RasterPixelRead,
 ): { readonly rows: readonly string[]; readonly legend: readonly SymbolGridLegendEntry[]; readonly source: RasterObservationSource } {
+  let source: RasterObservationSource;
+  if (request.source.kind === 'layer') {
+    if (!read.celId) throw symbolGridError('internal', true, { reason: 'layer_cel_identity' });
+    source = {
+      kind: 'layer',
+      layerId: request.source.layerId,
+      frameId: request.source.frameId,
+      celId: read.celId,
+    };
+  } else {
+    source = { kind: 'composite', frameId: request.source.frameId };
+  }
+  if (!read.indices) {
+    const encoding = encodeSymbolGridPixels(
+      read.pixels,
+      request.region.width,
+      request.region.height,
+      context.palette.getProjectPaletteEntries(),
+    );
+    return { ...encoding, source };
+  }
+
   const entries: SymbolGridLegendEntry[] = [];
   const keys = new Map<string, string>();
   const rows: string[] = [];
@@ -823,18 +930,6 @@ function buildSymbolGrid(
       row += symbol;
     }
     rows.push(row);
-  }
-  let source: RasterObservationSource;
-  if (request.source.kind === 'layer') {
-    if (!read.celId) throw symbolGridError('internal', true, { reason: 'layer_cel_identity' });
-    source = {
-      kind: 'layer',
-      layerId: request.source.layerId,
-      frameId: request.source.frameId,
-      celId: read.celId,
-    };
-  } else {
-    source = { kind: 'composite', frameId: request.source.frameId };
   }
   return { rows, legend: entries, source };
 }
