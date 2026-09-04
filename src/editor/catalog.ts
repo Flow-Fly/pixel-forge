@@ -9,6 +9,13 @@
 export const CANVAS_SIZE_COMMAND_ID = 'project.canvas.resize';
 export const CANVAS_SIZE_MAX_DIMENSION = 2048;
 export const RENDER_OBSERVATION_MAX_BYTES = 16 * 1024 * 1024;
+export const RENDER_OBSERVATION_MAX_REGION_WIDTH = 64;
+export const RENDER_OBSERVATION_MAX_REGION_HEIGHT = 64;
+export const RENDER_OBSERVATION_MAX_PIXELS = 4096;
+export const RENDER_OBSERVATION_MAX_IDENTITY_LENGTH = 256;
+export const RENDER_OBSERVATION_MIN_SCALE = 1;
+export const RENDER_OBSERVATION_MAX_SCALE = 16;
+export const RENDER_OBSERVATION_REPRESENTATION_VERSION = '1.0';
 export const TRANSACTION_PROVENANCE_MAX_STRING_LENGTH = 256;
 export const TRANSACTION_PROVENANCE_MAX_TRANSITIONS = 16;
 export const PROJECT_OBSERVATION_LIMITS = Object.freeze({
@@ -1047,18 +1054,89 @@ export const renderObservationCatalog = Object.freeze({
   kind: 'observation',
   target: 'project',
   requiresRevision: true,
+  representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
   request: {
-    target: { projectId: 'string' },
-    expectedRevision: 'integer >= 0',
-    frameId: 'string',
+    oneOf: {
+      explicit: {
+        target: { projectId: 'string' },
+        expectedRevision: 'integer >= 0',
+        source: {
+          oneOf: {
+            composite: { kind: 'composite', frameId: 'non-empty bounded string' },
+            layer: {
+              kind: 'layer',
+              layerId: 'non-empty bounded string',
+              frameId: 'non-empty bounded string',
+              celId: 'required non-empty captured cel identity',
+            },
+          },
+        },
+        region: 'optional integer crop; omitted means full project bounds',
+        background: {
+          kind: 'transparent | solid',
+          color: 'six-digit hex color when kind is solid',
+        },
+        scale: 'integer 1..16 nearest-neighbor inspection scale',
+        expectedDigest: 'null or 64-character lowercase SHA-256 digest',
+      },
+      compatibility: {
+        target: { projectId: 'string' },
+        expectedRevision: 'integer >= 0',
+        frameId: 'non-empty bounded string',
+      },
+    },
   },
   result: {
+    type: 'render.observation',
+    representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
+    target: { projectId: 'string' },
+    revision: 'integer >= 0',
+    frameId: 'source frame identity (compatibility alias)',
+    source: 'exact normalized composite or layer/cel identity',
+    sourceKind: 'composite | layer',
+    region: 'normalized in-bounds region',
+    background: 'normalized transparent or solid policy',
+    scale: 'requested integer nearest-neighbor scale',
+    width: 'region width',
+    height: 'region height',
     format: 'rgba8',
     pixels: 'copied Uint8Array',
     stride: 'width * 4',
+    digest: '64-character lowercase SHA-256 digest',
   },
-  limits: { maxBytes: RENDER_OBSERVATION_MAX_BYTES },
-  privacy: 'canonical artwork bytes only; no canvas or browser chrome',
+  limits: {
+    maxBytes: RENDER_OBSERVATION_MAX_BYTES,
+    maxIdentityLength: RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
+    region: {
+      maxWidth: RENDER_OBSERVATION_MAX_REGION_WIDTH,
+      maxHeight: RENDER_OBSERVATION_MAX_REGION_HEIGHT,
+      maxPixels: RENDER_OBSERVATION_MAX_PIXELS,
+    },
+    scale: { min: RENDER_OBSERVATION_MIN_SCALE, max: RENDER_OBSERVATION_MAX_SCALE },
+  },
+  revision: 'expectedRevision must remain current through asynchronous digest work',
+  digest: {
+    algorithm: 'SHA-256',
+    representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
+    expectedMismatch: { code: 'revision_conflict', retryable: true },
+  },
+  affectedDomains: ['raster-content'] as const,
+  availability: {
+    source: 'composite or renderable non-reference layer',
+    background: 'transparent or solid six-digit hex',
+    canvas: 'Canvas 2D and Web Crypto SHA-256 required',
+  },
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'bounds_exceeded',
+    'limit_exceeded',
+    'invalid_state',
+    'unsupported',
+    'internal',
+  ] as const,
+  privacy: 'bounded canonical artwork bytes only; no canvas, stores, or browser chrome',
 });
 
 const automationOperationCatalog = Object.freeze([
@@ -1130,29 +1208,18 @@ const automationOperationCatalog = Object.freeze([
     kind: 'observation',
     target: 'project',
     requiresRevision: true,
-    request: {
-      target: { projectId: 'string' },
-      expectedRevision: 'integer >= 0',
-      frameId: 'string',
-    },
+    request: renderObservationCatalog.request,
     result: {
-      type: 'render.observation',
-      target: { projectId: 'string' },
-      revision: 'integer >= 0',
-      frameId: 'string',
       ...renderObservationCatalog.result,
     },
     limits: renderObservationCatalog.limits,
+    affectedDomains: renderObservationCatalog.affectedDomains,
+    availability: renderObservationCatalog.availability,
+    privacy: renderObservationCatalog.privacy,
+    representationVersion: renderObservationCatalog.representationVersion,
+    digest: renderObservationCatalog.digest,
     revision: 'expectedRevision must equal the captured project revision; result reports that revision',
-    errors: [
-      'invalid_request',
-      'target_not_found',
-      'revision_conflict',
-      'limit_exceeded',
-      'invalid_state',
-      'unsupported',
-      'internal',
-    ] as const,
+    errors: renderObservationCatalog.errors,
   },
   {
     id: RASTER_OBSERVATION_ID,
