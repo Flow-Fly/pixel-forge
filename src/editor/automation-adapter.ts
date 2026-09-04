@@ -31,6 +31,7 @@ import {
 } from './observations';
 import {
   editorCatalog,
+  ANIMATION_OBSERVATION_ID,
   RASTER_GRID_MAX_STRING_LENGTH,
   RASTER_OBSERVATION_ID,
   RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
@@ -38,6 +39,12 @@ import {
   RENDER_OBSERVATION_MIN_SCALE,
   RENDER_OBSERVATION_MAX_BYTES,
 } from './catalog';
+import {
+  normalizeAnimationObservationRequest,
+  observeAnimation,
+  isAnimationObservationFailure,
+  type AnimationEvaluationBundle,
+} from './animation-observation';
 import {
   isRasterObservationFailure,
   observeRaster,
@@ -254,6 +261,7 @@ export class AutomationAdapter {
       'project.observe': async (input) => this.observeProject(input),
       'project.render.observe': (input) => this.observeRenderRequest(input),
       [RASTER_OBSERVATION_ID]: async (input) => this.observeRaster(input),
+      [ANIMATION_OBSERVATION_ID]: async (input) => this.observeAnimation(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
       [EDITOR_TRANSACTION_OPERATION_ID]: (input) => this.executeTransaction(input),
       'project.history.undo': (input) => this.undo(input),
@@ -438,6 +446,20 @@ export class AutomationAdapter {
       const context = this.prepareContext(request.target);
       const result = await observeRaster(context, input);
       if (isRasterObservationFailure(result)) return result;
+      return success(result);
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  async observeAnimation(input: unknown): Promise<AutomationResult<AnimationEvaluationBundle>> {
+    try {
+      this.assertNegotiated();
+      const request = normalizeAnimationObservationRequest(input);
+      const context = this.prepareContext(request.target);
+      this.assertCurrentRevision(context, request.expectedRevision);
+      const result = await observeAnimation(context, request);
+      if (isAnimationObservationFailure(result)) return result;
       return success(result);
     } catch (error) {
       return failureFromUnknown(error);

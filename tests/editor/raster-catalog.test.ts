@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   editorCatalog,
+  animationObservationCatalog,
   projectSaveSafetyCatalog,
   rasterObservationCatalog,
   rasterPatchCatalog,
@@ -65,6 +66,7 @@ describe('raster editor catalog contracts', () => {
       'project.observe',
       'project.render.observe',
       'project.raster.observe',
+      'project.animation.observe',
     ]);
   });
 
@@ -100,5 +102,33 @@ describe('raster editor catalog contracts', () => {
       },
     });
     expect(editorCatalog.commands).toContain(rasterPatchCatalog);
+  });
+
+  it('publishes the bounded animation evaluation bundle contract', () => {
+    expect(animationObservationCatalog).toMatchObject({
+      id: 'project.animation.observe',
+      kind: 'observation',
+      requiresRevision: true,
+      representationVersion: '1.0',
+      request: {
+        range: 'all | { tagId: bounded stable tag identity }',
+        keyframes: '1..4 unique frame identities within the selected range',
+        expectedDigest: 'null or 64-character lowercase SHA-256 bundle digest',
+      },
+      result: {
+        type: 'animation.evaluation.bundle',
+        digest: '64-character lowercase SHA-256 bundle digest',
+      },
+      limits: {
+        frames: { min: 2, max: 16 },
+        canvas: { maxWidth: 64, maxHeight: 64, maxPixels: 65536 },
+        legend: { maxEntries: 32 },
+      },
+      digest: {
+        algorithm: 'SHA-256',
+        expectedMismatch: { code: 'revision_conflict', retryable: true },
+      },
+    });
+    expect(editorCatalog.observations).toContain(animationObservationCatalog);
   });
 });

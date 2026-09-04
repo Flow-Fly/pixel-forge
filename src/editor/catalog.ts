@@ -16,6 +16,19 @@ export const RENDER_OBSERVATION_MAX_IDENTITY_LENGTH = 256;
 export const RENDER_OBSERVATION_MIN_SCALE = 1;
 export const RENDER_OBSERVATION_MAX_SCALE = 16;
 export const RENDER_OBSERVATION_REPRESENTATION_VERSION = '1.0';
+export const ANIMATION_OBSERVATION_ID = 'project.animation.observe';
+export const ANIMATION_OBSERVATION_REPRESENTATION_VERSION = '1.0';
+export const ANIMATION_OBSERVATION_MIN_FRAMES = 2;
+export const ANIMATION_OBSERVATION_MAX_FRAMES = 16;
+export const ANIMATION_OBSERVATION_MAX_KEYFRAMES = 4;
+export const ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION = 64;
+export const ANIMATION_OBSERVATION_MAX_FRAME_PIXELS = 65_536;
+export const ANIMATION_OBSERVATION_MAX_CELLS = 4_096;
+export const ANIMATION_OBSERVATION_MAX_PALETTE_ENTRIES = 32;
+export const ANIMATION_OBSERVATION_MAX_LEGEND_ENTRIES = 32;
+export const ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_ROWS = 4;
+export const ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_COLUMNS = 4;
+export const ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES = 16 * 1024 * 1024;
 export const TRANSACTION_PROVENANCE_MAX_STRING_LENGTH = 256;
 export const TRANSACTION_PROVENANCE_MAX_TRANSITIONS = 16;
 export const PROJECT_OBSERVATION_LIMITS = Object.freeze({
@@ -1139,6 +1152,85 @@ export const renderObservationCatalog = Object.freeze({
   privacy: 'bounded canonical artwork bytes only; no canvas, stores, or browser chrome',
 });
 
+export const animationObservationCatalog = Object.freeze({
+  id: ANIMATION_OBSERVATION_ID,
+  kind: 'observation',
+  target: 'project',
+  requiresRevision: true,
+  representationVersion: ANIMATION_OBSERVATION_REPRESENTATION_VERSION,
+  request: {
+    target: { projectId: 'bounded non-empty string (1..256)' },
+    expectedRevision: 'integer >= 0',
+    range: 'all | { tagId: bounded stable tag identity }',
+    background: {
+      kind: 'transparent | solid',
+      color: 'six-digit hex color when kind is solid',
+    },
+    scale: 'integer 1..16 nearest-neighbor inspection scale',
+    keyframes: '1..4 unique frame identities within the selected range',
+    expectedDigest: 'null or 64-character lowercase SHA-256 bundle digest',
+  },
+  result: {
+    type: 'animation.evaluation.bundle',
+    representationVersion: ANIMATION_OBSERVATION_REPRESENTATION_VERSION,
+    target: { projectId: 'string' },
+    revision: 'integer >= 0',
+    canvas: { width: 'integer 1..64', height: 'integer 1..64' },
+    frames: 'ordered full-frame Render Observations with durations and numbers',
+    tags: 'ordered applicable frame tags and inclusive ranges',
+    palette: 'ordered exact palette identities and colors',
+    legend: 'global deterministic Symbol Grid legend',
+    baseGrid: 'complete first-frame Symbol Grid rows',
+    deltas: 'one exact adjacent delta per later frame',
+    contactSheet: 'deterministic row-major detached RGBA cell buffer',
+    keyframes: 'requested detached enlarged frame observations',
+    digest: '64-character lowercase SHA-256 bundle digest',
+  },
+  limits: {
+    frames: { min: ANIMATION_OBSERVATION_MIN_FRAMES, max: ANIMATION_OBSERVATION_MAX_FRAMES },
+    keyframes: { min: 1, max: ANIMATION_OBSERVATION_MAX_KEYFRAMES },
+    canvas: {
+      maxWidth: ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION,
+      maxHeight: ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION,
+      maxPixels: ANIMATION_OBSERVATION_MAX_FRAME_PIXELS,
+    },
+    cells: { maxPerFrame: ANIMATION_OBSERVATION_MAX_CELLS },
+    palette: { maxEntries: ANIMATION_OBSERVATION_MAX_PALETTE_ENTRIES },
+    legend: { maxEntries: ANIMATION_OBSERVATION_MAX_LEGEND_ENTRIES },
+    contactSheet: {
+      maxRows: ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_ROWS,
+      maxColumns: ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_COLUMNS,
+      maxBytes: ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES,
+    },
+    identity: { maxLength: RENDER_OBSERVATION_MAX_IDENTITY_LENGTH },
+  },
+  grants: ['project-observe', 'creative-content'] as const,
+  affectedDomains: ['raster-content', 'timeline'] as const,
+  availability: {
+    guidedDrawing: 'unsupported',
+    selection: 'floating and transforming are rejected',
+    canvas: 'Canvas 2D and Web Crypto SHA-256 required',
+    source: 'canonical composite only; reference layers excluded',
+  },
+  revision: 'expectedRevision must remain current through every render and digest step',
+  digest: {
+    algorithm: 'SHA-256',
+    representationVersion: ANIMATION_OBSERVATION_REPRESENTATION_VERSION,
+    expectedMismatch: { code: 'revision_conflict', retryable: true },
+  },
+  privacy: 'detached bounded canonical artwork bytes, Symbol Grid metadata, timing, and digest only',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'bounds_exceeded',
+    'limit_exceeded',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
 const automationOperationCatalog = Object.freeze([
   {
     id: 'catalog.negotiate',
@@ -1234,6 +1326,23 @@ const automationOperationCatalog = Object.freeze([
     privacy: rasterObservationCatalog.privacy,
     revision: 'expectedRevision must equal the captured project revision; result reports that revision',
     errors: rasterObservationCatalog.errors,
+  },
+  {
+    id: ANIMATION_OBSERVATION_ID,
+    kind: animationObservationCatalog.kind,
+    target: animationObservationCatalog.target,
+    requiresRevision: animationObservationCatalog.requiresRevision,
+    request: animationObservationCatalog.request,
+    result: animationObservationCatalog.result,
+    limits: animationObservationCatalog.limits,
+    grants: animationObservationCatalog.grants,
+    affectedDomains: animationObservationCatalog.affectedDomains,
+    availability: animationObservationCatalog.availability,
+    privacy: animationObservationCatalog.privacy,
+    representationVersion: animationObservationCatalog.representationVersion,
+    digest: animationObservationCatalog.digest,
+    revision: animationObservationCatalog.revision,
+    errors: animationObservationCatalog.errors,
   },
   {
     id: CANVAS_SIZE_COMMAND_ID,
@@ -1384,6 +1493,7 @@ export const editorCatalog = Object.freeze({
     projectObservationCatalog,
     renderObservationCatalog,
     rasterObservationCatalog,
+    animationObservationCatalog,
   ]),
   commands: Object.freeze([
     projectCreateCatalog,
