@@ -97,6 +97,7 @@ describe('AutomationAdapter', () => {
       'project.render.observe',
       'project.raster.observe',
       'project.animation.observe',
+      'project.asset-package.prepare',
       'project.canvas.resize',
       'project.transaction.execute',
       'project.history.undo',

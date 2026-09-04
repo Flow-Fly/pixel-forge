@@ -50,6 +50,13 @@ import {
   observeRaster,
   type RasterObservation,
 } from './symbol-grid';
+import {
+  isExactSavedSafety,
+  isAssetPackagePreparationFailure,
+  normalizeAssetPackageRequest,
+  prepareAssetPackage as prepareAssetPackageOperation,
+  type AssetPackageResult,
+} from './asset-package';
 import { DB32_COLORS } from '../stores/palette/types';
 import { PROJECT_VERSION, type ProjectFile } from '../types/project';
 import {
@@ -262,6 +269,7 @@ export class AutomationAdapter {
       'project.render.observe': (input) => this.observeRenderRequest(input),
       [RASTER_OBSERVATION_ID]: async (input) => this.observeRaster(input),
       [ANIMATION_OBSERVATION_ID]: async (input) => this.observeAnimation(input),
+      'project.asset-package.prepare': async (input) => this.prepareAssetPackage(input),
       'project.canvas.resize': (input) => this.dispatchCanvasResize(input),
       [EDITOR_TRANSACTION_OPERATION_ID]: (input) => this.executeTransaction(input),
       'project.history.undo': (input) => this.undo(input),
@@ -460,6 +468,34 @@ export class AutomationAdapter {
       this.assertCurrentRevision(context, request.expectedRevision);
       const result = await observeAnimation(context, request);
       if (isAnimationObservationFailure(result)) return result;
+      return success(result);
+    } catch (error) {
+      return failureFromUnknown(error);
+    }
+  }
+
+  async prepareAssetPackage(input: unknown): Promise<AutomationResult<AssetPackageResult>> {
+    try {
+      this.assertNegotiated();
+      const request = normalizeAssetPackageRequest(input);
+      const context = this.prepareContext(request.target);
+      this.assertCurrentRevision(context, request.expectedRevision);
+      const liveSaveSafety = this.saveService.getSaveSafetyObservation(context);
+      if (!this.isExactSavedRevision(context, request.target, request.expectedRevision, liveSaveSafety)
+          || !isExactSavedSafety(request.expectedSaveSafety, request.target, request.expectedRevision)) {
+        return failure('invalid_state', false, { reason: 'save_safety' });
+      }
+      const result = await prepareAssetPackageOperation(context, request, {
+        getSaveSafety: () => this.saveService.getSaveSafetyObservation(context),
+        isCurrentTarget: () => {
+          try {
+            return this.resolveTarget(request.target) === context;
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (isAssetPackagePreparationFailure(result)) return result;
       return success(result);
     } catch (error) {
       return failureFromUnknown(error);
