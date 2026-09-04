@@ -253,21 +253,28 @@ export class PFAutomationSessionDialog extends BaseComponent {
     const next = this.controller.listPendingRequests()[0] ?? null;
     this.sessions = this.controller.listLocalSessions();
     if (!next) {
-      this.pending = null;
-      this.targets = [];
-      this.selectedTargetId = '';
-      this.selectedClasses = [];
-      if (openIfAvailable && this.sessions.length > 0) this.open = true;
-      if (this.sessions.length === 0) this.open = false;
+      this.clearPendingState(openIfAvailable);
       return;
     }
 
+    this.showPending(next, openIfAvailable);
+  }
+
+  private clearPendingState(openIfAvailable: boolean) {
+    this.pending = null;
+    this.targets = [];
+    this.selectedTargetId = '';
+    this.selectedClasses = [];
+    if (this.sessions.length === 0) this.open = false;
+    if (openIfAvailable && this.sessions.length > 0) this.open = true;
+  }
+
+  private showPending(next: AutomationSessionRequestStatus, openIfAvailable: boolean) {
     const changedRequest = this.pending?.requestId !== next.requestId;
     this.pending = next;
-    if (changedRequest || openIfAvailable) {
+    const refreshChoices = changedRequest || openIfAvailable;
+    if (refreshChoices) {
       this.targets = this.controller.captureLocalTargets(next.requestId);
-    }
-    if (changedRequest || openIfAvailable) {
       this.selectedTargetId = '';
       this.selectedClasses = [];
       this.errorMessage = '';
