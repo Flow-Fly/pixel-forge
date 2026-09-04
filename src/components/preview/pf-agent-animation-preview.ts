@@ -281,7 +281,7 @@ export class PFAgentAnimationPreview extends LitElement {
           <button type="button" aria-label="Next frame" @click=${this.nextFrame}>Next</button>
           <label>
             Playback range
-            <select aria-label="Playback range" .value=${this.playbackMode === 'tag' ? 'tag' : 'all'} @change=${this.changePlaybackRange}>
+            <select aria-label="Playback range" .value=${this.playbackMode === 'tag' && this.activeTagId ? `tag:${this.activeTagId}` : 'all'} @change=${this.changePlaybackRange}>
               <option value="all">All frames</option>
               ${bundle.tags.map((tag) => html`<option value=${`tag:${tag.id}`} ?selected=${this.playbackMode === 'tag' && tag.id === this.activeTagId}>${tag.name || tag.id} loop</option>`)}
             </select>

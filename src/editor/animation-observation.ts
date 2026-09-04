@@ -177,9 +177,11 @@ class AnimationObservationError extends Error {
 
 interface CapturedAnimationState {
   readonly frames: readonly Frame[];
+  readonly frameValues: readonly { readonly id: string; readonly order: number; readonly duration: number }[];
   readonly layers: readonly Layer[];
   readonly cels: ReadonlyMap<string, Cel>;
   readonly tags: readonly FrameTag[];
+  readonly tagValues: readonly AnimationTagMetadata[];
   readonly palette: readonly { readonly id: string; readonly color: string }[];
   readonly currentFrameId: string;
   readonly isPlaying: boolean;
@@ -235,6 +237,7 @@ export function normalizeAnimationObservationRequest(input: unknown): AnimationO
   if (new Set(keyframes).size !== keyframes.length) {
     throw animationError('invalid_request', false, { reason: 'keyframes_unique' });
   }
+  if (!('expectedDigest' in input)) throw animationError('invalid_request', false, { reason: 'digest' });
   const expectedDigest = input.expectedDigest;
   if (expectedDigest !== null && (typeof expectedDigest !== 'string' || !/^[0-9a-f]{64}$/.test(expectedDigest))) {
     throw animationError('invalid_request', false, { reason: 'digest' });
@@ -261,7 +264,6 @@ export async function observeAnimation(
 ): Promise<AnimationObservationResult> {
   try {
     const plan = captureAnimationPlan(context, request);
-    const renderedFrames: RenderObservation[] = [];
     let globalLegend: readonly SymbolGridLegendEntry[] = [];
     const frames: AnimationEvaluationFrame[] = [];
 
@@ -276,8 +278,6 @@ export async function observeAnimation(
       });
       if (isRenderObservationFailure(renderResult)) return renderResult;
       const render = cloneRenderObservation(renderResult);
-      renderedFrames.push(render);
-
       const encoding = encodeSymbolGridPixels(
         render.pixels,
         render.width,
@@ -432,7 +432,7 @@ function captureAnimationPlan(
   validateFrames(frames);
   validateTags(tags, frames.length);
   validatePalette(paletteEntries);
-  validateCels(context, frames, layers, cels, width, height);
+  validateCels(context, frames, layers, cels, width, height, paletteEntries.length);
 
   const selectedFrames = selectFrames(frames, tags, request.range);
   if (selectedFrames.length < ANIMATION_OBSERVATION_MIN_FRAMES || selectedFrames.length > ANIMATION_OBSERVATION_MAX_FRAMES) {
@@ -453,9 +453,11 @@ function captureAnimationPlan(
 
   const state: CapturedAnimationState = {
     frames,
+    frameValues: frames.map((frame) => ({ id: frame.id, order: frame.order, duration: frame.duration })),
     layers,
     cels,
     tags,
+    tagValues: tags.map(cloneTag),
     palette: paletteEntries.map((entry) => ({ ...entry })),
     currentFrameId: context.animation.currentFrameId.value,
     isPlaying: context.animation.isPlaying.value,
@@ -547,6 +549,7 @@ function validateCels(
   cels: ReadonlyMap<string, Cel>,
   width: number,
   height: number,
+  paletteLength: number,
 ): void {
   const layerIds = new Set<string>();
   for (const layer of layers) {
@@ -555,7 +558,7 @@ function validateCels(
     layerIds.add(layer.id);
   }
   const celIds = new Set<string>();
-  for (const cel of cels.values()) {
+  for (const [key, cel] of cels.entries()) {
     normalizeIdentity(cel.id, 'cel');
     if (celIds.has(cel.id)) throw animationError('invalid_state', false, { reason: 'cel_identity' });
     celIds.add(cel.id);
@@ -564,6 +567,12 @@ function validateCels(
     }
     if (cel.indexBuffer !== undefined && cel.indexBuffer.length !== width * height) {
       throw animationError('invalid_state', false, { reason: 'cel_index_shape' });
+    }
+    if (key !== context.animation.getCelKey(cel.layerId, cel.frameId)) {
+      throw animationError('invalid_state', false, { reason: 'cel_key' });
+    }
+    if (cel.indexBuffer?.some((index) => !Number.isSafeInteger(index) || index < 0 || index > paletteLength)) {
+      throw animationError('invalid_state', false, { reason: 'cel_index_value' });
     }
   }
   for (const frame of frames) {
@@ -602,6 +611,14 @@ function assertCapturedAnimationState(
       || context.animation.playbackMode.value !== state.playbackMode
       || context.animation.activeTagId.value !== state.activeTagId) {
     throw animationError('revision_conflict', true, { reason: 'source_changed' });
+  }
+  if (context.animation.frames.value.some((frame, index) => {
+    const captured = state.frameValues[index];
+    return !captured || frame.id !== captured.id || frame.order !== captured.order || frame.duration !== captured.duration;
+  }) || context.animation.frames.value.length !== state.frameValues.length
+      || context.animation.tags.value.some((tag, index) => JSON.stringify(cloneTag(tag)) !== JSON.stringify(state.tagValues[index]))
+      || context.animation.tags.value.length !== state.tagValues.length) {
+    throw animationError('revision_conflict', true, { reason: 'timeline_changed' });
   }
   const currentPalette = context.palette.getProjectPaletteEntries();
   if (currentPalette.length !== state.palette.length
