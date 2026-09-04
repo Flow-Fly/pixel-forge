@@ -6,6 +6,8 @@ import {
   type InspectObservationClass,
 } from '../../src/editor/automation-session';
 import type { AutomationAdapter } from '../../src/editor/automation-adapter';
+import type { AutomationResult } from '../../src/editor/automation-adapter';
+import { ProjectWriteTurnStore } from '../../src/editor/project-write-turn';
 import { autoSaveService } from '../../src/services/auto-save';
 import {
   createProjectContext,
@@ -655,6 +657,599 @@ describe('AutomationSessionManager', () => {
     expect(ARTIST_MODE_MAX_TRANSACTIONS).toBe(50);
   });
 
+  it('settles an in-flight Artist transaction before handing the turn to manual editing', async () => {
+    const target = createTarget('deferred-project', 'Deferred project');
+    let targets: readonly AutomationLocalTarget[] = [target];
+    const writeTurns = new ProjectWriteTurnStore();
+    let resolveAdapter!: (result: AutomationResult<unknown>) => void;
+    let signalDispatch!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      signalDispatch = resolve;
+    });
+    const adapterResult = new Promise<AutomationResult<unknown>>((resolve) => {
+      resolveAdapter = resolve;
+    });
+    let adapterInput: unknown;
+    const adapter = {
+      negotiateCatalog: () => ({ ok: true, result: {} }),
+      executeTransaction: async (input: unknown) => {
+        adapterInput = input;
+        signalDispatch();
+        return adapterResult;
+      },
+    } as unknown as AutomationAdapter;
+    const manager = new AutomationSessionManager({
+      targets: () => targets,
+      adapter,
+      writeTurns,
+      isPageVisible: () => true,
+      requestIdFactory: (() => {
+        let count = 0;
+        return () => `deferred-request-${++count}`;
+      })(),
+      sessionIdFactory: () => 'deferred-session',
+    });
+    managers.push(manager);
+
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'deferred-run',
+      runIntent: 'Commit one deferred edit',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, ['structure', 'timeline'], 1);
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    const layer = target.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+
+    const transactionPromise = manager.executeArtistModeTransaction(
+      grant.result.sessionId,
+      grant.result.runId,
+      {
+        operationId: 'deferred-operation',
+        profile: 'layer-and-tag',
+        expectedRevision: 0,
+        children: [
+          {
+            command: 'project.layer.state',
+            input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+          },
+          {
+            command: 'project.animation.frame-tag',
+            input: {
+              kind: 'tag.create',
+              name: 'Deferred fixture',
+              color: '#123456',
+              startFrameIndex: 0,
+              endFrameIndex: 0,
+            },
+          },
+        ],
+      },
+    );
+    await dispatched;
+
+    expect(writeTurns.owner(target.id)).toEqual({
+      kind: 'artist-mode',
+      sessionId: 'deferred-session',
+      runId: 'deferred-run',
+    });
+    expect(manager.takeoverProjectWriteTurn(target.id, 'human')).toBe(true);
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({ status: 'paused' });
+    expect(writeTurns.owner(target.id)).toEqual({
+      kind: 'artist-mode',
+      sessionId: 'deferred-session',
+      runId: 'deferred-run',
+    });
+
+    const event = target.context.project.commitChange('deferred-operation', ['layer-state', 'timeline']);
+    targets = [createTarget('deferred-project', 'Rebound deferred project')];
+    resolveAdapter({
+      ok: true,
+      result: {
+        type: 'project.transaction.execute',
+        target: { projectId: target.id },
+        revision: event.toRevision,
+        provenance: {
+          clientId: 'External Inspector',
+          sessionId: 'deferred-session',
+          runId: 'deferred-run',
+          operationId: 'deferred-operation',
+        },
+      },
+    });
+    const result = await transactionPromise;
+
+    expect(result).toMatchObject({ ok: true, result: { type: 'project.transaction.execute' } });
+    expectTargetFree(result);
+    expect(adapterInput).toMatchObject({
+      target: { projectId: target.id },
+      provenance: {
+        clientId: 'External Inspector',
+        sessionId: 'deferred-session',
+        runId: 'deferred-run',
+        operationId: 'deferred-operation',
+      },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 1,
+      remainingTransactions: 0,
+      status: 'expired',
+    });
+    expect(writeTurns.owner(target.id)).toEqual({ kind: 'manual', ownerId: 'human' });
+  });
+
+  // fallow-ignore-next-line complexity -- The table-driven journey exercises every approved Artist Mode profile through the public manager boundary.
+  it('executes every approved profile, rejects replay, and leaves the other project unchanged', async () => {
+    const target = createTarget('profile-project', 'Profile project');
+    const other = createTarget('profile-other-project', 'Other profile project');
+    const adapter = {
+      negotiateCatalog: () => ({ ok: true, result: {} }),
+      executeTransaction: async () => {
+        const event = target.context.project.commitChange('profile-matrix', ['layer-state']);
+        return {
+          ok: true as const,
+          result: {
+            type: 'project.transaction.execute',
+            target: { projectId: target.id },
+            revision: event.toRevision,
+          },
+        };
+      },
+    } as unknown as AutomationAdapter;
+    const manager = new AutomationSessionManager({
+      targets: () => [target, other],
+      adapter,
+      isPageVisible: () => true,
+      requestIdFactory: (() => {
+        let count = 0;
+        return () => `profile-request-${++count}`;
+      })(),
+      sessionIdFactory: () => 'profile-session',
+    });
+    managers.push(manager);
+    const inspect = request(manager, ['structure', 'palette', 'timeline', 'raster']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(
+      manager,
+      inspect.result.requestId,
+      target.id,
+      ['structure', 'palette', 'timeline', 'raster'],
+    );
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'profile-run',
+      requestedWriteCategories: ['structure', 'palette', 'timeline', 'raster'],
+      requestedTransactionLimit: 5,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const grant = manager.approveArtistMode(
+      artistRequest.result.requestId,
+      ['structure', 'palette', 'timeline', 'raster'],
+      5,
+    );
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    expect(grant.result.profiles).toEqual([
+      'structure-refinement',
+      'static-structure',
+      'layer-and-tag',
+      'animation',
+      'raster-patch',
+    ]);
+
+    const layer = target.context.layers.layers.value[0];
+    const frame = target.context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Expected the project fixture.');
+    const operation = async (
+      operationId: string,
+      profile: string,
+      children: readonly Record<string, unknown>[],
+      expectedRevision: number,
+    ) => {
+      const result = await manager.executeArtistModeTransaction(
+        grant.result.sessionId,
+        grant.result.runId,
+        { operationId, profile, children, expectedRevision },
+      );
+      expect(result, operationId).toMatchObject({
+        ok: true,
+        result: { type: 'project.transaction.execute' },
+      });
+      expectTargetFree(result);
+      return result;
+    };
+
+    const structureChildren = [{
+      command: 'project.layer.structure.refine',
+      input: {
+        kind: 'structure.refine',
+        layers: target.context.layers.layers.value.map((currentLayer) => ({
+          id: currentLayer.id,
+          name: `${currentLayer.name} refined`,
+          type: currentLayer.type,
+          parentId: currentLayer.parentId,
+        })),
+        mergePairs: [],
+      },
+    }];
+    await operation('profile-structure', 'structure-refinement', structureChildren, 0);
+    await expect(manager.executeArtistModeTransaction(
+      grant.result.sessionId,
+      grant.result.runId,
+      {
+        operationId: 'profile-structure',
+        profile: 'structure-refinement',
+        expectedRevision: 0,
+        children: structureChildren,
+      },
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { details: { reason: 'duplicate_operation' } },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 1,
+      remainingTransactions: 4,
+    });
+
+    const staticLayers = target.context.layers.layers.value.map((currentLayer) => ({
+      id: currentLayer.id,
+      name: currentLayer.name,
+      type: currentLayer.type,
+      parentId: currentLayer.parentId,
+      visible: currentLayer.visible,
+      locked: currentLayer.locked,
+      opacity: currentLayer.opacity === 0 ? 1 : currentLayer.opacity - 1,
+      blendMode: currentLayer.blendMode,
+      continuous: currentLayer.continuous ?? false,
+    }));
+    const staticChildren = [
+      {
+        command: 'project.palette.declaration',
+        input: {
+          kind: 'palette.declaration',
+          entries: target.context.palette.getProjectPaletteEntries(),
+        },
+      },
+      {
+        command: 'project.layer.tree',
+        input: { kind: 'layer-tree.declaration', layers: staticLayers },
+      },
+    ];
+    await operation('profile-static', 'static-structure', staticChildren, 1);
+
+    const layerTagChildren = [
+      {
+        command: 'project.layer.state',
+        input: { kind: 'layer.visibility', layerId: layer.id, visible: !layer.visible },
+      },
+      {
+        command: 'project.animation.frame-tag',
+        input: {
+          kind: 'tag.create',
+          name: 'Profile matrix tag',
+          color: '#123456',
+          startFrameIndex: 0,
+          endFrameIndex: 0,
+        },
+      },
+    ];
+    await operation('profile-layer-tag', 'layer-and-tag', layerTagChildren, 2);
+
+    const animationChildren = [{
+      command: 'project.animation.frame',
+      input: { kind: 'frame.duration', frameId: frame.id, duration: frame.duration + 1 },
+    }];
+    await operation('profile-animation', 'animation', animationChildren, 3);
+
+    const rasterChildren = [{
+      command: 'project.raster.patch',
+      input: {
+        kind: 'raster.patch',
+        layerId: layer.id,
+        frameId: frame.id,
+        celId: 'profile-cel',
+        region: { x: 0, y: 0, width: 1, height: 1 },
+        digest: '0'.repeat(64),
+        legend: [{ symbol: 'a', paletteEntryId: 'profile-palette' }],
+        patches: [{ x: 0, y: 0, width: 1, height: 1, rows: ['a'] }],
+      },
+    }];
+    await operation('profile-raster', 'raster-patch', rasterChildren, 4);
+
+    expect(target.context.project.revision.value).toBe(5);
+    expect(other.context.project.revision.value).toBe(0);
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 5,
+      remainingTransactions: 0,
+      status: 'budget-exhausted',
+    });
+  });
+
+  it('denies inspect-only, external, unsupported, and ungranted profile operations without budget use', async () => {
+    const target = createTarget('profile-denial-project', 'Profile denial project');
+    const manager = createManager([target]);
+    const inspect = request(manager, ['structure']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'profile-denial-run',
+      requestedWriteCategories: ['structure'],
+      requestedTransactionLimit: 2,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, ['structure'], 2);
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    const layer = target.context.layers.layers.value[0];
+    const frame = target.context.animation.frames.value[0];
+    if (!layer || !frame) throw new Error('Expected the project fixture.');
+    const animationChildren = [{
+      command: 'project.animation.frame',
+      input: { kind: 'frame.duration', frameId: frame.id, duration: frame.duration + 1 },
+    }];
+
+    await expect(manager.requestTransaction({
+      operation: 'project.files.delete',
+      sessionId: grant.result.sessionId,
+      runId: grant.result.runId,
+      operationId: 'external-operation',
+      profile: 'animation',
+      expectedRevision: 0,
+      children: animationChildren,
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', details: { reason: 'inspect_only' } },
+    });
+    await expect(manager.executeArtistModeTransaction(
+      grant.result.sessionId,
+      grant.result.runId,
+      {
+        operationId: 'unsupported-operation',
+        profile: 'unsupported-profile',
+        expectedRevision: 0,
+        children: animationChildren,
+      },
+    )).resolves.toMatchObject({ ok: false, error: { code: 'unsupported' } });
+    await expect(manager.executeArtistModeTransaction(
+      grant.result.sessionId,
+      grant.result.runId,
+      {
+        operationId: 'ungranted-operation',
+        profile: 'animation',
+        expectedRevision: 0,
+        children: animationChildren,
+      },
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', details: { reason: 'write_category' } },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 0,
+      remainingTransactions: 2,
+      status: 'running',
+    });
+  });
+
+  it('keeps the inspect observation grant unchanged when approving independent Artist write categories', () => {
+    const target = createTarget('observation-boundary-project', 'Observation boundary project');
+    const manager = createManager([target]);
+    const inspect = request(manager, ['structure']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const before = manager.listLocalSessions();
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'observation-boundary-run',
+      requestedWriteCategories: ['palette'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const artistGrant = manager.approveArtistMode(artistRequest.result.requestId, ['palette'], 1);
+    expect(artistGrant).toMatchObject({ ok: true, result: { categories: ['palette'] } });
+    expect(manager.listLocalSessions()).toEqual(before);
+  });
+
+  it('releases only the run-owned turn across rebound and disposal while preserving other owners', async () => {
+    const original = createTarget('owned-rebound-project', 'Original rebound project');
+    const replacement = createTarget('owned-rebound-project', 'Replacement rebound project');
+    const other = createTarget('unrelated-owner-project', 'Unrelated owner project');
+    let targets: readonly AutomationLocalTarget[] = [original, other];
+    const writeTurns = new ProjectWriteTurnStore();
+    const unrelatedOwner = { kind: 'manual' as const, ownerId: 'unrelated-human' };
+    expect(writeTurns.acquire(other.id, unrelatedOwner)).toMatchObject({ ok: true });
+    const manager = new AutomationSessionManager({
+      targets: () => targets,
+      writeTurns,
+      isPageVisible: () => true,
+      requestIdFactory: (() => {
+        let count = 0;
+        return () => `ownership-request-${++count}`;
+      })(),
+      sessionIdFactory: (() => {
+        let count = 0;
+        return () => `ownership-session-${++count}`;
+      })(),
+    });
+    managers.push(manager);
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, original.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'ownership-run',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, ['structure', 'timeline'], 1);
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    expect(writeTurns.owner(original.id)).toMatchObject({ kind: 'artist-mode', runId: 'ownership-run' });
+
+    targets = [replacement, other];
+    const layer = original.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+    await expect(manager.executeArtistModeTransaction(grant.result.sessionId, grant.result.runId, {
+      operationId: 'rebound-operation',
+      profile: 'layer-and-tag',
+      expectedRevision: 0,
+      children: [
+        {
+          command: 'project.layer.state',
+          input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+        },
+        {
+          command: 'project.animation.frame-tag',
+          input: {
+            kind: 'tag.create',
+            name: 'Rebound fixture',
+            color: '#123456',
+            startFrameIndex: 0,
+            endFrameIndex: 0,
+          },
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'target_not_found', details: { reason: 'target_rebound' } },
+    });
+    expect(writeTurns.owner(original.id)).toBeUndefined();
+    expect(writeTurns.owner(other.id)).toEqual(unrelatedOwner);
+
+    const disposalTarget = createTarget('disposal-owned-project', 'Disposal owned project');
+    targets = [disposalTarget, other];
+    const disposalManager = new AutomationSessionManager({
+      targets: () => targets,
+      writeTurns,
+      isPageVisible: () => true,
+      requestIdFactory: () => 'disposal-request',
+      sessionIdFactory: () => 'disposal-session',
+    });
+    managers.push(disposalManager);
+    const disposalInspect = request(disposalManager, ['structure', 'timeline']);
+    if (!disposalInspect.ok) throw new Error('Expected an inspect request.');
+    const disposalInspectGrant = approve(
+      disposalManager,
+      disposalInspect.result.requestId,
+      disposalTarget.id,
+      ['structure', 'timeline'],
+    );
+    if (!disposalInspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const disposalArtist = disposalManager.requestArtistMode({
+      sessionId: disposalInspectGrant.result.sessionId,
+      runId: 'disposal-run',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!disposalArtist.ok) throw new Error('Expected an Artist Mode request.');
+    disposalManager.captureArtistModeTarget(disposalArtist.result.requestId);
+    expect(disposalManager.approveArtistMode(disposalArtist.result.requestId, ['structure', 'timeline'], 1)).toMatchObject({ ok: true });
+    disposalManager.dispose();
+    expect(writeTurns.owner(disposalTarget.id)).toBeUndefined();
+    expect(writeTurns.owner(other.id)).toEqual(unrelatedOwner);
+  });
+
+  it('releases the Artist turn for revoke, expiry, background, completion, and rejection', async () => {
+    const target = createTarget('lifecycle-owner-project', 'Lifecycle owner project');
+    const now = { value: 10_000 };
+    let visible = true;
+    const writeTurns = new ProjectWriteTurnStore();
+    const manager = new AutomationSessionManager({
+      targets: () => [target],
+      writeTurns,
+      clock: () => now.value,
+      isPageVisible: () => visible,
+      requestIdFactory: (() => {
+        let count = 0;
+        return () => `lifecycle-owner-request-${++count}`;
+      })(),
+      sessionIdFactory: (() => {
+        let count = 0;
+        return () => `lifecycle-owner-session-${++count}`;
+      })(),
+    });
+    managers.push(manager);
+
+    const approveRun = (runId: string, durationSeconds = 60) => {
+      const inspect = request(manager, ['structure']);
+      if (!inspect.ok) throw new Error('Expected an inspect request.');
+      const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure']);
+      if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+      const artist = manager.requestArtistMode({
+        sessionId: inspectGrant.result.sessionId,
+        runId,
+        requestedWriteCategories: ['structure'],
+        requestedTransactionLimit: 1,
+        requestedDurationSeconds: durationSeconds,
+      });
+      if (!artist.ok) throw new Error('Expected an Artist Mode request.');
+      manager.captureArtistModeTarget(artist.result.requestId);
+      const grant = manager.approveArtistMode(artist.result.requestId, ['structure'], 1);
+      if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+      return grant.result;
+    };
+
+    const revoked = approveRun('revoke-run');
+    expect(manager.revokeSession(revoked.sessionId)).toMatchObject({ ok: true });
+    expect(writeTurns.owner(target.id)).toBeUndefined();
+
+    now.value = 10_000;
+    const expired = approveRun('expiry-run', 1);
+    now.value += 1_000;
+    expect(manager.listLocalArtistModeRuns()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: expired.runId, status: 'expired' }),
+    ]));
+    expect(writeTurns.owner(target.id)).toBeUndefined();
+
+    now.value = 10_000;
+    const backgrounded = approveRun('background-run');
+    visible = false;
+    await expect(manager.observe(backgrounded.sessionId, 'structure', { expectedRevision: 0 })).resolves.toMatchObject({
+      ok: false,
+      error: { details: { reason: 'page_hidden' } },
+    });
+    visible = true;
+    expect(manager.listLocalArtistModeRuns()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: backgrounded.runId, status: 'backgrounded' }),
+    ]));
+    expect(writeTurns.owner(target.id)).toBeUndefined();
+
+    now.value = 10_000;
+    const completed = approveRun('complete-run');
+    expect(manager.completeArtistMode(completed.sessionId, completed.runId)).toMatchObject({
+      ok: true,
+      result: { status: 'completed' },
+    });
+    expect(writeTurns.owner(target.id)).toBeUndefined();
+
+    const rejected = approveRun('reject-run');
+    expect(manager.rejectArtistMode(rejected.sessionId, rejected.runId)).toMatchObject({
+      ok: true,
+      result: { status: 'rejected' },
+    });
+    expect(writeTurns.owner(target.id)).toBeUndefined();
+  });
+
   it('rejects Artist Mode target and provenance smuggling, stale revisions, duplicates, and failures without budget use', async () => {
     const target = createTarget('artist-safe-project', 'Artist safe project');
     const manager = createManager([target]);
@@ -773,6 +1368,7 @@ describe('AutomationSessionManager', () => {
       sessionId: grant.result.sessionId,
       runId: grant.result.runId,
       blockedAction: 'project.transaction.execute',
+      blockedOperationId: 'paused-operation',
       additionalTransactions: 1,
     });
     expect(deniedEscalation).toMatchObject({ ok: false, error: { details: { reason: 'escalation_not_needed' } } });
@@ -863,6 +1459,7 @@ describe('AutomationSessionManager', () => {
       sessionId: inspectGrant.result.sessionId,
       runId: grant.result.runId,
       blockedAction: 'project.transaction.execute',
+      blockedOperationId: 'budget-operation-2',
       additionalTransactions: 2,
     });
     if (!denied.ok) throw new Error('Expected an escalation request.');
@@ -883,6 +1480,7 @@ describe('AutomationSessionManager', () => {
       sessionId: inspectGrant.result.sessionId,
       runId: grant.result.runId,
       blockedAction: 'project.transaction.execute',
+      blockedOperationId: 'budget-operation-3',
       additionalTransactions: 2,
     });
     if (!approved.ok) throw new Error('Expected a second escalation request.');

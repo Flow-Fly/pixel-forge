@@ -19,7 +19,7 @@ export type ProjectWriteTurnOwner =
 
 export type ProjectWriteTurnResult =
   | { readonly ok: true; readonly owner: ProjectWriteTurnOwner }
-  | { readonly ok: false; readonly reason: 'already-held' | 'owner-mismatch' };
+  | { readonly ok: false; readonly reason: 'already-held' };
 
 /** One in-memory turn owner per exact Project Target identity. */
 export class ProjectWriteTurnStore {
@@ -55,10 +55,6 @@ export class ProjectWriteTurnStore {
   has(targetId: string, owner: ProjectWriteTurnOwner): boolean {
     const current = this.owners.get(targetId);
     return current ? sameOwner(current, owner) : false;
-  }
-
-  clear(): void {
-    this.owners.clear();
   }
 }
 

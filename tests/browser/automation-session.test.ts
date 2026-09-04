@@ -405,6 +405,7 @@ describe('Automation Session approval dialog in Chromium', () => {
       sessionId: inspectGrant.result.sessionId,
       runId: artistGrant.result.runId,
       blockedAction: 'project.transaction.execute',
+      blockedOperationId: 'browser-escalation-operation-2',
       additionalTransactions: 1,
     });
     if (!firstEscalation.ok) throw new Error('Expected an escalation request.');
@@ -414,6 +415,7 @@ describe('Automation Session approval dialog in Chromium', () => {
     await expect.element(page.getByText('Approve budget escalation')).toBeVisible();
     await expect.element(page.getByText('Browser escalation project', { exact: true })).toBeVisible();
     await expect.element(page.getByText('project.transaction.execute', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('Blocked proposal: browser-escalation-operation-2', { exact: true })).toBeVisible();
     await expect.element(page.getByRole('button', { name: 'Approve additional transactions' })).toBeEnabled();
     await expect.element(page.getByRole('button', { name: 'Deny escalation' })).toBeVisible();
 
@@ -425,6 +427,7 @@ describe('Automation Session approval dialog in Chromium', () => {
       sessionId: inspectGrant.result.sessionId,
       runId: artistGrant.result.runId,
       blockedAction: 'project.transaction.execute',
+      blockedOperationId: 'browser-escalation-operation-3',
       additionalTransactions: 1,
     });
     if (!secondEscalation.ok) throw new Error('Expected a second escalation request.');

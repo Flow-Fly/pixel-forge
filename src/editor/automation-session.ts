@@ -241,6 +241,7 @@ export interface AutomationArtistModeEscalationRequest {
   readonly sessionId: string;
   readonly runId: string;
   readonly blockedAction: string;
+  readonly blockedOperationId: string;
   readonly additionalTransactions: number;
 }
 
@@ -250,6 +251,7 @@ export interface AutomationArtistModeEscalationDecision {
     | 'automation.artist-mode.escalation.denied';
   readonly requestId: string;
   readonly runId: string;
+  readonly blockedOperationId: string;
   readonly additionalTransactions: number;
   readonly transactionLimit?: number;
 }
@@ -344,13 +346,19 @@ interface InternalArtistModeRun {
   status: ArtistModeRunStatus;
   inFlight: boolean;
   pendingEscalation: InternalArtistModeEscalation | null;
+  pendingTurnAction: PendingArtistTurnAction | null;
   readonly operationIds: Set<string>;
 }
 
 interface InternalArtistModeEscalation {
   readonly requestId: string;
+  readonly blockedOperationId: string;
   readonly additionalTransactions: number;
 }
+
+type PendingArtistTurnAction =
+  | { readonly kind: 'release'; readonly status: ArtistModeRunStatus }
+  | { readonly kind: 'manual'; readonly ownerId: string };
 
 interface InternalApprovalTarget {
   readonly id: string;
@@ -630,7 +638,10 @@ export class AutomationPolicyGate {
     if (runFailure) return runFailure;
     const context = this.resolveTarget(session);
     const bindingFailure = validateTargetBinding(session, context);
-    if (bindingFailure) return bindingFailure;
+    if (bindingFailure) {
+      this.releaseArtistRun(run, 'expired');
+      return bindingFailure;
+    }
     if (!this.isCategoryAllowed(run, request.profile, request.children)) {
       return failureResult('capability_denied', false, { reason: 'write_category' });
     }
@@ -681,23 +692,27 @@ export class AutomationPolicyGate {
       result = await this.adapter.executeTransaction(adapterInput);
     } catch (error) {
       run.inFlight = false;
+      this.finalizeArtistTurn(run);
       return failureFromUnknown(error);
     }
 
     run.inFlight = false;
-    const postFailure = this.validateArtistRun(run, session);
-    if (postFailure) return postFailure;
-    const currentContext = this.resolveTarget(session);
-    const currentBindingFailure = validateTargetBinding(session, currentContext);
-    if (currentBindingFailure) return currentBindingFailure;
-    if (!result.ok) return sanitizeFailure(result);
+    if (!result.ok) {
+      this.finalizeArtistTurn(run);
+      return sanitizeFailure(result);
+    }
     if (run.context.project.revision.value !== request.expectedRevision + 1) {
+      this.finalizeArtistTurn(run);
       return failureResult('revision_conflict', true, {
         expectedRevision: request.expectedRevision,
       });
     }
 
     this.completeArtistTransaction(run, request.operationId);
+    const currentContext = this.resolveTarget(session);
+    const currentBindingFailure = validateTargetBinding(session, currentContext);
+    if (currentBindingFailure) this.releaseArtistRun(run, 'expired');
+    this.finalizeArtistTurn(run);
     return success(stripTargetIdentity(result.result));
   }
 
@@ -740,6 +755,31 @@ export class AutomationPolicyGate {
 
   private pauseForBudget(run: InternalArtistModeRun): void {
     if (run.status === 'running') this.releaseArtistRun(run, 'budget-exhausted');
+  }
+
+  private artistTurnOwner(run: InternalArtistModeRun): ProjectWriteTurnOwner {
+    return {
+      kind: 'artist-mode',
+      sessionId: run.sessionId,
+      runId: run.runId,
+    };
+  }
+
+  private finalizeArtistTurn(run: InternalArtistModeRun): void {
+    if (!this.writeTurns) return;
+    const pendingAction = run.pendingTurnAction;
+    run.pendingTurnAction = null;
+    const owner = this.artistTurnOwner(run);
+
+    if (pendingAction?.kind === 'manual') {
+      this.writeTurns.release(run.targetId, owner);
+      this.writeTurns.replaceWithManual(run.targetId, pendingAction.ownerId);
+      return;
+    }
+
+    if (pendingAction?.kind === 'release' || run.status !== 'running') {
+      this.writeTurns.release(run.targetId, owner);
+    }
   }
 
   private isCategoryAllowed(
@@ -1033,6 +1073,7 @@ export class AutomationSessionManager {
             sessionId: run.sessionId,
             runId: run.runId,
             blockedAction: EDITOR_TRANSACTION_OPERATION_ID,
+            blockedOperationId: escalation.blockedOperationId,
             additionalTransactions: escalation.additionalTransactions,
           }];
         }),
@@ -1132,6 +1173,7 @@ export class AutomationSessionManager {
       status: 'running',
       inFlight: false,
       pendingEscalation: null,
+      pendingTurnAction: null,
       operationIds: new Set(),
     };
     this.pendingArtistModeRequests.delete(requestId);
@@ -1263,7 +1305,14 @@ export class AutomationSessionManager {
     const previous = this.writeTurns.owner(targetId);
     if (previous?.kind === 'artist-mode') {
       const run = this.artistRuns.get(previous.runId);
+      if (run?.inFlight) {
+        run.status = 'paused';
+        run.pendingEscalation = null;
+        run.pendingTurnAction = { kind: 'manual', ownerId };
+        return true;
+      }
       if (run) this.releaseArtistRun(run, 'paused');
+      else this.writeTurns.release(targetId, previous);
     }
     this.writeTurns.replaceWithManual(targetId, ownerId);
     return previous !== undefined;
@@ -1310,13 +1359,18 @@ export class AutomationSessionManager {
     }
     const requestId = this.createRequestId();
     if (!requestId) return failureResult('internal', true, { reason: 'request_id' });
-    run.pendingEscalation = { requestId, additionalTransactions: request.additionalTransactions };
+    run.pendingEscalation = {
+      requestId,
+      blockedOperationId: request.blockedOperationId,
+      additionalTransactions: request.additionalTransactions,
+    };
     const status = cloneTransport({
       type: 'automation.artist-mode.escalation.requested' as const,
       requestId,
       sessionId: run.sessionId,
       runId: run.runId,
       blockedAction: request.blockedAction,
+      blockedOperationId: request.blockedOperationId,
       additionalTransactions: request.additionalTransactions,
     });
     this.events.dispatchEvent(new CustomEvent('automation-artist-mode-escalation-requested', { detail: status }));
@@ -1333,6 +1387,7 @@ export class AutomationSessionManager {
     if (sessionFailure) return sessionFailure;
     if (!session) return sessionFailureResult('session_missing');
     const additional = run.pendingEscalation.additionalTransactions;
+    const blockedOperationId = run.pendingEscalation.blockedOperationId;
     run.transactionLimit += additional;
     run.pendingEscalation = null;
     run.status = 'paused';
@@ -1341,6 +1396,7 @@ export class AutomationSessionManager {
       type: 'automation.artist-mode.escalation.granted' as const,
       requestId,
       runId: run.runId,
+      blockedOperationId,
       additionalTransactions: additional,
       transactionLimit: run.transactionLimit,
     });
@@ -1355,11 +1411,13 @@ export class AutomationSessionManager {
     const run = [...this.artistRuns.values()].find((candidate) => candidate.pendingEscalation?.requestId === requestId);
     if (!run || !run.pendingEscalation) return failureResult('capability_denied', false, { reason: 'request_missing' });
     const additional = run.pendingEscalation.additionalTransactions;
+    const blockedOperationId = run.pendingEscalation.blockedOperationId;
     run.pendingEscalation = null;
     const decision = cloneTransport({
       type: 'automation.artist-mode.escalation.denied' as const,
       requestId,
       runId: run.runId,
+      blockedOperationId,
       additionalTransactions: additional,
     });
     this.events.dispatchEvent(new CustomEvent('automation-artist-mode-escalation-denied', { detail: decision }));
@@ -1533,7 +1591,6 @@ export class AutomationSessionManager {
     this.pendingArtistModeRequests.clear();
     for (const session of this.sessions.values()) session.status = 'revoked';
     for (const run of this.artistRuns.values()) this.releaseArtistRun(run, 'revoked');
-    this.writeTurns.clear();
     this.sessions.clear();
     if (this.visibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.visibilityListener);
@@ -1590,16 +1647,29 @@ export class AutomationSessionManager {
     }
   }
 
-  private releaseArtistRun(run: InternalArtistModeRun, status?: ArtistModeRunStatus): void {
-    this.writeTurns.release(run.targetId, {
+  private artistTurnOwner(run: InternalArtistModeRun): ProjectWriteTurnOwner {
+    return {
       kind: 'artist-mode',
       sessionId: run.sessionId,
       runId: run.runId,
-    });
+    };
+  }
+
+  private releaseArtistRun(run: InternalArtistModeRun, status?: ArtistModeRunStatus): void {
     if (status) {
       run.status = status;
       if (status !== 'budget-exhausted') run.pendingEscalation = null;
     }
+    if (run.inFlight) {
+      if (run.pendingTurnAction?.kind !== 'manual') {
+        run.pendingTurnAction = {
+          kind: 'release',
+          status: status ?? run.status,
+        };
+      }
+      return;
+    }
+    this.writeTurns.release(run.targetId, this.artistTurnOwner(run));
   }
 
   // fallow-ignore-next-line complexity -- Local lifecycle controls repeat the exact session, target, and expiry guard.
@@ -1630,8 +1700,8 @@ export class AutomationSessionManager {
   private completeArtistTransaction(run: InternalArtistModeRun, operationId: string): void {
     run.operationIds.add(operationId);
     run.transactionsUsed += 1;
-    if (run.transactionsUsed >= run.transactionLimit) {
-      this.releaseArtistRun(run, 'budget-exhausted');
+    if (run.transactionsUsed >= run.transactionLimit && run.status === 'running') {
+      run.status = 'budget-exhausted';
     }
     this.events.dispatchEvent(new CustomEvent('automation-artist-mode-progress', {
       detail: cloneTransport(this.publicArtistModeGrant(run)),
@@ -1814,6 +1884,7 @@ interface NormalizedEscalationRequest {
   readonly sessionId: string;
   readonly runId: string;
   readonly blockedAction: string;
+  readonly blockedOperationId: string;
   readonly additionalTransactions: number;
 }
 
@@ -1878,6 +1949,7 @@ function normalizeEscalationRequest(input: unknown): NormalizedEscalationRequest
     'sessionId',
     'runId',
     'blockedAction',
+    'blockedOperationId',
     'additionalTransactions',
     'catalogVersion',
     'contractVersion',
@@ -1895,11 +1967,17 @@ function normalizeEscalationRequest(input: unknown): NormalizedEscalationRequest
   if (blockedAction !== EDITOR_TRANSACTION_OPERATION_ID) {
     throw sessionError('unsupported', false, { reason: 'blocked_action' });
   }
+  const blockedOperationId = normalizeBoundedIdentity(
+    value.blockedOperationId,
+    'blocked_operation_id',
+    ARTIST_MODE_MAX_OPERATION_ID_LENGTH,
+  );
   const additionalTransactions = normalizeAdditionalTransactions(value.additionalTransactions);
   return {
     sessionId: normalizeBoundedIdentity(value.sessionId, 'session'),
     runId: normalizeBoundedIdentity(value.runId, 'run_id', ARTIST_MODE_MAX_RUN_ID_LENGTH),
     blockedAction,
+    blockedOperationId,
     additionalTransactions,
   };
 }

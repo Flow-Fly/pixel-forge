@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import {
   automationSessionController,
+  ARTIST_MODE_MAX_TRANSACTIONS,
   type AutomationLocalArtistModeRun,
   type AutomationArtistModeEscalationRequest,
   type AutomationLocalTargetOption,
@@ -377,7 +378,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
     if (changedRequest || openIfAvailable) {
       this.artistTarget = this.controller.captureArtistModeTarget(next.requestId);
       this.selectedArtistCategories = [];
-      this.selectedTransactionLimit = Math.min(next.requestedTransactionLimit, 50);
+      this.selectedTransactionLimit = Math.min(next.requestedTransactionLimit, ARTIST_MODE_MAX_TRANSACTIONS);
       this.errorMessage = '';
     }
     this.open = true;
@@ -642,11 +643,14 @@ export class PFAutomationSessionDialog extends BaseComponent {
           id="automation-artist-transaction-limit"
           type="number"
           min="1"
-          max="50"
+          max=${ARTIST_MODE_MAX_TRANSACTIONS}
           .value=${String(this.selectedTransactionLimit)}
           @input=${this.handleTransactionLimitChange}
         />
-        <p class="hint">Maximum Preview ceiling: 50 transactions; maximum 2 child commands per transaction.</p>
+        <p class="hint">
+          Maximum Preview ceiling: ${ARTIST_MODE_MAX_TRANSACTIONS} transactions; maximum 2 child
+          commands per transaction.
+        </p>
       </div>
 
       <div class="section">
@@ -679,9 +683,11 @@ export class PFAutomationSessionDialog extends BaseComponent {
       <div class="section">
         <div class="section-title">Blocked action</div>
         <p class="hint">${pending.blockedAction}</p>
+        <p class="hint">Blocked proposal: ${pending.blockedOperationId}</p>
         <p class="hint">
           Add ${pending.additionalTransactions} transaction
-          ${pending.additionalTransactions === 1 ? 'unit' : 'units'}; the Preview ceiling remains 50.
+          ${pending.additionalTransactions === 1 ? 'unit' : 'units'}; the Preview ceiling remains
+          ${ARTIST_MODE_MAX_TRANSACTIONS}.
         </p>
       </div>
     `;
@@ -774,7 +780,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
       const canApprove = Boolean(this.artistTarget && this.selectedArtistCategories.length > 0
         && this.selectedTransactionLimit >= 1
         && this.selectedTransactionLimit <= this.pendingArtistMode.requestedTransactionLimit
-        && this.selectedTransactionLimit <= 50);
+        && this.selectedTransactionLimit <= ARTIST_MODE_MAX_TRANSACTIONS);
       return html`
         <button class="secondary" type="button" @click=${this.handleClose}>Deny Artist Mode</button>
         <button class="primary" type="button" ?disabled=${!canApprove} @click=${this.approveArtistMode}>
