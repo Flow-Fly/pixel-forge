@@ -61,6 +61,22 @@ export const RASTER_GRID_MAX_STRING_LENGTH = 256;
 export const RASTER_GRID_MAX_PREPARATION_BYTES = 32 * 1024 * 1024;
 export const RASTER_GRID_MAX_COMPOSITE_BYTES = 32 * 1024 * 1024;
 export const RASTER_GRID_REPRESENTATION_VERSION = '1.0';
+export const ASSET_PACKAGE_OPERATION_ID = 'project.asset-package.prepare';
+export const ASSET_PACKAGE_CONTRACT_VERSION = '1.0';
+export const ASSET_PACKAGE_MAX_CANVAS_DIMENSION = 64;
+export const ASSET_PACKAGE_MAX_FRAMES = 16;
+export const ASSET_PACKAGE_MAX_LAYERS = 16;
+export const ASSET_PACKAGE_MAX_CELS = 256;
+export const ASSET_PACKAGE_MAX_PALETTE_ENTRIES = 32;
+export const ASSET_PACKAGE_MAX_NAME_LENGTH = 256;
+export const ASSET_PACKAGE_MAX_ARTIFACTS = 4;
+export const ASSET_PACKAGE_MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
+export const ASSET_PACKAGE_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+export const ASSET_PACKAGE_MAX_SOURCE_BYTES = 16 * 1024 * 1024;
+export const ASSET_PACKAGE_MAX_REFERENCE_BYTES = 4 * 1024 * 1024;
+export const ASSET_PACKAGE_MAX_SPRITE_ROWS = 4;
+export const ASSET_PACKAGE_MAX_SPRITE_COLUMNS = 4;
+export const ASSET_PACKAGE_MAX_BUDGET_NODES = 250_000;
 
 export const canvasSizeCatalog = Object.freeze({
   version: '1.0',
@@ -1231,6 +1247,74 @@ export const animationObservationCatalog = Object.freeze({
   ] as const,
 });
 
+// fallow-ignore-next-line unused-export -- Public package catalog is negotiated by adapters.
+export const assetPackageCatalog = Object.freeze({
+  id: ASSET_PACKAGE_OPERATION_ID,
+  kind: 'preparation-command',
+  target: 'project',
+  requiresRevision: true,
+  request: {
+    target: { projectId: 'bounded non-empty string (1..256)' },
+    expectedRevision: 'integer >= 0',
+    expectedSaveSafety: {
+      type: 'project.save-safety',
+      status: 'saved',
+      currentRevision: 'same expectedRevision',
+      persistedRevision: 'same expectedRevision',
+    },
+    expectedPackageDigest: 'null or 64-character lowercase SHA-256 digest',
+  },
+  result: {
+    type: 'project.asset-package',
+    contractVersion: ASSET_PACKAGE_CONTRACT_VERSION,
+    artifacts: 'ordered detached source, preview, optional sprite-sheet, and manifest bytes',
+    manifest: 'canonical JSON Asset Manifest without its own digest',
+    manifestDigest: '64-character lowercase SHA-256 digest',
+    packageDigest: '64-character lowercase SHA-256 digest binding ordered artifacts',
+  },
+  limits: {
+    canvas: {
+      maxWidth: ASSET_PACKAGE_MAX_CANVAS_DIMENSION,
+      maxHeight: ASSET_PACKAGE_MAX_CANVAS_DIMENSION,
+      maxPixels: ASSET_PACKAGE_MAX_CANVAS_DIMENSION * ASSET_PACKAGE_MAX_CANVAS_DIMENSION,
+    },
+    frames: { max: ASSET_PACKAGE_MAX_FRAMES },
+    layers: { max: ASSET_PACKAGE_MAX_LAYERS },
+    cels: { max: ASSET_PACKAGE_MAX_CELS },
+    paletteEntries: { max: ASSET_PACKAGE_MAX_PALETTE_ENTRIES },
+    identityLength: { max: ASSET_PACKAGE_MAX_NAME_LENGTH },
+    references: { maxBytes: ASSET_PACKAGE_MAX_REFERENCE_BYTES },
+    serialization: {
+      maxBytes: ASSET_PACKAGE_MAX_SOURCE_BYTES,
+      maxNodes: ASSET_PACKAGE_MAX_BUDGET_NODES,
+    },
+    sprite: {
+      maxRows: ASSET_PACKAGE_MAX_SPRITE_ROWS,
+      maxColumns: ASSET_PACKAGE_MAX_SPRITE_COLUMNS,
+    },
+    artifacts: { max: ASSET_PACKAGE_MAX_ARTIFACTS, maxBytes: ASSET_PACKAGE_MAX_ARTIFACT_BYTES },
+    totalBytes: { max: ASSET_PACKAGE_MAX_TOTAL_BYTES },
+  },
+  availability: {
+    browser: 'Canvas 2D, TextEncoder, Web Crypto SHA-256, and pako are required',
+    selection: 'none | selected; floating and transforming are rejected',
+    referenceLayers: 'metadata is preserved; reference pixels are excluded from canonical renders',
+    provenance: 'absent; caller-authored provenance is unsupported',
+  },
+  revision: 'expectedRevision and exact saved-state proof must remain unchanged through every boundary',
+  sideEffects: 'detached bytes only; no URL, download, clipboard, share, upload, or external persistence',
+  errors: [
+    'invalid_request',
+    'target_not_found',
+    'revision_conflict',
+    'invalid_state',
+    'bounds_exceeded',
+    'limit_exceeded',
+    'unsupported',
+    'internal',
+  ] as const,
+});
+
 const automationOperationCatalog = Object.freeze([
   {
     id: 'catalog.negotiate',
@@ -1343,6 +1427,19 @@ const automationOperationCatalog = Object.freeze([
     digest: animationObservationCatalog.digest,
     revision: animationObservationCatalog.revision,
     errors: animationObservationCatalog.errors,
+  },
+  {
+    id: assetPackageCatalog.id,
+    kind: assetPackageCatalog.kind,
+    target: assetPackageCatalog.target,
+    requiresRevision: assetPackageCatalog.requiresRevision,
+    request: assetPackageCatalog.request,
+    result: assetPackageCatalog.result,
+    limits: assetPackageCatalog.limits,
+    availability: assetPackageCatalog.availability,
+    sideEffects: assetPackageCatalog.sideEffects,
+    revision: assetPackageCatalog.revision,
+    errors: assetPackageCatalog.errors,
   },
   {
     id: CANVAS_SIZE_COMMAND_ID,

@@ -5,8 +5,15 @@ import {
   type WorkspaceState,
 } from '../services/persistence/project-repository';
 import { AutoSaveService, createAutoSaveService } from '../services/auto-save';
-import { createProjectContext, type ProjectContext } from '../stores/project-context';
-import { PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../types/project';
+import {
+  createProjectContext,
+  defaultProjectContext,
+  getActiveProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../stores/project-context';
+import { decodeProjectFile, PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../types/project';
+import pako from 'pako';
 import {
   AutomationAdapter,
   createAutomationAdapter,
@@ -19,6 +26,7 @@ import {
   type ReloadResult,
   type SaveResult,
 } from './automation-adapter';
+import type { AssetPackageArtifact, AssetPackageResult } from './asset-package';
 import { renderProject } from './observations';
 import type { ProjectObservation, RenderObservation } from './observations';
 import type { EditorTransactionResult } from './transaction';
@@ -29,6 +37,7 @@ import {
   reconstructAnimationGrids,
   type AnimationEvaluationBundle,
 } from './animation-observation';
+import { sameBytes } from './structure-support';
 
 // fallow-ignore-next-line unused-export -- Stable fixture identity is part of conformance setup.
 export const FIXTURE_PROJECT_ID = 'fixture-project';
@@ -96,6 +105,102 @@ export interface FixtureSessionOptions {
 export interface FixtureBlankProjectResult {
   readonly creation: ProjectCreateResult;
   readonly observation: ProjectObservation;
+}
+
+export interface FixtureAssetPackageJourneyResult {
+  readonly negotiation: CatalogNegotiation;
+  readonly save: SaveResult;
+  readonly assetPackage: AssetPackageResult;
+  readonly replay: AssetPackageResult;
+  readonly persistedDocument: ProjectFile;
+  readonly roundTrip: {
+    readonly document: ProjectFile;
+    readonly renderPixels: Uint8Array;
+  };
+  readonly reloaded: {
+    readonly document: ProjectFile;
+    readonly renderPixels: Uint8Array;
+  };
+  readonly exact: {
+    readonly staticArtifacts: boolean;
+    readonly manifest: boolean;
+    readonly deterministic: boolean;
+    readonly digests: boolean;
+    readonly source: boolean;
+    readonly render: boolean;
+    readonly persistedSource: boolean;
+    readonly reload: boolean;
+    readonly reloadedRender: boolean;
+    readonly isolation: boolean;
+    readonly targetRebound: boolean;
+    readonly activeTab: boolean;
+    readonly target: boolean;
+    readonly bytes: boolean;
+  };
+}
+
+export interface FixtureAssetPackageJourneyOptions {
+  readonly afterPackagePreparation?: (
+    assetPackage: AssetPackageResult,
+    request: Record<string, unknown>,
+  ) => void | Promise<void>;
+  readonly switchActiveTabDuringPreparation?: boolean;
+}
+
+interface PreparedAssetPackageJourney {
+  readonly negotiation: CatalogNegotiation;
+  readonly save: SaveResult;
+  readonly packageRequest: Record<string, unknown>;
+  readonly persistedDocument: ProjectFile;
+  readonly inactiveContext: ProjectContext;
+  readonly inactiveBefore: ProjectFile;
+  readonly assetPackage: AssetPackageResult;
+  readonly replay: AssetPackageResult;
+  readonly activeTabSwitched: boolean;
+}
+
+interface AssetPackageSourceRoundTrip {
+  readonly project: ProjectFile;
+  readonly document: ProjectFile;
+  readonly renders: readonly Uint8Array[];
+}
+
+interface AssetPackagePreparationCheckpoint {
+  readonly assetPackage: AssetPackageResult;
+  readonly activeTabSwitched: boolean;
+}
+
+export interface FixtureAnimatedAssetPackageJourneyResult {
+  readonly negotiation: CatalogNegotiation;
+  readonly save: SaveResult;
+  readonly assetPackage: AssetPackageResult;
+  readonly replay: AssetPackageResult;
+  readonly persistedDocument: ProjectFile;
+  readonly sourceRoundTrip: {
+    readonly document: ProjectFile;
+    readonly renders: readonly Uint8Array[];
+  };
+  readonly reloaded: {
+    readonly document: ProjectFile;
+    readonly renders: readonly Uint8Array[];
+  };
+  readonly canonicalRenders: readonly Uint8Array[];
+  readonly exact: {
+    readonly sprite: boolean;
+    readonly cells: boolean;
+    readonly timing: boolean;
+    readonly deterministic: boolean;
+    readonly digests: boolean;
+    readonly referenceExcluded: boolean;
+    readonly persistedSource: boolean;
+    readonly reload: boolean;
+    readonly reloadedRender: boolean;
+    readonly isolation: boolean;
+    readonly targetRebound: boolean;
+    readonly activeTab: boolean;
+    readonly target: boolean;
+    readonly bytes: boolean;
+  };
 }
 
 interface FixtureDocumentState {
@@ -367,6 +472,11 @@ export class FixtureSession {
     });
   }
 
+  /** Exposes the fixture's isolated context to conformance tests only. */
+  get projectContext(): ProjectContext {
+    return this.context;
+  }
+
   /** Create one isolated Preview-sized target without changing the fixture tab. */
   async createBlankProject(
     name: string,
@@ -389,6 +499,158 @@ export class FixtureSession {
       expectedRevision: creation.revision,
     });
     return { creation, observation };
+  }
+
+  /** Exercise static package preparation, replay, and editable source round-trip. */
+  // fallow-ignore-next-line complexity -- The fixture keeps source round-trip, replay, and digest evidence in one public journey.
+  async runAssetPackage(
+    options: FixtureAssetPackageJourneyOptions = {},
+  ): Promise<FixtureAssetPackageJourneyResult> {
+    const {
+      negotiation,
+      save,
+      packageRequest,
+      persistedDocument,
+      inactiveContext,
+      inactiveBefore,
+      assetPackage,
+      replay,
+      activeTabSwitched,
+    } = await this.prepareAssetPackageJourney(undefined, options);
+    const source = assetPackage.artifacts.find((artifact) => artifact.role === 'source');
+    const manifest = assetPackage.artifacts.find((artifact) => artifact.role === 'manifest');
+    const initialFrame = this.context.animation.frames.value[0];
+    if (!source || !manifest || !initialFrame) throw new Error('Static package fixture is incomplete.');
+
+    const completed = await this.completeAssetPackageJourney(
+      packageRequest,
+      source,
+      inactiveContext,
+      'fixture-round-trip',
+      save.revision,
+    );
+    const { inactiveAfter, sourceRoundTrip, rebound, reload, reloadedDocument } = completed;
+    const reloadedPixels = renderProjectPixels(this.context, initialFrame.id);
+
+    const sourceArtifact = assetPackage.artifacts.find((artifact) => artifact.role === 'source');
+    const previewArtifact = assetPackage.artifacts.find((artifact) => artifact.role === 'preview');
+    const manifestArtifact = assetPackage.artifacts.find((artifact) => artifact.role === 'manifest');
+    const replayBytes = new Map(replay.artifacts.map((artifact) => [artifact.role, artifact.bytes]));
+    const deterministic = assetPackage.artifacts.every((artifact) => (
+      sameBytes(artifact.bytes, replayBytes.get(artifact.role) ?? new Uint8Array(0))
+      && artifact.digest === replay.artifacts.find((candidate) => candidate.role === artifact.role)?.digest
+    ));
+    const digests = await independentlyVerifyAssetPackage(assetPackage);
+    return {
+      negotiation,
+      save,
+      assetPackage,
+      replay,
+      persistedDocument,
+      roundTrip: {
+        document: sourceRoundTrip.document,
+        renderPixels: sourceRoundTrip.renders[0] ?? new Uint8Array(0),
+      },
+      reloaded: { document: reloadedDocument, renderPixels: reloadedPixels },
+      exact: {
+        staticArtifacts: assetPackage.artifacts.map((artifact) => artifact.role).join(',') === 'source,preview,manifest'
+          && !assetPackage.manifest.spriteSheet,
+        manifest: manifestArtifact?.byteLength === new TextEncoder().encode(JSON.stringify(assetPackage.manifest)).byteLength
+          && assetPackage.manifest.artifacts.length === 2
+          && !JSON.stringify(assetPackage.manifest).includes('manifestDigest'),
+        deterministic,
+        digests,
+        source: !!sourceArtifact && sourceArtifact.byteLength === sourceArtifact.bytes.byteLength
+          && sameProjectFile(sourceRoundTrip.document, sourceRoundTrip.project),
+        render: !!previewArtifact && sameBytes(
+          sourceRoundTrip.renders[0] ?? new Uint8Array(0),
+          reloadedPixels,
+        ),
+        ...exactAssetPackageReload(save, reload, persistedDocument, sourceRoundTrip, reloadedDocument),
+        reloadedRender: !!previewArtifact
+          && sameBytes(reloadedPixels, sourceRoundTrip.renders[0] ?? new Uint8Array(0)),
+        isolation: sameProjectFile(inactiveBefore, inactiveAfter),
+        targetRebound: rebound,
+        ...assetPackageIdentityEvidence(assetPackage, this.target, activeTabSwitched),
+      },
+    };
+  }
+
+  /** Exercise animated package preparation and row-major sprite evidence. */
+  // fallow-ignore-next-line complexity -- The fixture keeps animated source, sprite, reload, and isolation evidence together.
+  async runAnimatedAssetPackage(
+    options: FixtureAssetPackageJourneyOptions = {},
+  ): Promise<FixtureAnimatedAssetPackageJourneyResult> {
+    const {
+      negotiation,
+      save,
+      packageRequest,
+      persistedDocument,
+      inactiveContext,
+      inactiveBefore,
+      assetPackage,
+      replay,
+      activeTabSwitched,
+    } = await this.prepareAssetPackageJourney(
+      () => prepareAnimationObservationFixture(this.context),
+      options,
+    );
+    const sprite = assetPackage.artifacts.find((artifact) => artifact.role === 'sprite-sheet');
+    const replayBytes = new Map(replay.artifacts.map((artifact) => [artifact.role, artifact.bytes]));
+    const deterministic = assetPackage.artifacts.every((artifact) => (
+      sameBytes(artifact.bytes, replayBytes.get(artifact.role) ?? new Uint8Array(0))
+    ));
+    const digests = await independentlyVerifyAssetPackage(assetPackage);
+    const frames = this.context.animation.frames.value;
+    const cells = assetPackage.manifest.spriteSheet?.cells ?? [];
+    const canonicalRenders = frames.map((frame) => renderProjectPixels(this.context, frame.id));
+    const source = assetPackage.artifacts.find((artifact) => artifact.role === 'source');
+    if (!source) throw new Error('Animated package fixture has no source artifact.');
+    const completed = await this.completeAssetPackageJourney(
+      packageRequest,
+      source,
+      inactiveContext,
+      'animated-package-round-trip',
+      save.revision,
+    );
+    const { inactiveAfter, sourceRoundTrip, rebound, reload, reloadedDocument } = completed;
+    const reloadedFrames = this.context.animation.frames.value;
+    const reloadedRenders = reloadedFrames.map((frame) => renderProjectPixels(this.context, frame.id));
+    return {
+      negotiation,
+      save,
+      assetPackage,
+      replay,
+      persistedDocument,
+      sourceRoundTrip: {
+        document: sourceRoundTrip.document,
+        renders: sourceRoundTrip.renders,
+      },
+      reloaded: { document: reloadedDocument, renders: reloadedRenders },
+      canonicalRenders,
+      exact: {
+        sprite: !!sprite
+          && !!assetPackage.manifest.spriteSheet
+          && assetPackage.manifest.spriteSheet.cells.length === frames.length
+          && assetPackage.manifest.spriteSheet.columns === 3
+          && assetPackage.manifest.spriteSheet.rows === 1,
+        cells: cells.every((cell, index) => cell.index === index && cell.frameId === frames[index]?.id
+          && cell.frameNumber === index + 1 && cell.x === index * this.context.project.width.value
+          && cell.y === 0),
+        timing: assetPackage.manifest.frames.every((frame, index) => frame.id === frames[index]?.id
+          && frame.duration === frames[index]?.duration && frame.number === index + 1),
+        deterministic,
+        digests,
+        referenceExcluded: assetPackage.manifest.frames.every((frame) => frame.renderDigest.length === 64),
+        ...exactAssetPackageReload(save, reload, persistedDocument, sourceRoundTrip, reloadedDocument),
+        reloadedRender: reloadedRenders.length === sourceRoundTrip.renders.length
+          && reloadedRenders.every((render, index) => sameBytes(render, sourceRoundTrip.renders[index] ?? new Uint8Array(0))
+            && sameBytes(render, canonicalRenders[index] ?? new Uint8Array(0))),
+        isolation: sameProjectFile(inactiveBefore, inactiveAfter),
+        targetRebound: rebound,
+        ...assetPackageIdentityEvidence(assetPackage, this.target, activeTabSwitched),
+      },
+    };
   }
 
   /**
@@ -1518,6 +1780,181 @@ export class FixtureSession {
     this.initialized = true;
   }
 
+  private async saveAssetPackageRevision(
+    prepare?: () => void,
+  ): Promise<{
+    readonly negotiation: CatalogNegotiation;
+    readonly save: SaveResult;
+    readonly packageRequest: Record<string, unknown>;
+    readonly persistedDocument: ProjectFile;
+  }> {
+    await this.initialize();
+    prepare?.();
+    const negotiation = this.adapter.negotiateCatalog({ version: '1.0' });
+    if (!negotiation.ok) throw new Error(`Fixture catalog negotiation failed: ${negotiation.error.code}`);
+    const initial = await this.observeTarget(this.adapter, this.context.project.revision.value);
+    const save = await requestSuccess<SaveResult>(this.adapter, {
+      operation: 'project.save',
+      target: this.target,
+      expectedRevision: initial.revision,
+    });
+    const persistedInput = await this.repository.load(this.target.projectId);
+    if (!persistedInput) throw new Error('Asset package fixture did not persist its project.');
+    const persistedDocument = decodeProjectFile(persistedInput);
+    return {
+      negotiation: negotiation.result,
+      save,
+      persistedDocument,
+      packageRequest: {
+        operation: 'project.asset-package.prepare',
+        target: this.target,
+        expectedRevision: save.revision,
+        expectedSaveSafety: save.saveSafety,
+        expectedPackageDigest: null,
+      },
+    };
+  }
+
+  private async prepareAssetPackageJourney(
+    prepare: (() => void) | undefined,
+    options: FixtureAssetPackageJourneyOptions,
+  ): Promise<PreparedAssetPackageJourney> {
+    const { negotiation, save, packageRequest, persistedDocument } = await this.saveAssetPackageRevision(prepare);
+    const inactiveContext = await this.createInactiveFixtureContext(`${this.target.projectId}-inactive`);
+    seedInactiveFixturePixel(inactiveContext);
+    this.targetContexts.set(`${this.target.projectId}-inactive`, inactiveContext);
+    const inactiveBefore = await snapshotProject(inactiveContext);
+    const packagePreparation = options.switchActiveTabDuringPreparation
+      ? await this.prepareAssetPackageDuringActiveTabSwitch(
+        packageRequest,
+        inactiveContext,
+        options.afterPackagePreparation,
+      )
+      : {
+        assetPackage: await requestSuccess<AssetPackageResult>(this.adapter, packageRequest),
+        activeTabSwitched: false,
+      };
+    const { assetPackage, activeTabSwitched } = packagePreparation;
+    if (!options.switchActiveTabDuringPreparation) {
+      await options.afterPackagePreparation?.(assetPackage, packageRequest);
+    }
+    const replay = await requestSuccess<AssetPackageResult>(this.adapter, {
+      ...packageRequest,
+      expectedPackageDigest: assetPackage.packageDigest,
+    });
+    return {
+      negotiation,
+      save,
+      packageRequest,
+      persistedDocument,
+      inactiveContext,
+      inactiveBefore,
+      assetPackage,
+      replay,
+      activeTabSwitched,
+    };
+  }
+
+  private async prepareAssetPackageDuringActiveTabSwitch(
+    packageRequest: Record<string, unknown>,
+    inactiveContext: ProjectContext,
+    afterPackagePreparation: FixtureAssetPackageJourneyOptions['afterPackagePreparation'],
+  ): Promise<AssetPackagePreparationCheckpoint> {
+    const previousActiveContext = getActiveProjectContext();
+    const originalSaveProject = this.context.project.saveProject.bind(this.context.project);
+    let activeTabSwitched = false;
+    this.context.project.saveProject = async (...args: Parameters<typeof originalSaveProject>) => {
+      const saved = await originalSaveProject(...args);
+      setActiveProjectContext(inactiveContext);
+      activeTabSwitched = getActiveProjectContext() === inactiveContext;
+      return saved;
+    };
+    setActiveProjectContext(this.context);
+    try {
+      const assetPackage = await requestSuccess<AssetPackageResult>(this.adapter, packageRequest);
+      await afterPackagePreparation?.(assetPackage, packageRequest);
+      return { assetPackage, activeTabSwitched };
+    } finally {
+      this.context.project.saveProject = originalSaveProject;
+      setActiveProjectContext(previousActiveContext.isDisposed ? defaultProjectContext : previousActiveContext);
+    }
+  }
+
+  private async completeAssetPackageJourney(
+    packageRequest: Record<string, unknown>,
+    source: AssetPackageArtifact,
+    inactiveContext: ProjectContext,
+    roundTripProjectId = 'fixture-round-trip',
+    expectedRevision: number,
+  ): Promise<{
+    readonly sourceRoundTrip: AssetPackageSourceRoundTrip;
+    readonly inactiveAfter: ProjectFile;
+    readonly rebound: boolean;
+    readonly reload: ReloadResult;
+    readonly reloadedDocument: ProjectFile;
+  }> {
+    const sourceRoundTrip = await this.reopenAssetPackageSource(source, roundTripProjectId);
+    const inactiveAfter = await snapshotProject(inactiveContext);
+    const rebound = await this.reboundAssetPackage(packageRequest);
+    const reload = await requestSuccess<ReloadResult>(this.adapter, {
+      operation: 'project.reload',
+      target: this.target,
+      expectedRevision,
+    });
+    const reloadedDocument = await this.serializeDocument();
+    return { sourceRoundTrip, inactiveAfter, rebound, reload, reloadedDocument };
+  }
+
+  private async reopenAssetPackageSource(
+    source: AssetPackageArtifact,
+    projectId: string,
+  ): Promise<AssetPackageSourceRoundTrip> {
+    const sourceInput = JSON.parse(pako.inflate(source.bytes, { to: 'string' })) as ProjectFileInput;
+    const project = decodeProjectFile(sourceInput);
+    const context = createProjectContext();
+    try {
+      await this.saveService.runWithoutSaving(async () => {
+        await context.project.loadProject(project);
+        context.project.id.value = projectId;
+      }, context);
+      const document = await snapshotProject(context);
+      const renders = context.animation.frames.value.map((frame) => renderProjectPixels(context, frame.id));
+      return { project, document, renders };
+    } finally {
+      this.saveService.stop(context);
+      context.dispose();
+    }
+  }
+
+  private async reboundAssetPackage(request: Record<string, unknown>): Promise<boolean> {
+    const reboundContext = await this.createInactiveFixtureContext(`${this.target.projectId}-rebound`);
+    reboundContext.project.id.value = this.target.projectId;
+    reboundContext.project.name.value = 'Rebound Package Project';
+    seedInactiveFixturePixel(reboundContext);
+    const originalBefore = await snapshotProject(this.context);
+    const reboundBefore = await snapshotProject(reboundContext);
+    const originalSaveProject = this.context.project.saveProject.bind(this.context.project);
+    this.context.project.saveProject = async (...args: Parameters<typeof originalSaveProject>) => {
+      const saved = await originalSaveProject(...args);
+      this.targetContexts.set(this.target.projectId, reboundContext);
+      return saved;
+    };
+    let failure: AutomationFailure;
+    try {
+      failure = await requestFailure(this.adapter, request);
+    } finally {
+      this.context.project.saveProject = originalSaveProject;
+      this.targetContexts.set(this.target.projectId, this.context);
+    }
+    const originalAfter = await snapshotProject(this.context);
+    const reboundAfter = await snapshotProject(reboundContext);
+    this.saveService.stop(reboundContext);
+    reboundContext.dispose();
+    return failure.error.code === 'target_not_found'
+      && sameProjectFile(originalBefore, originalAfter)
+      && sameProjectFile(reboundBefore, reboundAfter);
+  }
+
   private async serializeDocument(): Promise<ProjectFile> {
     return structuredClone(await this.context.project.saveProject());
   }
@@ -1876,6 +2313,10 @@ async function requestFailure(
   return result;
 }
 
+async function snapshotProject(context: ProjectContext): Promise<ProjectFile> {
+  return structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
+}
+
 async function requestAnimationTransaction(
   adapter: AutomationAdapter,
   target: { readonly projectId: string },
@@ -1902,11 +2343,85 @@ async function requestAnimationTransaction(
 }
 
 function sameProjectFile(first: ProjectFile, second: ProjectFile): boolean {
-  return JSON.stringify(first, (_, value: unknown) =>
-    value instanceof Uint8Array ? Array.from(value) : value
-  ) === JSON.stringify(second, (_, value: unknown) =>
-    value instanceof Uint8Array ? Array.from(value) : value
+  return JSON.stringify(first, projectJsonReplacer) === JSON.stringify(second, projectJsonReplacer);
+}
+
+function projectJsonReplacer(_key: string, value: unknown): unknown {
+  return value instanceof Uint8Array ? Array.from(value) : value;
+}
+
+function exactAssetPackageReload(
+  save: SaveResult,
+  reload: ReloadResult,
+  persistedDocument: ProjectFile,
+  sourceRoundTrip: AssetPackageSourceRoundTrip,
+  reloadedDocument: ProjectFile,
+): { readonly persistedSource: boolean; readonly reload: boolean } {
+  return {
+    persistedSource: sameProjectFile(sourceRoundTrip.project, persistedDocument)
+      && sameProjectFile(sourceRoundTrip.document, reloadedDocument),
+    reload: reload.revision === save.revision
+      && reload.observation.revision === save.revision
+      && sameProjectFile(reloadedDocument, sourceRoundTrip.document),
+  };
+}
+
+function assetPackageIdentityEvidence(
+  assetPackage: AssetPackageResult,
+  target: { readonly projectId: string },
+  activeTabSwitched: boolean,
+): { readonly activeTab: boolean; readonly target: boolean; readonly bytes: boolean } {
+  return {
+    activeTab: activeTabSwitched,
+    target: assetPackage.target.projectId === target.projectId,
+    bytes: assetPackage.artifacts.length > 0 && assetPackage.artifacts.every((artifact) => (
+      artifact.bytes instanceof Uint8Array && artifact.byteLength === artifact.bytes.byteLength
+    )),
+  };
+}
+
+async function independentlyVerifyAssetPackage(assetPackage: AssetPackageResult): Promise<boolean> {
+  for (const artifact of assetPackage.artifacts) {
+    const digest = await digestBytesForFixture(artifact.bytes);
+    if (digest !== artifact.digest || artifact.byteLength !== artifact.bytes.byteLength) return false;
+  }
+  const manifestArtifact = assetPackage.artifacts.find((artifact) => artifact.role === 'manifest');
+  if (!manifestArtifact) return false;
+  const manifestBytes = new TextEncoder().encode(JSON.stringify(assetPackage.manifest));
+  if (!sameBytes(manifestBytes, manifestArtifact.bytes)) return false;
+  if (await digestBytesForFixture(manifestArtifact.bytes) !== assetPackage.manifestDigest) return false;
+
+  const descriptor = new TextEncoder().encode(JSON.stringify({
+    type: assetPackage.type,
+    contractVersion: assetPackage.contractVersion,
+    target: assetPackage.target,
+    revision: assetPackage.revision,
+    artifacts: assetPackage.artifacts.map((artifact) => ({
+      role: artifact.role,
+      filename: artifact.filename,
+      mediaType: artifact.mediaType,
+      byteLength: artifact.byteLength,
+      digest: artifact.digest,
+    })),
+  }));
+  const total = descriptor.byteLength + 1 + assetPackage.artifacts.reduce(
+    (sum, artifact) => sum + artifact.bytes.byteLength,
+    0,
   );
+  const binding = new Uint8Array(total);
+  binding.set(descriptor);
+  let offset = descriptor.byteLength;
+  binding[offset++] = 0;
+  for (const artifact of assetPackage.artifacts) {
+    binding.set(artifact.bytes, offset);
+    offset += artifact.bytes.byteLength;
+  }
+  return await digestBytesForFixture(binding) === assetPackage.packageDigest;
+}
+
+async function digestBytesForFixture(bytes: Uint8Array): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes as unknown as BufferSource);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
 }
 
 function sameProjectFileIgnoringEmptyIndices(first: ProjectFile, second: ProjectFile): boolean {
@@ -1925,8 +2440,10 @@ function removeEmptyIndexData(project: ProjectFile): ProjectFile {
   return copy;
 }
 
-function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
-  return first.length === second.length && first.every((value, index) => value === second[index]);
+function renderProjectPixels(context: ProjectContext, frameId: string): Uint8Array {
+  const render = renderProject(context, { projectId: context.project.id.value }, frameId);
+  if ('ok' in render) throw new Error(`Fixture render failed: ${render.error.code}`);
+  return new Uint8Array(render.pixels);
 }
 
 function cropRenderPixels(

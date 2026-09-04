@@ -125,6 +125,10 @@ export async function hydrateProjectFrames(
   restoreLinkedCelGroups(stores, linkedCelGroups);
   stores.animation.rebuildAllCelCanvases();
   deletePlaceholderFrame(stores, placeholderFrameId);
+  stores.animation.frames.value = stores.animation.frames.value.map((frame, index) => ({
+    ...frame,
+    order: index,
+  }));
 }
 
 export function restoreProjectAnimationState(stores: ProjectLoadStores, file: ProjectFile): void {

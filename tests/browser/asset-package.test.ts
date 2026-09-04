@@ -1,0 +1,275 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  createFixtureSession,
+  type FixtureSession,
+} from '../../src/editor/fixture-session';
+import type { AssetPackageArtifact } from '../../src/editor/asset-package';
+import { FileService } from '../../src/services/file-service';
+import { getActiveProjectContext } from '../../src/stores/project-context';
+
+const sessions: FixtureSession[] = [];
+
+afterEach(() => {
+  for (const session of sessions.splice(0)) session.dispose();
+  vi.restoreAllMocks();
+});
+
+describe('Creative Asset Package Chromium evidence', () => {
+  it('prepares static source, preview, and manifest without browser side effects', async () => {
+    const objectUrl = vi.spyOn(URL, 'createObjectURL');
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+    const downloadBlob = vi.spyOn(FileService, 'downloadBlob');
+    const clipboardWrite = typeof navigator.clipboard?.write === 'function'
+      ? vi.spyOn(navigator.clipboard, 'write')
+      : undefined;
+    const clipboardWriteText = typeof navigator.clipboard?.writeText === 'function'
+      ? vi.spyOn(navigator.clipboard, 'writeText')
+      : undefined;
+    const share = typeof navigator.share === 'function'
+      ? vi.spyOn(navigator, 'share')
+      : undefined;
+    const execCommand = typeof document.execCommand === 'function'
+      ? vi.spyOn(document, 'execCommand')
+      : undefined;
+    const session = createFixtureSession();
+    sessions.push(session);
+    const previousActiveContext = getActiveProjectContext();
+    const journey = await session.runAssetPackage({
+      switchActiveTabDuringPreparation: true,
+      afterPackagePreparation: async (assetPackage, request) => {
+        expect(assetPackage.packageDigest).toHaveLength(64);
+        expect(objectUrl).not.toHaveBeenCalled();
+        expect(anchorClick).not.toHaveBeenCalled();
+        expect(downloadBlob).not.toHaveBeenCalled();
+        if (clipboardWrite) expect(clipboardWrite).not.toHaveBeenCalled();
+        if (clipboardWriteText) expect(clipboardWriteText).not.toHaveBeenCalled();
+        if (share) expect(share).not.toHaveBeenCalled();
+        if (execCommand) expect(execCommand).not.toHaveBeenCalled();
+        const frame = session.projectContext.animation.frames.value[0];
+        if (!frame) throw new Error('Static package fixture has no frame.');
+        frame.order = 1;
+        const badOrder = await session.adapter.request(request);
+        expect(badOrder).toMatchObject({
+          ok: false,
+          error: { code: 'invalid_state', details: { reason: 'frame_order' } },
+        });
+        frame.order = 0;
+        const invalidNames = ['bad<name', 'bad>name', 'bad"name', 'bad|name', 'bad?name', 'bad*name', 'CON', 'name.'];
+        for (const name of invalidNames) {
+          session.projectContext.project.name.value = name;
+          const badName = await session.adapter.request(request);
+          expect(badName).toMatchObject({
+            ok: false,
+            error: { code: 'invalid_request' },
+          });
+        }
+        session.projectContext.project.name.value = 'Fixture Project';
+        session.projectContext.project.name.value = '😀'.repeat(100);
+        const longFilename = await session.adapter.request(request);
+        expect(longFilename).toMatchObject({
+          ok: false,
+          error: { code: 'invalid_request', details: { reason: 'artifact_filename' } },
+        });
+        session.projectContext.project.name.value = 'Fixture Project';
+        const selectedCelKeys = session.projectContext.animation.selectedCelKeys.value;
+        session.projectContext.animation.selectedCelKeys.value = new Set(
+          Array.from({ length: 250_001 }, (_, index) => `selected-${index}`),
+        );
+        const oversizedMetadata = await session.adapter.request(request);
+        expect(oversizedMetadata).toMatchObject({
+          ok: false,
+          error: { code: 'limit_exceeded', details: { reason: 'source_bytes' } },
+        });
+        session.projectContext.animation.selectedCelKeys.value = selectedCelKeys;
+        const mismatch = await session.adapter.request({
+          ...request,
+          expectedPackageDigest: '0'.repeat(64),
+        });
+        expect(mismatch).toEqual({
+          ok: false,
+          error: {
+            code: 'revision_conflict',
+            retryable: true,
+            details: { reason: 'package_digest' },
+          },
+        });
+      },
+    });
+
+    expect(journey.exact).toEqual({
+      staticArtifacts: true,
+      manifest: true,
+      deterministic: true,
+      digests: true,
+      source: true,
+      render: true,
+      persistedSource: true,
+      reload: true,
+      reloadedRender: true,
+      isolation: true,
+      targetRebound: true,
+      activeTab: true,
+      target: true,
+      bytes: true,
+    });
+    expect(journey.assetPackage.artifacts.map((artifact) => artifact.role))
+      .toEqual(['source', 'preview', 'manifest']);
+    expect(journey.assetPackage.manifest.spriteSheet).toBeUndefined();
+    expect(getActiveProjectContext()).toBe(previousActiveContext);
+    const preview = requiredArtifact(journey.assetPackage.artifacts, 'preview');
+    const previewPixels = await decodePng(preview, 4, 4);
+    expect(Array.from(previewPixels)).toEqual(Array.from(journey.roundTrip.renderPixels));
+  });
+
+  // fallow-ignore-next-line complexity -- This public animation journey proves source, sprite, reload, and side-effect boundaries.
+  it('decodes animated sprite cells and matches every canonical frame', async () => {
+    const objectUrl = vi.spyOn(URL, 'createObjectURL');
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+    const downloadBlob = vi.spyOn(FileService, 'downloadBlob');
+    const clipboardWrite = typeof navigator.clipboard?.write === 'function'
+      ? vi.spyOn(navigator.clipboard, 'write')
+      : undefined;
+    const clipboardWriteText = typeof navigator.clipboard?.writeText === 'function'
+      ? vi.spyOn(navigator.clipboard, 'writeText')
+      : undefined;
+    const share = typeof navigator.share === 'function'
+      ? vi.spyOn(navigator, 'share')
+      : undefined;
+    const execCommand = typeof document.execCommand === 'function'
+      ? vi.spyOn(document, 'execCommand')
+      : undefined;
+    const session = createFixtureSession({ projectId: 'animated-package-fixture' });
+    sessions.push(session);
+    const previousActiveContext = getActiveProjectContext();
+    const journey = await session.runAnimatedAssetPackage({
+      switchActiveTabDuringPreparation: true,
+      afterPackagePreparation: (assetPackage) => {
+        expect(assetPackage.packageDigest).toHaveLength(64);
+        expect(objectUrl).not.toHaveBeenCalled();
+        expect(anchorClick).not.toHaveBeenCalled();
+        expect(downloadBlob).not.toHaveBeenCalled();
+        if (clipboardWrite) expect(clipboardWrite).not.toHaveBeenCalled();
+        if (clipboardWriteText) expect(clipboardWriteText).not.toHaveBeenCalled();
+        if (share) expect(share).not.toHaveBeenCalled();
+        if (execCommand) expect(execCommand).not.toHaveBeenCalled();
+      },
+    });
+
+    expect(journey.exact).toEqual({
+      sprite: true,
+      cells: true,
+      timing: true,
+      deterministic: true,
+      digests: true,
+      referenceExcluded: true,
+      persistedSource: true,
+      reload: true,
+      reloadedRender: true,
+      isolation: true,
+      targetRebound: true,
+      activeTab: true,
+      target: true,
+      bytes: true,
+    });
+    expect(getActiveProjectContext()).toBe(previousActiveContext);
+    const sprite = requiredArtifact(journey.assetPackage.artifacts, 'sprite-sheet');
+    const sheet = journey.assetPackage.manifest.spriteSheet;
+    if (!sheet) throw new Error('Animated package did not include sprite metadata.');
+    const spritePixels = await decodePng(sprite, sheet.width, sheet.height);
+    for (const cell of sheet.cells) {
+      const expected = journey.canonicalRenders[cell.index];
+      if (!expected) throw new Error(`Missing canonical render ${cell.index}.`);
+      expect(Array.from(crop(spritePixels, sheet.width, cell.x, cell.y, cell.width, cell.height)))
+        .toEqual(Array.from(expected));
+    }
+    expect(journey.assetPackage.manifest.frames.map((frame) => frame.duration))
+      .toEqual([100, 180, 260]);
+  });
+
+  // fallow-ignore-next-line complexity -- This public failure journey covers each independent package safety boundary.
+  it('rejects stale revisions, source mutation during an await, and oversized bounds', async () => {
+    const session = createFixtureSession({ projectId: 'asset-package-failure-fixture' });
+    sessions.push(session);
+    const journey = await session.runAssetPackage();
+    const request = {
+      operation: 'project.asset-package.prepare',
+      target: session.target,
+      expectedRevision: journey.save.revision,
+      expectedSaveSafety: journey.save.saveSafety,
+      expectedPackageDigest: null,
+    };
+
+    const stale = await session.adapter.request({
+      ...request,
+      expectedRevision: journey.save.revision + 1,
+    });
+    expect(stale).toMatchObject({ ok: false, error: { code: 'revision_conflict', retryable: true } });
+
+    const projectStore = session.projectContext.project;
+    const originalSaveProject = projectStore.saveProject.bind(projectStore);
+    projectStore.saveProject = async () => {
+      const saved = await originalSaveProject({ rebuildIndexBuffers: false });
+      projectStore.name.value = 'Changed during package preparation';
+      return saved;
+    };
+    try {
+      const mutated = await session.adapter.request(request);
+      expect(mutated).toMatchObject({
+        ok: false,
+        error: { code: 'revision_conflict', details: { reason: 'source_changed' } },
+      });
+    } finally {
+      projectStore.saveProject = originalSaveProject;
+    }
+
+    projectStore.name.value = 'Fixture Project';
+    projectStore.setSize(65, 4);
+    const oversized = await session.adapter.request(request);
+    expect(oversized).toMatchObject({
+      ok: false,
+      error: { code: 'bounds_exceeded', details: { reason: 'canvas_dimensions' } },
+    });
+  });
+});
+
+function requiredArtifact(
+  artifacts: readonly AssetPackageArtifact[],
+  role: AssetPackageArtifact['role'],
+): AssetPackageArtifact {
+  const artifact = artifacts.find((candidate) => candidate.role === role);
+  if (!artifact) throw new Error(`Missing ${role} artifact.`);
+  return artifact;
+}
+
+async function decodePng(
+  artifact: AssetPackageArtifact,
+  width: number,
+  height: number,
+): Promise<Uint8Array> {
+  const bitmap = await createImageBitmap(new Blob([artifact.bytes], { type: artifact.mediaType }));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const drawing = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!drawing) throw new Error('Chromium did not provide a decoding canvas.');
+  drawing.imageSmoothingEnabled = false;
+  drawing.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return new Uint8Array(drawing.getImageData(0, 0, width, height).data);
+}
+
+function crop(
+  pixels: Uint8Array,
+  width: number,
+  x: number,
+  y: number,
+  cropWidth: number,
+  cropHeight: number,
+): Uint8Array {
+  const result = new Uint8Array(cropWidth * cropHeight * 4);
+  for (let row = 0; row < cropHeight; row++) {
+    const sourceStart = ((y + row) * width + x) * 4;
+    result.set(pixels.subarray(sourceStart, sourceStart + cropWidth * 4), row * cropWidth * 4);
+  }
+  return result;
+}
