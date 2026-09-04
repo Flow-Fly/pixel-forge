@@ -424,7 +424,7 @@ export class CreativeRunController {
     }
     if (authority.authority.grant.status === 'paused' || authority.authority.run.status === 'paused') {
       const resumed = this.sessionManager.resumeArtistMode(this.sessionId, this.brief.runId);
-      if (!resumed.ok) return this.failFromAdapter(resumed, 'resume-run');
+      if (!resumed.ok) return this.failFromAdapter(resumed, 'start-run');
     }
     const live = this.checkAuthority();
     if (!live.ok || live.authority.grant.status !== 'running') {

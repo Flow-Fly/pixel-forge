@@ -450,7 +450,11 @@ describe('CreativeRunController', () => {
     const result = action === 'start' ? await controller.start() : await controller.resume();
     expect(result).toMatchObject({
       ok: false,
-      error: { code: 'capability_denied', retryable: true, nextAction: 'resume-run' },
+      error: {
+        code: 'capability_denied',
+        retryable: true,
+        nextAction: action === 'start' ? 'start-run' : 'resume-run',
+      },
     });
     expect(observations).toBe(0);
     expect(plannedSteps).toBe(0);
