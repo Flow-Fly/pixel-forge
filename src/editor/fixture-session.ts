@@ -25,6 +25,10 @@ import type { EditorTransactionResult } from './transaction';
 import type { RasterObservation } from './symbol-grid';
 import type { Cel, Frame } from '../types/animation';
 import type { Layer } from '../types/layer';
+import {
+  reconstructAnimationGrids,
+  type AnimationEvaluationBundle,
+} from './animation-observation';
 
 // fallow-ignore-next-line unused-export -- Stable fixture identity is part of conformance setup.
 export const FIXTURE_PROJECT_ID = 'fixture-project';
@@ -254,6 +258,24 @@ export interface FixtureRenderObservationJourneyResult {
     readonly background: boolean;
     readonly digest: boolean;
     readonly document: boolean;
+  };
+}
+
+export interface FixtureAnimationObservationJourneyResult {
+  readonly negotiation: CatalogNegotiation;
+  readonly bundle: AnimationEvaluationBundle;
+  readonly stable: AnimationEvaluationBundle;
+  readonly tagRange: AnimationEvaluationBundle;
+  readonly afterTiming: AnimationEvaluationBundle;
+  readonly timingTransaction: EditorTransactionResult;
+  readonly digestMismatch: AutomationFailure;
+  readonly inactive: AnimationEvaluationBundle;
+  readonly exact: {
+    readonly reconstruction: boolean;
+    readonly contactSheet: boolean;
+    readonly digest: boolean;
+    readonly document: boolean;
+    readonly inactiveTarget: boolean;
   };
 }
 
@@ -1065,6 +1087,111 @@ export class FixtureSession {
     };
   }
 
+  /**
+   * Exercise the complete detached animation evaluation bundle journey with
+   * three visibly distinct frames, timing, a tag, and a visible reference.
+   */
+  // fallow-ignore-next-line complexity -- The fixture intentionally keeps the public bundle evidence together.
+  async runAnimationObservation(): Promise<FixtureAnimationObservationJourneyResult> {
+    await this.initialize();
+    prepareAnimationObservationFixture(this.context);
+    const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
+      operation: 'catalog.negotiate',
+      version: '1.0',
+    });
+    const initial = await this.observeTarget(this.adapter, this.context.project.revision.value);
+    const frameIds = initial.frames.map((frame) => frame.id);
+    const [firstFrameId, secondFrameId, thirdFrameId] = frameIds;
+    if (!firstFrameId || !secondFrameId || !thirdFrameId) {
+      throw new Error('Animation observation fixture did not create three frames.');
+    }
+    const documentBefore = await this.serializeDocument();
+    const request = {
+      operation: 'project.animation.observe',
+      target: this.target,
+      expectedRevision: initial.revision,
+      range: 'all' as const,
+      background: { kind: 'transparent' as const },
+      scale: 4,
+      keyframes: [firstFrameId, thirdFrameId],
+      expectedDigest: null,
+    };
+    const bundle = await requestSuccess<AnimationEvaluationBundle>(this.adapter, request);
+    const stable = await requestSuccess<AnimationEvaluationBundle>(this.adapter, {
+      ...request,
+      expectedDigest: bundle.digest,
+    });
+    const tagRange = await requestSuccess<AnimationEvaluationBundle>(this.adapter, {
+      ...request,
+      range: { tagId: 'fixture-animation-preview-tag' },
+      keyframes: [secondFrameId, thirdFrameId],
+    });
+    const digestMismatch = await requestFailure(this.adapter, {
+      ...request,
+      expectedDigest: '0'.repeat(64),
+    });
+    const inactiveContext = createProjectContext();
+    await this.saveService.runWithoutSaving(async () => {
+      await inactiveContext.project.loadProject(createFixtureProject());
+      inactiveContext.project.id.value = 'fixture-inactive-animation';
+    }, inactiveContext);
+    prepareAnimationObservationFixture(inactiveContext);
+    this.targetContexts.set('fixture-inactive-animation', inactiveContext);
+    const inactive = await requestSuccess<AnimationEvaluationBundle>(this.adapter, {
+      ...request,
+      target: { projectId: 'fixture-inactive-animation' },
+      expectedRevision: inactiveContext.project.revision.value,
+    });
+    const documentAfterObservation = await this.serializeDocument();
+
+    const timingTransaction = await requestAnimationTransaction(this.adapter, this.target, initial, {
+      command: 'project.animation.frame',
+      input: { kind: 'frame.duration', frameId: secondFrameId, duration: 375 },
+      operationId: 'fixture-animation-preview-duration',
+    });
+    const afterTiming = await requestSuccess<AnimationEvaluationBundle>(this.adapter, {
+      ...request,
+      expectedRevision: timingTransaction.revision,
+    });
+    const reconstructed = reconstructAnimationGrids(bundle);
+    const reconstruction = reconstructed.length === bundle.frames.length
+      && reconstructed.every((grid, index) => JSON.stringify(grid) === JSON.stringify(bundle.frames[index]?.grid));
+    const contactSheet = bundle.contactSheet.cells.every((cell) => {
+      const frame = bundle.frames[cell.index];
+      if (!frame) return false;
+      const bytes = new Uint8Array(cell.width * cell.height * 4);
+      for (let row = 0; row < cell.height; row++) {
+        const sourceStart = (cell.y + row) * bundle.contactSheet.stride + cell.x * 4;
+        bytes.set(bundle.contactSheet.pixels.subarray(sourceStart, sourceStart + cell.width * 4), row * cell.width * 4);
+      }
+      return sameBytes(bytes, frame.render.pixels);
+    });
+
+    return {
+      negotiation,
+      bundle,
+      stable,
+      tagRange,
+      afterTiming,
+      timingTransaction,
+      digestMismatch,
+      inactive,
+      exact: {
+        reconstruction,
+        contactSheet,
+        digest: stable.digest === bundle.digest
+          && afterTiming.digest !== bundle.digest
+          && afterTiming.frames[1]?.duration === 375
+          && digestMismatch.error.code === 'revision_conflict'
+          && digestMismatch.error.retryable,
+        document: sameProjectFile(documentBefore, documentAfterObservation),
+        inactiveTarget: inactive.target.projectId === 'fixture-inactive-animation'
+          && bundle.target.projectId === this.target.projectId
+          && inactive.revision === bundle.revision,
+      },
+    };
+  }
+
   private async observeTarget(
     adapter: AutomationAdapter,
     revision: number,
@@ -1495,6 +1622,84 @@ function prepareRenderObservationFixture(context: ProjectContext): void {
   const cels = new Map(context.animation.cels.value);
   cels.set(context.animation.getCelKey(overlayLayer.id, frame.id), overlayCel);
   context.animation.cels.value = cels;
+  context.animation.syncLayerCanvases();
+}
+
+// fallow-ignore-next-line complexity -- This fixture deliberately describes the three exact raster states used by the public bundle journey.
+function prepareAnimationObservationFixture(context: ProjectContext): void {
+  const baseLayer = context.layers.layers.value.find((layer) => layer.type === 'image');
+  if (!baseLayer) throw new Error('Animation observation fixture has no image layer.');
+  const width = context.project.width.value;
+  const height = context.project.height.value;
+  const frames: Frame[] = [
+    { id: 'fixture-animation-preview-frame-1', order: 0, duration: 100 },
+    { id: 'fixture-animation-preview-frame-2', order: 1, duration: 180 },
+    { id: 'fixture-animation-preview-frame-3', order: 2, duration: 260 },
+  ];
+  const cels = new Map<string, Cel>();
+  const pixels = [
+    [{ x: 0, y: 0, color: '#ff0000', index: 2 }],
+    [
+      { x: 0, y: 0, color: '#00ff00', index: 3 },
+      { x: 1, y: 0, color: '#ff0000', index: 2 },
+    ],
+    [
+      { x: 0, y: 0, color: '#ff0000', index: 2 },
+      { x: 2, y: 0, color: '#00ff00', index: 3 },
+    ],
+  ];
+  frames.forEach((frame, frameIndex) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const drawing = canvas.getContext('2d');
+    if (!drawing) throw new Error('Animation observation fixture could not create a canvas.');
+    const indexBuffer = new Uint8Array(width * height);
+    for (const pixel of pixels[frameIndex] ?? []) {
+      drawing.fillStyle = pixel.color;
+      drawing.fillRect(pixel.x, pixel.y, 1, 1);
+      indexBuffer[pixel.y * width + pixel.x] = pixel.index;
+    }
+    cels.set(context.animation.getCelKey(baseLayer.id, frame.id), {
+      id: `fixture-animation-preview-cel-${frameIndex + 1}`,
+      layerId: baseLayer.id,
+      frameId: frame.id,
+      canvas,
+      indexBuffer,
+      opacity: 100,
+    });
+    if (frameIndex === 0) baseLayer.canvas = canvas;
+  });
+  const referenceLayer: Layer = {
+    id: 'fixture-animation-preview-reference',
+    name: 'Visible Preview Reference',
+    type: 'reference',
+    visible: true,
+    locked: false,
+    opacity: 255,
+    blendMode: 'normal',
+    parentId: null,
+    referenceData: {
+      bytes: new Uint8Array([255, 0, 255, 255]),
+      mimeType: 'image/png',
+      x: 0,
+      y: 0,
+      scale: 1,
+      position: 'above',
+    },
+  };
+  context.layers.layers.value = [baseLayer, referenceLayer];
+  context.animation.frames.value = frames;
+  context.animation.cels.value = cels;
+  context.animation.tags.value = [{
+    id: 'fixture-animation-preview-tag',
+    name: 'Preview Motion',
+    color: '#123456',
+    startFrameIndex: 0,
+    endFrameIndex: 2,
+    collapsed: false,
+  }];
+  context.animation.currentFrameId.value = frames[0]!.id;
   context.animation.syncLayerCanvases();
 }
 

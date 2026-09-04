@@ -65,6 +65,7 @@ describe('raster editor catalog contracts', () => {
       'project.observe',
       'project.render.observe',
       'project.raster.observe',
+      'project.animation.observe',
     ]);
   });
 

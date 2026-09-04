@@ -734,7 +734,9 @@ interface AnimationDigestInput {
 async function createAnimationDigest(input: AnimationDigestInput): Promise<string> {
   const metadata = JSON.stringify({
     representation: ANIMATION_OBSERVATION_REPRESENTATION_VERSION,
-    request: input.request,
+    // expectedDigest validates a prior result; it is not part of the result
+    // representation, so checkpoint capture remains digest-stable.
+    request: { ...input.request, expectedDigest: null },
     canvas: input.canvas,
     tags: input.tags,
     palette: input.palette,

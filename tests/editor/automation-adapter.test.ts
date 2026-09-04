@@ -87,6 +87,7 @@ describe('AutomationAdapter', () => {
       'project.observe',
       'project.render.observe',
       'project.raster.observe',
+      'project.animation.observe',
     ]);
     expect(negotiated.result.catalog.operations.map((operation) => operation.id)).toEqual([
       'catalog.negotiate',
@@ -95,6 +96,7 @@ describe('AutomationAdapter', () => {
       'project.observe',
       'project.render.observe',
       'project.raster.observe',
+      'project.animation.observe',
       'project.canvas.resize',
       'project.transaction.execute',
       'project.history.undo',

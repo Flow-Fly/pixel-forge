@@ -22,6 +22,7 @@ import "../dialogs/pf-accent-color-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../preview/pf-agent-preview-surface";
+import "../preview/pf-agent-animation-preview";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-panel";
