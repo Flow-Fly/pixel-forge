@@ -226,6 +226,62 @@ export class PFCreativeRunPanel extends LitElement {
       overflow-wrap: anywhere;
     }
 
+    .timeline-action {
+      justify-self: start;
+      min-height: 32px;
+      margin-top: 4px;
+    }
+
+    .recovery-summary {
+      border: 1px solid var(--creative-run-border);
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+    }
+
+    .recovery-summary strong {
+      color: var(--creative-run-accent);
+      font-size: 0.8125rem;
+    }
+
+    .recovery-summary p {
+      font-size: 0.75rem;
+      line-height: 1.45;
+    }
+
+    dialog {
+      background: var(--creative-run-panel);
+      border: 1px solid var(--creative-run-border);
+      border-radius: 8px;
+      color: var(--creative-run-text);
+      max-inline-size: min(28rem, calc(100vw - 2rem));
+      padding: 16px;
+    }
+
+    dialog::backdrop {
+      background: rgb(0 0 0 / 55%);
+    }
+
+    .dialog-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: end;
+      margin-top: 12px;
+    }
+
+    .diagnostics {
+      background: #101720;
+      border: 1px solid var(--creative-run-border);
+      font-size: 0.6875rem;
+      line-height: 1.35;
+      max-block-size: 180px;
+      overflow: auto;
+      padding: 8px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
     pf-agent-preview-surface {
       margin-top: 2px;
     }
@@ -312,6 +368,22 @@ export class PFCreativeRunPanel extends LitElement {
           ${this.renderControls(state)}
         </fieldset>
 
+        ${state.recovery
+          ? html`
+              <section class="recovery-summary" aria-labelledby="creative-run-recovery-title">
+                <strong id="creative-run-recovery-title">Recovery safety</strong>
+                <p>
+                  ${state.recovery.recoveryCopyId
+                    ? `A Recovery Copy is preserved (${state.recovery.recoveryCopyId}). The original project remains unchanged until a confirmed action completes.`
+                    : 'The original project and any later edits remain preserved. Recovery never reuses or deletes a project key.'}
+                </p>
+                ${state.recovery.interrupted
+                  ? html`<p role="status">This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
+                  : nothing}
+              </section>
+            `
+          : nothing}
+
         ${state.error
           ? html`<p class="error" role="alert">${state.error.code}. Next action: ${state.error.nextAction}.</p>`
           : nothing}
@@ -329,6 +401,12 @@ export class PFCreativeRunPanel extends LitElement {
                       <details class="transaction-detail">
                         <summary>${entryLabel(entry)}</summary>
                         <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
+                        ${entry.operationId && state.recovery
+                          ? html`<button class="timeline-action" type="button" ?disabled=${this.actionBusy}
+                              @click=${() => this.requestRewind(entry.operationId!)}>
+                              Rewind after this transaction
+                            </button>`
+                          : nothing}
                       </details>
                     `
                   : html`
@@ -344,6 +422,8 @@ export class PFCreativeRunPanel extends LitElement {
           .observation=${this.previewObservation}
           .error=${this.previewError}
         ></pf-agent-preview-surface>
+
+        ${this.renderConfirmationDialog(state)}
       </section>
     `;
   }
@@ -355,7 +435,8 @@ export class PFCreativeRunPanel extends LitElement {
     const approveDisabled = state.approvedBriefRevision === state.brief.revision
       || state.phase === 'running'
       || state.phase === 'pausing'
-      || state.phase === 'stopping';
+      || state.phase === 'stopping'
+      || this.actionBusy;
     return html`
       <button type="button" ?disabled=${approveDisabled} @click=${() => controller.approveBrief(toApproval(state))}>
         Approve Brief
@@ -374,9 +455,41 @@ export class PFCreativeRunPanel extends LitElement {
         : nothing}
       ${state.phase === 'paused' || state.phase === 'stopped'
         ? html`
-            <button type="button" ?disabled=${state.packagePreparedRevision !== null} @click=${() => void controller.accept()}>
+            <button type="button" ?disabled=${state.packagePreparedRevision !== null || this.actionBusy} @click=${() => void this.runAction(() => controller.accept())}>
               Accept / Prepare Package
             </button>
+          `
+        : nothing}
+      ${state.recovery && (state.phase === 'paused' || state.phase === 'stopped')
+        ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => this.requestReject()}>
+              Reject Run…
+            </button>
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.createRecoveryCopy())}>
+              Create Recovery Copy
+            </button>
+          `
+        : nothing}
+      ${state.recovery?.recoveryCopyId
+        ? html`<button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.openRecoveryCopy())}>
+            Open Recovery Copy
+          </button>`
+        : nothing}
+      ${state.recovery?.interrupted
+        ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.resumeAfterInterruption())}>
+              Resume with New Session…
+            </button>
+          `
+        : nothing}
+      ${state.recovery
+        ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => { this.diagnosticsOpen = !this.diagnosticsOpen; }}>
+              ${this.diagnosticsOpen ? 'Hide local diagnostics' : 'Inspect local diagnostics'}
+            </button>
+            ${this.diagnosticsOpen
+              ? html`<pre class="diagnostics" aria-label="Local recovery diagnostics">${JSON.stringify(controller.getRecoveryDiagnostics(), null, 2)}</pre>`
+              : nothing}
           `
         : nothing}
       ${state.phase !== 'accepted' && state.phase !== 'rejected'
@@ -394,6 +507,72 @@ export class PFCreativeRunPanel extends LitElement {
           `
         : nothing}
     `;
+  }
+
+  private actionBusy = false;
+  private diagnosticsOpen = false;
+  private pendingConfirmation: { readonly kind: 'reject' | 'rewind'; readonly operationId?: string } | null = null;
+
+  private requestReject(): void {
+    this.pendingConfirmation = { kind: 'reject' };
+    this.requestUpdate();
+  }
+
+  private requestRewind(operationId: string): void {
+    this.pendingConfirmation = { kind: 'rewind', operationId };
+    this.requestUpdate();
+  }
+
+  private renderConfirmationDialog(state: CreativeRunState) {
+    const pending = this.pendingConfirmation;
+    if (!pending) return nothing;
+    const rewind = pending.kind === 'rewind';
+    return html`
+      <dialog open aria-labelledby="creative-run-confirm-title" aria-describedby="creative-run-confirm-copy">
+        <h3 id="creative-run-confirm-title">${rewind ? 'Confirm rewind' : 'Confirm reject'}</h3>
+        <p id="creative-run-confirm-copy">
+          ${rewind
+            ? 'Later Creative Run transactions will be undone through the owned history boundary. The selected transaction remains, and a fresh observation and approval will be required.'
+            : 'The rejected result will be preserved under a fresh Recovery Copy before the original checkpoint is restored. Later edits stop this restore and remain untouched.'}
+        </p>
+        <p class="muted">Project: ${state.target.name}. No copy is deleted or overwritten.</p>
+        <div class="dialog-actions">
+          <button type="button" @click=${this.cancelConfirmation}>Cancel</button>
+          <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.confirmPendingAction()}>
+            ${rewind ? 'Rewind' : 'Reject Run'}
+          </button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  private cancelConfirmation = (): void => {
+    this.pendingConfirmation = null;
+    this.requestUpdate();
+  };
+
+  private async confirmPendingAction(): Promise<void> {
+    const pending = this.pendingConfirmation;
+    const controller = this.controller;
+    if (!pending || !controller) return;
+    this.pendingConfirmation = null;
+    if (pending.kind === 'rewind' && pending.operationId) {
+      await this.runAction(() => controller.rewind({ operationId: pending.operationId }));
+    } else {
+      await this.runAction(() => controller.reject(true));
+    }
+  }
+
+  private async runAction(action: () => Promise<unknown>): Promise<void> {
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    this.requestUpdate();
+    try {
+      await action();
+    } finally {
+      this.actionBusy = false;
+      this.requestUpdate();
+    }
   }
 
   private refineBrief(controller: CreativeRunController): void {

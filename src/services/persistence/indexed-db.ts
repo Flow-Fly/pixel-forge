@@ -9,6 +9,10 @@ import {
   type WorkspaceState,
 } from './project-repository';
 import { log } from '../../utils/log';
+import type {
+  CreativeRunRecoveryPersistence,
+  CreativeRunRecoveryRecord,
+} from '../../editor/creative-run-recovery';
 
 /** Key of the single-project slot used before multi-project support. */
 const LEGACY_CURRENT_PROJECT_KEY = 'current-project';
@@ -37,6 +41,10 @@ interface PixelForgeDB extends DBSchema {
     key: string;
     value: StoredSetting;
   };
+  creativeRunRecovery: {
+    key: string;
+    value: CreativeRunRecoveryRecord;
+  };
 }
 
 /**
@@ -51,13 +59,16 @@ class IndexedDbProjectRepository implements ProjectRepository {
   private dbPromise: Promise<IDBPDatabase<PixelForgeDB>>;
 
   constructor() {
-    this.dbPromise = openDB<PixelForgeDB>('pixel-forge-db', 1, {
+    this.dbPromise = openDB<PixelForgeDB>('pixel-forge-db', 2, {
       upgrade(db) {
         if (!db.objectStoreNames.contains('sprites')) {
           db.createObjectStore('sprites', { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('creativeRunRecovery')) {
+          db.createObjectStore('creativeRunRecovery', { keyPath: 'runId' });
         }
       },
     }).then((db) => this.migrateLegacySlot(db));
@@ -181,6 +192,46 @@ function isConstraintError(error: unknown): boolean {
 }
 
 export const projectRepository: ProjectRepository = new IndexedDbProjectRepository();
+
+/** Additive browser-local persistence for bounded Creative Run recovery records. */
+export class IndexedDbCreativeRunRecoveryPersistence implements CreativeRunRecoveryPersistence {
+  private readonly dbPromise: Promise<IDBPDatabase<PixelForgeDB>>;
+
+  constructor() {
+    this.dbPromise = openDB<PixelForgeDB>('pixel-forge-db', 2, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('sprites')) {
+          db.createObjectStore('sprites', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('creativeRunRecovery')) {
+          db.createObjectStore('creativeRunRecovery', { keyPath: 'runId' });
+        }
+      },
+    });
+  }
+
+  async load(runId: string): Promise<CreativeRunRecoveryRecord | null> {
+    const db = await this.dbPromise;
+    const record = await db.get('creativeRunRecovery', runId);
+    return record ? structuredClone(record) : null;
+  }
+
+  async save(record: CreativeRunRecoveryRecord): Promise<void> {
+    const db = await this.dbPromise;
+    await db.put('creativeRunRecovery', structuredClone(record));
+  }
+
+  async list(): Promise<CreativeRunRecoveryRecord[]> {
+    const db = await this.dbPromise;
+    const records = await db.getAll('creativeRunRecovery');
+    return records.map((record) => structuredClone(record));
+  }
+}
+
+export const creativeRunRecoveryPersistence = new IndexedDbCreativeRunRecoveryPersistence();
 
 function parseWorkspaceState(value: unknown): WorkspaceState | null {
   if (!value || typeof value !== 'object') return null;

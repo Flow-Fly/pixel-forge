@@ -6,6 +6,7 @@ import {
   ProjectAlreadyExistsError,
   type ProjectRepository,
 } from '../../../src/services/persistence/project-repository';
+import type { CreativeRunRecoveryRecord } from '../../../src/editor/creative-run-recovery';
 
 function makeProject(name: string, width = 8, height = 8): ProjectFile {
   return {
@@ -20,6 +21,10 @@ function makeProject(name: string, width = 8, height = 8): ProjectFile {
 }
 
 let repo: ProjectRepository;
+let recoveryPersistence: {
+  load(runId: string): Promise<CreativeRunRecoveryRecord | null>;
+  save(record: CreativeRunRecoveryRecord): Promise<void>;
+};
 
 beforeAll(async () => {
   // Seed a pre-multi-project database: one project under the legacy
@@ -37,7 +42,7 @@ beforeAll(async () => {
   });
   db.close();
 
-  ({ projectRepository: repo } = await import(
+  ({ projectRepository: repo, creativeRunRecoveryPersistence: recoveryPersistence } = await import(
     '../../../src/services/persistence/indexed-db'
   ));
 });
@@ -101,6 +106,59 @@ describe('IndexedDbProjectRepository', () => {
     );
     expect(meta?.name).toBe('Renamed');
     expect(meta?.thumbnail).toEqual(thumbnail);
+  });
+
+  it('adds the recovery store without replacing projects or settings', async () => {
+    const db = await openDB('pixel-forge-db', 2);
+    expect(db.objectStoreNames.contains('sprites')).toBe(true);
+    expect(db.objectStoreNames.contains('settings')).toBe(true);
+    expect(db.objectStoreNames.contains('creativeRunRecovery')).toBe(true);
+    expect(await repo.load('current-project')).toBeNull();
+    expect((await repo.list()).some((item) => item.name === 'Legacy drawing')).toBe(true);
+    expect(await repo.getLastOpenedProjectId()).toBeTruthy();
+    db.close();
+  });
+
+  it('round-trips a bounded recovery record with its Project File bytes', async () => {
+    const record = {
+      schemaVersion: 1,
+      runId: 'persisted-run',
+      sessionId: 'persisted-session',
+      target: { projectId: 'persisted-project' },
+      brief: {
+        runId: 'persisted-run',
+        revision: 1,
+        targetId: 'persisted-project',
+        targetName: 'Persisted project',
+        goal: 'Goal',
+        constraints: [],
+        requestedWriteCategories: ['structure'] as const,
+        transactionLimit: 1,
+        durationSeconds: 10,
+        contentEgress: 'local-only' as const,
+      },
+      approvedBriefRevision: 1,
+      phase: 'ready',
+      status: 'active' as const,
+      outcome: null,
+      reason: null,
+      currentRevision: 0,
+      lastDurableRevision: 0,
+      checkpoint: {
+        schemaVersion: 1,
+        runId: 'persisted-run',
+        target: { projectId: 'persisted-project' },
+        sourceRevision: 0,
+        sourceDigest: 'a'.repeat(64),
+        project: makeProject('Checkpoint'),
+      },
+      transactions: [],
+      timeline: [{ sequence: 1, kind: 'checkpoint' as const }],
+      recoveryCopyId: null,
+    } satisfies CreativeRunRecoveryRecord;
+
+    await recoveryPersistence.save(record);
+    expect(await recoveryPersistence.load(record.runId)).toEqual(record);
   });
 
   it('returns null for unknown ids', async () => {
