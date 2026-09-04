@@ -424,6 +424,90 @@ describe('CreativeRunController', () => {
     }]);
   });
 
+  it.each(['start', 'resume'] as const)('does not dispatch while %s loses a write-turn race', async (action) => {
+    const authority = createAuthority({ status: 'paused' });
+    let observations = 0;
+    let plannedSteps = 0;
+    const boundary: CreativeRunSessionBoundary = {
+      ...authority.boundary,
+      resumeArtistMode: () => failure('capability_denied', true),
+      observe: async () => {
+        observations += 1;
+        return success({});
+      },
+    };
+    const controller = createController({ ...authority, boundary }, {
+      stepSource: () => {
+        plannedSteps += 1;
+        return step();
+      },
+    });
+    controller.approveBrief(approval(controller));
+    if (action === 'resume') {
+      expect(controller.pause()).toMatchObject({ ok: true, state: { phase: 'paused' } });
+    }
+
+    const result = action === 'start' ? await controller.start() : await controller.resume();
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', retryable: true, nextAction: 'resume-run' },
+    });
+    expect(observations).toBe(0);
+    expect(plannedSteps).toBe(0);
+    expect(authority.state.executeInputs).toHaveLength(0);
+  });
+
+  it('accounts a pending transaction once when manual takeover pauses the run', async () => {
+    const authority = createAuthority();
+    let resolveTransaction!: (result: AutomationSessionResult<unknown>) => void;
+    let signalDispatch!: () => void;
+    const dispatched = new Promise<void>((resolve) => { signalDispatch = resolve; });
+    const pendingTransaction = new Promise<AutomationSessionResult<unknown>>((resolve) => { resolveTransaction = resolve; });
+    const takeoverOwners: string[] = [];
+    let plannedSteps = 0;
+    const boundary: CreativeRunSessionBoundary = {
+      ...authority.boundary,
+      takeoverProjectWriteTurn: (target, ownerId) => {
+        takeoverOwners.push(`${target}:${ownerId}`);
+        return authority.boundary.takeoverProjectWriteTurn(target, ownerId);
+      },
+    };
+    const controller = createController({ ...authority, boundary }, {
+      stepSource: () => {
+        plannedSteps += 1;
+        return step();
+      },
+      executeTransaction: async (_session, _run, input) => {
+        authority.state.executeInputs.push(input);
+        signalDispatch();
+        return pendingTransaction;
+      },
+    });
+    controller.approveBrief(approval(controller));
+    const run = controller.start();
+    await dispatched;
+    expect(controller.requestManualTakeover('human-editor')).toMatchObject({
+      ok: true,
+      state: { phase: 'pausing' },
+    });
+    expect(takeoverOwners).toEqual([`${targetId}:human-editor`]);
+
+    const request = authority.state.executeInputs[0] as { expectedRevision: number; operationId: string };
+    authority.state.revision = request.expectedRevision + 1;
+    resolveTransaction(success({
+      type: 'project.transaction.execute',
+      fromRevision: request.expectedRevision,
+      revision: request.expectedRevision + 1,
+      provenance: { children: [] },
+    }));
+    const settled = await run;
+
+    expect(settled).toMatchObject({ ok: true, state: { phase: 'paused', transactionsUsed: 1 } });
+    expect(controller.getState().lastDurableResult?.operationId).toBe(request.operationId);
+    expect(authority.state.executeInputs).toHaveLength(1);
+    expect(plannedSteps).toBe(1);
+  });
+
   it.each([
     ['pause', 'paused'],
     ['stop', 'stopped'],

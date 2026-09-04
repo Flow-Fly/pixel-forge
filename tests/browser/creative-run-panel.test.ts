@@ -27,7 +27,7 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) fixture.dispose();
 });
 
-async function createRun(): Promise<{ element: PFCreativeRunPanel; controller: CreativeRunController; fixture: FixtureSession }> {
+async function createRun(): Promise<{ element: PFCreativeRunPanel; controller: CreativeRunController; fixture: FixtureSession; manager: AutomationSessionManager }> {
   const fixture = createFixtureSession();
   fixtures.push(fixture);
   await fixture.runAnimationObservation();
@@ -122,7 +122,7 @@ async function createRun(): Promise<{ element: PFCreativeRunPanel; controller: C
   element.controller = controller;
   document.body.append(element);
   await element.updateComplete;
-  return { element, controller, fixture };
+  return { element, controller, fixture, manager };
 }
 
 describe('Creative Run panel in Chromium', () => {
@@ -166,7 +166,7 @@ describe('Creative Run panel in Chromium', () => {
   });
 
   it('lets the composed app render and control a supplied run without creating one', async () => {
-    const { controller, fixture } = await createRun();
+    const { controller, fixture, manager } = await createRun();
     const revisionBefore = fixture.projectContext.project.revision.value;
     document.body.replaceChildren();
     const app = document.createElement('pixel-forge-app') as HTMLElement & {
@@ -184,6 +184,7 @@ describe('Creative Run panel in Chromium', () => {
     await userEvent.click(page.getByRole('button', { name: 'Start Run' }));
     await expect.poll(() => controller.getState().phase).toBe('stopped');
     expect(fixture.projectContext.project.revision.value).toBe(revisionBefore + 1);
+    expect(manager.listLocalArtistModeRuns()[0]?.status).toBe('completed');
   });
 
   it('completes the deterministic two-project supervision journey without touching the second project', async () => {
