@@ -4,6 +4,7 @@ import {
   type AutomationLocalTarget,
   type InspectObservationClass,
 } from '../../src/editor/automation-session';
+import type { AutomationAdapter } from '../../src/editor/automation-adapter';
 import { autoSaveService } from '../../src/services/auto-save';
 import {
   createProjectContext,
@@ -64,6 +65,10 @@ function request(
   });
 }
 
+function expectTargetFree(value: unknown): void {
+  expect(JSON.stringify(value)).not.toContain('"target"');
+}
+
 describe('AutomationSessionManager', () => {
   it('discovers and queues access without reading or returning local project data', () => {
     const target = createTarget('secret-project-id', 'Private project name');
@@ -94,7 +99,10 @@ describe('AutomationSessionManager', () => {
     const pending = request(manager, ['structure', 'palette', 'save-state']);
     if (!pending.ok) throw new Error('Expected a pending request.');
 
-    const grant = manager.approve(pending.result.requestId, first.id, ['structure', 'save-state']);
+    const grant = manager.approveRequest(pending.result.requestId, first.id, [
+      'structure',
+      'save-state',
+    ]);
     expect(grant).toMatchObject({
       ok: true,
       result: {
@@ -111,11 +119,11 @@ describe('AutomationSessionManager', () => {
     const observation = await manager.observe(grant.result.sessionId, 'structure', {
       expectedRevision: 0,
     });
+    expectTargetFree(observation);
     expect(observation).toMatchObject({
       ok: true,
       result: {
         type: 'project.structure.observation',
-        target: { projectId: 'project-a' },
         revision: 0,
         canvas: { width: 64, height: 64 },
       },
@@ -167,7 +175,7 @@ describe('AutomationSessionManager', () => {
 
     const deniedRequest = request(manager);
     if (!deniedRequest.ok) throw new Error('Expected a pending request.');
-    expect(manager.deny(deniedRequest.result.requestId)).toEqual({
+    expect(manager.denyRequest(deniedRequest.result.requestId)).toEqual({
       ok: true,
       result: {
         type: 'automation.session.denied',
@@ -179,10 +187,10 @@ describe('AutomationSessionManager', () => {
 
     const pending = request(manager, ['structure']);
     if (!pending.ok) throw new Error('Expected a pending request.');
-    const grant = manager.approve(pending.result.requestId, target.id, ['structure']);
+    const grant = manager.approveRequest(pending.result.requestId, target.id, ['structure']);
     if (!grant.ok) throw new Error('Expected a grant.');
 
-    expect(manager.revoke(grant.result.sessionId)).toEqual({
+    expect(manager.revokeSession(grant.result.sessionId)).toEqual({
       ok: true,
       result: { type: 'automation.session.revoked' },
     });
@@ -199,7 +207,7 @@ describe('AutomationSessionManager', () => {
 
     const pendingAfterRevoke = request(manager, ['structure']);
     if (!pendingAfterRevoke.ok) throw new Error('Expected a pending request.');
-    const expiringGrant = manager.approve(pendingAfterRevoke.result.requestId, target.id, [
+    const expiringGrant = manager.approveRequest(pendingAfterRevoke.result.requestId, target.id, [
       'structure',
     ]);
     if (!expiringGrant.ok) throw new Error('Expected a grant.');
@@ -225,6 +233,20 @@ describe('AutomationSessionManager', () => {
       observationClasses: ['structure'],
       lifetimeSeconds: 60,
     };
+
+    const first = manager.requestSession(baseRequest);
+    expect(first).toMatchObject({ ok: true });
+    const duplicate = manager.requestSession({ ...baseRequest });
+    expect(duplicate).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_request',
+        retryable: false,
+        details: { reason: 'duplicate_request' },
+      },
+    });
+    expect(manager.listPendingRequests()).toHaveLength(1);
+    if (first.ok) manager.denyRequest(first.result.requestId);
 
     for (const input of [
       { ...baseRequest, client: { name: 'Inspector', identity: 'verified' } },
@@ -262,7 +284,9 @@ describe('AutomationSessionManager', () => {
 
     const firstRequest = request(manager);
     if (!firstRequest.ok) throw new Error('Expected a pending request.');
-    const firstGrant = manager.approve(firstRequest.result.requestId, original.id, ['structure']);
+    const firstGrant = manager.approveRequest(firstRequest.result.requestId, original.id, [
+      'structure',
+    ]);
     if (!firstGrant.ok) throw new Error('Expected a grant.');
 
     visible = false;
@@ -286,7 +310,9 @@ describe('AutomationSessionManager', () => {
 
     const secondRequest = request(manager);
     if (!secondRequest.ok) throw new Error('Expected a fresh pending request.');
-    const secondGrant = manager.approve(secondRequest.result.requestId, original.id, ['structure']);
+    const secondGrant = manager.approveRequest(secondRequest.result.requestId, original.id, [
+      'structure',
+    ]);
     if (!secondGrant.ok) throw new Error('Expected a fresh grant.');
     targets = [replacement];
     await expect(
@@ -315,5 +341,166 @@ describe('AutomationSessionManager', () => {
         lifetimeSeconds: 10,
       })
     ).toMatchObject({ ok: false, error: { code: 'capability_denied' } });
+  });
+
+  it('bootstraps a non-zero revision once and keeps conflicts content-free', async () => {
+    const target = createTarget('revision-project', 'Revision project');
+    target.context.project.commitChange('external-change', ['timeline']);
+    expect(target.context.project.revision.value).toBe(1);
+    const manager = createManager([target]);
+    const pending = request(manager);
+    if (!pending.ok) throw new Error('Expected a pending request.');
+    const grant = manager.approveRequest(pending.result.requestId, target.id, ['structure']);
+    if (!grant.ok) throw new Error('Expected a grant.');
+
+    const bootstrap = await manager.observe(grant.result.sessionId, 'structure', {});
+    expect(bootstrap).toMatchObject({
+      ok: true,
+      result: { type: 'project.structure.observation', revision: 1 },
+    });
+    expectTargetFree(bootstrap);
+    expect(grant.result).not.toHaveProperty('revision');
+
+    await expect(manager.observe(grant.result.sessionId, 'structure', {})).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_request',
+        retryable: false,
+        details: { reason: 'expected_revision' },
+      },
+    });
+
+    const explicit = await manager.observe(grant.result.sessionId, 'structure', {
+      expectedRevision: 1,
+    });
+    expect(explicit).toMatchObject({ ok: true, result: { revision: 1 } });
+
+    const conflict = await manager.observe(grant.result.sessionId, 'structure', {
+      expectedRevision: 0,
+    });
+    expect(conflict).toMatchObject({
+      ok: false,
+      error: { code: 'revision_conflict' },
+    });
+    expect(JSON.stringify(conflict)).not.toContain('currentRevision');
+    expect(JSON.stringify(conflict)).not.toContain('revision-project');
+  });
+
+  it('serializes bootstrap attempts and retries a failed bootstrap', async () => {
+    const target = createTarget('retry-project', 'Retry project');
+    let attempts = 0;
+    const adapter = {
+      negotiateCatalog: () => ({ ok: true, result: {} }),
+      observeProject: (input: unknown) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return {
+            ok: false as const,
+            error: { code: 'internal' as const, retryable: true, details: { reason: 'temporary' } },
+          };
+        }
+        return {
+          ok: true as const,
+          result: {
+            type: 'test.observation',
+            target: { projectId: target.id },
+            revision: (input as { expectedRevision: number }).expectedRevision,
+          },
+        };
+      },
+    } as unknown as AutomationAdapter;
+    const manager = new AutomationSessionManager({
+      targets: () => [target],
+      adapter,
+      isPageVisible: () => true,
+      requestIdFactory: () => 'retry-request',
+      sessionIdFactory: () => 'retry-session',
+    });
+    managers.push(manager);
+    const pending = request(manager);
+    if (!pending.ok) throw new Error('Expected a pending request.');
+    const grant = manager.approveRequest(pending.result.requestId, target.id, ['structure']);
+    if (!grant.ok) throw new Error('Expected a grant.');
+
+    await expect(manager.observe(grant.result.sessionId, 'structure', {})).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    });
+    const retried = await manager.observe(grant.result.sessionId, 'structure', {});
+    expect(retried).toMatchObject({ ok: true, result: { revision: 0 } });
+    expectTargetFree(retried);
+    expect(attempts).toBe(2);
+  });
+
+  it('rejects concurrent omitted revisions while the first bootstrap is in flight', async () => {
+    const target = createTarget('concurrent-project', 'Concurrent project');
+    let resolveObservation: ((value: unknown) => void) | undefined;
+    const observation = new Promise<unknown>((resolve) => {
+      resolveObservation = resolve;
+    });
+    const adapter = {
+      negotiateCatalog: () => ({ ok: true, result: {} }),
+      observeProject: () => observation,
+    } as unknown as AutomationAdapter;
+    const manager = new AutomationSessionManager({
+      targets: () => [target],
+      adapter,
+      isPageVisible: () => true,
+      requestIdFactory: () => 'concurrent-request',
+      sessionIdFactory: () => 'concurrent-session',
+    });
+    managers.push(manager);
+    const pending = request(manager);
+    if (!pending.ok) throw new Error('Expected a pending request.');
+    const grant = manager.approveRequest(pending.result.requestId, target.id, ['structure']);
+    if (!grant.ok) throw new Error('Expected a grant.');
+
+    const first = manager.observe(grant.result.sessionId, 'structure', {});
+    const second = await manager.observe(grant.result.sessionId, 'structure', {});
+    expect(second).toEqual({
+      ok: false,
+      error: {
+        code: 'capability_denied',
+        retryable: true,
+        details: { reason: 'revision_bootstrap_in_flight' },
+      },
+    });
+    resolveObservation?.({
+      ok: true,
+      result: {
+        type: 'test.observation',
+        target: { projectId: target.id },
+        revision: 0,
+      },
+    });
+    await expect(first).resolves.toMatchObject({ ok: true, result: { revision: 0 } });
+  });
+
+  it('rejects an approval after the displayed target is replaced', () => {
+    const original = createTarget('approval-project', 'Original approval project');
+    const replacement = createTarget('approval-project', 'Replacement approval project');
+    let targets: readonly AutomationLocalTarget[] = [original];
+    const manager = new AutomationSessionManager({
+      targets: () => targets,
+      isPageVisible: () => true,
+      requestIdFactory: () => 'approval-request',
+      sessionIdFactory: () => 'approval-session',
+    });
+    managers.push(manager);
+    const pending = request(manager);
+    if (!pending.ok) throw new Error('Expected a pending request.');
+    expect(manager.captureLocalTargets(pending.result.requestId)).toEqual([
+      { id: original.id, name: original.name },
+    ]);
+    targets = [replacement];
+
+    const approval = manager.approveRequest(pending.result.requestId, original.id, ['structure']);
+    expect(approval).toEqual({
+      ok: false,
+      error: { code: 'target_not_found', retryable: true },
+    });
+    expect(manager.listPendingRequests()).toHaveLength(1);
+    expect(manager.listLocalSessions()).toHaveLength(0);
+    expect(JSON.stringify(approval)).not.toContain('approval-project');
   });
 });

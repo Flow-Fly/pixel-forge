@@ -111,10 +111,27 @@ describe('Automation Session approval dialog in Chromium', () => {
 
     await userEvent.click(page.getByRole('button', { name: 'Approve selected access' }));
     await expect.poll(() => manager.listPendingRequests()).toHaveLength(0);
+    await expect.poll(() => element.open).toBe(true);
+    await expect.element(page.getByText('Active local sessions')).toBeVisible();
+    await expect
+      .element(page.getByText('Chromium Inspector · Private browser project'))
+      .toBeVisible();
+    await expect.element(page.getByText('Status: active')).toBeVisible();
+
+    await userEvent.click(page.getByRole('button', { name: 'Close', exact: true }));
     await expect.poll(() => element.open).toBe(false);
+    window.dispatchEvent(new CustomEvent('show-automation-session-dialog'));
+    await expect.poll(() => element.open).toBe(true);
+    await expect.element(page.getByText('Active local sessions')).toBeVisible();
+
+    await userEvent.click(page.getByRole('button', { name: 'Revoke Chromium Inspector session' }));
+    await expect.element(page.getByText('Status: revoked')).toBeVisible();
 
     const grant = await manager.observe('browser-session-1', 'structure', { expectedRevision: 0 });
-    expect(grant).toMatchObject({ ok: true, result: { target: { projectId: target.id } } });
+    expect(grant).toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', details: { reason: 'session_revoked' } },
+    });
   });
 
   it('keeps focus in the semantic dialog and denies on Escape without creating authority', async () => {
@@ -145,7 +162,7 @@ describe('Automation Session approval dialog in Chromium', () => {
     });
   });
 
-  it('keeps separately granted structure, save-state, raster, render, and animation observations on one target', async () => {
+  it('keeps separately granted target-free observations across every inspect class', async () => {
     const fixture = createFixtureSession();
     fixtures.push(fixture);
     await fixture.runAnimationObservation();
@@ -159,11 +176,11 @@ describe('Automation Session approval dialog in Chromium', () => {
     const request = manager.requestSession({
       client: { name: 'Observation client', identity: 'self-declared' },
       compatibility: { minVersion: '1.0', maxVersion: '1.0' },
-      observationClasses: ['structure', 'save-state', 'raster', 'render', 'timeline'],
+      observationClasses: ['structure', 'palette', 'save-state', 'raster', 'render', 'timeline'],
       lifetimeSeconds: 60,
     });
     if (!request.ok) throw new Error('Expected a pending session request.');
-    const grant = manager.approve(
+    const grant = manager.approveRequest(
       request.result.requestId,
       target.id,
       request.result.observationClasses
@@ -180,21 +197,21 @@ describe('Automation Session approval dialog in Chromium', () => {
     const structure = await manager.observe(grant.result.sessionId, 'structure', {
       expectedRevision,
     });
+    expect(JSON.stringify(structure)).not.toContain('"target"');
     expect(structure).toMatchObject({
       ok: true,
       result: {
         type: 'project.structure.observation',
-        target: { projectId: fixture.target.projectId },
       },
     });
     const saveState = await manager.observe(grant.result.sessionId, 'save-state', {
       expectedRevision,
     });
+    expect(JSON.stringify(saveState)).not.toContain('"target"');
     expect(saveState).toMatchObject({
       ok: true,
       result: {
         type: 'project.save-state.observation',
-        target: { projectId: fixture.target.projectId },
       },
     });
     const raster = await manager.observe(grant.result.sessionId, 'raster', {
@@ -202,11 +219,11 @@ describe('Automation Session approval dialog in Chromium', () => {
       source: { kind: 'layer' as const, layerId: layer.id, frameId: frame.id, celId: cel.id },
       region: { x: 0, y: 0, width: 4, height: 4 },
     });
+    expect(JSON.stringify(raster)).not.toContain('"target"');
     expect(raster).toMatchObject({
       ok: true,
       result: {
         type: 'project.raster.observation',
-        target: { projectId: fixture.target.projectId },
       },
     });
     const render = await manager.observe(grant.result.sessionId, 'render', {
@@ -216,10 +233,29 @@ describe('Automation Session approval dialog in Chromium', () => {
       scale: 1,
       expectedDigest: null,
     });
+    expect(JSON.stringify(render)).not.toContain('"target"');
     expect(render).toMatchObject({
       ok: true,
-      result: { type: 'render.observation', target: { projectId: fixture.target.projectId } },
+      result: { type: 'render.observation' },
     });
+    const palette = await manager.observe(grant.result.sessionId, 'palette', {
+      expectedRevision,
+    });
+    expect(JSON.stringify(palette)).not.toContain('"target"');
+    expect(palette).toMatchObject({
+      ok: true,
+      result: { type: 'project.palette.observation' },
+    });
+
+    const timeline = await manager.observe(grant.result.sessionId, 'timeline', {
+      expectedRevision,
+    });
+    expect(JSON.stringify(timeline)).not.toContain('"target"');
+    expect(timeline).toMatchObject({
+      ok: true,
+      result: { type: 'project.timeline.observation' },
+    });
+
     const animation = await manager.requestObservation({
       sessionId: grant.result.sessionId,
       operation: 'project.animation.observe',
@@ -231,11 +267,11 @@ describe('Automation Session approval dialog in Chromium', () => {
       keyframes: context.animation.frames.value.slice(0, 2).map((candidate) => candidate.id),
       expectedDigest: null,
     });
+    expect(JSON.stringify(animation)).not.toContain('"target"');
     expect(animation).toMatchObject({
       ok: true,
       result: {
         type: 'animation.evaluation.bundle',
-        target: { projectId: fixture.target.projectId },
       },
     });
   });

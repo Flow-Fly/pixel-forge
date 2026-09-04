@@ -185,11 +185,20 @@ export interface AutomationSessionManagerOptions {
 interface InternalSessionGrant {
   readonly sessionId: string;
   readonly targetId: string;
+  readonly targetName: string;
   readonly context: ProjectContext;
   readonly client: AutomationSessionClient;
   readonly observationClasses: readonly InspectObservationClass[];
   readonly expiresAt: number;
+  revisionBootstrap: 'available' | 'in-flight' | 'completed';
   status: AutomationSessionStatus;
+}
+
+interface InternalApprovalTarget {
+  readonly id: string;
+  readonly name: string;
+  readonly context: ProjectContext;
+  readonly projectId: string;
 }
 
 interface InternalPendingRequest {
@@ -198,13 +207,14 @@ interface InternalPendingRequest {
   readonly compatibility: AutomationSessionRequestInput['compatibility'];
   readonly observationClasses: readonly InspectObservationClass[];
   readonly lifetimeSeconds: number;
+  approvalTargets?: readonly InternalApprovalTarget[];
 }
 
 interface NormalizedPolicyRequest {
   readonly sessionId: string;
   readonly operation: PolicyOperation;
   readonly observationClass: InspectObservationClass;
-  readonly expectedRevision: number;
+  readonly expectedRevision?: number;
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
@@ -218,6 +228,16 @@ type PolicyOperation =
 type SessionSuccess<T> = AutomationSuccess<T>;
 type SessionFailure = AutomationFailure;
 export type AutomationSessionResult<T> = SessionSuccess<T> | SessionFailure;
+
+export interface AutomationLocalSession {
+  readonly sessionId: string;
+  readonly client: AutomationSessionClient;
+  readonly targetId: string;
+  readonly targetName: string;
+  readonly observationClasses: readonly InspectObservationClass[];
+  readonly expiresAt: number;
+  readonly status: AutomationSessionStatus;
+}
 
 // fallow-ignore-next-line unused-export -- Public per-call bounds are disclosed before approval.
 export const AUTOMATION_SESSION_LIMITS: AutomationSessionLimits = Object.freeze({
@@ -321,26 +341,61 @@ export class AutomationPolicyGate {
     const bindingFailure = validateTargetBinding(session, context);
     if (bindingFailure) return bindingFailure;
 
+    const isRevisionBootstrap = request.expectedRevision === undefined;
+    if (session.revisionBootstrap === 'in-flight') {
+      return failureResult('capability_denied', true, {
+        reason: 'revision_bootstrap_in_flight',
+      });
+    }
+    if (isRevisionBootstrap && session.revisionBootstrap === 'completed') {
+      return failureResult('invalid_request', false, { reason: 'expected_revision' });
+    }
+    const expectedRevision = request.expectedRevision ?? context!.project.revision.value;
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      return failureResult('invalid_request', false, { reason: 'expected_revision' });
+    }
+    if (isRevisionBootstrap) session.revisionBootstrap = 'in-flight';
+
     const target: ProjectTarget = { projectId: session.targetId };
-    const adapterInput = createAdapterInput(request, target);
+    const adapterInput = createAdapterInput(request, target, expectedRevision);
     let result: AutomationResult<unknown>;
     try {
       result = await this.dispatch(request, adapterInput);
     } catch (error) {
+      if (isRevisionBootstrap) session.revisionBootstrap = 'available';
       return failureFromUnknown(error);
     }
 
     const postFailure = this.validateSession(session);
-    if (postFailure) return postFailure;
+    if (postFailure) {
+      if (isRevisionBootstrap) session.revisionBootstrap = 'available';
+      return postFailure;
+    }
     const currentContext = this.resolveTarget(session);
     const currentBindingFailure = validateTargetBinding(session, currentContext);
-    if (currentBindingFailure) return currentBindingFailure;
-    if (context?.project.revision.value !== request.expectedRevision) {
+    if (currentBindingFailure) {
+      if (isRevisionBootstrap) session.revisionBootstrap = 'available';
+      return currentBindingFailure;
+    }
+    if (context?.project.revision.value !== expectedRevision) {
+      if (isRevisionBootstrap) session.revisionBootstrap = 'available';
       return failureResult('revision_conflict', true);
     }
 
-    if (!result.ok) return sanitizeFailure(result);
-    return success(cloneTransport(filterObservation(request.observationClass, result.result)));
+    if (!result.ok) {
+      if (isRevisionBootstrap) session.revisionBootstrap = 'available';
+      return sanitizeFailure(result);
+    }
+    try {
+      const observation = stripTargetIdentity(
+        filterObservation(request.observationClass, result.result)
+      );
+      if (isRevisionBootstrap) session.revisionBootstrap = 'completed';
+      return success(observation);
+    } catch {
+      if (isRevisionBootstrap) session.revisionBootstrap = 'available';
+      return failureResult('internal', true, { reason: 'observation_transport' });
+    }
   }
 
   /** Convenience method for callers that already have a session and class. */
@@ -478,16 +533,6 @@ export class AutomationSessionManager {
     });
   }
 
-  // fallow-ignore-next-line unused-class-member -- Compatibility alias for browser clients.
-  discoverContract(): AutomationSessionDiscovery {
-    return this.discover();
-  }
-
-  // fallow-ignore-next-line unused-class-member -- Compatibility alias for browser clients.
-  discoverAutomationContract(): AutomationSessionDiscovery {
-    return this.discover();
-  }
-
   /** Validate and queue one request for visible local approval. */
   requestSession(input: unknown): AutomationSessionResult<AutomationSessionRequestStatus> {
     if (this.disposed)
@@ -506,6 +551,12 @@ export class AutomationSessionManager {
       return failureFromUnknown(error);
     }
 
+    for (const pending of this.pendingRequests.values()) {
+      if (samePendingRequest(pending, request)) {
+        return failureResult('invalid_request', false, { reason: 'duplicate_request' });
+      }
+    }
+
     const requestId = this.createUniqueId(this.requestIdFactory, this.pendingRequests);
     if (!requestId) return failureResult('internal', true, { reason: 'request_id' });
     const pending: InternalPendingRequest = {
@@ -521,20 +572,6 @@ export class AutomationSessionManager {
     return success(status);
   }
 
-  // fallow-ignore-next-line unused-class-member -- Compatibility alias for browser clients.
-  requestAutomationSession(
-    input: unknown
-  ): AutomationSessionResult<AutomationSessionRequestStatus> {
-    return this.requestSession(input);
-  }
-
-  /** Return request status without any local target information. */
-  // fallow-ignore-next-line unused-class-member -- Public local status lookup for browser clients.
-  getPendingRequest(requestId: string): AutomationSessionRequestStatus | null {
-    const pending = this.pendingRequests.get(requestId);
-    return pending ? this.publicPendingRequest(pending) : null;
-  }
-
   listPendingRequests(): readonly AutomationSessionRequestStatus[] {
     return cloneTransport(
       [...this.pendingRequests.values()].map((pending) => this.publicPendingRequest(pending))
@@ -544,6 +581,43 @@ export class AutomationSessionManager {
   /** Local-only target choices for the approval component. */
   listLocalTargets(): readonly AutomationLocalTargetOption[] {
     return this.readTargets().map((target) => ({ id: target.id, name: target.name }));
+  }
+
+  /** Capture the exact local target/context choices shown for one request. */
+  captureLocalTargets(requestId: string): readonly AutomationLocalTargetOption[] {
+    const pending = this.pendingRequests.get(requestId);
+    if (!pending || this.disposed || !this.isPageVisible()) return [];
+
+    pending.approvalTargets = this.readTargets()
+      .filter(
+        (target) => !target.context.isDisposed && target.context.project.id.value === target.id
+      )
+      .map((target) => ({
+        id: target.id,
+        name: target.name,
+        context: target.context,
+        projectId: target.context.project.id.value,
+      }));
+    return cloneTransport(pending.approvalTargets.map(({ id, name }) => ({ id, name })));
+  }
+
+  /** Browser-local session management data; never a client response. */
+  listLocalSessions(): readonly AutomationLocalSession[] {
+    const now = this.clock();
+    for (const session of this.sessions.values()) {
+      if (session.status === 'active' && now >= session.expiresAt) session.status = 'expired';
+    }
+    return cloneTransport(
+      [...this.sessions.values()].map((session) => ({
+        sessionId: session.sessionId,
+        client: session.client,
+        targetId: session.targetId,
+        targetName: session.targetName,
+        observationClasses: session.observationClasses,
+        expiresAt: session.expiresAt,
+        status: session.status,
+      }))
+    );
   }
 
   // fallow-ignore-next-line complexity -- Approval binds one target, subset, lifetime, and opaque session atomically.
@@ -570,7 +644,16 @@ export class AutomationSessionManager {
     }
 
     const target = this.findTarget(targetId);
-    if (!target || target.context.isDisposed || target.context.project.id.value !== target.id) {
+    const capturedTarget = pending.approvalTargets?.find((candidate) => candidate.id === targetId);
+    if (
+      !target ||
+      target.context.isDisposed ||
+      target.context.project.id.value !== target.id ||
+      (capturedTarget !== undefined &&
+        (capturedTarget.name !== target.name ||
+          capturedTarget.context !== target.context ||
+          capturedTarget.projectId !== target.context.project.id.value))
+    ) {
       return failureResult('target_not_found', true);
     }
 
@@ -582,10 +665,12 @@ export class AutomationSessionManager {
     const session: InternalSessionGrant = {
       sessionId,
       targetId: target.id,
+      targetName: target.name,
       context: target.context,
       client: { ...pending.client },
       observationClasses: [...selectedClasses],
       expiresAt,
+      revisionBootstrap: 'available',
       status: 'active',
     };
     this.pendingRequests.delete(requestId);
@@ -593,14 +678,6 @@ export class AutomationSessionManager {
     const grant = this.publicGrant(session);
     this.events.dispatchEvent(new CustomEvent('automation-session-granted', { detail: grant }));
     return success(grant);
-  }
-
-  approve(
-    requestId: string,
-    targetId: string,
-    observationClasses: readonly InspectObservationClass[]
-  ): AutomationSessionResult<AutomationSessionGrant> {
-    return this.approveRequest(requestId, targetId, observationClasses);
   }
 
   denyRequest(requestId: string): AutomationSessionResult<AutomationSessionDenied> {
@@ -618,10 +695,6 @@ export class AutomationSessionManager {
     return success(denied);
   }
 
-  deny(requestId: string): AutomationSessionResult<AutomationSessionDenied> {
-    return this.denyRequest(requestId);
-  }
-
   /** Synchronously revoke a live grant. The next gate call fails. */
   revokeSession(
     sessionId: string
@@ -634,12 +707,6 @@ export class AutomationSessionManager {
     const revoked = cloneTransport({ type: 'automation.session.revoked' as const });
     this.events.dispatchEvent(new CustomEvent('automation-session-revoked', { detail: revoked }));
     return success(revoked);
-  }
-
-  revoke(
-    sessionId: string
-  ): AutomationSessionResult<{ readonly type: 'automation.session.revoked' }> {
-    return this.revokeSession(sessionId);
   }
 
   async requestObservation(input: unknown): Promise<AutomationSessionResult<unknown>> {
@@ -747,11 +814,6 @@ export class AutomationSessionManager {
   }
 }
 
-// fallow-ignore-next-line unused-type -- Compatibility name for browser-owned integrations.
-export type AutomationSessionController = AutomationSessionManager;
-// fallow-ignore-next-line unused-type -- Compatibility name for browser-owned integrations.
-export type BrowserAutomationSessionController = AutomationSessionManager;
-
 /** The app's browser-owned controller surface. */
 export const automationSessionController = new AutomationSessionManager();
 
@@ -762,6 +824,23 @@ function defaultLocalTargetSource(): readonly AutomationLocalTarget[] {
     context: item.context,
     workspaceItemId: item.id,
   }));
+}
+
+function samePendingRequest(
+  pending: InternalPendingRequest,
+  request: AutomationSessionRequestInput
+): boolean {
+  return (
+    pending.client.name === request.client.name &&
+    pending.client.identity === request.client.identity &&
+    pending.compatibility.minVersion === request.compatibility.minVersion &&
+    pending.compatibility.maxVersion === request.compatibility.maxVersion &&
+    pending.lifetimeSeconds === request.lifetimeSeconds &&
+    pending.observationClasses.length === request.observationClasses.length &&
+    pending.observationClasses.every(
+      (observationClass, index) => observationClass === request.observationClasses[index]
+    )
+  );
 }
 
 // fallow-ignore-next-line complexity -- The strict session schema keeps every public bound before queuing.
@@ -946,7 +1025,10 @@ function normalizePolicyRequest(input: unknown): NormalizedPolicyRequest {
   if (value.expectedRevision !== undefined && value.revision !== undefined) {
     throw sessionError('invalid_request', false, { reason: 'expected_revision' });
   }
-  const expectedRevision = normalizeRevision(value.expectedRevision ?? value.revision);
+  const expectedRevision =
+    value.expectedRevision === undefined && value.revision === undefined
+      ? undefined
+      : normalizeRevision(value.expectedRevision ?? value.revision);
   const payload = { ...value };
   delete payload.sessionId;
   delete payload.operation;
@@ -1029,12 +1111,13 @@ function observationClassForOperation(
 
 function createAdapterInput(
   request: NormalizedPolicyRequest,
-  target: ProjectTarget
+  target: ProjectTarget,
+  expectedRevision: number
 ): Record<string, unknown> {
   return {
     operation: request.operation,
     target,
-    expectedRevision: request.expectedRevision,
+    expectedRevision,
     ...request.payload,
   };
 }
@@ -1185,7 +1268,6 @@ function filterObservation(observationClass: InspectObservationClass, value: unk
   if (observationClass === 'structure' && isProjectObservation(value)) {
     return {
       type: 'project.structure.observation',
-      target: value.target,
       revision: value.revision,
       canvas: value.canvas,
       currentFrameId: value.currentFrameId,
@@ -1200,7 +1282,6 @@ function filterObservation(observationClass: InspectObservationClass, value: unk
   if (observationClass === 'palette' && isProjectObservation(value)) {
     return {
       type: 'project.palette.observation',
-      target: value.target,
       revision: value.revision,
       palette: value.palette,
     };
@@ -1208,7 +1289,6 @@ function filterObservation(observationClass: InspectObservationClass, value: unk
   if (observationClass === 'timeline' && isProjectObservation(value)) {
     return {
       type: 'project.timeline.observation',
-      target: value.target,
       revision: value.revision,
       currentFrameId: value.currentFrameId,
       fps: value.fps,
@@ -1223,12 +1303,24 @@ function filterObservation(observationClass: InspectObservationClass, value: unk
   if (observationClass === 'save-state' && isProjectObservation(value)) {
     return {
       type: 'project.save-state.observation',
-      target: value.target,
       revision: value.revision,
       saveSafety: value.saveSafety,
     };
   }
   return value;
+}
+
+/** Remove the browser-local project binding from every client observation. */
+function stripTargetIdentity(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => stripTargetIdentity(item));
+  if (value === null || typeof value !== 'object') return value;
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value;
+
+  const stripped: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== 'target') stripped[key] = stripTargetIdentity(child);
+  }
+  return stripped;
 }
 
 function isProjectObservation(value: unknown): value is ProjectObservation {
@@ -1328,7 +1420,7 @@ function failureFromUnknown(error: unknown): SessionFailure {
     return failureResult(
       code,
       editorError.retryable === true,
-      sanitizeDetails(editorError.details)
+      sanitizeDetails(editorError.details, code !== 'revision_conflict')
     );
   }
   return failureResult('internal', true, { reason: 'unexpected_failure' });
@@ -1338,14 +1430,20 @@ function sanitizeFailure(result: AutomationFailure): SessionFailure {
   return failureResult(
     result.error.code,
     result.error.retryable,
-    sanitizeDetails(result.error.details)
+    sanitizeDetails(result.error.details, result.error.code !== 'revision_conflict')
   );
 }
 
-function sanitizeDetails(value: unknown): Readonly<Record<string, string | number>> | undefined {
+function sanitizeDetails(
+  value: unknown,
+  includeExpectedRevision = true
+): Readonly<Record<string, string | number>> | undefined {
   if (!isRecord(value)) return undefined;
   const safe: Record<string, string | number> = {};
-  for (const key of ['reason', 'min', 'max', 'expectedRevision', 'currentRevision', 'limitId']) {
+  const keys = includeExpectedRevision
+    ? ['reason', 'min', 'max', 'expectedRevision', 'limitId']
+    : ['reason', 'min', 'max', 'limitId'];
+  for (const key of keys) {
     const item = value[key];
     if (typeof item === 'string' || (typeof item === 'number' && Number.isFinite(item)))
       safe[key] = item;

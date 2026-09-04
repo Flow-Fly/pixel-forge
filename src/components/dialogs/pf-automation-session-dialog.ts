@@ -5,6 +5,7 @@ import {
   automationSessionController,
   type AutomationLocalTargetOption,
   type AutomationSessionManager,
+  type AutomationLocalSession,
   type AutomationSessionRequestStatus,
   type InspectObservationClass,
 } from '../../editor/automation-session';
@@ -48,6 +49,43 @@ export class PFAutomationSessionDialog extends BaseComponent {
       display: flex;
       flex-direction: column;
       gap: 8px;
+    }
+
+    .sessions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .session-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .session {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      border: 1px solid var(--pf-color-border, #333);
+      border-radius: var(--pf-radius-sm, 4px);
+    }
+
+    .session-line {
+      color: var(--pf-color-text-secondary, #b7bcc5);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .session-line strong {
+      color: var(--pf-color-text-main, #e0e0e0);
+    }
+
+    .session .revoke {
+      justify-self: start;
+      min-height: 34px;
     }
 
     .section-title {
@@ -146,6 +184,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
 
   @state() private pending: AutomationSessionRequestStatus | null = null;
   @state() private targets: readonly AutomationLocalTargetOption[] = [];
+  @state() private sessions: readonly AutomationLocalSession[] = [];
   @state() private selectedTargetId = '';
   @state() private selectedClasses: readonly InspectObservationClass[] = [];
   @state() private errorMessage = '';
@@ -155,7 +194,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
     super.connectedCallback();
     this.subscribeToController();
     window.addEventListener('show-automation-session-dialog', this.handleShow);
-    this.refreshPending();
+    this.refreshState(true);
   }
 
   disconnectedCallback() {
@@ -196,29 +235,39 @@ export class PFAutomationSessionDialog extends BaseComponent {
   }
 
   private handleShow = () => {
-    this.refreshPending();
-    if (!this.pending) this.errorMessage = 'There is no pending access request.';
+    this.refreshState(true);
+    if (!this.pending && this.sessions.length === 0) {
+      this.errorMessage = 'There is no pending request or active local session.';
+    } else {
+      this.errorMessage = '';
+    }
   };
 
-  private handleSessionEvent = () => {
-    this.refreshPending();
+  private handleSessionEvent = (event: Event) => {
+    const opensDialog =
+      event.type === 'automation-session-requested' || event.type === 'automation-session-granted';
+    this.refreshState(opensDialog);
   };
 
-  private refreshPending() {
+  private refreshState(openIfAvailable = false) {
     const next = this.controller.listPendingRequests()[0] ?? null;
+    this.sessions = this.controller.listLocalSessions();
     if (!next) {
       this.pending = null;
-      this.open = false;
       this.targets = [];
       this.selectedTargetId = '';
       this.selectedClasses = [];
+      if (openIfAvailable && this.sessions.length > 0) this.open = true;
+      if (this.sessions.length === 0) this.open = false;
       return;
     }
 
     const changedRequest = this.pending?.requestId !== next.requestId;
     this.pending = next;
-    this.targets = this.controller.listLocalTargets();
-    if (changedRequest) {
+    if (changedRequest || openIfAvailable) {
+      this.targets = this.controller.captureLocalTargets(next.requestId);
+    }
+    if (changedRequest || openIfAvailable) {
       this.selectedTargetId = '';
       this.selectedClasses = [];
       this.errorMessage = '';
@@ -260,88 +309,148 @@ export class PFAutomationSessionDialog extends BaseComponent {
     if (!result.ok) {
       this.errorMessage =
         'The access request could not be approved. Review the local choices and try again.';
-      this.targets = this.controller.listLocalTargets();
+      this.targets = this.controller.captureLocalTargets(pending.requestId);
+      this.selectedTargetId = '';
       return;
     }
 
     this.pending = null;
-    this.open = false;
+    this.sessions = this.controller.listLocalSessions();
+    this.open = true;
     this.errorMessage = '';
     this.refreshPendingSoon();
   };
 
+  private revokeSession = (sessionId: string) => {
+    const result = this.controller.revokeSession(sessionId);
+    if (!result.ok) {
+      this.errorMessage = 'The local session could not be revoked.';
+      return;
+    }
+    this.errorMessage = '';
+    this.sessions = this.controller.listLocalSessions();
+  };
+
   private refreshPendingSoon() {
     queueMicrotask(() => {
-      if (this.isConnected) this.refreshPending();
+      if (this.isConnected) this.refreshState(false);
     });
+  }
+
+  private renderPending(pending: AutomationSessionRequestStatus) {
+    return html`
+      <p class="intro">
+        <strong>${pending.client.name}</strong> is requesting a temporary, inspect-only session.
+        This identity is self-declared and has not been verified.
+      </p>
+
+      <div class="section">
+        <div class="section-title">Local target</div>
+        <label for="automation-session-target">Choose one project for this session</label>
+        <select
+          id="automation-session-target"
+          .value=${this.selectedTargetId}
+          @change=${this.handleTargetChange}
+        >
+          <option value="">Choose a project…</option>
+          ${this.targets.map((target) => html` <option value=${target.id}>${target.name}</option> `)}
+        </select>
+        ${
+          this.targets.length === 0
+            ? html`<p class="hint">No open local project is available.</p>`
+            : nothing
+        }
+      </div>
+
+      <div class="section">
+        <div class="section-title">Requested observations</div>
+        <p class="hint">
+          Select the specific observations to share. Nothing is selected automatically. Intended
+          lifetime: ${pending.lifetimeSeconds} seconds.
+        </p>
+        <div class="choices">
+          ${pending.observationClasses.map((observationClass) => {
+            const inputId = `automation-session-class-${observationClass}`;
+            return html`
+              <label class="check-label" for=${inputId}>
+                <input
+                  id=${inputId}
+                  type="checkbox"
+                  .checked=${this.selectedClasses.includes(observationClass)}
+                  @change=${(event: Event) => this.handleClassChange(observationClass, event)}
+                />
+                <span>${OBSERVATION_LABELS[observationClass]}</span>
+              </label>
+            `;
+          })}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderSessions() {
+    if (this.sessions.length === 0) return nothing;
+    return html`
+      <section class="sessions" aria-labelledby="automation-session-list-title">
+        <div class="section-title" id="automation-session-list-title">Active local sessions</div>
+        <ul class="session-list">
+          ${this.sessions.map(
+            (session) => html`
+              <li class="session" data-session-id=${session.sessionId}>
+                <div class="session-line">
+                  <strong>${session.client.name}</strong> · ${session.targetName}
+                </div>
+                <div class="session-line">
+                  Granted:
+                  ${session.observationClasses
+                    .map((observationClass) => OBSERVATION_LABELS[observationClass])
+                    .join(', ')}
+                </div>
+                <div class="session-line">
+                  Status: ${session.status} · Expires: ${session.expiresAt}
+                </div>
+                <button
+                  class="secondary revoke"
+                  type="button"
+                  aria-label="Revoke ${session.client.name} session"
+                  ?disabled=${session.status !== 'active'}
+                  @click=${() => this.revokeSession(session.sessionId)}
+                >
+                  Revoke
+                </button>
+              </li>
+            `
+          )}
+        </ul>
+      </section>
+    `;
+  }
+
+  private renderActions(pending: AutomationSessionRequestStatus | null) {
+    if (!pending) {
+      return html`<button class="secondary" type="button" @click=${this.handleClose}>
+        Close
+      </button>`;
+    }
+    const canApprove = Boolean(this.selectedTargetId && this.selectedClasses.length > 0);
+    return html`
+      <button class="secondary" type="button" @click=${this.handleClose}>Deny</button>
+      <button class="primary" type="button" ?disabled=${!canApprove} @click=${this.approve}>
+        Approve selected access
+      </button>
+    `;
   }
 
   render() {
     const pending = this.pending;
-    if (!pending) return nothing;
+    if (!pending && this.sessions.length === 0) return nothing;
 
-    const canApprove = Boolean(this.selectedTargetId && this.selectedClasses.length > 0);
     return html`
       <pf-dialog ?open=${this.open} width="380px" @pf-close=${this.handleClose}>
-        <span slot="title">Allow Inspect-Only Access</span>
-
-        <p class="intro">
-          <strong>${pending.client.name}</strong> is requesting a temporary, inspect-only session.
-          This identity is self-declared and has not been verified.
-        </p>
-
-        <div class="section">
-          <div class="section-title">Local target</div>
-          <label for="automation-session-target">Choose one project for this session</label>
-          <select
-            id="automation-session-target"
-            .value=${this.selectedTargetId}
-            @change=${this.handleTargetChange}
-          >
-            <option value="">Choose a project…</option>
-            ${this.targets.map(
-              (target) => html` <option value=${target.id}>${target.name}</option> `
-            )}
-          </select>
-          ${
-            this.targets.length === 0
-              ? html`<p class="hint">No open local project is available.</p>`
-              : nothing
-          }
-        </div>
-
-        <div class="section">
-          <div class="section-title">Requested observations</div>
-          <p class="hint">
-            Select the specific observations to share. Nothing is selected automatically. Intended
-            lifetime: ${pending.lifetimeSeconds} seconds.
-          </p>
-          <div class="choices">
-            ${pending.observationClasses.map((observationClass) => {
-              const inputId = `automation-session-class-${observationClass}`;
-              return html`
-                <label class="check-label" for=${inputId}>
-                  <input
-                    id=${inputId}
-                    type="checkbox"
-                    .checked=${this.selectedClasses.includes(observationClass)}
-                    @change=${(event: Event) => this.handleClassChange(observationClass, event)}
-                  />
-                  <span>${OBSERVATION_LABELS[observationClass]}</span>
-                </label>
-              `;
-            })}
-          </div>
-        </div>
-
+        <span slot="title">${pending ? 'Allow Inspect-Only Access' : 'Inspect-Only Sessions'}</span>
+        ${pending ? this.renderPending(pending) : nothing} ${this.renderSessions()}
         ${this.errorMessage ? html`<p class="error" role="alert">${this.errorMessage}</p>` : nothing}
-
-        <div slot="actions">
-          <button class="secondary" type="button" @click=${this.handleClose}>Deny</button>
-          <button class="primary" type="button" ?disabled=${!canApprove} @click=${this.approve}>
-            Approve selected access
-          </button>
-        </div>
+        <div slot="actions">${this.renderActions(pending)}</div>
       </pf-dialog>
     `;
   }
