@@ -19,6 +19,7 @@ import {
   type ReloadResult,
   type SaveResult,
 } from './automation-adapter';
+import { renderProject } from './observations';
 import type { ProjectObservation, RenderObservation } from './observations';
 import type { EditorTransactionResult } from './transaction';
 import type { RasterObservation } from './symbol-grid';
@@ -241,6 +242,8 @@ export interface FixtureAnimationJourneyResult extends FixtureAnimationLifecycle
 export interface FixtureRenderObservationJourneyResult {
   readonly negotiation: CatalogNegotiation;
   readonly composite: RenderObservation;
+  readonly canonicalCrop: Uint8Array;
+  readonly primaryAfterInactive: RenderObservation;
   readonly layer: RenderObservation;
   readonly solidBackground: RenderObservation;
   readonly expectedDigest: RenderObservation;
@@ -373,13 +376,15 @@ export class FixtureSession {
   // fallow-ignore-next-line complexity -- The fixture intentionally exercises every public observation checkpoint in one journey.
   async runRenderObservation(): Promise<FixtureRenderObservationJourneyResult> {
     await this.initialize();
+    prepareRenderObservationFixture(this.context);
     const negotiation = await requestSuccess<CatalogNegotiation>(this.adapter, {
       operation: 'catalog.negotiate',
       version: '1.0',
     });
     const observation = await this.observeTarget(this.adapter, this.context.project.revision.value);
     const frame = observation.frames.find((candidate) => candidate.id === observation.currentFrameId);
-    const layer = observation.layers.find((candidate) => candidate.type !== 'reference');
+    const layer = observation.layers.find((candidate) => candidate.id === 'fixture-overlay')
+      ?? observation.layers.find((candidate) => candidate.type !== 'reference');
     const cel = frame?.cels.find((candidate) => candidate.layerId === layer?.id);
     if (!frame || !layer || !cel) throw new Error('Fixture render observation source is incomplete.');
 
@@ -396,6 +401,9 @@ export class FixtureSession {
       expectedDigest: null,
     };
     const composite = await requestSuccess<RenderObservation>(this.adapter, compositeRequest);
+    const canonical = renderProject(this.context, this.target, frame.id);
+    if ('ok' in canonical) throw new Error(`Fixture canonical render failed: ${canonical.error.code}`);
+    const canonicalCrop = cropRenderPixels(canonical.pixels, canonical.width, crop);
     const layerResult = await requestSuccess<RenderObservation>(this.adapter, {
       ...compositeRequest,
       source: { kind: 'layer', layerId: layer.id, frameId: frame.id, celId: cel.id },
@@ -420,17 +428,21 @@ export class FixtureSession {
       inactiveContext.project.id.value = 'fixture-inactive';
     }, inactiveContext);
     seedFixturePixel(inactiveContext);
+    seedInactiveFixturePixel(inactiveContext);
     this.targetContexts.set('fixture-inactive', inactiveContext);
     const inactiveTarget = await requestSuccess<RenderObservation>(this.adapter, {
       ...compositeRequest,
       target: { projectId: 'fixture-inactive' },
       expectedRevision: inactiveContext.project.revision.value,
     });
+    const primaryAfterInactive = await requestSuccess<RenderObservation>(this.adapter, compositeRequest);
     const documentAfter = await this.serializeDocument();
 
     return {
       negotiation,
       composite,
+      canonicalCrop,
+      primaryAfterInactive,
       layer: layerResult,
       solidBackground,
       expectedDigest,
@@ -445,13 +457,14 @@ export class FixtureSession {
         background: solidBackground.background.kind === 'solid'
           && solidBackground.pixels[3] === 255
           && composite.background.kind === 'transparent'
-          && composite.pixels[3] === 0,
+          && composite.pixels[7] === 0,
         digest: composite.digest === expectedDigest.digest
           && sameBytes(composite.pixels, expectedDigest.pixels)
           && digestMismatch.error.code === 'revision_conflict'
           && digestMismatch.error.retryable,
         document: sameProjectFile(documentBefore, documentAfter)
-          && observation.revision === this.context.project.revision.value,
+          && observation.revision === this.context.project.revision.value
+          && sameBytes(composite.pixels, primaryAfterInactive.pixels),
       },
     };
   }
@@ -1420,6 +1433,71 @@ function createFixtureProject(): ProjectFile {
   };
 }
 
+// fallow-ignore-next-line complexity -- This browser fixture keeps the layer, blend, and reference cases together.
+// fallow-ignore-next-line code-duplication -- Canvas setup intentionally follows the existing deterministic fixture shape.
+function prepareRenderObservationFixture(context: ProjectContext): void {
+  if (context.layers.layers.value.some((layer) => layer.id === 'fixture-overlay')) return;
+
+  const frame = context.animation.frames.value[0];
+  const baseLayer = context.layers.layers.value[0];
+  if (!frame || !baseLayer) throw new Error('Render observation fixture has no base layer.');
+
+  // fallow-ignore-next-line code-duplication -- This setup mirrors the established canvas-backed fixture contract.
+  const canvas = document.createElement('canvas');
+  canvas.width = context.project.width.value;
+  canvas.height = context.project.height.value;
+  const drawing = canvas.getContext('2d');
+  if (!drawing) throw new Error('Render observation fixture could not create an overlay canvas.');
+  drawing.fillStyle = '#0000ff';
+  drawing.fillRect(0, 0, 1, 1);
+  drawing.fillRect(1, 1, 1, 1);
+
+  const overlayLayer: Layer = {
+    id: 'fixture-overlay',
+    name: 'Overlay',
+    type: 'image',
+    visible: true,
+    locked: false,
+    opacity: 128,
+    blendMode: 'multiply',
+    parentId: null,
+    continuous: false,
+    canvas,
+  };
+  const referenceLayer: Layer = {
+    id: 'fixture-reference',
+    name: 'Visible Reference',
+    type: 'reference',
+    visible: true,
+    locked: false,
+    opacity: 255,
+    blendMode: 'normal',
+    parentId: null,
+    referenceData: {
+      bytes: new Uint8Array([255, 0, 255, 255]),
+      mimeType: 'image/png',
+      x: 0,
+      y: 0,
+      scale: 1,
+      position: 'above',
+    },
+  };
+  const overlayCel: Cel = {
+    id: 'fixture-overlay-cel',
+    layerId: overlayLayer.id,
+    frameId: frame.id,
+    canvas,
+    indexBuffer: new Uint8Array(canvas.width * canvas.height),
+    opacity: 100,
+  };
+
+  context.layers.layers.value = [baseLayer, overlayLayer, referenceLayer];
+  const cels = new Map(context.animation.cels.value);
+  cels.set(context.animation.getCelKey(overlayLayer.id, frame.id), overlayCel);
+  context.animation.cels.value = cels;
+  context.animation.syncLayerCanvases();
+}
+
 function seedFixturePixel(context: ProjectContext): void {
   const layer = context.layers.layers.value[0];
   const frame = context.animation.frames.value[0];
@@ -1437,6 +1515,18 @@ function seedFixturePixel(context: ProjectContext): void {
   indexBuffer[cel.canvas.width + 1] = 2;
   context.animation.updateCelIndexBuffer(layer.id, frame.id, indexBuffer);
   context.animation.syncLayerCanvases();
+}
+
+function seedInactiveFixturePixel(context: ProjectContext): void {
+  const frame = context.animation.frames.value[0];
+  const layer = context.layers.layers.value[0];
+  if (!frame || !layer) throw new Error('Inactive fixture project did not load its artwork.');
+  const cel = context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id));
+  if (!cel) throw new Error('Inactive fixture project did not load its cel.');
+  const drawing = cel.canvas.getContext('2d');
+  if (!drawing) throw new Error('Inactive fixture project could not create a drawing context.');
+  drawing.fillStyle = '#00ff00';
+  drawing.fillRect(0, 0, 1, 1);
 }
 
 function prepareStructureRefinementFixture(context: ProjectContext): void {
@@ -1607,6 +1697,20 @@ function removeEmptyIndexData(project: ProjectFile): ProjectFile {
 
 function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
   return first.length === second.length && first.every((value, index) => value === second[index]);
+}
+
+function cropRenderPixels(
+  pixels: Uint8Array,
+  width: number,
+  region: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): Uint8Array {
+  const cropped = new Uint8Array(region.width * region.height * 4);
+  for (let row = 0; row < region.height; row += 1) {
+    const sourceStart = ((region.y + row) * width + region.x) * 4;
+    const targetStart = row * region.width * 4;
+    cropped.set(pixels.subarray(sourceStart, sourceStart + region.width * 4), targetStart);
+  }
+  return cropped;
 }
 
 // fallow-ignore-next-line complexity -- Exact fixture comparison keeps every public render field visible.

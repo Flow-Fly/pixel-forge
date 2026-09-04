@@ -12,6 +12,7 @@ export const RENDER_OBSERVATION_MAX_BYTES = 16 * 1024 * 1024;
 export const RENDER_OBSERVATION_MAX_REGION_WIDTH = 64;
 export const RENDER_OBSERVATION_MAX_REGION_HEIGHT = 64;
 export const RENDER_OBSERVATION_MAX_PIXELS = 4096;
+export const RENDER_OBSERVATION_MAX_IDENTITY_LENGTH = 256;
 export const RENDER_OBSERVATION_MIN_SCALE = 1;
 export const RENDER_OBSERVATION_MAX_SCALE = 16;
 export const RENDER_OBSERVATION_REPRESENTATION_VERSION = '1.0';
@@ -1053,34 +1054,41 @@ export const renderObservationCatalog = Object.freeze({
   kind: 'observation',
   target: 'project',
   requiresRevision: true,
+  representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
   request: {
-    target: { projectId: 'string' },
-    expectedRevision: 'integer >= 0',
-    frameId: 'compatibility frame-only source identity',
-    source: {
-      oneOf: {
-        composite: { kind: 'composite', frameId: 'non-empty bounded string' },
-        layer: {
-          kind: 'layer',
-          layerId: 'non-empty bounded string',
-          frameId: 'non-empty bounded string',
-          celId: 'optional captured cel identity',
+    oneOf: {
+      explicit: {
+        target: { projectId: 'string' },
+        expectedRevision: 'integer >= 0',
+        source: {
+          oneOf: {
+            composite: { kind: 'composite', frameId: 'non-empty bounded string' },
+            layer: {
+              kind: 'layer',
+              layerId: 'non-empty bounded string',
+              frameId: 'non-empty bounded string',
+              celId: 'required non-empty captured cel identity',
+            },
+          },
         },
+        region: 'optional integer crop; omitted means full project bounds',
+        background: {
+          kind: 'transparent | solid',
+          color: 'six-digit hex color when kind is solid',
+        },
+        scale: 'integer 1..16 nearest-neighbor inspection scale',
+        expectedDigest: 'null or 64-character lowercase SHA-256 digest',
       },
-    },
-    region: 'optional integer crop; omitted means full project bounds',
-    background: {
-      kind: 'transparent | solid',
-      color: 'six-digit hex color when kind is solid',
-    },
-    scale: 'integer 1..16 nearest-neighbor inspection scale',
-    expectedDigest: 'null or 64-character lowercase SHA-256 digest',
-    compatibility: {
-      frameId: 'frame-only request means composite, full bounds, transparent, scale 1, no digest assertion',
+      compatibility: {
+        target: { projectId: 'string' },
+        expectedRevision: 'integer >= 0',
+        frameId: 'non-empty bounded string',
+      },
     },
   },
   result: {
     type: 'render.observation',
+    representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
     target: { projectId: 'string' },
     revision: 'integer >= 0',
     frameId: 'source frame identity (compatibility alias)',
@@ -1098,6 +1106,7 @@ export const renderObservationCatalog = Object.freeze({
   },
   limits: {
     maxBytes: RENDER_OBSERVATION_MAX_BYTES,
+    maxIdentityLength: RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
     region: {
       maxWidth: RENDER_OBSERVATION_MAX_REGION_WIDTH,
       maxHeight: RENDER_OBSERVATION_MAX_REGION_HEIGHT,
@@ -1106,6 +1115,11 @@ export const renderObservationCatalog = Object.freeze({
     scale: { min: RENDER_OBSERVATION_MIN_SCALE, max: RENDER_OBSERVATION_MAX_SCALE },
   },
   revision: 'expectedRevision must remain current through asynchronous digest work',
+  digest: {
+    algorithm: 'SHA-256',
+    representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
+    expectedMismatch: { code: 'revision_conflict', retryable: true },
+  },
   affectedDomains: ['raster-content'] as const,
   availability: {
     source: 'composite or renderable non-reference layer',
@@ -1194,17 +1208,7 @@ const automationOperationCatalog = Object.freeze([
     kind: 'observation',
     target: 'project',
     requiresRevision: true,
-    request: {
-      target: { projectId: 'string' },
-      expectedRevision: 'integer >= 0',
-      frameId: renderObservationCatalog.request.frameId,
-      source: renderObservationCatalog.request.source,
-      region: renderObservationCatalog.request.region,
-      background: renderObservationCatalog.request.background,
-      scale: renderObservationCatalog.request.scale,
-      expectedDigest: renderObservationCatalog.request.expectedDigest,
-      compatibility: renderObservationCatalog.request.compatibility,
-    },
+    request: renderObservationCatalog.request,
     result: {
       ...renderObservationCatalog.result,
     },
@@ -1212,6 +1216,8 @@ const automationOperationCatalog = Object.freeze([
     affectedDomains: renderObservationCatalog.affectedDomains,
     availability: renderObservationCatalog.availability,
     privacy: renderObservationCatalog.privacy,
+    representationVersion: renderObservationCatalog.representationVersion,
+    digest: renderObservationCatalog.digest,
     revision: 'expectedRevision must equal the captured project revision; result reports that revision',
     errors: renderObservationCatalog.errors,
   },

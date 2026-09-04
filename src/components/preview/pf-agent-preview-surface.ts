@@ -22,6 +22,7 @@ export class PFAgentPreviewSurface extends LitElement {
       display: block;
       font-family: system-ui, sans-serif;
       min-width: 0;
+      container-type: inline-size;
     }
 
     .surface {
@@ -143,7 +144,7 @@ export class PFAgentPreviewSurface extends LitElement {
       width: var(--inspection-width);
     }
 
-    @media (max-width: 640px) {
+    @container (max-width: 640px) {
       .surface {
         padding: 12px;
       }
@@ -172,7 +173,9 @@ export class PFAgentPreviewSurface extends LitElement {
   @query('.inspection-canvas') private inspectionCanvas?: HTMLCanvasElement;
 
   protected updated(changedProperties: PropertyValues<this>): void {
-    if (changedProperties.has('observation')) this.paintObservation();
+    if (changedProperties.has('observation') || changedProperties.has('error')) {
+      this.paintObservation();
+    }
   }
 
   protected render() {

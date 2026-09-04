@@ -3,6 +3,7 @@ import {
   createFixtureSession,
   type FixtureSession,
 } from '../../src/editor/fixture-session';
+import { createProjectContext } from '../../src/stores/project-context';
 import '../../src/components/preview/pf-agent-preview-surface';
 import type { PFAgentPreviewSurface } from '../../src/components/preview/pf-agent-preview-surface';
 
@@ -28,6 +29,43 @@ describe('static render observation and agent preview surface', () => {
       digest: true,
       document: true,
     });
+    const renderOperation = journey.negotiation.catalog.operations.find((operation) =>
+      operation.id === 'project.render.observe');
+    expect(renderOperation).toMatchObject({
+      representationVersion: '1.0',
+      digest: {
+        algorithm: 'SHA-256',
+        representationVersion: '1.0',
+        expectedMismatch: { code: 'revision_conflict', retryable: true },
+      },
+      limits: { maxIdentityLength: 256 },
+    });
+    expect(renderOperation?.request).toMatchObject({
+      oneOf: {
+        explicit: {
+          source: { oneOf: { layer: { celId: 'required non-empty captured cel identity' } } },
+          expectedDigest: 'null or 64-character lowercase SHA-256 digest',
+        },
+        compatibility: {
+          frameId: 'non-empty bounded string',
+        },
+      },
+    });
+    expect(renderOperation?.request).not.toHaveProperty('compatibility');
+    const compatibility = await session.adapter.request({
+      operation: 'project.render.observe',
+      target: session.target,
+      expectedRevision: journey.composite.revision,
+      frameId: 'fixture-frame',
+    });
+    expect(compatibility).toMatchObject({
+      ok: true,
+      result: {
+        source: { kind: 'composite', frameId: 'fixture-frame' },
+        background: { kind: 'transparent' },
+        scale: 1,
+      },
+    });
     expect(journey.composite).toMatchObject({
       type: 'render.observation',
       sourceKind: 'composite',
@@ -36,11 +74,17 @@ describe('static render observation and agent preview surface', () => {
       format: 'rgba8',
       stride: 8,
     });
+    expect(journey.composite.pixels).toEqual(journey.canonicalCrop);
+    expect(journey.layer.pixels).not.toEqual(journey.composite.pixels);
+    expect(journey.layer.pixels[3]).toBeLessThan(255);
+    expect(journey.inactiveTarget.pixels).not.toEqual(journey.composite.pixels);
+    expect(journey.primaryAfterInactive.pixels).toEqual(journey.composite.pixels);
+    expect(hasRgbaPixel(journey.composite.pixels, [255, 0, 255, 255])).toBe(false);
     expect(journey.layer.source).toMatchObject({
       kind: 'layer',
-      layerId: 'fixture-layer',
+      layerId: 'fixture-overlay',
       frameId: 'fixture-frame',
-      celId: 'fixture-cel',
+      celId: 'fixture-overlay-cel',
     });
     expect(journey.composite.source).toEqual({ kind: 'composite', frameId: 'fixture-frame' });
     expect(journey.solidBackground.background).toEqual({ kind: 'solid', color: '#0000ff' });
@@ -54,6 +98,21 @@ describe('static render observation and agent preview surface', () => {
     sessions.push(session);
     const journey = await session.runRenderObservation();
     const createElement = vi.spyOn(document, 'createElement');
+
+    const missingCel = await session.adapter.request({
+      operation: 'project.render.observe',
+      target: session.target,
+      expectedRevision: journey.composite.revision,
+      source: { kind: 'layer', layerId: 'fixture-overlay', frameId: 'fixture-frame' },
+      region: { x: 0, y: 0, width: 2, height: 2 },
+      background: { kind: 'transparent' },
+      scale: 1,
+      expectedDigest: null,
+    });
+    expect(missingCel).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', retryable: false, details: { reason: 'cel_id' } },
+    });
 
     const result = await session.adapter.request({
       operation: 'project.render.observe',
@@ -103,15 +162,70 @@ describe('static render observation and agent preview surface', () => {
     });
     expect(missingFrame).toMatchObject({ ok: false, error: { code: 'target_not_found', retryable: true } });
 
+    const missingLayer = await session.adapter.request({
+      ...request,
+      source: { kind: 'layer', layerId: 'missing-layer', frameId: 'fixture-frame', celId: 'missing-cel' },
+    });
+    expect(missingLayer).toMatchObject({ ok: false, error: { code: 'target_not_found', retryable: true } });
+
     const replacedCel = await session.adapter.request({
       ...request,
-      source: { kind: 'layer', layerId: 'fixture-layer', frameId: 'fixture-frame', celId: 'replaced-cel' },
+      source: { kind: 'layer', layerId: 'fixture-overlay', frameId: 'fixture-frame', celId: 'replaced-cel' },
     });
     expect(replacedCel).toMatchObject({ ok: false, error: { code: 'revision_conflict', retryable: true } });
+
+    const referenceSource = await session.adapter.request({
+      ...request,
+      source: {
+        kind: 'layer',
+        layerId: 'fixture-reference',
+        frameId: 'fixture-frame',
+        celId: 'fixture-reference-cel',
+      },
+    });
+    expect(referenceSource).toMatchObject({
+      ok: false,
+      error: { code: 'unsupported', retryable: false, details: { reason: 'reference_layer' } },
+    });
 
     session.dispose();
     const disposed = await session.adapter.request(request);
     expect(disposed).toMatchObject({ ok: false, error: { code: 'target_not_found', retryable: true } });
+  });
+
+  it('rejects a malformed layer canvas before allocating a Canvas', async () => {
+    const context = createProjectContext();
+    const session = createFixtureSession({ context });
+    sessions.push(session);
+    const journey = await session.runRenderObservation();
+    const malformedCel = context.animation.cels.value.get(
+      context.animation.getCelKey('fixture-overlay', 'fixture-frame'),
+    );
+    if (!malformedCel) throw new Error('Malformed-source fixture cel missing.');
+    malformedCel.canvas.width = 1;
+    const createElement = vi.spyOn(document, 'createElement');
+
+    const result = await session.adapter.request({
+      operation: 'project.render.observe',
+      target: session.target,
+      expectedRevision: journey.composite.revision,
+      source: {
+        kind: 'layer',
+        layerId: 'fixture-overlay',
+        frameId: 'fixture-frame',
+        celId: 'fixture-overlay-cel',
+      },
+      region: { x: 0, y: 0, width: 2, height: 2 },
+      background: { kind: 'transparent' },
+      scale: 1,
+      expectedDigest: null,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_state', retryable: false, details: { reason: 'source_canvas_shape' } },
+    });
+    expect(createElement.mock.calls.filter(([tag]) => tag === 'canvas')).toHaveLength(0);
   });
 
   it('returns a retryable stale-revision conflict after asynchronous digest work', async () => {
@@ -174,6 +288,52 @@ describe('static render observation and agent preview surface', () => {
     });
   });
 
+  it('detaches the original request while asynchronous digest work is paused', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+    const journey = await session.runRenderObservation();
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+    let releaseDigest: (() => void) | undefined;
+    let markDigestStarted: (() => void) | undefined;
+    const digestPaused = new Promise<void>((resolve) => { releaseDigest = resolve; });
+    const digestStarted = new Promise<void>((resolve) => { markDigestStarted = resolve; });
+    vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      markDigestStarted?.();
+      await digestPaused;
+      return originalDigest(...args);
+    });
+
+    const source: { kind: 'composite'; frameId: string } = {
+      kind: 'composite',
+      frameId: 'fixture-frame',
+    };
+    const target = { projectId: session.target.projectId };
+    const requestInput = {
+      operation: 'project.render.observe',
+      target,
+      expectedRevision: journey.composite.revision,
+      source,
+      region: { x: 0, y: 0, width: 2, height: 2 },
+      background: { kind: 'transparent' as const },
+      scale: 4,
+      expectedDigest: null,
+    };
+    const pending = session.adapter.request(requestInput);
+    await digestStarted;
+    source.frameId = 'missing-frame';
+    target.projectId = 'mutated-target';
+    releaseDigest?.();
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      result: {
+        target: { projectId: 'fixture-project' },
+        source: { kind: 'composite', frameId: 'fixture-frame' },
+      },
+    });
+  });
+
+  // fallow-ignore-next-line complexity -- This browser proof keeps view, responsive, and recovery assertions together.
   it('shows both intended and nearest-neighbor inspection figures from identical bytes', async () => {
     const session = createFixtureSession();
     sessions.push(session);
@@ -206,6 +366,23 @@ describe('static render observation and agent preview surface', () => {
     expect(shadowText).toContain(journey.composite.digest);
     expect(surface.shadowRoot?.querySelectorAll('figure')).toHaveLength(2);
     expect(surface.shadowRoot?.querySelector('.checkerboard')).toBeTruthy();
+
+    surface.style.width = '320px';
+    await surface.updateComplete;
+    const figures = surface.shadowRoot?.querySelector<HTMLElement>('.figures');
+    expect(getComputedStyle(figures!).gridTemplateColumns.trim().split(/\s+/)).toHaveLength(1);
+
+    surface.error = 'Render checkpoint unavailable.';
+    await surface.updateComplete;
+    expect(surface.shadowRoot?.querySelector('[role="alert"]')?.textContent)
+      .toContain('Render checkpoint unavailable.');
+    expect(surface.shadowRoot?.querySelector('.intended-canvas')).toBeNull();
+
+    surface.error = '';
+    await surface.updateComplete;
+    const recovered = surface.shadowRoot?.querySelector<HTMLCanvasElement>('.intended-canvas');
+    expect(recovered).toBeTruthy();
+    expect(readCanvas(recovered!)).toEqual(journey.composite.pixels);
   });
 
   it('renders a solid background as presentation while retaining the detached result', async () => {
@@ -230,4 +407,11 @@ function readCanvas(canvas: HTMLCanvasElement): Uint8Array {
   const drawing = canvas.getContext('2d');
   if (!drawing) throw new Error('Canvas context unavailable.');
   return new Uint8Array(drawing.getImageData(0, 0, canvas.width, canvas.height).data);
+}
+
+function hasRgbaPixel(pixels: Uint8Array, expected: readonly [number, number, number, number]): boolean {
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    if (expected.every((value, index) => pixels[offset + index] === value)) return true;
+  }
+  return false;
 }

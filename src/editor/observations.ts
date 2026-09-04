@@ -10,6 +10,7 @@ import {
   RENDER_OBSERVATION_MAX_BYTES,
   RENDER_OBSERVATION_MAX_REGION_HEIGHT,
   RENDER_OBSERVATION_MAX_REGION_WIDTH,
+  RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
   RENDER_OBSERVATION_MAX_SCALE,
   RENDER_OBSERVATION_MIN_SCALE,
   RENDER_OBSERVATION_REPRESENTATION_VERSION,
@@ -129,7 +130,7 @@ export interface RenderLayerSourceRequest {
   readonly kind: 'layer';
   readonly layerId: string;
   readonly frameId: string;
-  readonly celId?: string;
+  readonly celId: string;
 }
 
 export type RenderObservationSourceRequest =
@@ -164,6 +165,7 @@ export type RenderObservationSource =
 
 export interface RenderObservation {
   readonly type: 'render.observation';
+  readonly representationVersion: typeof RENDER_OBSERVATION_REPRESENTATION_VERSION;
   readonly target: ProjectTarget;
   readonly revision: number;
   /** Compatibility alias for the captured source frame. */
@@ -455,6 +457,7 @@ export async function renderProjectObservation(
 
     return {
       type: 'render.observation',
+      representationVersion: RENDER_OBSERVATION_REPRESENTATION_VERSION,
       target: { projectId: request.target.projectId },
       revision: request.expectedRevision,
       frameId: source.frameId,
@@ -504,7 +507,7 @@ function validateRenderRequest(request: RenderObservationRequest): void {
   if (!isRecord(request.target)
       || typeof request.target.projectId !== 'string'
       || request.target.projectId.length === 0
-      || request.target.projectId.length > 256) {
+      || request.target.projectId.length > RENDER_OBSERVATION_MAX_IDENTITY_LENGTH) {
     throw renderObservationError('invalid_request', false, { reason: 'target' });
   }
   if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) {
@@ -518,9 +521,7 @@ function validateRenderRequest(request: RenderObservationRequest): void {
   } else if (request.source.kind === 'layer') {
     validateRenderIdentity(request.source.layerId, 'layer_id');
     validateRenderIdentity(request.source.frameId, 'frame_id');
-    if (request.source.celId !== undefined) {
-      validateRenderIdentity(request.source.celId, 'cel_id');
-    }
+    validateRenderIdentity(request.source.celId, 'cel_id');
   } else {
     throw renderObservationError('invalid_request', false, { reason: 'source_kind' });
   }
@@ -550,8 +551,11 @@ function validateRenderIdentity(value: unknown, reason: string): asserts value i
   if (typeof value !== 'string' || value.length === 0) {
     throw renderObservationError('invalid_request', false, { reason });
   }
-  if (value.length > 256) {
-    throw renderObservationError('limit_exceeded', false, { reason, max: 256 });
+  if (value.length > RENDER_OBSERVATION_MAX_IDENTITY_LENGTH) {
+    throw renderObservationError('limit_exceeded', false, {
+      reason,
+      max: RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
+    });
   }
 }
 
@@ -601,7 +605,10 @@ function normalizeRenderRegion(
 }
 
 function normalizeRenderBackground(value: RenderBackgroundPolicy): RenderBackgroundPolicy {
-  if (!isRecord(value) || value.kind === 'transparent') return { kind: 'transparent' };
+  if (!isRecord(value)) {
+    throw renderObservationError('invalid_request', false, { reason: 'background' });
+  }
+  if (value.kind === 'transparent') return { kind: 'transparent' };
   if (value.kind === 'solid' && typeof value.color === 'string' && /^#[0-9a-f]{6}$/i.test(value.color)) {
     return { kind: 'solid', color: value.color.toLowerCase() };
   }
@@ -643,10 +650,10 @@ function captureRenderSource(
   if (cel.layerId !== layer.id || cel.frameId !== source.frameId) {
     throw renderObservationError('invalid_state', false, { reason: 'cel_identity' });
   }
-  if (source.celId !== undefined && source.celId !== cel.id) {
+  if (source.celId !== cel.id) {
     throw renderObservationError('revision_conflict', true, { reason: 'cel_changed' });
   }
-  validateSourceCanvas(cel);
+  validateSourceCanvas(cel, context.project.width.value, context.project.height.value);
   return {
     source: { kind: 'layer', layerId: layer.id, frameId: source.frameId, celId: cel.id },
     frameId: source.frameId,
@@ -659,10 +666,10 @@ function captureRenderSource(
   };
 }
 
-function validateSourceCanvas(cel: Cel): void {
+function validateSourceCanvas(cel: Cel, projectWidth: number, projectHeight: number): void {
   if (!cel.canvas || !Number.isSafeInteger(cel.canvas.width) || !Number.isSafeInteger(cel.canvas.height)
-      || cel.canvas.width < 1 || cel.canvas.height < 1) {
-    throw renderObservationError('invalid_state', false, { reason: 'canvas_shape' });
+      || cel.canvas.width !== projectWidth || cel.canvas.height !== projectHeight) {
+    throw renderObservationError('invalid_state', false, { reason: 'source_canvas_shape' });
   }
 }
 

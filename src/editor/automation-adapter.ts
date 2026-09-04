@@ -33,6 +33,7 @@ import {
   editorCatalog,
   RASTER_GRID_MAX_STRING_LENGTH,
   RASTER_OBSERVATION_ID,
+  RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
   RENDER_OBSERVATION_MAX_SCALE,
   RENDER_OBSERVATION_MIN_SCALE,
   RENDER_OBSERVATION_MAX_BYTES,
@@ -1024,12 +1025,10 @@ function normalizeRenderRequest(input: unknown): ProjectRequestInput & { readonl
     throw adapterError('invalid_request', false, { reason: 'operation' });
   }
   const frameId = input.frameId;
-  if (typeof frameId !== 'string' || frameId.length === 0) {
-    throw adapterError('invalid_request', false, { reason: 'frame_id' });
-  }
   return {
-    ...normalizeProjectRequest(input),
-    frameId,
+    target: normalizeRenderTarget(input.target),
+    expectedRevision: normalizeRenderRevision(input.expectedRevision ?? input.revision),
+    frameId: normalizeRenderIdentity(frameId, 'frame_id'),
   };
 }
 
@@ -1052,8 +1051,8 @@ function normalizeRenderObservationRequest(input: unknown): RenderObservationReq
     throw adapterError('invalid_request', false, { reason: 'operation' });
   }
 
-  const target = normalizeTarget(input.target);
-  const expectedRevision = normalizeRevision(input.expectedRevision ?? input.revision);
+  const target = normalizeRenderTarget(input.target);
+  const expectedRevision = normalizeRenderRevision(input.expectedRevision ?? input.revision);
   const hasExplicitShape = input.source !== undefined
     || input.region !== undefined
     || input.background !== undefined
@@ -1103,7 +1102,7 @@ function normalizeRenderSource(value: unknown): RenderObservationRequest['source
       kind: 'layer',
       layerId: normalizeRenderIdentity(value.layerId, 'layer_id'),
       frameId: normalizeRenderIdentity(value.frameId, 'frame_id'),
-      ...(value.celId === undefined ? {} : { celId: normalizeRenderIdentity(value.celId, 'cel_id') }),
+      celId: normalizeRenderIdentity(value.celId, 'cel_id'),
     };
   }
   throw adapterError('invalid_request', false, { reason: 'source_kind' });
@@ -1163,7 +1162,12 @@ function normalizeRenderIdentity(value: unknown, reason: string): string {
   if (typeof value !== 'string' || value.length === 0) {
     throw adapterError('invalid_request', false, { reason });
   }
-  if (value.length > 256) throw adapterError('limit_exceeded', false, { reason, max: 256 });
+  if (value.length > RENDER_OBSERVATION_MAX_IDENTITY_LENGTH) {
+    throw adapterError('limit_exceeded', false, {
+      reason,
+      max: RENDER_OBSERVATION_MAX_IDENTITY_LENGTH,
+    });
+  }
   return value;
 }
 
@@ -1188,15 +1192,27 @@ function normalizeTarget(value: unknown): ProjectTarget {
   if (!isRecord(value) || typeof value.projectId !== 'string' || value.projectId.length === 0) {
     throw adapterError('invalid_request', false, { reason: 'target' });
   }
-  assertExactKeys(value, ['projectId'], 'target');
-  return { projectId: normalizeRenderIdentity(value.projectId, 'target') };
+  return { projectId: value.projectId };
 }
 
 function normalizeRevision(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw adapterError('invalid_request', false, { reason: 'expected_revision' });
   }
   return value;
+}
+
+function normalizeRenderTarget(value: unknown): ProjectTarget {
+  if (!isRecord(value)) throw adapterError('invalid_request', false, { reason: 'target' });
+  assertExactKeys(value, ['projectId'], 'render_target');
+  return { projectId: normalizeRenderIdentity(value.projectId, 'target') };
+}
+
+function normalizeRenderRevision(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw adapterError('invalid_request', false, { reason: 'expected_revision' });
+  }
+  return value as number;
 }
 
 function normalizeNumber(value: unknown, reason: string): number {
