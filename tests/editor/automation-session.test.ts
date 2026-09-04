@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   AutomationSessionManager,
+  ARTIST_MODE_MAX_TRANSACTIONS,
   type AutomationLocalTarget,
   type InspectObservationClass,
 } from '../../src/editor/automation-session';
@@ -522,5 +523,403 @@ describe('AutomationSessionManager', () => {
     expect(manager.listPendingRequests()).toHaveLength(1);
     expect(manager.listLocalSessions()).toHaveLength(0);
     expect(JSON.stringify(approval)).not.toContain('approval-project');
+  });
+
+  it('grants one target-free Artist Mode run and injects target and provenance at execution', async () => {
+    const first = createTarget('artist-project', 'Artist project');
+    const second = createTarget('untouched-project', 'Untouched project');
+    const manager = createManager([first, second]);
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, first.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+
+    const artistRequest = manager.requestArtistMode({
+      operation: 'automation.artist-mode.request',
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'artist-run-1',
+      runIntent: 'Make one coherent fixture edit',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 2,
+      requestedDurationSeconds: 60,
+    });
+    expect(artistRequest).toMatchObject({
+      ok: true,
+      result: {
+        type: 'automation.artist-mode.requested',
+        runId: 'artist-run-1',
+        requestedWriteCategories: ['structure', 'timeline'],
+      },
+    });
+    expect(JSON.stringify(artistRequest)).not.toContain('artist-project');
+    expect(manager.captureArtistModeTarget('request-2')).toEqual({ id: first.id, name: first.name });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+
+    const artistGrant = manager.approveArtistMode(
+      artistRequest.result.requestId,
+      ['structure', 'timeline'],
+      1,
+    );
+    expect(artistGrant).toMatchObject({
+      ok: true,
+      result: {
+        type: 'automation.artist-mode.granted',
+        sessionId: inspectGrant.result.sessionId,
+        runId: 'artist-run-1',
+        categories: ['structure', 'timeline'],
+        transactionLimit: 1,
+        childCommandLimit: 2,
+        remainingTransactions: 1,
+        operationIds: ['project.transaction.execute'],
+      },
+    });
+    expect(JSON.stringify(artistGrant)).not.toContain('artist-project');
+    if (!artistGrant.ok) throw new Error('Expected an Artist Mode grant.');
+
+    const layer = first.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+    const result = await manager.requestTransaction({
+      operation: 'project.transaction.execute',
+      sessionId: inspectGrant.result.sessionId,
+      runId: artistGrant.result.runId,
+      operationId: 'artist-operation-1',
+      profile: 'layer-and-tag',
+      expectedRevision: 0,
+      children: [
+        {
+          command: 'project.layer.state',
+          input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+        },
+        {
+          command: 'project.animation.frame-tag',
+          input: {
+            kind: 'tag.create',
+            name: 'Artist fixture',
+            color: '#123456',
+            startFrameIndex: 0,
+            endFrameIndex: 0,
+          },
+        },
+      ],
+    });
+    expect(result).toMatchObject({ ok: true, result: { type: 'project.transaction.execute' } });
+    expect(JSON.stringify(result)).not.toContain('artist-project');
+    expect(JSON.stringify(result)).not.toContain('target');
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        provenance: {
+          clientId: 'External Inspector',
+          sessionId: inspectGrant.result.sessionId,
+          runId: 'artist-run-1',
+          operationId: 'artist-operation-1',
+        },
+      },
+    });
+    expect(first.context.project.revision.value).toBe(1);
+    expect(second.context.project.revision.value).toBe(0);
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      runId: 'artist-run-1',
+      transactionsUsed: 1,
+      remainingTransactions: 0,
+      status: 'budget-exhausted',
+    });
+
+    await expect(manager.requestTransaction({
+      operation: 'project.transaction.execute',
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'artist-run-1',
+      operationId: 'artist-operation-2',
+      profile: 'layer-and-tag',
+      expectedRevision: 1,
+      children: [
+        {
+          command: 'project.layer.state',
+          input: { kind: 'layer.visibility', layerId: layer.id, visible: true },
+        },
+        {
+          command: 'project.animation.frame-tag',
+          input: {
+            kind: 'tag.create',
+            name: 'Artist fixture 2',
+            color: '#123456',
+            startFrameIndex: 0,
+            endFrameIndex: 0,
+          },
+        },
+      ],
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'limit_exceeded', details: { reason: 'transaction_budget' } },
+    });
+    expect(ARTIST_MODE_MAX_TRANSACTIONS).toBe(50);
+  });
+
+  it('rejects Artist Mode target and provenance smuggling, stale revisions, duplicates, and failures without budget use', async () => {
+    const target = createTarget('artist-safe-project', 'Artist safe project');
+    const manager = createManager([target]);
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runIntent: 'Run safety test',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 3,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, {
+      categories: ['structure', 'timeline'],
+      transactionLimit: 3,
+    });
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    const base = {
+      operation: 'project.transaction.execute',
+      sessionId: grant.result.sessionId,
+      runId: grant.result.runId,
+      operationId: 'safety-operation',
+      profile: 'layer-and-tag',
+      expectedRevision: 0,
+      children: [],
+    };
+    const layer = target.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+    const validChildren = [
+      {
+        command: 'project.layer.state',
+        input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+      },
+      {
+        command: 'project.animation.frame-tag',
+        input: {
+          kind: 'tag.create',
+          name: 'Safety fixture',
+          color: '#123456',
+          startFrameIndex: 0,
+          endFrameIndex: 0,
+        },
+      },
+    ] as const;
+    await expect(manager.requestTransaction({ ...base, target: { projectId: 'other-project' } })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'target_forbidden' } },
+    });
+    await expect(manager.requestTransaction({ ...base, provenance: { source: 'caller' } })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request', details: { reason: 'provenance_forbidden' } },
+    });
+    await expect(manager.requestTransaction({ ...base, expectedRevision: 9, children: validChildren })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'revision_conflict' },
+    });
+    await expect(manager.requestTransaction(base)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'limit_exceeded', details: { reason: 'transaction_children' } },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 0,
+      remainingTransactions: 3,
+      status: 'running',
+    });
+  });
+
+  it('pauses before manual takeover and requires explicit resume after escalation', async () => {
+    const target = createTarget('artist-lifecycle-project', 'Artist lifecycle project');
+    const manager = createManager([target]);
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'lifecycle-run',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, ['structure', 'timeline'], 1);
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+
+    expect(manager.takeoverProjectWriteTurn(target.id, 'human')).toBe(true);
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({ status: 'paused' });
+    const observation = await manager.observe(inspectGrant.result.sessionId, 'structure', { expectedRevision: 0 });
+    expect(observation).toMatchObject({ ok: true, result: { revision: 0 } });
+    await expect(manager.executeArtistModeTransaction(grant.result.sessionId, grant.result.runId, {
+      operationId: 'paused-operation',
+      profile: 'layer-and-tag',
+      expectedRevision: 0,
+      children: [
+        {
+          command: 'project.layer.state',
+          input: { kind: 'layer.visibility', layerId: target.context.layers.layers.value[0]!.id, visible: false },
+        },
+        {
+          command: 'project.animation.frame-tag',
+          input: {
+            kind: 'tag.create',
+            name: 'Paused fixture',
+            color: '#123456',
+            startFrameIndex: 0,
+            endFrameIndex: 0,
+          },
+        },
+      ],
+    })).resolves.toMatchObject({ ok: false, error: { details: { reason: 'run_paused' } } });
+
+    const deniedEscalation = manager.requestArtistModeEscalation({
+      sessionId: grant.result.sessionId,
+      runId: grant.result.runId,
+      blockedAction: 'project.transaction.execute',
+      additionalTransactions: 1,
+    });
+    expect(deniedEscalation).toMatchObject({ ok: false, error: { details: { reason: 'escalation_not_needed' } } });
+  });
+
+  it('maps every granted category to bounded profiles and requires explicit budget escalation', async () => {
+    const target = createTarget('artist-budget-project', 'Artist budget project');
+    const manager = createManager([target]);
+    const inspect = request(manager, ['structure']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'budget-run',
+      requestedWriteCategories: ['structure', 'palette', 'timeline', 'raster'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    const grant = manager.approveArtistMode(
+      artistRequest.result.requestId,
+      ['structure', 'palette', 'timeline', 'raster'],
+      1,
+    );
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    expect(grant.result.profiles).toEqual([
+      'structure-refinement',
+      'static-structure',
+      'layer-and-tag',
+      'animation',
+      'raster-patch',
+    ]);
+
+    const layer = target.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+    const transaction = (
+      operationId: string,
+      expectedRevision: number,
+      visible: boolean,
+      tagInput: Readonly<Record<string, unknown>> = {
+        kind: 'tag.create',
+        name: `Budget ${operationId}`,
+        color: '#123456',
+        startFrameIndex: 0,
+        endFrameIndex: 0,
+      },
+    ) => ({
+      operation: 'project.transaction.execute' as const,
+      sessionId: inspectGrant.result.sessionId,
+      runId: grant.result.runId,
+      operationId,
+      profile: 'layer-and-tag' as const,
+      expectedRevision,
+      children: [
+        {
+          command: 'project.layer.state' as const,
+          input: { kind: 'layer.visibility', layerId: layer.id, visible },
+        },
+        {
+          command: 'project.animation.frame-tag' as const,
+          input: tagInput,
+        },
+      ],
+    });
+
+    const failed = await manager.requestTransaction({
+      ...transaction('failed-operation', 0, 'not-a-boolean' as unknown as boolean),
+    });
+    expect(failed).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 0,
+      remainingTransactions: 1,
+      status: 'running',
+    });
+
+    await expect(manager.requestTransaction(transaction('committed-operation', 0, false))).resolves.toMatchObject({
+      ok: true,
+      result: { type: 'project.transaction.execute' },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 1,
+      remainingTransactions: 0,
+      status: 'budget-exhausted',
+    });
+
+    const denied = manager.requestArtistModeEscalation({
+      sessionId: inspectGrant.result.sessionId,
+      runId: grant.result.runId,
+      blockedAction: 'project.transaction.execute',
+      additionalTransactions: 2,
+    });
+    if (!denied.ok) throw new Error('Expected an escalation request.');
+    expectTargetFree(denied);
+    expect(manager.listPendingArtistModeEscalations()).toMatchObject([
+      { requestId: denied.result.requestId, additionalTransactions: 2 },
+    ]);
+    expect(manager.denyArtistModeEscalation(denied.result.requestId)).toMatchObject({
+      ok: true,
+      result: { type: 'automation.artist-mode.escalation.denied' },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionLimit: 1,
+      status: 'budget-exhausted',
+    });
+
+    const approved = manager.requestArtistModeEscalation({
+      sessionId: inspectGrant.result.sessionId,
+      runId: grant.result.runId,
+      blockedAction: 'project.transaction.execute',
+      additionalTransactions: 2,
+    });
+    if (!approved.ok) throw new Error('Expected a second escalation request.');
+    expect(manager.approveArtistModeEscalation(approved.result.requestId)).toMatchObject({
+      ok: true,
+      result: {
+        type: 'automation.artist-mode.escalation.granted',
+        transactionLimit: 3,
+      },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionLimit: 3,
+      status: 'paused',
+      remainingTransactions: 2,
+    });
+    await expect(manager.requestTransaction(transaction('paused-operation', 1, true))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'capability_denied', details: { reason: 'run_paused' } },
+    });
+    expect(manager.resumeArtistMode(grant.result.sessionId, grant.result.runId)).toMatchObject({
+      ok: true,
+      result: { status: 'running' },
+    });
+    const tag = target.context.animation.tags.value[0];
+    if (!tag) throw new Error('Expected a committed tag.');
+    await expect(manager.requestTransaction(transaction('second-operation', 1, true, {
+      kind: 'tag.rename',
+      tagId: tag.id,
+      name: 'Budget second-operation',
+    }))).resolves.toMatchObject({
+      ok: true,
+      result: { type: 'project.transaction.execute' },
+    });
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 2,
+      remainingTransactions: 1,
+      status: 'running',
+    });
   });
 });

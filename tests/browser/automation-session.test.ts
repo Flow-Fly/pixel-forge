@@ -276,4 +276,165 @@ describe('Automation Session approval dialog in Chromium', () => {
       },
     });
   });
+
+  it('shows exact Artist Mode authority, exclusions, subset choices, and visible budget state', async () => {
+    const target = createTarget('artist-browser-project', 'Artist browser project');
+    const manager = createManager([target]);
+    const inspectRequest = manager.requestSession({
+      client: { name: 'Chromium Artist', identity: 'self-declared' },
+      compatibility: { minVersion: '1.0', maxVersion: '1.0' },
+      observationClasses: ['structure', 'timeline'],
+      lifetimeSeconds: 60,
+    });
+    if (!inspectRequest.ok) throw new Error('Expected an inspect request.');
+    manager.captureLocalTargets(inspectRequest.result.requestId);
+    const inspectGrant = manager.approveRequest(
+      inspectRequest.result.requestId,
+      target.id,
+      ['structure', 'timeline'],
+    );
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+
+    const artistRequest = manager.requestArtistMode({
+      operation: 'automation.artist-mode.request',
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'browser-artist-run',
+      runIntent: 'Make one visible browser fixture edit',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 4,
+      requestedDurationSeconds: 30,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    expect(JSON.stringify(artistRequest)).not.toContain('artist-browser-project');
+
+    const element = await mountDialog(manager);
+    await expect.element(page.getByRole('dialog')).toBeVisible();
+    await expect.element(page.getByText('Allow Artist Mode')).toBeVisible();
+    await expect.element(page.getByText('Artist browser project', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('Make one visible browser fixture edit')).toBeVisible();
+    await expect.element(page.getByRole('checkbox', { name: 'Structure writes' })).toBeVisible();
+    await expect.element(page.getByRole('checkbox', { name: 'Timeline writes' })).toBeVisible();
+    await expect.element(page.getByText('Delete, overwrite, or change another project')).toBeVisible();
+    await expect.element(page.getByText('Import, upload, download, share, or publish')).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Approve Artist Mode' })).toBeDisabled();
+
+    const limit = page.getByRole('spinbutton', { name: 'Committed transaction limit' }).element() as HTMLInputElement;
+    expect(limit.value).toBe('4');
+    limit.value = '2';
+    limit.dispatchEvent(new Event('input', { bubbles: true }));
+    await userEvent.click(page.getByRole('checkbox', { name: 'Structure writes' }));
+    await userEvent.click(page.getByRole('checkbox', { name: 'Timeline writes' }));
+    await expect.element(page.getByRole('button', { name: 'Approve Artist Mode' })).toBeEnabled();
+    await userEvent.click(page.getByRole('button', { name: 'Approve Artist Mode' }));
+    await expect.poll(() => manager.listPendingArtistModeRequests()).toHaveLength(0);
+    await expect.element(page.getByText('Artist Mode runs')).toBeVisible();
+    await expect.element(page.getByText('Write turn: held')).toBeVisible();
+    await expect.element(page.getByText('Budget: 0/2 committed · 2 remaining')).toBeVisible();
+    await expect.element(page.getByText('Status: running')).toBeVisible();
+
+    await userEvent.click(page.getByRole('button', { name: 'Pause' }));
+    await expect.element(page.getByText('Write turn: released')).toBeVisible();
+    await expect.element(page.getByText('Status: paused')).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Resume' })).toBeVisible();
+
+    await userEvent.click(page.getByRole('button', { name: 'Revoke Chromium Artist Artist Mode run' }));
+    await expect.element(page.getByText('Status: revoked', { exact: true })).toBeVisible();
+    void element;
+  });
+
+  it('shows one content-free escalation and resumes only after explicit approval and action', async () => {
+    const target = createTarget('browser-escalation-project', 'Browser escalation project');
+    const manager = createManager([target]);
+    const inspectRequest = manager.requestSession({
+      client: { name: 'Chromium Escalation', identity: 'self-declared' },
+      compatibility: { minVersion: '1.0', maxVersion: '1.0' },
+      observationClasses: ['structure'],
+      lifetimeSeconds: 60,
+    });
+    if (!inspectRequest.ok) throw new Error('Expected an inspect request.');
+    manager.captureLocalTargets(inspectRequest.result.requestId);
+    const inspectGrant = manager.approveRequest(
+      inspectRequest.result.requestId,
+      target.id,
+      ['structure'],
+    );
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'browser-escalation-run',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 30,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    const artistGrant = manager.approveArtistMode(
+      artistRequest.result.requestId,
+      ['structure', 'timeline'],
+      1,
+    );
+    if (!artistGrant.ok) throw new Error('Expected an Artist Mode grant.');
+    const layer = target.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+    await expect(manager.executeArtistModeTransaction(
+      inspectGrant.result.sessionId,
+      artistGrant.result.runId,
+      {
+        operationId: 'browser-escalation-operation',
+        profile: 'layer-and-tag',
+        expectedRevision: 0,
+        children: [
+          {
+            command: 'project.layer.state',
+            input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+          },
+          {
+            command: 'project.animation.frame-tag',
+            input: {
+              kind: 'tag.create',
+              name: 'Browser escalation tag',
+              color: '#123456',
+              startFrameIndex: 0,
+              endFrameIndex: 0,
+            },
+          },
+        ],
+      },
+    )).resolves.toMatchObject({ ok: true });
+
+    const firstEscalation = manager.requestArtistModeEscalation({
+      sessionId: inspectGrant.result.sessionId,
+      runId: artistGrant.result.runId,
+      blockedAction: 'project.transaction.execute',
+      additionalTransactions: 1,
+    });
+    if (!firstEscalation.ok) throw new Error('Expected an escalation request.');
+    expect(JSON.stringify(firstEscalation)).not.toContain('browser-escalation-project');
+    const element = await mountDialog(manager);
+    await expect.element(page.getByRole('dialog')).toBeVisible();
+    await expect.element(page.getByText('Approve budget escalation')).toBeVisible();
+    await expect.element(page.getByText('Browser escalation project', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('project.transaction.execute', { exact: true })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Approve additional transactions' })).toBeEnabled();
+    await expect.element(page.getByRole('button', { name: 'Deny escalation' })).toBeVisible();
+
+    await userEvent.click(page.getByRole('button', { name: 'Deny escalation' }));
+    await expect.poll(() => manager.listPendingArtistModeEscalations()).toHaveLength(0);
+    await expect.element(page.getByText('Status: budget-exhausted')).toBeVisible();
+
+    const secondEscalation = manager.requestArtistModeEscalation({
+      sessionId: inspectGrant.result.sessionId,
+      runId: artistGrant.result.runId,
+      blockedAction: 'project.transaction.execute',
+      additionalTransactions: 1,
+    });
+    if (!secondEscalation.ok) throw new Error('Expected a second escalation request.');
+    await expect.element(page.getByRole('button', { name: 'Approve additional transactions' })).toBeVisible();
+    await userEvent.click(page.getByRole('button', { name: 'Approve additional transactions' }));
+    await expect.poll(() => manager.listPendingArtistModeEscalations()).toHaveLength(0);
+    await expect.element(page.getByText('Budget: 1/2 committed · 1 remaining')).toBeVisible();
+    await expect.element(page.getByText('Status: paused')).toBeVisible();
+    await userEvent.click(page.getByRole('button', { name: 'Resume' }));
+    await expect.element(page.getByText('Status: running')).toBeVisible();
+    void element;
+  });
 });
