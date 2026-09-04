@@ -4,8 +4,16 @@ import {
   AutomationSessionManager,
   type AutomationLocalTarget,
 } from '../../src/editor/automation-session';
-import { CreativeRunController } from '../../src/editor/creative-run';
+import {
+  CreativeRunController,
+  type CreativeRunStep,
+} from '../../src/editor/creative-run';
 import { createFixtureSession, type FixtureSession } from '../../src/editor/fixture-session';
+import {
+  restoreDefaultProjectContext,
+  setActiveProjectContext,
+} from '../../src/stores/project-context';
+import '../../src/components/app/pixel-forge-app';
 import '../../src/components/preview/pf-creative-run-panel';
 import type { PFCreativeRunPanel } from '../../src/components/preview/pf-creative-run-panel';
 
@@ -14,6 +22,7 @@ const managers: AutomationSessionManager[] = [];
 
 afterEach(() => {
   document.body.replaceChildren();
+  restoreDefaultProjectContext();
   for (const manager of managers.splice(0)) manager.dispose();
   for (const fixture of fixtures.splice(0)) fixture.dispose();
 });
@@ -124,23 +133,28 @@ describe('Creative Run panel in Chromium', () => {
     await expect.element(page.getByText('Goal: Make a calm title card')).toBeVisible();
     await expect.element(page.getByText('Creative Fixture')).toBeVisible();
     await expect.element(page.getByText('Requested authority')).toBeVisible();
+    await expect.element(page.getByText('Run time')).toBeVisible();
     await expect.element(page.getByRole('button', { name: 'Start Run' })).toBeVisible();
+    expect(element.shadowRoot?.querySelector('fieldset.toolbar legend')?.textContent).toContain('Creative Run controls');
 
     const start = page.getByRole('button', { name: 'Start Run' });
     await userEvent.click(start);
     await expect.poll(() => controller.getState().phase).toBe('stopped');
     await expect.element(page.getByText('transaction (committed)')).toBeVisible();
+    await userEvent.click(page.getByText('transaction (committed)'));
     const transaction = controller.getState().timeline.find((entry) => entry.kind === 'transaction');
     expect(transaction).toBeDefined();
-    await expect.element(page.getByText(new RegExp(`layer-and-tag · ${transaction?.operationId} · revision ${transaction?.fromRevision} → ${transaction?.toRevision}`))).toBeVisible();
+    const transactionDetail = element.shadowRoot?.querySelector<HTMLDetailsElement>('details.transaction-detail');
+    await expect.poll(() => transactionDetail?.open).toBe(true);
+    expect(transactionDetail?.textContent).toContain(`layer-and-tag · ${transaction?.operationId} · ordinal ${transaction?.ordinal}`);
     expect(fixture.projectContext.project.revision.value).toBe(transaction?.toRevision);
     expect(JSON.stringify(controller.getState().timeline)).not.toContain('Make a calm title card');
 
     const stop = page.getByRole('button', { name: 'Stop' });
     await expect.element(stop).toBeVisible();
-    await userEvent.tab();
-    expect(document.activeElement).not.toBeNull();
-    expect(element.shadowRoot?.activeElement?.tagName).toBe('BUTTON');
+    const firstControl = element.shadowRoot?.querySelector<HTMLButtonElement>('button:not([disabled])');
+    firstControl?.focus();
+    expect(element.shadowRoot?.activeElement).toBe(firstControl);
   });
 
   it('renders a narrow-friendly empty state without inventing authority', async () => {
@@ -149,6 +163,27 @@ describe('Creative Run panel in Chromium', () => {
     await element.updateComplete;
     await expect.element(page.getByRole('status')).toHaveTextContent('No active Creative Run.');
     expect(element.shadowRoot?.querySelector('button')).toBeNull();
+  });
+
+  it('lets the composed app render and control a supplied run without creating one', async () => {
+    const { controller, fixture } = await createRun();
+    const revisionBefore = fixture.projectContext.project.revision.value;
+    document.body.replaceChildren();
+    const app = document.createElement('pixel-forge-app') as HTMLElement & {
+      creativeRunController: CreativeRunController | null;
+      updateComplete: Promise<unknown>;
+    };
+    app.creativeRunController = controller;
+    document.body.append(app);
+    await app.updateComplete;
+
+    const panel = app.shadowRoot?.querySelector('pf-creative-run-panel') as PFCreativeRunPanel | null;
+    expect(panel?.controller).toBe(controller);
+    await expect.element(page.getByRole('heading', { name: 'Creative Run' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Start Run' })).toBeVisible();
+    await userEvent.click(page.getByRole('button', { name: 'Start Run' }));
+    await expect.poll(() => controller.getState().phase).toBe('stopped');
+    expect(fixture.projectContext.project.revision.value).toBe(revisionBefore + 1);
   });
 
   it('completes the deterministic two-project supervision journey without touching the second project', async () => {
@@ -236,6 +271,21 @@ describe('Creative Run panel in Chromium', () => {
       ],
     });
     let stepNumber = 0;
+    let resolveSecondPlan!: (value: CreativeRunStep | null) => void;
+    let signalSecondPlan!: () => void;
+    const secondPlanRequested = new Promise<void>((resolve) => { signalSecondPlan = resolve; });
+    const pendingSecondPlan = new Promise<CreativeRunStep | null>((resolve) => { resolveSecondPlan = resolve; });
+    let transactionNumber = 0;
+    let signalTransaction!: () => void;
+    const transactionDispatched = new Promise<void>((resolve) => { signalTransaction = resolve; });
+    let releaseTransaction!: () => void;
+    const pendingTransaction = new Promise<void>((resolve) => { releaseTransaction = resolve; });
+    let signalPackage!: () => void;
+    const packageRequested = new Promise<void>((resolve) => { signalPackage = resolve; });
+    let releasePackage!: () => void;
+    const pendingPackage = new Promise<void>((resolve) => { releasePackage = resolve; });
+    const firstStep = createStep('Journey first', false);
+    const secondStep = createAnimationStep();
     const controller = new CreativeRunController({
       sessionManager: manager,
       sessionId: inspectGrant.result.sessionId,
@@ -254,15 +304,31 @@ describe('Creative Run panel in Chromium', () => {
       stepSource: () => {
         if (stepNumber === 0) {
           stepNumber += 1;
-          return createStep('Journey first', false);
+          return firstStep;
         }
         if (stepNumber === 1) {
           stepNumber += 1;
-          return createAnimationStep();
+          signalSecondPlan();
+          return pendingSecondPlan;
+        }
+        if (stepNumber === 2) {
+          stepNumber += 1;
+          return secondStep;
         }
         return null;
       },
+      executeTransaction: async (sessionId, runId, input) => {
+        transactionNumber += 1;
+        const result = manager.executeArtistModeTransaction(sessionId, runId, input);
+        if (transactionNumber === 2) {
+          signalTransaction();
+          await pendingTransaction;
+        }
+        return result;
+      },
       preparePackage: async (request) => {
+        signalPackage();
+        await pendingPackage;
         const packageResult = await primary.adapter.request({
           operation: 'project.asset-package.prepare',
           target: { projectId: primaryTarget.id },
@@ -286,8 +352,25 @@ describe('Creative Run panel in Chromium', () => {
       durationSeconds: 30,
       contentEgress: 'local-only',
     });
-    const firstRun = await controller.start();
-    expect(firstRun).toMatchObject({ ok: true, state: { phase: 'paused', transactionsUsed: 2 } });
+
+    setActiveProjectContext(primary.projectContext);
+    const firstRunPromise = controller.start();
+    await secondPlanRequested;
+    expect(controller.pause()).toMatchObject({ ok: true, state: { phase: 'pausing' } });
+    setActiveProjectContext(secondary.projectContext);
+    resolveSecondPlan(secondStep);
+    const pausedRun = await firstRunPromise;
+    expect(pausedRun).toMatchObject({ ok: true, state: { phase: 'paused', transactionsUsed: 1 } });
+    expect(primary.projectContext.project.revision.value).toBe(primaryBefore + 1);
+    expect(secondary.projectContext.project.revision.value).toBe(secondaryBefore);
+
+    const resumedRunPromise = controller.resume();
+    await transactionDispatched;
+    expect(controller.stop()).toMatchObject({ ok: true, state: { phase: 'stopping' } });
+    releaseTransaction();
+    const stoppedRun = await resumedRunPromise;
+    expect(stoppedRun).toMatchObject({ ok: true, state: { phase: 'stopped', transactionsUsed: 2 } });
+    expect(manager.listLocalArtistModeRuns()[0]?.status).toBe('completed');
     expect(primary.projectContext.project.revision.value).toBe(primaryBefore + 2);
     expect(secondary.projectContext.project.revision.value).toBe(secondaryBefore);
 
@@ -297,9 +380,13 @@ describe('Creative Run panel in Chromium', () => {
       expectedRevision: primary.projectContext.project.revision.value,
     });
     if (!saved.ok) throw new Error('Expected the journey project to save.');
-    const accepted = await controller.accept({
+    const acceptedPromise = controller.accept({
       expectedSaveSafety: (saved.result as { readonly saveSafety: unknown }).saveSafety,
     });
+    await packageRequested;
+    setActiveProjectContext(secondary.projectContext);
+    releasePackage();
+    const accepted = await acceptedPromise;
     expect(accepted).toMatchObject({ ok: true, state: { phase: 'accepted', packagePreparedRevision: primaryBefore + 2 } });
     expect(primary.projectContext.project.revision.value).toBe(primaryBefore + 2);
     expect(secondary.projectContext.project.revision.value).toBe(secondaryBefore);

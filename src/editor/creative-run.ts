@@ -146,7 +146,7 @@ export interface CreativeRunTimelineEntry {
   readonly ordinal?: number;
   readonly fromRevision?: number;
   readonly toRevision?: number;
-  readonly outcome?: 'committed' | 'failed' | 'prepared';
+  readonly outcome?: 'committed' | 'failed' | 'prepared' | 'exhausted';
   readonly errorCode?: string;
   readonly childCount?: number;
   readonly durationMs?: number;
@@ -184,6 +184,8 @@ export interface CreativeRunState {
   readonly transactionsUsed: number;
   readonly transactionLimit: number;
   readonly remainingTransactions: number;
+  readonly elapsedSeconds: number;
+  readonly remainingDurationSeconds: number;
   readonly inFlight: 'observation' | 'step' | 'transaction' | null;
   readonly grant: CreativeRunGrantSummary | null;
   readonly lastDurableResult: CreativeRunTransactionSummary | null;
@@ -292,6 +294,8 @@ export class CreativeRunController {
   private pendingLifecycle: PendingLifecycle | null = null;
   private loopPromise: Promise<CreativeRunActionResult> | null = null;
   private disposed = false;
+  private activeDurationMs = 0;
+  private activeSegmentStartedAt: number | null = null;
 
   constructor(options: CreativeRunControllerOptions) {
     this.sessionManager = options.sessionManager;
@@ -317,6 +321,7 @@ export class CreativeRunController {
     const authority = this.readLiveAuthority();
     const transactionLimit = this.brief.transactionLimit;
     const transactionsUsed = this.transactionsUsed;
+    const elapsedSeconds = Math.floor(this.readElapsedDurationMs() / 1000);
     return freezeTransport({
       runId: this.brief.runId,
       phase: this.phase,
@@ -329,6 +334,8 @@ export class CreativeRunController {
       transactionsUsed,
       transactionLimit,
       remainingTransactions: Math.max(0, transactionLimit - transactionsUsed),
+      elapsedSeconds,
+      remainingDurationSeconds: Math.max(0, this.brief.durationSeconds - elapsedSeconds),
       inFlight: this.inFlight,
       grant: authority ? summarizeGrant(authority.run, authority.grant) : null,
       lastDurableResult: this.lastDurableResult,
@@ -391,8 +398,7 @@ export class CreativeRunController {
 
     if (this.inFlight) {
       this.pendingLifecycle = { phase: 'draft' };
-      this.phase = 'pausing';
-      this.appendTimeline({ kind: 'phase', phase: 'pausing' });
+      this.setPhase('pausing');
       this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
       this.publish();
       return this.succeed();
@@ -475,8 +481,7 @@ export class CreativeRunController {
     if (wasInFlight) this.pendingLifecycle = { phase: 'paused' };
     this.sessionManager.takeoverProjectWriteTurn(this.target.id, ownerId);
     if (wasInFlight) {
-      this.phase = 'pausing';
-      this.appendTimeline({ kind: 'phase', phase: 'pausing' });
+      this.setPhase('pausing');
     } else {
       this.pendingLifecycle = null;
       this.setPhase('paused');
@@ -498,6 +503,7 @@ export class CreativeRunController {
       this.setPhase('stopping');
     } else {
       this.setPhase('stopped');
+      this.completeAuthority();
     }
     return this.succeed();
   }
@@ -564,8 +570,7 @@ export class CreativeRunController {
     this.generation += 1;
     if (this.inFlight) this.pendingLifecycle = { phase: 'stopped' };
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
-    this.phase = 'stopping';
-    this.publish();
+    this.setPhase('stopping');
   }
 
   private async processSteps(): Promise<CreativeRunActionResult> {
@@ -588,19 +593,12 @@ export class CreativeRunController {
         this.setPhase('failed');
         return this.fail(authority.code, authority.retryable, authority.nextAction);
       }
+      const budgetFailure = this.checkRunBudget();
+      if (budgetFailure) return budgetFailure;
+
       const expectedRevision = readRevision(this.getCurrentRevision, this.currentRevision);
       this.currentRevision = expectedRevision;
-      this.inFlight = 'observation';
-      this.publish();
-      let observation: AutomationSessionResult<unknown>;
-      try {
-        observation = await this.observeBoundary(this.sessionId, this.observationClass, {
-          expectedRevision,
-        });
-      } catch {
-        observation = failure('internal', true);
-      }
-      this.inFlight = null;
+      const observation = await this.captureObservation(generation, expectedRevision);
       if (!this.canContinue(generation)) {
         this.settlePendingLifecycle();
         break;
@@ -611,79 +609,40 @@ export class CreativeRunController {
       }
       this.appendTimeline({ kind: 'observation', observationClass: this.observationClass, fromRevision: expectedRevision, toRevision: expectedRevision, outcome: 'prepared' });
 
-      this.inFlight = 'step';
-      this.publish();
-      let step: CreativeRunStep | null;
-      try {
-        step = await this.stepSource({
-          runId: this.brief.runId,
-          briefRevision: this.brief.revision,
-          revision: expectedRevision,
-          transactionOrdinal: this.transactionsUsed + 1,
-          observation: redactTransport(observation.result),
-        });
-      } catch {
-        step = null;
-        if (this.canContinue(generation)) {
-          this.inFlight = null;
-          this.setPhase('failed');
-          return this.fail('step_failed', true, 'recover-manually');
-        }
-      }
-      this.inFlight = null;
+      const planned = await this.planStep(generation, expectedRevision, observation.result);
       if (!this.canContinue(generation)) {
         this.settlePendingLifecycle();
         break;
       }
-      if (step === null) {
+      if (!planned.ok) {
+        this.setPhase('failed');
+        return this.fail('step_failed', true, 'recover-manually');
+      }
+      if (planned.step === null) {
         this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
         this.setPhase('stopped');
+        this.completeAuthority();
         break;
       }
-      if (!isValidStep(step)) {
+      if (!isValidStep(planned.step)) {
         this.setPhase('failed');
         return this.fail('invalid_request', false, 'recover-manually');
       }
 
+      const dispatchBudgetFailure = this.checkRunBudget();
+      if (dispatchBudgetFailure) return dispatchBudgetFailure;
+
       const operationSequence = ++this.transactionSequence;
       const operationId = createOperationId(this.brief.runId, operationSequence);
-      const startedAt = this.clock();
-      this.inFlight = 'transaction';
-      this.publish();
-      let result: AutomationSessionResult<unknown>;
-      try {
-        result = await this.executeBoundary(this.sessionId, this.brief.runId, {
-          profile: step.profile,
-          operationId,
-          expectedRevision,
-          children: detach(step.children),
-        });
-      } catch {
-        result = failure('internal', true);
-      }
-      this.inFlight = null;
+      const dispatched = await this.dispatchStep(operationId, expectedRevision, planned.step);
+      const result = dispatched.result;
       if (result.ok) {
         const transaction = readTransactionResult(result.result);
         if (!transaction || transaction.fromRevision !== expectedRevision || transaction.revision !== expectedRevision + 1) {
           this.setPhase('recovery-required');
           return this.fail('revision_conflict', true, 'recover-manually');
         }
-        this.transactionsUsed += 1;
-        this.currentRevision = transaction.revision;
-        this.lastDurableRevision = transaction.revision;
-        const summary = summarizeTransaction(operationId, step.profile, transaction, elapsed(this.clock, startedAt), this.transactionsUsed);
-        this.lastDurableResult = summary;
-        this.appendTimeline({
-          kind: 'transaction',
-          operationId,
-          profile: step.profile,
-          ordinal: summary.ordinal,
-          fromRevision: summary.fromRevision,
-          toRevision: summary.toRevision,
-          childCount: summary.childCount,
-          durationMs: summary.durationMs,
-          outcome: 'committed',
-        });
+        this.recordCommittedTransaction(operationId, planned.step.profile, transaction, dispatched.durationMs);
         if (this.transactionsUsed >= this.brief.transactionLimit) {
           this.appendTimeline({ kind: 'budget', ordinal: this.transactionsUsed, outcome: 'committed' });
           if (this.pendingLifecycle) this.settlePendingLifecycle();
@@ -695,10 +654,10 @@ export class CreativeRunController {
         this.appendTimeline({
           kind: 'failure',
           operationId,
-          profile: step.profile,
+          profile: planned.step.profile,
           errorCode: result.error.code,
           outcome: 'failed',
-          durationMs: elapsed(this.clock, startedAt),
+          durationMs: dispatched.durationMs,
         });
         if (this.pendingLifecycle) {
           this.settlePendingLifecycle();
@@ -713,6 +672,104 @@ export class CreativeRunController {
     return this.succeed();
   }
 
+  private checkRunBudget(): CreativeRunActionResult | null {
+    if (this.transactionsUsed >= this.brief.transactionLimit) {
+      return this.pauseForBudget('limit_exceeded');
+    }
+    if (!this.hasDurationBudget()) {
+      return this.pauseForBudget('duration_exhausted');
+    }
+    return null;
+  }
+
+  private async captureObservation(
+    generation: number,
+    expectedRevision: number,
+  ): Promise<AutomationSessionResult<unknown>> {
+    this.inFlight = 'observation';
+    this.publish();
+    try {
+      return await this.observeBoundary(this.sessionId, this.observationClass, { expectedRevision });
+    } catch {
+      return failure('internal', true);
+    } finally {
+      this.inFlight = null;
+      if (!this.canContinue(generation)) this.publish();
+    }
+  }
+
+  private async planStep(
+    generation: number,
+    expectedRevision: number,
+    observation: unknown,
+  ): Promise<{ readonly ok: true; readonly step: CreativeRunStep | null } | { readonly ok: false }> {
+    this.inFlight = 'step';
+    this.publish();
+    try {
+      const step = await this.stepSource({
+        runId: this.brief.runId,
+        briefRevision: this.brief.revision,
+        revision: expectedRevision,
+        transactionOrdinal: this.transactionsUsed + 1,
+        observation: redactTransport(observation),
+      });
+      return { ok: true, step };
+    } catch {
+      return { ok: false };
+    } finally {
+      this.inFlight = null;
+      if (!this.canContinue(generation)) this.publish();
+    }
+  }
+
+  private async dispatchStep(
+    operationId: string,
+    expectedRevision: number,
+    step: CreativeRunStep,
+  ): Promise<{ readonly result: AutomationSessionResult<unknown>; readonly durationMs: number }> {
+    const startedAt = readClock(this.clock);
+    this.inFlight = 'transaction';
+    this.publish();
+    let result: AutomationSessionResult<unknown>;
+    try {
+      result = await this.executeBoundary(this.sessionId, this.brief.runId, {
+        profile: step.profile,
+        operationId,
+        expectedRevision,
+        children: detach(step.children),
+      });
+    } catch {
+      result = failure('internal', true);
+    } finally {
+      this.inFlight = null;
+    }
+    return { result, durationMs: Math.max(0, Math.round(readClock(this.clock) - startedAt)) };
+  }
+
+  private recordCommittedTransaction(
+    operationId: string,
+    profile: EditorTransactionProfile,
+    transaction: EditorTransactionResult,
+    durationMs: number,
+  ): void {
+    this.transactionsUsed += 1;
+    this.currentRevision = transaction.revision;
+    this.lastDurableRevision = transaction.revision;
+    const summary = summarizeTransaction(operationId, profile, transaction, durationMs, this.transactionsUsed);
+    this.lastDurableResult = summary;
+    this.appendTimeline({
+      kind: 'transaction',
+      operationId,
+      profile,
+      ordinal: summary.ordinal,
+      fromRevision: summary.fromRevision,
+      toRevision: summary.toRevision,
+      childCount: summary.childCount,
+      durationMs: summary.durationMs,
+      outcome: 'committed',
+    });
+  }
+
   private canContinue(generation: number): boolean {
     return this.phase === 'running' && generation === this.generation;
   }
@@ -723,6 +780,7 @@ export class CreativeRunController {
     this.pendingLifecycle = null;
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
     this.setPhase(next);
+    if (next === 'stopped') this.completeAuthority();
   }
 
   private readSaveSafety(expectedRevision: number): Promise<unknown> {
@@ -759,8 +817,8 @@ export class CreativeRunController {
     if (authority.grant.transactionLimit < this.brief.transactionLimit) {
       return { ok: false, code: 'grant_incompatible', retryable: false, nextAction: 'request-grant' };
     }
-    if (authority.grant.expiresAt < this.clock() + this.brief.durationSeconds * 1000) {
-      return { ok: false, code: 'grant_incompatible', retryable: false, nextAction: 'request-grant' };
+    if (authority.grant.expiresAt <= this.clock()) {
+      return { ok: false, code: 'grant_expired', retryable: false, nextAction: 'recover-manually' };
     }
     if (!authority.session.observationClasses.includes(this.observationClass)) {
       return { ok: false, code: 'observation_denied', retryable: false, nextAction: 'request-grant' };
@@ -780,7 +838,7 @@ export class CreativeRunController {
   private completeAuthority(): void {
     const authority = this.readLiveAuthority();
     if (!authority) return;
-    if (authority.run.status === 'running' || authority.run.status === 'paused') {
+    if (authority.run.status === 'running' || authority.run.status === 'paused' || authority.run.status === 'budget-exhausted') {
       this.sessionManager.completeArtistMode(this.sessionId, this.brief.runId);
     }
   }
@@ -790,6 +848,8 @@ export class CreativeRunController {
   }
 
   private setPhase(phase: CreativeRunPhase): void {
+    if (phase === 'running') this.beginActiveDuration();
+    else this.endActiveDuration();
     if (this.phase === phase) {
       this.publish();
       return;
@@ -797,6 +857,38 @@ export class CreativeRunController {
     this.phase = phase;
     this.appendTimeline({ kind: 'phase', phase });
     this.publish();
+  }
+
+  private beginActiveDuration(): void {
+    if (this.activeSegmentStartedAt === null) {
+      this.activeSegmentStartedAt = readClock(this.clock);
+    }
+  }
+
+  private endActiveDuration(): void {
+    if (this.activeSegmentStartedAt === null) return;
+    this.activeDurationMs += Math.max(0, readClock(this.clock) - this.activeSegmentStartedAt);
+    this.activeSegmentStartedAt = null;
+  }
+
+  private readElapsedDurationMs(): number {
+    const activeSegmentMs = this.activeSegmentStartedAt === null
+      ? 0
+      : Math.max(0, readClock(this.clock) - this.activeSegmentStartedAt);
+    return this.activeDurationMs + activeSegmentMs;
+  }
+
+  private hasDurationBudget(): boolean {
+    return this.readElapsedDurationMs() < this.brief.durationSeconds * 1000;
+  }
+
+  private pauseForBudget(
+    code: 'limit_exceeded' | 'duration_exhausted',
+  ): CreativeRunActionResult {
+    this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
+    this.appendTimeline({ kind: 'budget', ordinal: this.transactionsUsed, outcome: 'exhausted' });
+    this.setPhase('paused');
+    return this.fail(code, false, 'review-result');
   }
 
   private clearError(): void {
@@ -836,8 +928,9 @@ export class CreativeRunController {
       this.timeline.push(next);
       return;
     }
-    this.collapsedTimelineEntries += 1;
-    if (this.timeline[0]?.kind === 'collapsed') {
+    const alreadyCollapsed = this.timeline[0]?.kind === 'collapsed';
+    this.collapsedTimelineEntries += alreadyCollapsed ? 1 : 2;
+    if (alreadyCollapsed) {
       this.timeline.splice(1, 1);
       this.timeline[0] = {
         ...this.timeline[0],
@@ -1047,10 +1140,6 @@ function readClock(clock: () => number): number {
   } catch {
     return Date.now();
   }
-}
-
-function elapsed(clock: () => number, startedAt: number): number {
-  return Math.max(0, Math.round(readClock(clock) - startedAt));
 }
 
 function detach<T>(value: T): T {

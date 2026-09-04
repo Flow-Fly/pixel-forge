@@ -3,6 +3,7 @@ import {
   CreativeRunController,
   type CreativeBriefInput,
   type CreativeRunSessionBoundary,
+  type CreativeRunPackageRequest,
   type CreativeRunStep,
 } from '../../src/editor/creative-run';
 import type {
@@ -292,7 +293,7 @@ describe('CreativeRunController', () => {
       clock: () => 10_000,
     });
     controller.approveBrief(approval(controller));
-    for (let index = 0; index < 75; index += 1) {
+    for (let index = 0; index < 125; index += 1) {
       await controller.start();
       controller.approveBrief(approval(controller));
     }
@@ -301,6 +302,126 @@ describe('CreativeRunController', () => {
     expect(state.collapsedTimelineEntries).toBeGreaterThan(0);
     expect(JSON.stringify(state.timeline)).not.toContain('Goal 0');
     expect(state.timeline[0]).toMatchObject({ kind: 'collapsed', count: state.collapsedTimelineEntries });
+  });
+
+  it('fences a refined transaction limit before dispatch and exposes the exhausted budget', async () => {
+    const authority = createAuthority();
+    let stepNumber = 0;
+    const controller = createController(authority, {
+      stepSource: () => {
+        if (stepNumber > 0) return null;
+        stepNumber += 1;
+        return step();
+      },
+    });
+    controller.approveBrief(approval(controller));
+    await controller.start();
+    expect(controller.getState()).toMatchObject({ phase: 'stopped', transactionsUsed: 1 });
+    authority.state.runStatus = 'paused';
+
+    expect(controller.refineBrief({ transactionLimit: 1 })).toMatchObject({
+      ok: true,
+      state: { phase: 'draft', brief: { revision: 2 } },
+    });
+    controller.approveBrief(approval(controller));
+    const result = await controller.start();
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'limit_exceeded', nextAction: 'review-result' },
+      state: { phase: 'paused', transactionsUsed: 1, remainingTransactions: 0 },
+    });
+    expect(authority.state.executeInputs).toHaveLength(1);
+    expect(controller.getState().timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'budget', outcome: 'exhausted', ordinal: 1 }),
+    ]));
+  });
+
+  it('keeps active duration cumulative across pause time and fences expiry before dispatch', async () => {
+    let now = 10_000;
+    const authority = createAuthority();
+    let planNumber = 0;
+    let resolvePendingPlan!: (value: CreativeRunStep | null) => void;
+    let pendingPlanRequested!: () => void;
+    const pendingPlanSignal = new Promise<void>((resolve) => { pendingPlanRequested = resolve; });
+    const pendingPlan = new Promise<CreativeRunStep | null>((resolve) => { resolvePendingPlan = resolve; });
+    const controller = createController(authority, {
+      clock: () => now,
+      stepSource: () => {
+        if (planNumber === 0) {
+          planNumber += 1;
+          now = 11_000;
+          return step();
+        }
+        if (planNumber === 1) {
+          planNumber += 1;
+          pendingPlanRequested();
+          return pendingPlan;
+        }
+        planNumber += 1;
+        now = 18_000;
+        return null;
+      },
+    });
+    controller.approveBrief(approval(controller));
+    const firstRun = controller.start();
+    await pendingPlanSignal;
+    expect(controller.pause()).toMatchObject({ ok: true, state: { phase: 'pausing' } });
+    now = 16_000;
+    resolvePendingPlan(null);
+    await firstRun;
+    expect(controller.getState()).toMatchObject({ phase: 'paused', elapsedSeconds: 1, remainingDurationSeconds: 59 });
+
+    const resumed = controller.resume();
+    await resumed;
+    expect(controller.getState()).toMatchObject({ phase: 'stopped', elapsedSeconds: 3, remainingDurationSeconds: 57 });
+
+    let expiryNow = 20_000;
+    const expiringAuthority = createAuthority();
+    let executeCount = 0;
+    const expiringController = createController(expiringAuthority, {
+      brief: { ...brief, durationSeconds: 1 },
+      clock: () => expiryNow,
+      stepSource: () => {
+        expiryNow = 21_001;
+        return step();
+      },
+      executeTransaction: async () => {
+        executeCount += 1;
+        return success({});
+      },
+    });
+    expiringController.approveBrief(approval(expiringController));
+    const expired = await expiringController.start();
+    expect(expired).toMatchObject({
+      ok: false,
+      error: { code: 'duration_exhausted', nextAction: 'review-result' },
+      state: { phase: 'paused', elapsedSeconds: 1, remainingDurationSeconds: 0, transactionsUsed: 0 },
+    });
+    expect(executeCount).toBe(0);
+  });
+
+  it('completes stopped authority while accepting the exact current revision', async () => {
+    const authority = createAuthority();
+    const packageRequests: CreativeRunPackageRequest[] = [];
+    const controller = createController(authority, {
+      preparePackage: async (request) => {
+        packageRequests.push(request);
+        return { ok: true, result: {} as never };
+      },
+    });
+    controller.approveBrief(approval(controller));
+    expect(controller.stop()).toMatchObject({ ok: true, state: { phase: 'stopped' } });
+    expect(authority.state.runStatus).toBe('completed');
+    expect(await controller.accept({ expectedSaveSafety: { status: 'saved', revision: 0 } })).toMatchObject({
+      ok: true,
+      state: { phase: 'accepted', packagePreparedRevision: 0 },
+    });
+    expect(packageRequests).toEqual([{
+      expectedRevision: 0,
+      expectedSaveSafety: { status: 'saved', revision: 0 },
+      expectedPackageDigest: null,
+    }]);
   });
 
   it.each([
@@ -362,11 +483,11 @@ describe('CreativeRunController', () => {
       state: { phase: 'awaiting-grant' },
     });
 
-    const expired = createAuthority({ expiresAt: 10_020 });
+    const expired = createAuthority({ expiresAt: 9_999 });
     const expiredController = createController(expired);
     expect(expiredController.approveBrief(approval(expiredController))).toMatchObject({
       ok: false,
-      error: { code: 'grant_incompatible' },
+      error: { code: 'grant_expired' },
     });
 
     const revoked = createAuthority();

@@ -1,5 +1,5 @@
 import { html, css } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import "../toolbar/pf-toolbar";
 import "../status/pf-status-bar";
@@ -63,12 +63,15 @@ import {
 import { log } from "../../utils/log";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
 import { productTelemetry } from "../../services/telemetry";
+import type { CreativeRunController } from "../../editor/creative-run";
 
 type UpdatableElement = HTMLElement & { updateComplete?: Promise<unknown> };
 const SIDEBAR_KEYBOARD_STEP = 16;
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
+  @property({ attribute: false }) creativeRunController: CreativeRunController | null = null;
+
   static styles = css`
     ${scrollbarStyles}
 
@@ -1225,7 +1228,7 @@ export class PixelForgeApp extends BaseComponent {
           <pf-undo-history></pf-undo-history>
         </pf-panel>
         <pf-panel header="Creative Run" collapsible panel-id="creative-run" bordered>
-          <pf-creative-run-panel></pf-creative-run-panel>
+          <pf-creative-run-panel .controller=${this.creativeRunController}></pf-creative-run-panel>
         </pf-panel>
       </aside>
 

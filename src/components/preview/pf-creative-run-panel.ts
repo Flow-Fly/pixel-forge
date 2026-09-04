@@ -109,9 +109,19 @@ export class PFCreativeRunPanel extends LitElement {
     }
 
     .toolbar {
+      border: 0;
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
+      margin: 0;
+      padding: 0;
+    }
+
+    .toolbar legend {
+      color: var(--creative-run-muted);
+      font-size: 0.75rem;
+      padding: 0;
+      width: 100%;
     }
 
     .refine {
@@ -197,6 +207,18 @@ export class PFCreativeRunPanel extends LitElement {
       overflow-wrap: anywhere;
     }
 
+    .transaction-detail summary {
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .transaction-detail summary:focus-visible {
+      outline: 2px solid var(--creative-run-accent);
+      outline-offset: 2px;
+    }
+
     .timeline-entry span {
       color: var(--creative-run-muted);
       font-size: 0.6875rem;
@@ -279,14 +301,16 @@ export class PFCreativeRunPanel extends LitElement {
           <p class="status" role="status">${formatPhase(state.phase)}</p>
           <dl>
             <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
+            <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
             <dt>Revision</dt><dd>${state.currentRevision} (last durable ${state.lastDurableRevision})</dd>
             <dt>Grant</dt><dd>${state.grant ? formatGrant(state) : 'Not available'}</dd>
           </dl>
         </section>
 
-        <div class="toolbar" aria-label="Creative Run controls">
+        <fieldset class="toolbar">
+          <legend>Creative Run controls</legend>
           ${this.renderControls(state)}
-        </div>
+        </fieldset>
 
         ${state.error
           ? html`<p class="error" role="alert">${state.error.code}. Next action: ${state.error.nextAction}.</p>`
@@ -300,8 +324,17 @@ export class PFCreativeRunPanel extends LitElement {
           <ol class="timeline-list">
             ${state.timeline.map((entry) => html`
               <li class="timeline-entry">
-                <strong>${entryLabel(entry)}</strong>
-                <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
+                ${entry.kind === 'transaction'
+                  ? html`
+                      <details class="transaction-detail">
+                        <summary>${entryLabel(entry)}</summary>
+                        <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
+                      </details>
+                    `
+                  : html`
+                      <strong>${entryLabel(entry)}</strong>
+                      <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
+                    `}
               </li>
             `)}
           </ol>
@@ -419,13 +452,21 @@ function entryDetails(entry: CreativeRunState['timeline'][number]): string {
   const values = [
     entry.profile,
     entry.operationId,
+    entry.ordinal !== undefined ? `ordinal ${entry.ordinal}` : undefined,
+    entry.childCount !== undefined ? `${entry.childCount} children` : undefined,
     entry.fromRevision !== undefined && entry.toRevision !== undefined
       ? `revision ${entry.fromRevision} → ${entry.toRevision}`
       : undefined,
     entry.errorCode,
+    entry.durationMs !== undefined ? coarseDuration(entry.durationMs) : undefined,
     entry.count !== undefined ? `${entry.count} older entries` : undefined,
   ];
   return values.filter((value): value is string => Boolean(value)).join(' · ') || 'Recorded locally';
+}
+
+function coarseDuration(durationMs: number): string {
+  if (durationMs < 1000) return `~${Math.max(1, Math.round(durationMs / 100) * 100)}ms`;
+  return `~${Math.max(1, Math.round(durationMs / 1000))}s`;
 }
 
 declare global {

@@ -1303,7 +1303,7 @@ export class AutomationSessionManager {
     if (!run) return failureResult('capability_denied', false, { reason: 'run_missing' });
     const sessionFailure = this.validateArtistLifecycle(sessionId, run);
     if (sessionFailure) return sessionFailure;
-    if (run.status !== 'running' && run.status !== 'paused') {
+    if (run.status !== 'running' && run.status !== 'paused' && run.status !== 'budget-exhausted') {
       return failureResult('capability_denied', false, { reason: `run_${run.status}` });
     }
     this.releaseArtistRun(run, 'completed');
