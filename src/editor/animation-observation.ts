@@ -33,6 +33,7 @@ import {
 import {
   createSymbolGridDigest,
   encodeSymbolGridPixels,
+  getSymbolGridEditorError,
   type SymbolGridEncoding,
   type SymbolGridLegendEntry,
 } from './symbol-grid';
@@ -69,7 +70,7 @@ export interface AnimationTagMetadata {
 export interface AnimationEvaluationFrame {
   readonly id: string;
   readonly frameId: string;
-  /** Stable one-based number within this captured range. */
+  /** Stable one-based number from the source timeline. */
   readonly number: number;
   /** The source timeline order, zero-based. */
   readonly order: number;
@@ -401,7 +402,7 @@ async function renderAnimationFrames(
 ): Promise<CapturedAnimationFrames> {
   let legend: readonly SymbolGridLegendEntry[] = [];
   const frames: AnimationEvaluationFrame[] = [];
-  for (const [rangeIndex, frame] of plan.selectedFrames.entries()) {
+  for (const frame of plan.selectedFrames) {
     const renderResult = await renderProjectObservation(context, {
       target: request.target,
       expectedRevision: request.expectedRevision,
@@ -418,14 +419,14 @@ async function renderAnimationFrames(
       render.pixels,
       render.width,
       render.height,
-      plan.palette,
+      [],
       legend,
     );
     legend = encoding.legend.map(cloneLegendEntry);
     frames.push({
       id: frame.id,
       frameId: frame.id,
-      number: rangeIndex + 1,
+      number: frame.order + 1,
       order: frame.order,
       duration: frame.duration,
       tags: plan.selectedTags.filter((tag) => tag.startFrameIndex <= frame.order && tag.endFrameIndex >= frame.order),
@@ -1333,6 +1334,8 @@ function animationError(
 
 function toAnimationError(error: unknown): EditorError {
   if (error instanceof AnimationObservationError) return error.editorError;
+  const symbolGridError = getSymbolGridEditorError(error);
+  if (symbolGridError) return symbolGridError;
   return { code: 'internal', retryable: true, details: { reason: 'unexpected_failure' } };
 }
 

@@ -195,6 +195,36 @@ export class PFAgentAnimationPreview extends LitElement {
       font-variant-numeric: tabular-nums;
     }
 
+    .sr-status {
+      block-size: 1px;
+      clip-path: inset(50%);
+      inline-size: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+    }
+
+    .contact-cell-captions {
+      display: grid;
+      gap: 4px;
+      grid-template-columns: repeat(var(--contact-columns), minmax(0, 1fr));
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .contact-cell-captions li {
+      border: 1px solid var(--agent-animation-border);
+      border-radius: 4px;
+      color: var(--agent-animation-muted);
+      font-size: 0.75rem;
+      line-height: 1.35;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      padding: 4px;
+      text-align: center;
+    }
+
     @container (max-width: 640px) {
       .surface {
         padding: 12px;
@@ -225,6 +255,7 @@ export class PFAgentAnimationPreview extends LitElement {
   @state() private playbackMode: 'all' | 'tag' = 'all';
   @state() private activeTagId: string | null = null;
   @state() private isPlaying = false;
+  @state() private liveAnnouncement = '';
 
   @query('.contact-canvas') private contactCanvas?: HTMLCanvasElement;
   @query('.intended-canvas') private intendedCanvas?: HTMLCanvasElement;
@@ -338,7 +369,7 @@ export class PFAgentAnimationPreview extends LitElement {
   private renderSeek(bundle: AnimationEvaluationBundle, frame: AnimationEvaluationFrame, currentIndex: number): TemplateResult {
     return html`
       <div class="seek">
-        <label for="animation-frame-seek">Frame ${frame.number} of ${bundle.frames.length}</label>
+        <label for="animation-frame-seek">Frame ${frame.number} · position ${currentIndex + 1} of ${bundle.frames.length}</label>
         <input
           id="animation-frame-seek"
           type="range"
@@ -354,11 +385,18 @@ export class PFAgentAnimationPreview extends LitElement {
   }
 
   private renderStatus(frame: AnimationEvaluationFrame, currentTag: AnimationEvaluationBundle['tags'][number] | undefined): TemplateResult {
+    const status = this.getStatusText(frame, currentTag);
     return html`
-      <p class="status" role="status" aria-live="polite">
-        ${this.isPlaying ? 'Playing' : 'Paused'} · Frame ${frame.number} · ${frame.duration} ms${currentTag ? ` · ${currentTag.name || currentTag.id}` : ''}
-      </p>
+      <p class="status">${status}</p>
+      ${this.liveAnnouncement ? html`<p class="sr-status" role="status" aria-live="polite">${this.liveAnnouncement}</p>` : ''}
     `;
+  }
+
+  private getStatusText(
+    frame: AnimationEvaluationFrame,
+    currentTag: AnimationEvaluationBundle['tags'][number] | undefined,
+  ): string {
+    return `${this.isPlaying ? 'Playing' : 'Paused'} · Frame ${frame.number} · ${frame.duration} ms${currentTag ? ` · ${currentTag.name || currentTag.id}` : ''}`;
   }
 
   private renderFigures(
@@ -376,9 +414,18 @@ export class PFAgentAnimationPreview extends LitElement {
               height=${bundle.contactSheet.height}
               role="img"
               aria-label="Animation contact sheet with ${bundle.frames.length} frames"
+              aria-describedby="contact-sheet-caption contact-sheet-captions"
             ></canvas>
           </div>
           <figcaption id="contact-sheet-caption">Contact sheet (${bundle.contactSheet.columns} columns × ${bundle.contactSheet.rows} rows)</figcaption>
+          <ol
+            id="contact-sheet-captions"
+            class="contact-cell-captions"
+            style=${`--contact-columns: ${bundle.contactSheet.columns}`}
+            aria-label="Contact sheet frame captions"
+          >
+            ${bundle.contactSheet.cells.map((cell) => html`<li>Frame ${cell.frameNumber} · ${cell.duration} ms</li>`)}
+          </ol>
         </figure>
         <figure aria-labelledby="playback-caption">
           <div class="canvas-frame ${background.className}" style=${background.style}>
@@ -450,6 +497,7 @@ export class PFAgentAnimationPreview extends LitElement {
 
   private resetBundlePlayback(): void {
     this.stopPlayback();
+    this.liveAnnouncement = '';
     const bundle = this.bundle;
     if (!bundle || bundle.frames.length === 0) {
       this.playbackEngine = null;
@@ -506,6 +554,7 @@ export class PFAgentAnimationPreview extends LitElement {
   private togglePlayback = (): void => {
     if (!this.playbackEngine) return;
     this.isPlaying = this.playbackEngine.toggle();
+    this.announceCurrentStatus();
   };
 
   private stopPlayback(): void {
@@ -516,11 +565,13 @@ export class PFAgentAnimationPreview extends LitElement {
 
   private previousFrame = (): void => {
     this.seekBy(-1);
+    this.announceCurrentStatus();
   };
 
   private nextFrame = (): void => {
     if (!this.playbackEngine) return;
     this.playbackEngine.advanceFrame();
+    this.announceCurrentStatus();
     this.requestUpdate();
   };
 
@@ -545,7 +596,10 @@ export class PFAgentAnimationPreview extends LitElement {
   private seekFrame = (event: Event): void => {
     const value = Number((event.currentTarget as HTMLInputElement).value) - 1;
     const frame = this.playbackFrames[value];
-    if (frame) this.currentFrameId = frame.id;
+    if (frame) {
+      this.currentFrameId = frame.id;
+      this.announceCurrentStatus();
+    }
   };
 
   private changePlaybackRange = (event: Event): void => {
@@ -554,6 +608,7 @@ export class PFAgentAnimationPreview extends LitElement {
       this.playbackMode = 'all';
       this.activeTagId = null;
       this.playbackEngine?.setMode('all');
+      this.announceCurrentStatus();
       return;
     }
     const tagId = value.slice('tag:'.length);
@@ -563,6 +618,7 @@ export class PFAgentAnimationPreview extends LitElement {
     this.activeTagId = tag.id;
     this.playbackEngine?.setMode('tag', tag.id);
     this.currentFrameId = this.playbackFrames[tag.startFrameIndex]?.id ?? this.currentFrameId;
+    this.announceCurrentStatus();
   };
 
   private changeTag = (event: Event): void => {
@@ -573,7 +629,16 @@ export class PFAgentAnimationPreview extends LitElement {
     this.playbackMode = 'tag';
     this.playbackEngine?.setMode('tag', tag.id);
     this.currentFrameId = this.playbackFrames[tag.startFrameIndex]?.id ?? this.currentFrameId;
+    this.announceCurrentStatus();
   };
+
+  private announceCurrentStatus(): void {
+    const bundle = this.bundle;
+    const frame = bundle ? this.currentFrame(bundle) : undefined;
+    if (!frame) return;
+    const currentTag = bundle?.tags.find((tag) => tag.id === this.activeTagId);
+    this.liveAnnouncement = this.getStatusText(frame, currentTag);
+  }
 
   private paintCanvases(): void {
     const bundle = this.bundle;

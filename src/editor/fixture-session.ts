@@ -1128,6 +1128,7 @@ export class FixtureSession {
     });
     const inactiveContext = await this.createInactiveFixtureContext('fixture-inactive-animation');
     prepareAnimationObservationFixture(inactiveContext);
+    prepareInactiveAnimationObservationFixture(inactiveContext);
     this.targetContexts.set('fixture-inactive-animation', inactiveContext);
     const inactive = await requestSuccess<AnimationEvaluationBundle>(this.adapter, {
       ...request,
@@ -1179,7 +1180,13 @@ export class FixtureSession {
         document: sameProjectFile(documentBefore, documentAfterObservation),
         inactiveTarget: inactive.target.projectId === 'fixture-inactive-animation'
           && bundle.target.projectId === this.target.projectId
-          && inactive.revision === bundle.revision,
+          && inactive.revision === bundle.revision
+          && inactive.frames.map((frame) => frame.duration).join(',') === '140,220,300'
+          && inactive.frames[0]?.render.pixels[60] === 0
+          && inactive.frames[0]?.render.pixels[61] === 0
+          && inactive.frames[0]?.render.pixels[62] === 255
+          && inactive.frames[0]?.render.pixels[63] === 255
+          && inactive.contactSheet.cells[0]?.label === 'Frame 1 · 140 ms',
       },
     };
   }
@@ -1626,6 +1633,23 @@ function prepareRenderObservationFixture(context: ProjectContext): void {
   context.animation.syncLayerCanvases();
 }
 
+function prepareInactiveAnimationObservationFixture(context: ProjectContext): void {
+  const frames = context.animation.frames.value;
+  const firstFrame = frames[0];
+  const imageLayer = context.layers.layers.value.find((layer) => layer.type === 'image');
+  if (!firstFrame || !imageLayer) throw new Error('Inactive animation fixture is incomplete.');
+  const firstCel = context.animation.cels.value.get(context.animation.getCelKey(imageLayer.id, firstFrame.id));
+  if (!firstCel) throw new Error('Inactive animation fixture has no first cel.');
+  const drawing = firstCel.canvas.getContext('2d');
+  if (!drawing) throw new Error('Inactive animation fixture could not create a canvas context.');
+  drawing.fillStyle = '#0000ff';
+  drawing.fillRect(3, 3, 1, 1);
+  context.animation.frames.value = frames.map((frame, index) => ({
+    ...frame,
+    duration: [140, 220, 300][index] ?? frame.duration,
+  }));
+}
+
 // fallow-ignore-next-line complexity -- This fixture deliberately describes the three exact raster states used by the public bundle journey.
 function prepareAnimationObservationFixture(context: ProjectContext): void {
   const baseLayer = context.layers.layers.value.find((layer) => layer.type === 'image');
@@ -1696,7 +1720,7 @@ function prepareAnimationObservationFixture(context: ProjectContext): void {
     id: 'fixture-animation-preview-tag',
     name: 'Preview Motion',
     color: '#123456',
-    startFrameIndex: 0,
+    startFrameIndex: 1,
     endFrameIndex: 2,
     collapsed: false,
   }];

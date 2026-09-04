@@ -360,6 +360,11 @@ class SymbolGridError extends Error {
   }
 }
 
+/** Preserve a bounded Symbol Grid failure when a caller composes its result. */
+export function getSymbolGridEditorError(error: unknown): EditorError | undefined {
+  return error instanceof SymbolGridError ? error.editorError : undefined;
+}
+
 /**
  * Observe one bounded source region without exposing a canvas or an index
  * buffer. A layer read remains editable; a composite read is proof only.
