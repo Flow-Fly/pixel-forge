@@ -158,7 +158,7 @@ describe('animation evaluation bundle and agent preview', () => {
     vi.spyOn(performance, 'now').mockReturnValue(0);
     const root = preview.shadowRoot!;
     await assertControlledTiming(preview, root, raf);
-    await assertPlaybackActions(preview, root);
+    await assertPlaybackActions(preview, root, raf);
   });
 
   it('cancels scheduled playback when the bundle is replaced or disconnected', async () => {
@@ -190,6 +190,30 @@ describe('animation evaluation bundle and agent preview', () => {
     expect(raf.cancelled()).toBe(2);
   });
 
+  it('keeps component-local playback timing and IDs after bundle mutation', async () => {
+    const session = createFixtureSession();
+    sessions.push(session);
+    const journey = await session.runAnimationObservation();
+    const preview = document.createElement('pf-agent-animation-preview') as PFAgentAnimationPreview;
+    preview.bundle = journey.bundle;
+    document.body.append(preview);
+    await preview.updateComplete;
+
+    const assignedFrame = journey.bundle.frames[0] as { id: string; frameId: string; duration: number };
+    assignedFrame.id = 'mutated-frame-id';
+    assignedFrame.frameId = 'mutated-frame-id';
+    assignedFrame.duration = 999;
+    const raf = controlAnimationFrames();
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    const root = preview.shadowRoot!;
+    const play = root.querySelector<HTMLButtonElement>('button[aria-label="Play animation"]')!;
+    play.click();
+    await preview.updateComplete;
+    raf.tick(100);
+    await preview.updateComplete;
+    expect(root.querySelector('.status')?.textContent).toContain('Frame 2');
+  });
+
   it('rejects malformed, one-frame, oversized, and disposed requests before allocation', async () => {
     const context = createProjectContext();
     const session = createFixtureSession({ context });
@@ -200,6 +224,7 @@ describe('animation evaluation bundle and agent preview', () => {
       ...journey.afterTiming.request,
       expectedDigest: null,
     };
+    expandAnimationFrameRange(context);
     const createElement = vi.spyOn(document, 'createElement');
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
     const createImageData = vi.spyOn(CanvasRenderingContext2D.prototype, 'createImageData');
@@ -207,6 +232,13 @@ describe('animation evaluation bundle and agent preview', () => {
 
     const malformed = await session.adapter.request({ ...request, expectedDigest: 'malformed' });
     expect(malformed).toMatchObject({ ok: false, error: { code: 'invalid_request', retryable: false } });
+    expectNoAnimationAllocation(createElement, getContext, createImageData, digest);
+
+    const oversizedRange = await session.adapter.request(request);
+    expect(oversizedRange).toMatchObject({
+      ok: false,
+      error: { code: 'bounds_exceeded', retryable: false, details: { reason: 'frame_range', max: 16 } },
+    });
     expectNoAnimationAllocation(createElement, getContext, createImageData, digest);
 
     context.animation.frames.value = [context.animation.frames.value[0]!];
@@ -236,6 +268,35 @@ describe('animation evaluation bundle and agent preview', () => {
       ...journey.afterTiming.request,
       keyframes: journey.afterTiming.request.keyframes.slice(),
     };
+    const callerTarget = { projectId: session.target.projectId };
+    const callerKeyframes = observationRequest.keyframes.slice();
+    const callerRequest = {
+      operation: 'project.animation.observe',
+      target: callerTarget,
+      expectedRevision: observationRequest.expectedRevision,
+      range: 'all' as const,
+      background: { kind: 'transparent' as const },
+      scale: observationRequest.scale,
+      keyframes: callerKeyframes,
+      expectedDigest: null,
+    };
+    const expectedKeyframes = callerKeyframes.slice();
+    const pending = session.adapter.request(callerRequest);
+    callerTarget.projectId = 'mutated-target';
+    callerKeyframes[0] = 'mutated-frame';
+    const captured = await pending;
+    if (!captured.ok) throw new Error(`Detached request unexpectedly failed: ${captured.error.code}`);
+    const capturedBundle = captured.result as AnimationEvaluationBundle;
+    expect(capturedBundle.request.target).toEqual({ projectId: session.target.projectId });
+    expect(capturedBundle.request.keyframes).toEqual(expectedKeyframes);
+    const later = await session.adapter.request({
+      ...callerRequest,
+      target: { projectId: session.target.projectId },
+      keyframes: expectedKeyframes,
+    });
+    if (!later.ok) throw new Error(`Later animation observation unexpectedly failed: ${later.error.code}`);
+    expect((later.result as AnimationEvaluationBundle).digest).toBe(capturedBundle.digest);
+    expect((later.result as AnimationEvaluationBundle).request).toEqual(capturedBundle.request);
     const detached = journey.afterTiming;
     (detached.frames[0]!.render.pixels as Uint8Array)[0] = 99;
     (detached.contactSheet.pixels as Uint8Array)[0] = 99;
@@ -333,18 +394,25 @@ async function assertControlledTiming(
   raf.tick(280);
   await preview.updateComplete;
   expect(root.querySelector('.status')?.textContent).toContain('Frame 3');
+  raf.tick(540);
+  await preview.updateComplete;
+  expect(root.querySelector('.status')?.textContent).toContain('Frame 1');
 
   const pause = root.querySelector<HTMLButtonElement>('button[aria-label="Pause animation"]')!;
   pause.click();
   await preview.updateComplete;
-  expect(root.querySelector('[role="status"]')?.textContent).toContain('Paused · Frame 3');
+  expect(root.querySelector('[role="status"]')?.textContent).toContain('Paused · Frame 1');
 }
 
-async function assertPlaybackActions(preview: PFAgentAnimationPreview, root: ShadowRoot): Promise<void> {
+async function assertPlaybackActions(
+  preview: PFAgentAnimationPreview,
+  root: ShadowRoot,
+  raf: ControlledAnimationFrames,
+): Promise<void> {
   const next = root.querySelector<HTMLButtonElement>('button[aria-label="Next frame"]')!;
   next.click();
   await preview.updateComplete;
-  expect(root.querySelector('.status')?.textContent).toContain('Frame 1');
+  expect(root.querySelector('.status')?.textContent).toContain('Frame 2');
 
   const seek = root.querySelector<HTMLInputElement>('input[aria-label="Animation frame"]')!;
   seek.value = '2';
@@ -369,6 +437,50 @@ async function assertPlaybackActions(preview: PFAgentAnimationPreview, root: Sha
   await userEvent.keyboard('{Enter}');
   await preview.updateComplete;
   expect(root.querySelector('.status')?.textContent).toContain('Frame 3');
+
+  const play = root.querySelector<HTMLButtonElement>('button[aria-label="Play animation"]')!;
+  play.click();
+  await preview.updateComplete;
+  raf.tick(259);
+  await preview.updateComplete;
+  expect(root.querySelector('.status')?.textContent).toContain('Frame 3');
+  raf.tick(260);
+  await preview.updateComplete;
+  expect(root.querySelector('.status')?.textContent).toContain('Frame 2');
+  const pause = root.querySelector<HTMLButtonElement>('button[aria-label="Pause animation"]')!;
+  pause.click();
+  await preview.updateComplete;
+}
+
+function expandAnimationFrameRange(context: ReturnType<typeof createProjectContext>): void {
+  const frames = context.animation.frames.value;
+  const imageLayer = context.layers.layers.value.find((layer) => layer.type === 'image');
+  const firstCel = frames[0] && imageLayer
+    ? context.animation.cels.value.get(context.animation.getCelKey(imageLayer.id, frames[0].id))
+    : undefined;
+  if (!imageLayer || !firstCel) throw new Error('Animation fixture did not have a source cel.');
+  const additionalFrames = Array.from({ length: 17 - frames.length }, (_, index) => ({
+    id: `oversized-animation-frame-${index + 1}`,
+    order: frames.length + index,
+    duration: 100,
+  }));
+  const expandedFrames = [...frames, ...additionalFrames];
+  const cels = new Map(context.animation.cels.value);
+  for (const frame of additionalFrames) {
+    const canvas = document.createElement('canvas');
+    canvas.width = context.project.width.value;
+    canvas.height = context.project.height.value;
+    cels.set(context.animation.getCelKey(imageLayer.id, frame.id), {
+      ...firstCel,
+      id: `${firstCel.id}-${frame.order}`,
+      frameId: frame.id,
+      canvas,
+      indexBuffer: new Uint8Array(canvas.width * canvas.height),
+    });
+  }
+  context.animation.frames.value = expandedFrames;
+  context.animation.cels.value = cels;
+  context.animation.tags.value = [];
 }
 
 function readCanvas(canvas: HTMLCanvasElement): Uint8Array {
