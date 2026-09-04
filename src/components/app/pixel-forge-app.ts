@@ -19,6 +19,7 @@ import "../dialogs/pf-paint-by-number-dialog";
 import "../dialogs/pf-grid-settings-dialog";
 import "../dialogs/pf-checker-settings-dialog";
 import "../dialogs/pf-accent-color-dialog";
+import "../dialogs/pf-automation-session-dialog";
 import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../preview/pf-agent-preview-surface";
@@ -115,7 +116,8 @@ export class PixelForgeApp extends BaseComponent {
       pf-resize-dialog,
       pf-grid-settings-dialog,
       pf-checker-settings-dialog,
-      pf-accent-color-dialog
+      pf-accent-color-dialog,
+      pf-automation-session-dialog
     ) {
       z-index: auto;
     }
@@ -1274,6 +1276,7 @@ export class PixelForgeApp extends BaseComponent {
       <pf-grid-settings-dialog></pf-grid-settings-dialog>
       <pf-checker-settings-dialog></pf-checker-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
+      <pf-automation-session-dialog></pf-automation-session-dialog>
 
       ${this.renderWarningToasts()}
       ${this.renderFileImportStatus()}

@@ -572,6 +572,10 @@ export class PFMenuBar extends BaseComponent {
     );
   }
 
+  showAutomationSessionDialog() {
+    window.dispatchEvent(new CustomEvent("show-automation-session-dialog"));
+  }
+
   showNewProjectDialog() {
     this.dispatchEvent(
       new CustomEvent("show-new-project-dialog", {
@@ -778,6 +782,13 @@ export class PFMenuBar extends BaseComponent {
           <div class="menu-item" @click=${this.showExportDialog}>
             Export... <span class="shortcut">${formatShortcut(menuShortcuts.export)}</span>
           </div>
+          <button
+            class="menu-item"
+            type="button"
+            @click=${this.showAutomationSessionDialog}
+          >
+            Automation Session...
+          </button>
           ${pwaStore.installAvailable.value
             ? html`
                 <div class="divider"></div>
