@@ -99,68 +99,164 @@ export function encodeSymbolGridPixels(
   height: number,
   paletteEntries: readonly SymbolGridPaletteEntry[] = [],
   existingLegend: readonly SymbolGridLegendEntry[] = [],
+  paletteIndices?: ArrayLike<number>,
 ): SymbolGridEncoding {
+  validateSymbolGridPixels(pixels, width, height);
+  const paletteMatches = createPaletteMatches(paletteEntries);
+  const entries: SymbolGridLegendEntry[] = existingLegend.map((entry) => ({ ...entry }));
+  const keys = new Map<string, string>();
+  entries.forEach((entry) => keys.set(entry.color, entry.symbol));
+  const rows = Array.from({ length: height }, (_, y) => encodeSymbolGridRow(
+    pixels,
+    width,
+    y,
+    paletteEntries,
+    paletteMatches,
+    paletteIndices,
+    entries,
+    keys,
+  ));
+  return { rows, legend: entries };
+}
+
+type SymbolGridPaletteMatch = { readonly id: string; readonly index: number };
+
+interface SymbolGridPixel {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+  readonly a: number;
+}
+
+function validateSymbolGridPixels(
+  pixels: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+): void {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
       || width < 1 || height < 1 || width * height > RASTER_GRID_MAX_CELLS
       || pixels.length !== width * height * 4) {
     throw symbolGridError('invalid_state', false, { reason: 'symbol_grid_pixels' });
   }
+}
 
-  const paletteMatches = new Map<string, { readonly id: string; readonly index: number }[]>();
+function createPaletteMatches(
+  paletteEntries: readonly SymbolGridPaletteEntry[],
+): ReadonlyMap<string, readonly SymbolGridPaletteMatch[]> {
+  const matches = new Map<string, SymbolGridPaletteMatch[]>();
   paletteEntries.forEach((entry, index) => {
     const rgb = hexToRgb(entry.color);
     if (!rgb) return;
     const key = `${rgb.r},${rgb.g},${rgb.b}`;
-    const matches = paletteMatches.get(key) ?? [];
-    matches.push({ id: entry.id, index: index + 1 });
-    paletteMatches.set(key, matches);
+    const candidates = matches.get(key) ?? [];
+    candidates.push({ id: entry.id, index: index + 1 });
+    matches.set(key, candidates);
   });
+  return matches;
+}
 
-  const entries: SymbolGridLegendEntry[] = existingLegend.map((entry) => ({ ...entry }));
-  const keys = new Map<string, string>();
-  entries.forEach((entry) => keys.set(entry.color, entry.symbol));
-  const rows: string[] = [];
-  for (let y = 0; y < height; y++) {
-    let row = '';
-    for (let x = 0; x < width; x++) {
-      const cell = y * width + x;
-      const pixelOffset = cell * 4;
-      const r = pixels[pixelOffset] ?? 0;
-      const g = pixels[pixelOffset + 1] ?? 0;
-      const b = pixels[pixelOffset + 2] ?? 0;
-      const a = pixels[pixelOffset + 3] ?? 0;
-      if (a === 0) {
-        if (r !== 0 || g !== 0 || b !== 0) {
-          throw symbolGridError('invalid_state', false, { reason: 'transparent_rgba' });
-        }
-        row += '.';
-        continue;
-      }
-
-      const paletteCandidates = a === 255 ? paletteMatches.get(`${r},${g},${b}`) : undefined;
-      const paletteMatch = paletteCandidates?.length === 1 ? paletteCandidates[0] : undefined;
-      const key = rgbaToHex(r, g, b, a);
-      let symbol = keys.get(key);
-      if (!symbol) {
-        if (entries.length >= RASTER_GRID_MAX_LEGEND_ENTRIES) {
-          throw symbolGridError('limit_exceeded', false, {
-            reason: 'legend',
-            max: RASTER_GRID_MAX_LEGEND_ENTRIES,
-          });
-        }
-        symbol = SYMBOL_ALPHABET[entries.length] ?? '';
-        keys.set(key, symbol);
-        entries.push({
-          symbol,
-          color: rgbaToHex(r, g, b, a),
-          ...(paletteMatch ? { paletteEntryId: paletteMatch.id, paletteIndex: paletteMatch.index } : {}),
-        });
-      }
-      row += symbol;
-    }
-    rows.push(row);
+function encodeSymbolGridRow(
+  pixels: Uint8Array | Uint8ClampedArray,
+  width: number,
+  y: number,
+  paletteEntries: readonly SymbolGridPaletteEntry[],
+  paletteMatches: ReadonlyMap<string, readonly SymbolGridPaletteMatch[]>,
+  paletteIndices: ArrayLike<number> | undefined,
+  entries: SymbolGridLegendEntry[],
+  keys: Map<string, string>,
+): string {
+  let row = '';
+  for (let x = 0; x < width; x++) {
+    row += encodeSymbolGridCell(
+      pixels,
+      y * width + x,
+      paletteEntries,
+      paletteMatches,
+      paletteIndices,
+      entries,
+      keys,
+    );
   }
-  return { rows, legend: entries };
+  return row;
+}
+
+function encodeSymbolGridCell(
+  pixels: Uint8Array | Uint8ClampedArray,
+  cell: number,
+  paletteEntries: readonly SymbolGridPaletteEntry[],
+  paletteMatches: ReadonlyMap<string, readonly SymbolGridPaletteMatch[]>,
+  paletteIndices: ArrayLike<number> | undefined,
+  entries: SymbolGridLegendEntry[],
+  keys: Map<string, string>,
+): string {
+  const pixel = readSymbolGridPixel(pixels, cell);
+  if (pixel.a === 0) return encodeTransparentSymbol(pixel);
+  const paletteIndex = paletteIndices?.[cell] ?? 0;
+  const paletteMatch = resolvePaletteMatch(pixel, paletteIndex, paletteEntries, paletteMatches);
+  const key = paletteIndex > 0
+    ? `index:${paletteIndex}:${pixel.r},${pixel.g},${pixel.b},${pixel.a}`
+    : rgbaToHex(pixel.r, pixel.g, pixel.b, pixel.a);
+  return getOrCreateSymbol(key, rgbaToHex(pixel.r, pixel.g, pixel.b, pixel.a), paletteMatch, entries, keys);
+}
+
+function readSymbolGridPixel(
+  pixels: Uint8Array | Uint8ClampedArray,
+  cell: number,
+): SymbolGridPixel {
+  const pixelOffset = cell * 4;
+  return {
+    r: pixels[pixelOffset] ?? 0,
+    g: pixels[pixelOffset + 1] ?? 0,
+    b: pixels[pixelOffset + 2] ?? 0,
+    a: pixels[pixelOffset + 3] ?? 0,
+  };
+}
+
+function encodeTransparentSymbol(pixel: SymbolGridPixel): string {
+  if (pixel.r !== 0 || pixel.g !== 0 || pixel.b !== 0) {
+    throw symbolGridError('invalid_state', false, { reason: 'transparent_rgba' });
+  }
+  return '.';
+}
+
+function resolvePaletteMatch(
+  pixel: SymbolGridPixel,
+  paletteIndex: number,
+  paletteEntries: readonly SymbolGridPaletteEntry[],
+  paletteMatches: ReadonlyMap<string, readonly SymbolGridPaletteMatch[]>,
+): SymbolGridPaletteMatch | undefined {
+  if (paletteIndex > 0) {
+    const indexedEntry = paletteEntries[paletteIndex - 1];
+    if (indexedEntry) return { id: indexedEntry.id, index: paletteIndex };
+  }
+  if (pixel.a !== 255) return undefined;
+  const candidates = paletteMatches.get(`${pixel.r},${pixel.g},${pixel.b}`);
+  return candidates?.length === 1 ? candidates[0] : undefined;
+}
+
+function getOrCreateSymbol(
+  key: string,
+  color: string,
+  paletteMatch: SymbolGridPaletteMatch | undefined,
+  entries: SymbolGridLegendEntry[],
+  keys: Map<string, string>,
+): string {
+  const existing = keys.get(key);
+  if (existing) return existing;
+  if (entries.length >= RASTER_GRID_MAX_LEGEND_ENTRIES) {
+    throw symbolGridError('limit_exceeded', false, {
+      reason: 'legend',
+      max: RASTER_GRID_MAX_LEGEND_ENTRIES,
+    });
+  }
+  const symbol = SYMBOL_ALPHABET[entries.length] ?? '';
+  keys.set(key, symbol);
+  entries.push({
+    symbol,
+    color,
+    ...(paletteMatch ? { paletteEntryId: paletteMatch.id, paletteIndex: paletteMatch.index } : {}),
+  });
+  return symbol;
 }
 
 export interface RasterObservation {
@@ -874,64 +970,15 @@ function buildSymbolGrid(
   } else {
     source = { kind: 'composite', frameId: request.source.frameId };
   }
-  if (!read.indices) {
-    const encoding = encodeSymbolGridPixels(
-      read.pixels,
-      request.region.width,
-      request.region.height,
-      context.palette.getProjectPaletteEntries(),
-    );
-    return { ...encoding, source };
-  }
-
-  const entries: SymbolGridLegendEntry[] = [];
-  const keys = new Map<string, string>();
-  const rows: string[] = [];
-  for (let y = 0; y < request.region.height; y++) {
-    let row = '';
-    for (let x = 0; x < request.region.width; x++) {
-      const cell = y * request.region.width + x;
-      const pixelOffset = cell * 4;
-      const r = read.pixels[pixelOffset] ?? 0;
-      const g = read.pixels[pixelOffset + 1] ?? 0;
-      const b = read.pixels[pixelOffset + 2] ?? 0;
-      const a = read.pixels[pixelOffset + 3] ?? 0;
-      if (a === 0) {
-        if (r !== 0 || g !== 0 || b !== 0) {
-          throw symbolGridError('invalid_state', false, { reason: 'transparent_rgba' });
-        }
-        row += '.';
-        continue;
-      }
-
-      const paletteIndex = read.indices?.[cell] ?? 0;
-      const paletteEntry = paletteIndex > 0
-        ? context.palette.getProjectPaletteEntries()[paletteIndex - 1]
-        : undefined;
-      const key = paletteIndex > 0
-        ? `index:${paletteIndex}:${r},${g},${b},${a}`
-        : `rgba:${r},${g},${b},${a}`;
-      let symbol = keys.get(key);
-      if (!symbol) {
-        if (entries.length >= RASTER_GRID_MAX_LEGEND_ENTRIES) {
-          throw symbolGridError('limit_exceeded', false, {
-            reason: 'legend',
-            max: RASTER_GRID_MAX_LEGEND_ENTRIES,
-          });
-        }
-        symbol = SYMBOL_ALPHABET[entries.length] ?? '';
-        keys.set(key, symbol);
-        entries.push({
-          symbol,
-          color: rgbaToHex(r, g, b, a),
-          ...(paletteEntry ? { paletteEntryId: paletteEntry.id, paletteIndex } : {}),
-        });
-      }
-      row += symbol;
-    }
-    rows.push(row);
-  }
-  return { rows, legend: entries, source };
+  const encoding = encodeSymbolGridPixels(
+    read.pixels,
+    request.region.width,
+    request.region.height,
+    read.indices ? context.palette.getProjectPaletteEntries() : [],
+    [],
+    read.indices,
+  );
+  return { ...encoding, source };
 }
 
 interface DigestInput {
@@ -966,6 +1013,12 @@ async function createDigest(
   if (!globalThis.crypto?.subtle) {
     throw symbolGridError('internal', true, { reason: 'digest_support' });
   }
+  return createSymbolGridDigest(bytes);
+}
+
+/** Shared SHA-256 framing for detached Symbol Grid and animation evidence. */
+export async function createSymbolGridDigest(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw symbolGridError('internal', true, { reason: 'digest_support' });
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
 }

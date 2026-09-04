@@ -444,11 +444,7 @@ export class FixtureSession {
       expectedDigest: '0'.repeat(64),
     });
 
-    const inactiveContext = createProjectContext();
-    await this.saveService.runWithoutSaving(async () => {
-      await inactiveContext.project.loadProject(createFixtureProject());
-      inactiveContext.project.id.value = 'fixture-inactive';
-    }, inactiveContext);
+    const inactiveContext = await this.createInactiveFixtureContext('fixture-inactive');
     seedFixturePixel(inactiveContext);
     seedInactiveFixturePixel(inactiveContext);
     this.targetContexts.set('fixture-inactive', inactiveContext);
@@ -1130,11 +1126,7 @@ export class FixtureSession {
       ...request,
       expectedDigest: '0'.repeat(64),
     });
-    const inactiveContext = createProjectContext();
-    await this.saveService.runWithoutSaving(async () => {
-      await inactiveContext.project.loadProject(createFixtureProject());
-      inactiveContext.project.id.value = 'fixture-inactive-animation';
-    }, inactiveContext);
+    const inactiveContext = await this.createInactiveFixtureContext('fixture-inactive-animation');
     prepareAnimationObservationFixture(inactiveContext);
     this.targetContexts.set('fixture-inactive-animation', inactiveContext);
     const inactive = await requestSuccess<AnimationEvaluationBundle>(this.adapter, {
@@ -1200,6 +1192,15 @@ export class FixtureSession {
     return requestSuccess<ProjectObservation>(adapter, {
       operation: 'project.observe', target, expectedRevision: revision,
     });
+  }
+
+  private async createInactiveFixtureContext(projectId: string): Promise<ProjectContext> {
+    const context = createProjectContext();
+    await this.saveService.runWithoutSaving(async () => {
+      await context.project.loadProject(createFixtureProject());
+      context.project.id.value = projectId;
+    }, context);
+    return context;
   }
 
   private async captureAnimationCheckpoint(

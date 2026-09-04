@@ -31,10 +31,12 @@ import {
   type RenderObservationResult,
 } from './observations';
 import {
+  createSymbolGridDigest,
   encodeSymbolGridPixels,
   type SymbolGridEncoding,
   type SymbolGridLegendEntry,
 } from './symbol-grid';
+import { sameBytes } from './structure-support';
 
 export type AnimationObservationRange = 'all' | { readonly tagId: string };
 
@@ -177,9 +179,16 @@ class AnimationObservationError extends Error {
 
 interface CapturedAnimationState {
   readonly frames: readonly Frame[];
-  readonly frameValues: readonly { readonly id: string; readonly order: number; readonly duration: number }[];
+  readonly frameValues: readonly {
+    readonly id: string;
+    readonly order: number;
+    readonly duration: number;
+    readonly tags: string | undefined;
+  }[];
   readonly layers: readonly Layer[];
+  readonly layerValues: readonly CapturedLayerValue[];
   readonly cels: ReadonlyMap<string, Cel>;
+  readonly celValues: ReadonlyMap<string, CapturedCelValue>;
   readonly tags: readonly FrameTag[];
   readonly tagValues: readonly AnimationTagMetadata[];
   readonly palette: readonly { readonly id: string; readonly color: string }[];
@@ -189,6 +198,35 @@ interface CapturedAnimationState {
   readonly activeTagId: string | null;
 }
 
+interface CapturedLayerValue {
+  readonly id: string;
+  readonly name: string;
+  readonly type: Layer['type'];
+  readonly visible: boolean;
+  readonly locked: boolean;
+  readonly opacity: number;
+  readonly blendMode: Layer['blendMode'];
+  readonly parentId: string | null;
+  readonly continuous: boolean | undefined;
+  readonly canvas: HTMLCanvasElement | undefined;
+  readonly textData: string | undefined;
+  readonly referenceData: string | undefined;
+}
+
+interface CapturedCelValue {
+  readonly id: string;
+  readonly layerId: string;
+  readonly frameId: string;
+  readonly canvas: HTMLCanvasElement;
+  readonly indexBuffer: Uint8Array | undefined;
+  readonly indexValues: Uint8Array | undefined;
+  readonly linkedCelId: string | undefined;
+  readonly linkType: Cel['linkType'];
+  readonly opacity: number | undefined;
+  readonly textCelData: string | undefined;
+  readonly pixels: Uint8ClampedArray;
+}
+
 interface CapturedAnimationPlan {
   readonly state: CapturedAnimationState;
   readonly selectedFrames: readonly Frame[];
@@ -196,6 +234,19 @@ interface CapturedAnimationPlan {
   readonly palette: readonly { readonly id: string; readonly color: string; readonly index: number }[];
   readonly width: number;
   readonly height: number;
+}
+
+interface AnimationDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
+interface AnimationSources {
+  readonly frames: readonly Frame[];
+  readonly layers: readonly Layer[];
+  readonly cels: ReadonlyMap<string, Cel>;
+  readonly tags: readonly FrameTag[];
+  readonly palette: readonly { readonly id: string; readonly color: string }[];
 }
 
 /** Normalize the public request before a target is looked up. */
@@ -264,72 +315,20 @@ export async function observeAnimation(
 ): Promise<AnimationObservationResult> {
   try {
     const plan = captureAnimationPlan(context, request);
-    let globalLegend: readonly SymbolGridLegendEntry[] = [];
-    const frames: AnimationEvaluationFrame[] = [];
-
-    for (const [rangeIndex, frame] of plan.selectedFrames.entries()) {
-      const renderResult = await renderProjectObservation(context, {
-        target: request.target,
-        expectedRevision: request.expectedRevision,
-        source: { kind: 'composite', frameId: frame.id },
-        background: request.background,
-        scale: request.scale,
-        expectedDigest: null,
-      });
-      if (isRenderObservationFailure(renderResult)) return renderResult;
-      const render = cloneRenderObservation(renderResult);
-      const encoding = encodeSymbolGridPixels(
-        render.pixels,
-        render.width,
-        render.height,
-        plan.palette,
-        globalLegend,
-      );
-      globalLegend = encoding.legend.map(cloneLegendEntry);
-      frames.push({
-        id: frame.id,
-        frameId: frame.id,
-        number: rangeIndex + 1,
-        order: frame.order,
-        duration: frame.duration,
-        tags: plan.selectedTags.filter((tag) => tag.startFrameIndex <= frame.order && tag.endFrameIndex >= frame.order),
-        render,
-        renderedDigest: render.digest,
-        grid: createGrid(encoding, render.width, render.height),
-      });
-    }
-
+    const captured = await renderAnimationFrames(context, request, plan);
     assertCapturedAnimationState(context, request, plan.state);
-    if (globalLegend.length > ANIMATION_OBSERVATION_MAX_LEGEND_ENTRIES) {
-      throw animationError('limit_exceeded', false, {
-        reason: 'legend',
-        max: ANIMATION_OBSERVATION_MAX_LEGEND_ENTRIES,
-      });
-    }
-
-    const baseGrid = cloneGrid(frames[0]!.grid);
-    const deltas = frames.slice(1).map((frame, index) => createGridDelta(frames[index]!, frame));
-    const contactSheet = createContactSheet(frames);
-    const keyframes = request.keyframes.map((frameId) => {
-      const index = frames.findIndex((frame) => frame.frameId === frameId);
-      const frame = frames[index]!;
-      return {
-        ...cloneRenderObservation(frame.render),
-        frameNumber: frame.number,
-        duration: frame.duration,
-      };
-    });
+    const artifacts = createAnimationArtifacts(captured.frames, request.keyframes);
     const digest = await createAnimationDigest({
       request,
       canvas: { width: plan.width, height: plan.height },
-      frames,
+      frames: captured.frames,
       tags: plan.selectedTags,
       palette: plan.palette,
-      legend: globalLegend,
-      baseGrid,
-      deltas,
-      contactSheet,
-      keyframes,
+      legend: captured.legend,
+      baseGrid: artifacts.baseGrid,
+      deltas: artifacts.deltas,
+      contactSheet: artifacts.contactSheet,
+      keyframes: artifacts.keyframes,
     });
 
     assertCapturedAnimationState(context, request, plan.state);
@@ -344,14 +343,14 @@ export async function observeAnimation(
       revision: request.expectedRevision,
       request: cloneRequest(request),
       canvas: { width: plan.width, height: plan.height },
-      frames: frames.map(cloneEvaluationFrame),
+      frames: captured.frames.map(cloneEvaluationFrame),
       tags: plan.selectedTags.map(cloneTag),
       palette: plan.palette.map((entry) => ({ ...entry })),
-      legend: globalLegend.map(cloneLegendEntry),
-      baseGrid,
-      deltas: deltas.map(cloneDelta),
-      contactSheet: cloneContactSheet(contactSheet),
-      keyframes: keyframes.map((keyframe) => ({ ...keyframe, pixels: new Uint8Array(keyframe.pixels) })),
+      legend: captured.legend.map(cloneLegendEntry),
+      baseGrid: artifacts.baseGrid,
+      deltas: artifacts.deltas.map(cloneDelta),
+      contactSheet: cloneContactSheet(artifacts.contactSheet),
+      keyframes: artifacts.keyframes.map((keyframe) => ({ ...keyframe, pixels: new Uint8Array(keyframe.pixels) })),
       digest,
     };
   } catch (error) {
@@ -383,11 +382,135 @@ export function isAnimationObservationFailure(
   return isRecord(value) && value.ok === false && isRecord(value.error);
 }
 
+interface CapturedAnimationFrames {
+  readonly frames: readonly AnimationEvaluationFrame[];
+  readonly legend: readonly SymbolGridLegendEntry[];
+}
+
+interface AnimationArtifacts {
+  readonly baseGrid: AnimationGrid;
+  readonly deltas: readonly AnimationGridDelta[];
+  readonly contactSheet: AnimationContactSheet;
+  readonly keyframes: readonly AnimationKeyframeObservation[];
+}
+
+async function renderAnimationFrames(
+  context: ProjectContext,
+  request: AnimationObservationRequest,
+  plan: CapturedAnimationPlan,
+): Promise<CapturedAnimationFrames> {
+  let legend: readonly SymbolGridLegendEntry[] = [];
+  const frames: AnimationEvaluationFrame[] = [];
+  for (const [rangeIndex, frame] of plan.selectedFrames.entries()) {
+    const renderResult = await renderProjectObservation(context, {
+      target: request.target,
+      expectedRevision: request.expectedRevision,
+      source: { kind: 'composite', frameId: frame.id },
+      background: request.background,
+      scale: request.scale,
+      expectedDigest: null,
+    });
+    if (isRenderObservationFailure(renderResult)) {
+      throw new AnimationObservationError(renderResult.error);
+    }
+    const render = cloneRenderObservation(renderResult);
+    const encoding = encodeSymbolGridPixels(
+      render.pixels,
+      render.width,
+      render.height,
+      plan.palette,
+      legend,
+    );
+    legend = encoding.legend.map(cloneLegendEntry);
+    frames.push({
+      id: frame.id,
+      frameId: frame.id,
+      number: rangeIndex + 1,
+      order: frame.order,
+      duration: frame.duration,
+      tags: plan.selectedTags.filter((tag) => tag.startFrameIndex <= frame.order && tag.endFrameIndex >= frame.order),
+      render,
+      renderedDigest: render.digest,
+      grid: createGrid(encoding, render.width, render.height),
+    });
+  }
+  assertLegendBounds(legend);
+  return { frames, legend };
+}
+
+function assertLegendBounds(legend: readonly SymbolGridLegendEntry[]): void {
+  if (legend.length > ANIMATION_OBSERVATION_MAX_LEGEND_ENTRIES) {
+    throw animationError('limit_exceeded', false, {
+      reason: 'legend',
+      max: ANIMATION_OBSERVATION_MAX_LEGEND_ENTRIES,
+    });
+  }
+}
+
+function createAnimationArtifacts(
+  frames: readonly AnimationEvaluationFrame[],
+  keyframeIds: readonly string[],
+): AnimationArtifacts {
+  const firstFrame = frames[0];
+  if (!firstFrame) throw animationError('invalid_state', false, { reason: 'animation_frames' });
+  const baseGrid = cloneGrid(firstFrame.grid);
+  const deltas = frames.slice(1).map((frame, index) => createGridDelta(frames[index]!, frame));
+  const contactSheet = createContactSheet(frames);
+  const keyframes = createKeyframeObservations(frames, keyframeIds);
+  return { baseGrid, deltas, contactSheet, keyframes };
+}
+
+function createKeyframeObservations(
+  frames: readonly AnimationEvaluationFrame[],
+  keyframeIds: readonly string[],
+): readonly AnimationKeyframeObservation[] {
+  return keyframeIds.map((frameId) => {
+    const frame = frames.find((candidate) => candidate.frameId === frameId);
+    if (!frame) throw animationError('invalid_state', false, { reason: 'keyframe_range' });
+    return {
+      ...cloneRenderObservation(frame.render),
+      frameNumber: frame.number,
+      duration: frame.duration,
+    };
+  });
+}
+
 function captureAnimationPlan(
   context: ProjectContext,
   request: AnimationObservationRequest,
 ): CapturedAnimationPlan {
   validateRequest(request);
+  assertAnimationTarget(context, request);
+  assertAnimationEnvironment(context);
+  const dimensions = readAnimationDimensions(context);
+  const sources = readAnimationSources(context);
+  validateAnimationSources(context, sources, dimensions);
+
+  const selectedFrames = selectFrames(sources.frames, sources.tags, request.range);
+  if (selectedFrames.length < ANIMATION_OBSERVATION_MIN_FRAMES || selectedFrames.length > ANIMATION_OBSERVATION_MAX_FRAMES) {
+    throw animationError('bounds_exceeded', false, {
+      reason: 'frame_range',
+      min: ANIMATION_OBSERVATION_MIN_FRAMES,
+      max: ANIMATION_OBSERVATION_MAX_FRAMES,
+    });
+  }
+  const selectedIds = new Set(selectedFrames.map((frame) => frame.id));
+  assertKeyframesSelected(request.keyframes, selectedIds);
+  const selectedTags = sources.tags
+    .filter((tag) => request.range === 'all' || rangesIntersect(tag, selectedFrames[0]!.order, selectedFrames[selectedFrames.length - 1]!.order))
+    .map(cloneTag);
+  const palette = sources.palette.map((entry, index) => ({ id: entry.id, color: entry.color.toLowerCase(), index }));
+  return {
+    state: captureAnimationState(context, sources),
+    selectedFrames,
+    selectedTags,
+    palette,
+    width: dimensions.width,
+    height: dimensions.height,
+  };
+}
+
+function assertAnimationTarget(context: ProjectContext, request: AnimationObservationRequest): void {
   if (context.isDisposed || context.project.id.value !== request.target.projectId) {
     throw animationError('target_not_found', true);
   }
@@ -397,74 +520,146 @@ function captureAnimationPlan(
       currentRevision: context.project.revision.value,
     });
   }
-  if (context.guidedDrawing.active) {
-    throw animationError('unsupported', false, { feature: 'guided-drawing-animation' });
-  }
-  const selectionType = context.selection.state.value.type;
-  if (selectionType === 'floating' || selectionType === 'transforming') {
-    throw animationError('invalid_state', false, { reason: 'selection_in_progress' });
-  }
+}
+
+function assertAnimationEnvironment(context: ProjectContext): void {
+  assertAnimationDrawingMode(context);
+  assertAnimationSelection(context);
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
     throw animationError('internal', true, { reason: 'render_surface' });
   }
   if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') {
     throw animationError('internal', true, { reason: 'digest_support' });
   }
+}
 
+function assertAnimationDrawingMode(context: ProjectContext): void {
+  if (context.guidedDrawing.active) {
+    throw animationError('unsupported', false, { feature: 'guided-drawing-animation' });
+  }
+}
+
+function assertAnimationSelection(context: ProjectContext): void {
+  const selectionType = context.selection.state.value.type;
+  if (selectionType === 'floating' || selectionType === 'transforming') {
+    throw animationError('invalid_state', false, { reason: 'selection_in_progress' });
+  }
+}
+
+function readAnimationDimensions(context: ProjectContext): AnimationDimensions {
   const width = context.project.width.value;
   const height = context.project.height.value;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
       || width < 1 || height < 1
       || width > ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION
       || height > ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION) {
-    throw animationError('bounds_exceeded', false, { reason: 'canvas_dimensions', max: ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION });
+    throw animationError('bounds_exceeded', false, {
+      reason: 'canvas_dimensions',
+      max: ANIMATION_OBSERVATION_MAX_CANVAS_DIMENSION,
+    });
   }
   const framePixels = width * height;
   if (!Number.isSafeInteger(framePixels) || framePixels > ANIMATION_OBSERVATION_MAX_FRAME_PIXELS) {
-    throw animationError('limit_exceeded', false, { reason: 'frame_pixels', max: ANIMATION_OBSERVATION_MAX_FRAME_PIXELS });
-  }
-
-  const frames = context.animation.frames.value;
-  const layers = context.layers.layers.value;
-  const cels = context.animation.cels.value;
-  const tags = context.animation.tags.value;
-  const paletteEntries = context.palette.getProjectPaletteEntries();
-  validateFrames(frames);
-  validateTags(tags, frames.length);
-  validatePalette(paletteEntries);
-  validateCels(context, frames, layers, cels, width, height, paletteEntries.length);
-
-  const selectedFrames = selectFrames(frames, tags, request.range);
-  if (selectedFrames.length < ANIMATION_OBSERVATION_MIN_FRAMES || selectedFrames.length > ANIMATION_OBSERVATION_MAX_FRAMES) {
-    throw animationError('bounds_exceeded', false, {
-      reason: 'frame_range',
-      min: ANIMATION_OBSERVATION_MIN_FRAMES,
-      max: ANIMATION_OBSERVATION_MAX_FRAMES,
+    throw animationError('limit_exceeded', false, {
+      reason: 'frame_pixels',
+      max: ANIMATION_OBSERVATION_MAX_FRAME_PIXELS,
     });
   }
-  const selectedIds = new Set(selectedFrames.map((frame) => frame.id));
-  for (const keyframeId of request.keyframes) {
+  return { width, height };
+}
+
+function readAnimationSources(context: ProjectContext): AnimationSources {
+  return {
+    frames: context.animation.frames.value,
+    layers: context.layers.layers.value,
+    cels: context.animation.cels.value,
+    tags: context.animation.tags.value,
+    palette: context.palette.getProjectPaletteEntries(),
+  };
+}
+
+function validateAnimationSources(
+  context: ProjectContext,
+  sources: AnimationSources,
+  dimensions: AnimationDimensions,
+): void {
+  validateFrames(sources.frames);
+  validateTags(sources.tags, sources.frames.length);
+  validatePalette(sources.palette);
+  validateCels(context, sources.frames, sources.layers, sources.cels, dimensions.width, dimensions.height, sources.palette.length);
+}
+
+function assertKeyframesSelected(keyframeIds: readonly string[], selectedIds: ReadonlySet<string>): void {
+  for (const keyframeId of keyframeIds) {
     if (!selectedIds.has(keyframeId)) throw animationError('invalid_request', false, { reason: 'keyframe_range' });
   }
-  const selectedTags = tags
-    .filter((tag) => request.range === 'all' || rangesIntersect(tag, selectedFrames[0]!.order, selectedFrames[selectedFrames.length - 1]!.order))
-    .map(cloneTag);
-  const palette = paletteEntries.map((entry, index) => ({ id: entry.id, color: entry.color.toLowerCase(), index }));
+}
 
-  const state: CapturedAnimationState = {
-    frames,
-    frameValues: frames.map((frame) => ({ id: frame.id, order: frame.order, duration: frame.duration })),
-    layers,
-    cels,
-    tags,
-    tagValues: tags.map(cloneTag),
-    palette: paletteEntries.map((entry) => ({ ...entry })),
+function captureAnimationState(context: ProjectContext, sources: AnimationSources): CapturedAnimationState {
+  return {
+    frames: sources.frames,
+    frameValues: sources.frames.map((frame) => ({
+      id: frame.id,
+      order: frame.order,
+      duration: frame.duration,
+      tags: serializeOptional(frame.tags),
+    })),
+    layers: sources.layers,
+    layerValues: sources.layers.map(captureLayerValue),
+    cels: sources.cels,
+    celValues: captureCelValues(sources.cels),
+    tags: sources.tags,
+    tagValues: sources.tags.map(cloneTag),
+    palette: sources.palette.map((entry) => ({ ...entry })),
     currentFrameId: context.animation.currentFrameId.value,
     isPlaying: context.animation.isPlaying.value,
     playbackMode: context.animation.playbackMode.value,
     activeTagId: context.animation.activeTagId.value,
   };
-  return { state, selectedFrames, selectedTags, palette, width, height };
+}
+
+function captureLayerValue(layer: Layer): CapturedLayerValue {
+  return {
+    id: layer.id,
+    name: layer.name,
+    type: layer.type,
+    visible: layer.visible,
+    locked: layer.locked,
+    opacity: layer.opacity,
+    blendMode: layer.blendMode,
+    parentId: layer.parentId,
+    continuous: layer.continuous,
+    canvas: layer.canvas,
+    textData: serializeOptional(layer.textData),
+    referenceData: serializeOptional(layer.referenceData),
+  };
+}
+
+function captureCelValues(cels: ReadonlyMap<string, Cel>): ReadonlyMap<string, CapturedCelValue> {
+  const values = new Map<string, CapturedCelValue>();
+  for (const [key, cel] of cels.entries()) values.set(key, captureCelValue(cel));
+  return values;
+}
+
+function captureCelValue(cel: Cel): CapturedCelValue {
+  return {
+    id: cel.id,
+    layerId: cel.layerId,
+    frameId: cel.frameId,
+    canvas: cel.canvas,
+    indexBuffer: cel.indexBuffer,
+    indexValues: cel.indexBuffer ? new Uint8Array(cel.indexBuffer) : undefined,
+    linkedCelId: cel.linkedCelId,
+    linkType: cel.linkType,
+    opacity: cel.opacity,
+    textCelData: serializeOptional(cel.textCelData),
+    pixels: readCelPixels(cel.canvas),
+  };
+}
+
+function serializeOptional(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return JSON.stringify(value);
 }
 
 function selectFrames(
@@ -551,30 +746,65 @@ function validateCels(
   height: number,
   paletteLength: number,
 ): void {
+  validateLayerIds(layers);
+  validateCelEntries(context, cels, width, height, paletteLength);
+  validateRequiredCels(context, frames, layers, cels);
+}
+
+function validateLayerIds(layers: readonly Layer[]): void {
   const layerIds = new Set<string>();
   for (const layer of layers) {
     normalizeIdentity(layer.id, 'layer');
     if (layerIds.has(layer.id)) throw animationError('invalid_state', false, { reason: 'layer_identity' });
     layerIds.add(layer.id);
   }
+}
+
+function validateCelEntries(
+  context: ProjectContext,
+  cels: ReadonlyMap<string, Cel>,
+  width: number,
+  height: number,
+  paletteLength: number,
+): void {
   const celIds = new Set<string>();
   for (const [key, cel] of cels.entries()) {
-    normalizeIdentity(cel.id, 'cel');
-    if (celIds.has(cel.id)) throw animationError('invalid_state', false, { reason: 'cel_identity' });
-    celIds.add(cel.id);
-    if (!cel.canvas || cel.canvas.width !== width || cel.canvas.height !== height) {
-      throw animationError('invalid_state', false, { reason: 'cel_canvas_shape' });
-    }
-    if (cel.indexBuffer !== undefined && cel.indexBuffer.length !== width * height) {
-      throw animationError('invalid_state', false, { reason: 'cel_index_shape' });
-    }
+    validateCelIdentity(cel, celIds);
+    validateCelCanvas(cel, width, height);
+    validateCelIndexBuffer(cel, width, height, paletteLength);
     if (key !== context.animation.getCelKey(cel.layerId, cel.frameId)) {
       throw animationError('invalid_state', false, { reason: 'cel_key' });
     }
-    if (cel.indexBuffer?.some((index) => !Number.isSafeInteger(index) || index < 0 || index > paletteLength)) {
-      throw animationError('invalid_state', false, { reason: 'cel_index_value' });
-    }
   }
+}
+
+function validateCelIdentity(cel: Cel, celIds: Set<string>): void {
+  normalizeIdentity(cel.id, 'cel');
+  if (celIds.has(cel.id)) throw animationError('invalid_state', false, { reason: 'cel_identity' });
+  celIds.add(cel.id);
+}
+
+function validateCelCanvas(cel: Cel, width: number, height: number): void {
+  if (!cel.canvas || cel.canvas.width !== width || cel.canvas.height !== height) {
+    throw animationError('invalid_state', false, { reason: 'cel_canvas_shape' });
+  }
+}
+
+function validateCelIndexBuffer(cel: Cel, width: number, height: number, paletteLength: number): void {
+  if (cel.indexBuffer !== undefined && cel.indexBuffer.length !== width * height) {
+    throw animationError('invalid_state', false, { reason: 'cel_index_shape' });
+  }
+  if (cel.indexBuffer?.some((index) => !Number.isSafeInteger(index) || index < 0 || index > paletteLength)) {
+    throw animationError('invalid_state', false, { reason: 'cel_index_value' });
+  }
+}
+
+function validateRequiredCels(
+  context: ProjectContext,
+  frames: readonly Frame[],
+  layers: readonly Layer[],
+  cels: ReadonlyMap<string, Cel>,
+): void {
   for (const frame of frames) {
     for (const layer of layers) {
       if (layer.type === 'reference') continue;
@@ -592,6 +822,13 @@ function assertCapturedAnimationState(
   request: AnimationObservationRequest,
   state: CapturedAnimationState,
 ): void {
+  assertCapturedTarget(context, request);
+  assertCapturedReferences(context, state);
+  assertCapturedTimeline(context, state);
+  assertCapturedPalette(context, state);
+}
+
+function assertCapturedTarget(context: ProjectContext, request: AnimationObservationRequest): void {
   if (context.isDisposed || context.project.id.value !== request.target.projectId) {
     throw animationError('target_not_found', true);
   }
@@ -602,6 +839,9 @@ function assertCapturedAnimationState(
       currentRevision,
     });
   }
+}
+
+function assertCapturedReferences(context: ProjectContext, state: CapturedAnimationState): void {
   if (context.animation.frames.value !== state.frames
       || context.layers.layers.value !== state.layers
       || context.animation.cels.value !== state.cels
@@ -612,14 +852,112 @@ function assertCapturedAnimationState(
       || context.animation.activeTagId.value !== state.activeTagId) {
     throw animationError('revision_conflict', true, { reason: 'source_changed' });
   }
-  if (context.animation.frames.value.some((frame, index) => {
+  assertCapturedLayers(context.layers.layers.value, state.layerValues);
+  assertCapturedCels(context.animation.cels.value, state.celValues);
+}
+
+function assertCapturedLayers(layers: readonly Layer[], expected: readonly CapturedLayerValue[]): void {
+  if (layers.length !== expected.length || layers.some((layer, index) => !sameCapturedLayer(layer, expected[index]))) {
+    throw animationError('revision_conflict', true, { reason: 'source_changed' });
+  }
+}
+
+function sameCapturedLayer(layer: Layer, expected: CapturedLayerValue | undefined): boolean {
+  if (!expected) return false;
+  return sameLayerIdentity(layer, expected)
+    && sameLayerPresentation(layer, expected)
+    && sameLayerData(layer, expected);
+}
+
+function sameLayerIdentity(layer: Layer, expected: CapturedLayerValue): boolean {
+  return layer.id === expected.id
+    && layer.type === expected.type
+    && layer.parentId === expected.parentId
+    && layer.canvas === expected.canvas;
+}
+
+function sameLayerPresentation(layer: Layer, expected: CapturedLayerValue): boolean {
+  return layer.name === expected.name
+    && layer.visible === expected.visible
+    && layer.locked === expected.locked
+    && layer.opacity === expected.opacity
+    && layer.blendMode === expected.blendMode
+    && layer.continuous === expected.continuous;
+}
+
+function sameLayerData(layer: Layer, expected: CapturedLayerValue): boolean {
+  return serializeOptional(layer.textData) === expected.textData
+    && serializeOptional(layer.referenceData) === expected.referenceData;
+}
+
+function assertCapturedCels(
+  cels: ReadonlyMap<string, Cel>,
+  expected: ReadonlyMap<string, CapturedCelValue>,
+): void {
+  if (cels.size !== expected.size) {
+    throw animationError('revision_conflict', true, { reason: 'source_changed' });
+  }
+  for (const [key, cel] of cels.entries()) {
+    const captured = expected.get(key);
+    if (!captured || !sameCapturedCel(cel, captured)) {
+      throw animationError('revision_conflict', true, { reason: 'source_changed' });
+    }
+  }
+}
+
+function sameCapturedCel(cel: Cel, expected: CapturedCelValue): boolean {
+  return sameCelIdentity(cel, expected)
+    && sameCelPayload(cel, expected)
+    && sameCelMetadata(cel, expected);
+}
+
+function sameCelIdentity(cel: Cel, expected: CapturedCelValue): boolean {
+  return cel.id === expected.id
+    && cel.layerId === expected.layerId
+    && cel.frameId === expected.frameId
+    && cel.canvas === expected.canvas;
+}
+
+function sameCelPayload(cel: Cel, expected: CapturedCelValue): boolean {
+  return cel.indexBuffer === expected.indexBuffer
+    && sameBytes(cel.indexBuffer, expected.indexValues)
+    && sameBytes(readCelPixels(cel.canvas), expected.pixels);
+}
+
+function sameCelMetadata(cel: Cel, expected: CapturedCelValue): boolean {
+  return cel.linkedCelId === expected.linkedCelId
+    && cel.linkType === expected.linkType
+    && cel.opacity === expected.opacity
+    && serializeOptional(cel.textCelData) === expected.textCelData;
+}
+
+function readCelPixels(canvas: HTMLCanvasElement): Uint8ClampedArray {
+  const drawing = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!drawing) throw animationError('internal', true, { reason: 'canvas_read' });
+  try {
+    return new Uint8ClampedArray(drawing.getImageData(0, 0, canvas.width, canvas.height).data);
+  } catch {
+    throw animationError('internal', true, { reason: 'canvas_read' });
+  }
+}
+
+function assertCapturedTimeline(context: ProjectContext, state: CapturedAnimationState): void {
+  const frames = context.animation.frames.value;
+  const tags = context.animation.tags.value;
+  const framesChanged = frames.length !== state.frameValues.length || frames.some((frame, index) => {
     const captured = state.frameValues[index];
-    return !captured || frame.id !== captured.id || frame.order !== captured.order || frame.duration !== captured.duration;
-  }) || context.animation.frames.value.length !== state.frameValues.length
-      || context.animation.tags.value.some((tag, index) => JSON.stringify(cloneTag(tag)) !== JSON.stringify(state.tagValues[index]))
-      || context.animation.tags.value.length !== state.tagValues.length) {
+    return !captured || frame.id !== captured.id || frame.order !== captured.order || frame.duration !== captured.duration
+      || serializeOptional(frame.tags) !== captured.tags;
+  });
+  const tagsChanged = tags.length !== state.tagValues.length || tags.some((tag, index) => (
+    JSON.stringify(cloneTag(tag)) !== JSON.stringify(state.tagValues[index])
+  ));
+  if (framesChanged || tagsChanged) {
     throw animationError('revision_conflict', true, { reason: 'timeline_changed' });
   }
+}
+
+function assertCapturedPalette(context: ProjectContext, state: CapturedAnimationState): void {
   const currentPalette = context.palette.getProjectPaletteEntries();
   if (currentPalette.length !== state.palette.length
       || currentPalette.some((entry, index) => entry.id !== state.palette[index]?.id || entry.color !== state.palette[index]?.color)) {
@@ -644,23 +982,15 @@ function createGridDelta(from: AnimationEvaluationFrame, to: AnimationEvaluation
     const beforeRow = from.grid.rows[y]!;
     const afterRow = to.grid.rows[y]!;
     for (let x = 0; x < from.grid.width; x++) {
-      const before = beforeRow[x]!;
-      const after = afterRow[x]!;
-      if (before === after) {
+      const cell = createDeltaCell(beforeRow[x]!, afterRow[x]!, x, y);
+      if (!cell) {
         unchangedCellCount++;
         continue;
       }
-      const kind: AnimationDeltaKind = before === '.'
-        ? 'added'
-        : after === '.'
-          ? 'removed'
-          : 'recolored';
-      cells.push({ x, y, kind, before, after, beforeSymbol: before, afterSymbol: after });
+      cells.push(cell);
     }
   }
-  if (cells.length > ANIMATION_OBSERVATION_MAX_CELLS || unchangedCellCount > ANIMATION_OBSERVATION_MAX_CELLS) {
-    throw animationError('limit_exceeded', false, { reason: 'delta_cells', max: ANIMATION_OBSERVATION_MAX_CELLS });
-  }
+  assertDeltaCellBounds(cells.length, unchangedCellCount);
   return {
     type: 'symbol-grid.delta',
     fromFrameId: from.frameId,
@@ -675,78 +1005,154 @@ function createGridDelta(from: AnimationEvaluationFrame, to: AnimationEvaluation
   };
 }
 
-function createContactSheet(frames: readonly AnimationEvaluationFrame[]): AnimationContactSheet {
-  const cellWidth = frames[0]?.render.width ?? 0;
-  const cellHeight = frames[0]?.render.height ?? 0;
-  const columns = Math.min(ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_COLUMNS, frames.length);
-  const rows = Math.ceil(frames.length / columns);
-  const width = cellWidth * columns;
-  const height = cellHeight * rows;
-  const stride = width * 4;
-  const byteLength = stride * height;
-  if (!Number.isSafeInteger(columns) || !Number.isSafeInteger(rows)
-      || rows < 1 || rows > ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_ROWS
-      || columns < 1 || columns > ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_COLUMNS
-      || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)
-      || !Number.isSafeInteger(byteLength) || byteLength > ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES) {
-    throw animationError('limit_exceeded', false, { reason: 'contact_sheet', max: ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES });
+function createDeltaCell(before: string, after: string, x: number, y: number): AnimationDeltaCell | undefined {
+  if (before === after) return undefined;
+  const kind: AnimationDeltaKind = before === '.'
+    ? 'added'
+    : after === '.'
+      ? 'removed'
+      : 'recolored';
+  return { x, y, kind, before, after, beforeSymbol: before, afterSymbol: after };
+}
+
+function assertDeltaCellBounds(changedCellCount: number, unchangedCellCount: number): void {
+  if (changedCellCount > ANIMATION_OBSERVATION_MAX_CELLS || unchangedCellCount > ANIMATION_OBSERVATION_MAX_CELLS) {
+    throw animationError('limit_exceeded', false, { reason: 'delta_cells', max: ANIMATION_OBSERVATION_MAX_CELLS });
   }
-  const pixels = new Uint8Array(byteLength);
+}
+
+function createContactSheet(frames: readonly AnimationEvaluationFrame[]): AnimationContactSheet {
+  const layout = getContactSheetLayout(frames);
+  const pixels = new Uint8Array(layout.byteLength);
   const cells: AnimationContactSheetCell[] = [];
   frames.forEach((frame, index) => {
-    const row = Math.floor(index / columns);
-    const column = index % columns;
-    const x = column * cellWidth;
-    const y = row * cellHeight;
-    for (let sourceRow = 0; sourceRow < cellHeight; sourceRow++) {
-      const sourceStart = sourceRow * frame.render.stride;
-      const targetStart = (y + sourceRow) * stride + x * 4;
-      pixels.set(frame.render.pixels.subarray(sourceStart, sourceStart + frame.render.stride), targetStart);
-    }
-    cells.push({
-      index,
-      row,
-      column,
-      x,
-      y,
-      width: cellWidth,
-      height: cellHeight,
-      sourceRect: { x: 0, y: 0, width: cellWidth, height: cellHeight },
-      frameId: frame.frameId,
-      frameNumber: frame.number,
-      duration: frame.duration,
-      digest: frame.renderedDigest,
-      label: `Frame ${frame.number} · ${frame.duration} ms`,
-    });
+    const position = getContactSheetPosition(index, layout);
+    copyContactSheetPixels(frame, position, layout, pixels);
+    cells.push(createContactSheetCell(frame, index, position, layout));
   });
   return {
     type: 'animation.contact-sheet',
-    rows,
-    columns,
-    cellWidth,
-    cellHeight,
-    width,
-    height,
+    rows: layout.rows,
+    columns: layout.columns,
+    cellWidth: layout.cellWidth,
+    cellHeight: layout.cellHeight,
+    width: layout.width,
+    height: layout.height,
     format: 'rgba8',
-    stride,
+    stride: layout.stride,
     smoothing: 'none',
     pixels,
     cells,
   };
 }
 
-interface AnimationDigestInput {
-  readonly request: AnimationObservationRequest;
-  readonly canvas: { readonly width: number; readonly height: number };
-  readonly frames: readonly AnimationEvaluationFrame[];
-  readonly tags: readonly AnimationTagMetadata[];
-  readonly palette: readonly { readonly id: string; readonly color: string; readonly index: number }[];
-  readonly legend: readonly SymbolGridLegendEntry[];
-  readonly baseGrid: AnimationGrid;
-  readonly deltas: readonly AnimationGridDelta[];
-  readonly contactSheet: AnimationContactSheet;
-  readonly keyframes: readonly AnimationKeyframeObservation[];
+interface ContactSheetLayout {
+  readonly rows: number;
+  readonly columns: number;
+  readonly cellWidth: number;
+  readonly cellHeight: number;
+  readonly width: number;
+  readonly height: number;
+  readonly stride: number;
+  readonly byteLength: number;
 }
+
+interface ContactSheetPosition {
+  readonly row: number;
+  readonly column: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+function getContactSheetLayout(frames: readonly AnimationEvaluationFrame[]): ContactSheetLayout {
+  const cellWidth = frames[0]?.render.width ?? 0;
+  const cellHeight = frames[0]?.render.height ?? 0;
+  const columns = Math.min(ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_COLUMNS, frames.length);
+  const rows = columns > 0 ? Math.ceil(frames.length / columns) : 0;
+  const width = cellWidth * columns;
+  const height = cellHeight * rows;
+  const stride = width * 4;
+  const byteLength = stride * height;
+  const layout = { rows, columns, cellWidth, cellHeight, width, height, stride, byteLength };
+  assertContactSheetLayout(layout);
+  return layout;
+}
+
+function assertContactSheetLayout(layout: ContactSheetLayout): void {
+  assertContactSheetGridBounds(layout);
+  if (!Number.isSafeInteger(layout.byteLength)
+      || layout.byteLength > ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES) {
+    throw animationError('limit_exceeded', false, {
+      reason: 'contact_sheet',
+      max: ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES,
+    });
+  }
+}
+
+function assertContactSheetGridBounds(layout: ContactSheetLayout): void {
+  if (!Number.isSafeInteger(layout.columns) || !Number.isSafeInteger(layout.rows)
+      || layout.rows < 1 || layout.rows > ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_ROWS
+      || layout.columns < 1 || layout.columns > ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_COLUMNS
+      || !Number.isSafeInteger(layout.width) || !Number.isSafeInteger(layout.height)) {
+    throw animationError('limit_exceeded', false, {
+      reason: 'contact_sheet',
+      max: ANIMATION_OBSERVATION_MAX_CONTACT_SHEET_BYTES,
+    });
+  }
+}
+
+function getContactSheetPosition(index: number, layout: ContactSheetLayout): ContactSheetPosition {
+  const row = Math.floor(index / layout.columns);
+  const column = index % layout.columns;
+  return {
+    row,
+    column,
+    x: column * layout.cellWidth,
+    y: row * layout.cellHeight,
+  };
+}
+
+function copyContactSheetPixels(
+  frame: AnimationEvaluationFrame,
+  position: ContactSheetPosition,
+  layout: ContactSheetLayout,
+  pixels: Uint8Array,
+): void {
+  for (let sourceRow = 0; sourceRow < layout.cellHeight; sourceRow++) {
+    const sourceStart = sourceRow * frame.render.stride;
+    const targetStart = (position.y + sourceRow) * layout.stride + position.x * 4;
+    pixels.set(frame.render.pixels.subarray(sourceStart, sourceStart + frame.render.stride), targetStart);
+  }
+}
+
+function createContactSheetCell(
+  frame: AnimationEvaluationFrame,
+  index: number,
+  position: ContactSheetPosition,
+  layout: ContactSheetLayout,
+): AnimationContactSheetCell {
+  return {
+    index,
+    row: position.row,
+    column: position.column,
+    x: position.x,
+    y: position.y,
+    width: layout.cellWidth,
+    height: layout.cellHeight,
+    sourceRect: { x: 0, y: 0, width: layout.cellWidth, height: layout.cellHeight },
+    frameId: frame.frameId,
+    frameNumber: frame.number,
+    duration: frame.duration,
+    digest: frame.renderedDigest,
+    label: `Frame ${frame.number} · ${frame.duration} ms`,
+  };
+}
+
+type AnimationDigestInput = Pick<
+  AnimationEvaluationBundle,
+  'request' | 'canvas' | 'frames' | 'tags' | 'palette' | 'legend'
+  | 'baseGrid' | 'deltas' | 'contactSheet' | 'keyframes'
+>;
 
 async function createAnimationDigest(input: AnimationDigestInput): Promise<string> {
   const metadata = JSON.stringify({
@@ -789,8 +1195,7 @@ async function createAnimationDigest(input: AnimationDigestInput): Promise<strin
   bytes.set(metadataBytes);
   bytes[metadataBytes.length] = 0;
   bytes.set(input.contactSheet.pixels, metadataBytes.length + 1);
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  return createSymbolGridDigest(bytes);
 }
 
 function cloneRenderObservation(observation: RenderObservation): RenderObservation {

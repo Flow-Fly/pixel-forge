@@ -3,6 +3,7 @@ import {
   createFixtureSession,
   type FixtureSession,
 } from '../../src/editor/fixture-session';
+import { createProjectContext } from '../../src/stores/project-context';
 import type { AnimationEvaluationBundle } from '../../src/editor/animation-observation';
 import '../../src/components/preview/pf-agent-animation-preview';
 import type { PFAgentAnimationPreview } from '../../src/components/preview/pf-agent-animation-preview';
@@ -94,6 +95,37 @@ describe('animation evaluation bundle and agent preview', () => {
     preview.bundle = structuredClone(journey.bundle) as AnimationEvaluationBundle;
     await preview.updateComplete;
     expect(journey.bundle.target.projectId).toBe(originalProjectId);
+  });
+
+  it('rejects a cel pixel mutation that happens during asynchronous capture', async () => {
+    const context = createProjectContext();
+    const session = createFixtureSession({ context });
+    sessions.push(session);
+    const journey = await session.runAnimationObservation();
+    const frame = context.animation.frames.value[0];
+    const layer = context.layers.layers.value.find((candidate) => candidate.type === 'image');
+    const cel = frame && layer
+      ? context.animation.cels.value.get(context.animation.getCelKey(layer.id, frame.id))
+      : undefined;
+    if (!cel) throw new Error('Animation fixture cel was not available.');
+    const drawing = cel.canvas.getContext('2d');
+    if (!drawing) throw new Error('Animation fixture canvas was not available.');
+
+    const pending = session.adapter.request({
+      operation: 'project.animation.observe',
+      ...journey.afterTiming.request,
+      expectedDigest: null,
+    });
+    queueMicrotask(() => {
+      drawing.fillStyle = '#0000ff';
+      drawing.fillRect(3, 3, 1, 1);
+    });
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'revision_conflict', retryable: true },
+    });
   });
 });
 

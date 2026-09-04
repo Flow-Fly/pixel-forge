@@ -16,7 +16,6 @@ export const RENDER_OBSERVATION_MAX_IDENTITY_LENGTH = 256;
 export const RENDER_OBSERVATION_MIN_SCALE = 1;
 export const RENDER_OBSERVATION_MAX_SCALE = 16;
 export const RENDER_OBSERVATION_REPRESENTATION_VERSION = '1.0';
-// fallow-ignore-next-line unused-export -- Stable animation observation contract is negotiated by adapters.
 export const ANIMATION_OBSERVATION_ID = 'project.animation.observe';
 export const ANIMATION_OBSERVATION_REPRESENTATION_VERSION = '1.0';
 export const ANIMATION_OBSERVATION_MIN_FRAMES = 2;
@@ -1153,7 +1152,6 @@ export const renderObservationCatalog = Object.freeze({
   privacy: 'bounded canonical artwork bytes only; no canvas, stores, or browser chrome',
 });
 
-// fallow-ignore-next-line unused-export -- Public observation catalog is negotiated by adapters.
 export const animationObservationCatalog = Object.freeze({
   id: ANIMATION_OBSERVATION_ID,
   kind: 'observation',

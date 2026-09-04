@@ -1,4 +1,4 @@
-import { css, html, LitElement, type PropertyValues } from 'lit';
+import { css, html, LitElement, type PropertyValues, type TemplateResult } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import type { Frame, FrameTag } from '../../types/animation';
 import { createPlaybackEngine, type PlaybackEngine } from '../../stores/animation/playback';
@@ -6,6 +6,19 @@ import type {
   AnimationEvaluationBundle,
   AnimationEvaluationFrame,
 } from '../../editor/animation-observation';
+
+interface AnimationPreviewBackground {
+  readonly className: string;
+  readonly style: string;
+}
+
+function getPreviewBackground(bundle: AnimationEvaluationBundle): AnimationPreviewBackground {
+  if (bundle.request.background.kind !== 'solid') return { className: '', style: '' };
+  return {
+    className: 'solid-background',
+    style: `--agent-animation-background: ${bundle.request.background.color}`,
+  };
+}
 
 /**
  * Data-only animation preview. The bundle is detached before it reaches this
@@ -235,149 +248,202 @@ export class PFAgentAnimationPreview extends LitElement {
     super.disconnectedCallback();
   }
 
-  protected render() {
+  protected render(): TemplateResult {
     if (this.error) {
-      return html`
-        <section class="surface" aria-labelledby="animation-preview-title">
-          <h2 id="animation-preview-title">Agent Animation Preview</h2>
-          <p class="error-state" role="alert">${this.error}</p>
-        </section>
-      `;
+      return this.renderError();
     }
     const bundle = this.bundle;
     if (!bundle) {
-      return html`
-        <section class="surface" aria-labelledby="animation-preview-title">
-          <h2 id="animation-preview-title">Agent Animation Preview</h2>
-          <p class="empty-state" role="status">No animation evaluation bundle available.</p>
-        </section>
-      `;
+      return this.renderEmpty();
     }
-
     const frame = this.currentFrame(bundle);
     if (!frame) return html``;
-    const backgroundClass = bundle.request.background.kind === 'solid' ? 'solid-background' : '';
-    const backgroundStyle = bundle.request.background.kind === 'solid'
-      ? `--agent-animation-background: ${bundle.request.background.color}`
-      : '';
+    return this.renderBundle(bundle, frame);
+  }
+
+  private renderError(): TemplateResult {
+    return html`
+      <section class="surface" aria-labelledby="animation-preview-title">
+        <h2 id="animation-preview-title">Agent Animation Preview</h2>
+        <p class="error-state" role="alert">${this.error}</p>
+      </section>
+    `;
+  }
+
+  private renderEmpty(): TemplateResult {
+    return html`
+      <section class="surface" aria-labelledby="animation-preview-title">
+        <h2 id="animation-preview-title">Agent Animation Preview</h2>
+        <p class="empty-state" role="status">No animation evaluation bundle available.</p>
+      </section>
+    `;
+  }
+
+  private renderBundle(bundle: AnimationEvaluationBundle, frame: AnimationEvaluationFrame): TemplateResult {
+    const background = getPreviewBackground(bundle);
     const currentIndex = bundle.frames.findIndex((candidate) => candidate.frameId === frame.frameId);
     const currentTag = bundle.tags.find((tag) => tag.id === this.activeTagId);
 
     return html`
       <section class="surface" aria-labelledby="animation-preview-title">
-        <div class="metadata">
-          <h2 id="animation-preview-title">Agent Animation Preview</h2>
-          <span>Project ${bundle.target.projectId}, revision ${bundle.revision}, ${bundle.canvas.width} × ${bundle.canvas.height}</span>
-          <span>Bundle digest ${bundle.digest}</span>
-        </div>
+        ${this.renderMetadata(bundle)}
+        ${this.renderToolbar(bundle)}
+        ${this.renderSeek(bundle, frame, currentIndex)}
+        ${this.renderStatus(frame, currentTag)}
+        ${this.renderFigures(bundle, frame, background)}
+        ${this.renderKeyframes(bundle, background)}
+        ${this.renderTiming(bundle)}
+        ${this.renderDeltas(bundle)}
+      </section>
+    `;
+  }
 
-        <div class="toolbar" aria-label="Animation playback controls">
-          <button
-            type="button"
-            aria-label=${this.isPlaying ? 'Pause animation' : 'Play animation'}
-            @click=${this.togglePlayback}
-          >${this.isPlaying ? 'Pause' : 'Play'}</button>
-          <button type="button" aria-label="Previous frame" @click=${this.previousFrame}>Previous</button>
-          <button type="button" aria-label="Next frame" @click=${this.nextFrame}>Next</button>
-          <label>
-            Playback range
-            <select aria-label="Playback range" .value=${this.playbackMode === 'tag' && this.activeTagId ? `tag:${this.activeTagId}` : 'all'} @change=${this.changePlaybackRange}>
-              <option value="all">All frames</option>
-              ${bundle.tags.map((tag) => html`<option value=${`tag:${tag.id}`} ?selected=${this.playbackMode === 'tag' && tag.id === this.activeTagId}>${tag.name || tag.id} loop</option>`)}
-            </select>
-          </label>
-          <label ?hidden=${this.playbackMode !== 'tag'}>
-            Tag loop
-            <select aria-label="Tag loop" .value=${this.activeTagId ?? ''} @change=${this.changeTag}>
-              ${bundle.tags.map((tag) => html`<option value=${tag.id}>${tag.name || tag.id}</option>`)}
-            </select>
-          </label>
-        </div>
+  private renderMetadata(bundle: AnimationEvaluationBundle): TemplateResult {
+    return html`
+      <div class="metadata">
+        <h2 id="animation-preview-title">Agent Animation Preview</h2>
+        <span>Project ${bundle.target.projectId}, revision ${bundle.revision}, ${bundle.canvas.width} × ${bundle.canvas.height}</span>
+        <span>Bundle digest ${bundle.digest}</span>
+      </div>
+    `;
+  }
 
-        <div class="seek">
-          <label for="animation-frame-seek">Frame ${frame.number} of ${bundle.frames.length}</label>
-          <input
-            id="animation-frame-seek"
-            type="range"
-            min="1"
-            max=${bundle.frames.length}
-            step="1"
-            .value=${String(currentIndex + 1)}
-            aria-label="Animation frame"
-            @input=${this.seekFrame}
-          />
-        </div>
+  private renderToolbar(bundle: AnimationEvaluationBundle): TemplateResult {
+    return html`
+      <div class="toolbar" aria-label="Animation playback controls">
+        <button
+          type="button"
+          aria-label=${this.isPlaying ? 'Pause animation' : 'Play animation'}
+          @click=${this.togglePlayback}
+        >${this.isPlaying ? 'Pause' : 'Play'}</button>
+        <button type="button" aria-label="Previous frame" @click=${this.previousFrame}>Previous</button>
+        <button type="button" aria-label="Next frame" @click=${this.nextFrame}>Next</button>
+        <label>
+          Playback range
+          <select aria-label="Playback range" .value=${this.playbackMode === 'tag' && this.activeTagId ? `tag:${this.activeTagId}` : 'all'} @change=${this.changePlaybackRange}>
+            <option value="all">All frames</option>
+            ${bundle.tags.map((tag) => html`<option value=${`tag:${tag.id}`} ?selected=${this.playbackMode === 'tag' && tag.id === this.activeTagId}>${tag.name || tag.id} loop</option>`)}
+          </select>
+        </label>
+        <label ?hidden=${this.playbackMode !== 'tag'}>
+          Tag loop
+          <select aria-label="Tag loop" .value=${this.activeTagId ?? ''} @change=${this.changeTag}>
+            ${bundle.tags.map((tag) => html`<option value=${tag.id}>${tag.name || tag.id}</option>`)}
+          </select>
+        </label>
+      </div>
+    `;
+  }
 
-        <p class="status" role="status" aria-live="polite">
-          ${this.isPlaying ? 'Playing' : 'Paused'} · Frame ${frame.number} · ${frame.duration} ms${currentTag ? ` · ${currentTag.name || currentTag.id}` : ''}
-        </p>
+  private renderSeek(bundle: AnimationEvaluationBundle, frame: AnimationEvaluationFrame, currentIndex: number): TemplateResult {
+    return html`
+      <div class="seek">
+        <label for="animation-frame-seek">Frame ${frame.number} of ${bundle.frames.length}</label>
+        <input
+          id="animation-frame-seek"
+          type="range"
+          min="1"
+          max=${bundle.frames.length}
+          step="1"
+          .value=${String(currentIndex + 1)}
+          aria-label="Animation frame"
+          @input=${this.seekFrame}
+        />
+      </div>
+    `;
+  }
 
-        <div class="figures">
-          <figure aria-labelledby="contact-sheet-caption">
-            <div class="canvas-frame ${backgroundClass}" style=${backgroundStyle}>
-              <canvas
-                class="contact-canvas"
-                width=${bundle.contactSheet.width}
-                height=${bundle.contactSheet.height}
-                role="img"
-                aria-label="Animation contact sheet with ${bundle.frames.length} frames"
-              ></canvas>
-            </div>
-            <figcaption id="contact-sheet-caption">Contact sheet (${bundle.contactSheet.columns} columns × ${bundle.contactSheet.rows} rows)</figcaption>
-          </figure>
-          <figure aria-labelledby="playback-caption">
-            <div class="canvas-frame ${backgroundClass}" style=${backgroundStyle}>
-              <canvas
-                class="intended-canvas"
-                width=${frame.render.width}
-                height=${frame.render.height}
-                style=${`--canvas-width: ${frame.render.width}px; --canvas-height: ${frame.render.height}px;`}
-                role="img"
-                aria-label="Intended-size playback frame ${frame.number}, ${frame.duration} milliseconds"
-              ></canvas>
-            </div>
-            <figcaption id="playback-caption">Intended-size playback frame ${frame.number} (${frame.render.width} × ${frame.render.height})</figcaption>
-          </figure>
-        </div>
+  private renderStatus(frame: AnimationEvaluationFrame, currentTag: AnimationEvaluationBundle['tags'][number] | undefined): TemplateResult {
+    return html`
+      <p class="status" role="status" aria-live="polite">
+        ${this.isPlaying ? 'Playing' : 'Paused'} · Frame ${frame.number} · ${frame.duration} ms${currentTag ? ` · ${currentTag.name || currentTag.id}` : ''}
+      </p>
+    `;
+  }
 
-        <section aria-labelledby="keyframes-title">
-          <h3 id="keyframes-title">Requested keyframes</h3>
-          <div class="keyframes">
-            ${bundle.keyframes.map((keyframe) => html`
-              <figure>
-                <div class="canvas-frame ${backgroundClass}" style=${backgroundStyle}>
-                  <canvas
-                    class="keyframe-canvas"
-                    data-frame-id=${keyframe.frameId}
-                    width=${keyframe.width}
-                    height=${keyframe.height}
-                    style=${`--inspection-width: ${keyframe.width * keyframe.scale}px; --inspection-height: ${keyframe.height * keyframe.scale}px;`}
-                    role="img"
-                    aria-label="Keyframe ${keyframe.frameNumber}, ${keyframe.duration} milliseconds"
-                  ></canvas>
-                </div>
-                <figcaption>Frame ${keyframe.frameNumber} · ${keyframe.duration} ms · ${keyframe.digest}</figcaption>
-              </figure>
-            `)}
+  private renderFigures(
+    bundle: AnimationEvaluationBundle,
+    frame: AnimationEvaluationFrame,
+    background: AnimationPreviewBackground,
+  ): TemplateResult {
+    return html`
+      <div class="figures">
+        <figure aria-labelledby="contact-sheet-caption">
+          <div class="canvas-frame ${background.className}" style=${background.style}>
+            <canvas
+              class="contact-canvas"
+              width=${bundle.contactSheet.width}
+              height=${bundle.contactSheet.height}
+              role="img"
+              aria-label="Animation contact sheet with ${bundle.frames.length} frames"
+            ></canvas>
           </div>
-        </section>
-
-        <section aria-labelledby="timing-title">
-          <h3 id="timing-title">Timing and tags</h3>
-          <div class="tag-metadata">
-            ${bundle.frames.map((candidate) => html`<span>Frame ${candidate.number}: ${candidate.duration} ms</span>`)}
-            ${bundle.tags.map((tag) => html`<span>${tag.name || tag.id}: frames ${tag.startFrameIndex + 1}–${tag.endFrameIndex + 1}</span>`)}
+          <figcaption id="contact-sheet-caption">Contact sheet (${bundle.contactSheet.columns} columns × ${bundle.contactSheet.rows} rows)</figcaption>
+        </figure>
+        <figure aria-labelledby="playback-caption">
+          <div class="canvas-frame ${background.className}" style=${background.style}>
+            <canvas
+              class="intended-canvas"
+              width=${frame.render.width}
+              height=${frame.render.height}
+              style=${`--canvas-width: ${frame.render.width}px; --canvas-height: ${frame.render.height}px`}
+              role="img"
+              aria-label="Intended-size playback frame ${frame.number}, ${frame.duration} milliseconds"
+            ></canvas>
           </div>
-        </section>
+          <figcaption id="playback-caption">Intended-size playback frame ${frame.number} (${frame.render.width} × ${frame.render.height})</figcaption>
+        </figure>
+      </div>
+    `;
+  }
 
-        <section aria-labelledby="deltas-title">
-          <h3 id="deltas-title">Adjacent Symbol Grid deltas</h3>
-          <div class="delta-list">
-            ${bundle.deltas.map((delta) => html`
-              <p class="delta-summary">Frames ${delta.fromNumber} → ${delta.toNumber}: ${delta.changedCellCount} changed (${delta.unchangedCellCount} unchanged); ${delta.cells.filter((cell) => cell.kind === 'added').length} added, ${delta.cells.filter((cell) => cell.kind === 'removed').length} removed, ${delta.cells.filter((cell) => cell.kind === 'recolored').length} recolored.</p>
-            `)}
-          </div>
-        </section>
+  private renderKeyframes(bundle: AnimationEvaluationBundle, background: AnimationPreviewBackground): TemplateResult {
+    return html`
+      <section aria-labelledby="keyframes-title">
+        <h3 id="keyframes-title">Requested keyframes</h3>
+        <div class="keyframes">
+          ${bundle.keyframes.map((keyframe) => html`
+            <figure>
+              <div class="canvas-frame ${background.className}" style=${background.style}>
+                <canvas
+                  class="keyframe-canvas"
+                  data-frame-id=${keyframe.frameId}
+                  width=${keyframe.width}
+                  height=${keyframe.height}
+                  style=${`--inspection-width: ${keyframe.width * keyframe.scale}px; --inspection-height: ${keyframe.height * keyframe.scale}px`}
+                  role="img"
+                  aria-label="Keyframe ${keyframe.frameNumber}, ${keyframe.duration} milliseconds"
+                ></canvas>
+              </div>
+              <figcaption>Frame ${keyframe.frameNumber} · ${keyframe.duration} ms · ${keyframe.digest}</figcaption>
+            </figure>
+          `)}
+        </div>
+      </section>
+    `;
+  }
+
+  private renderTiming(bundle: AnimationEvaluationBundle): TemplateResult {
+    return html`
+      <section aria-labelledby="timing-title">
+        <h3 id="timing-title">Timing and tags</h3>
+        <div class="tag-metadata">
+          ${bundle.frames.map((candidate) => html`<span>Frame ${candidate.number}: ${candidate.duration} ms</span>`)}
+          ${bundle.tags.map((tag) => html`<span>${tag.name || tag.id}: frames ${tag.startFrameIndex + 1}–${tag.endFrameIndex + 1}</span>`)}
+        </div>
+      </section>
+    `;
+  }
+
+  private renderDeltas(bundle: AnimationEvaluationBundle): TemplateResult {
+    return html`
+      <section aria-labelledby="deltas-title">
+        <h3 id="deltas-title">Adjacent Symbol Grid deltas</h3>
+        <div class="delta-list">
+          ${bundle.deltas.map((delta) => html`
+            <p class="delta-summary">Frames ${delta.fromNumber} → ${delta.toNumber}: ${delta.changedCellCount} changed (${delta.unchangedCellCount} unchanged); ${delta.cells.filter((cell) => cell.kind === 'added').length} added, ${delta.cells.filter((cell) => cell.kind === 'removed').length} removed, ${delta.cells.filter((cell) => cell.kind === 'recolored').length} recolored.</p>
+          `)}
+        </div>
       </section>
     `;
   }
@@ -461,8 +527,19 @@ export class PFAgentAnimationPreview extends LitElement {
   private seekBy(offset: number): void {
     const index = this.playbackFrames.findIndex((frame) => frame.id === this.currentFrameId);
     if (index < 0 || this.playbackFrames.length === 0) return;
-    const next = (index + offset + this.playbackFrames.length) % this.playbackFrames.length;
+    const bounds = this.playbackBounds();
+    const frameCount = bounds.end - bounds.start + 1;
+    const relativeIndex = index < bounds.start || index > bounds.end ? 0 : index - bounds.start;
+    const next = bounds.start + ((relativeIndex + offset) % frameCount + frameCount) % frameCount;
     this.currentFrameId = this.playbackFrames[next]!.id;
+  }
+
+  private playbackBounds(): { readonly start: number; readonly end: number } {
+    if (this.playbackMode === 'tag' && this.activeTagId) {
+      const tag = this.playbackTags.find((candidate) => candidate.id === this.activeTagId);
+      if (tag) return { start: tag.startFrameIndex, end: tag.endFrameIndex };
+    }
+    return { start: 0, end: this.playbackFrames.length - 1 };
   }
 
   private seekFrame = (event: Event): void => {
@@ -511,6 +588,7 @@ export class PFAgentAnimationPreview extends LitElement {
   }
 }
 
+// fallow-ignore-next-line code-duplication -- Detached canvas painting intentionally matches the shipped static preview primitive.
 function paintCanvas(
   canvas: HTMLCanvasElement | undefined,
   width: number,
