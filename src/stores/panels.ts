@@ -7,6 +7,7 @@ export type PanelId =
   | "preview"
   | "layers"
   | "history"
+  | "creative-run"
   | "shape-options"
   | "timeline";
 
@@ -21,6 +22,7 @@ const DEFAULT_STATES: Record<PanelId, PanelState> = {
   preview: { collapsed: false },
   layers: { collapsed: false },
   history: { collapsed: true },
+  "creative-run": { collapsed: false },
   "shape-options": { collapsed: false },
   "timeline": { collapsed: false },
 };

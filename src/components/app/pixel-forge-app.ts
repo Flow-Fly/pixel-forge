@@ -24,6 +24,7 @@ import "../ui/pf-keyboard-shortcuts-dialog";
 import "../preview/pf-preview-overlay";
 import "../preview/pf-agent-preview-surface";
 import "../preview/pf-agent-animation-preview";
+import "../preview/pf-creative-run-panel";
 import "../brush/pf-brush-panel";
 import "../ui/pf-undo-history";
 import "../ui/pf-panel";
@@ -1222,6 +1223,9 @@ export class PixelForgeApp extends BaseComponent {
         </pf-panel>
         <pf-panel header="History" collapsible panel-id="history" bordered>
           <pf-undo-history></pf-undo-history>
+        </pf-panel>
+        <pf-panel header="Creative Run" collapsible panel-id="creative-run" bordered>
+          <pf-creative-run-panel></pf-creative-run-panel>
         </pf-panel>
       </aside>
 
