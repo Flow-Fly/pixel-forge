@@ -578,11 +578,6 @@ export class AutomationSessionManager {
     );
   }
 
-  /** Local-only target choices for the approval component. */
-  listLocalTargets(): readonly AutomationLocalTargetOption[] {
-    return this.readTargets().map((target) => ({ id: target.id, name: target.name }));
-  }
-
   /** Capture the exact local target/context choices shown for one request. */
   captureLocalTargets(requestId: string): readonly AutomationLocalTargetOption[] {
     const pending = this.pendingRequests.get(requestId);
@@ -646,13 +641,14 @@ export class AutomationSessionManager {
     const target = this.findTarget(targetId);
     const capturedTarget = pending.approvalTargets?.find((candidate) => candidate.id === targetId);
     if (
+      !capturedTarget ||
       !target ||
+      capturedTarget.context.isDisposed ||
       target.context.isDisposed ||
       target.context.project.id.value !== target.id ||
-      (capturedTarget !== undefined &&
-        (capturedTarget.name !== target.name ||
-          capturedTarget.context !== target.context ||
-          capturedTarget.projectId !== target.context.project.id.value))
+      capturedTarget.name !== target.name ||
+      capturedTarget.context !== target.context ||
+      capturedTarget.projectId !== target.context.project.id.value
     ) {
       return failureResult('target_not_found', true);
     }

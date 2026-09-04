@@ -180,6 +180,7 @@ describe('Automation Session approval dialog in Chromium', () => {
       lifetimeSeconds: 60,
     });
     if (!request.ok) throw new Error('Expected a pending session request.');
+    manager.captureLocalTargets(request.result.requestId);
     const grant = manager.approveRequest(
       request.result.requestId,
       target.id,
