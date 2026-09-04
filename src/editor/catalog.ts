@@ -76,6 +76,7 @@ export const ASSET_PACKAGE_MAX_SOURCE_BYTES = 16 * 1024 * 1024;
 export const ASSET_PACKAGE_MAX_REFERENCE_BYTES = 4 * 1024 * 1024;
 export const ASSET_PACKAGE_MAX_SPRITE_ROWS = 4;
 export const ASSET_PACKAGE_MAX_SPRITE_COLUMNS = 4;
+export const ASSET_PACKAGE_MAX_BUDGET_NODES = 250_000;
 
 export const canvasSizeCatalog = Object.freeze({
   version: '1.0',
@@ -1261,6 +1262,7 @@ export const assetPackageCatalog = Object.freeze({
       currentRevision: 'same expectedRevision',
       persistedRevision: 'same expectedRevision',
     },
+    expectedPackageDigest: 'null or 64-character lowercase SHA-256 digest',
   },
   result: {
     type: 'project.asset-package',
@@ -1282,6 +1284,10 @@ export const assetPackageCatalog = Object.freeze({
     paletteEntries: { max: ASSET_PACKAGE_MAX_PALETTE_ENTRIES },
     identityLength: { max: ASSET_PACKAGE_MAX_NAME_LENGTH },
     references: { maxBytes: ASSET_PACKAGE_MAX_REFERENCE_BYTES },
+    serialization: {
+      maxBytes: ASSET_PACKAGE_MAX_SOURCE_BYTES,
+      maxNodes: ASSET_PACKAGE_MAX_BUDGET_NODES,
+    },
     sprite: {
       maxRows: ASSET_PACKAGE_MAX_SPRITE_ROWS,
       maxColumns: ASSET_PACKAGE_MAX_SPRITE_COLUMNS,

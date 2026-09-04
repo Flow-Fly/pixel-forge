@@ -11,6 +11,7 @@ import {
   ASSET_PACKAGE_CONTRACT_VERSION,
   ASSET_PACKAGE_MAX_ARTIFACT_BYTES,
   ASSET_PACKAGE_MAX_ARTIFACTS,
+  ASSET_PACKAGE_MAX_BUDGET_NODES,
   ASSET_PACKAGE_MAX_CELS,
   ASSET_PACKAGE_MAX_CANVAS_DIMENSION,
   ASSET_PACKAGE_MAX_FRAMES,
@@ -32,6 +33,7 @@ import {
   type ProjectTarget,
 } from './contracts';
 import { renderProjectObservation, type RenderObservation, type RenderObservationResult } from './observations';
+import { sameBytes, samePaletteSnapshot } from './structure-support';
 
 export type AssetPackageArtifactRole = 'source' | 'preview' | 'sprite-sheet' | 'manifest';
 
@@ -39,6 +41,7 @@ export interface AssetPackagePrepareRequest {
   readonly target: ProjectTarget;
   readonly expectedRevision: number;
   readonly expectedSaveSafety: ProjectSaveSafetyObservation;
+  readonly expectedPackageDigest: string | null;
 }
 
 export interface AssetPackageArtifact {
@@ -258,6 +261,13 @@ interface PreparedArtifact {
   readonly digest: string;
 }
 
+interface AssetPackageFilenames {
+  readonly source: string;
+  readonly preview: string;
+  readonly spriteSheet: string;
+  readonly manifest: string;
+}
+
 function isRenderFailure(
   value: RenderObservationResult,
 ): value is Extract<RenderObservationResult, { readonly ok: false }> {
@@ -284,14 +294,21 @@ function assetPackageError(
 
 export function normalizeAssetPackageRequest(input: unknown): AssetPackagePrepareRequest {
   if (!isRecord(input)) throw assetPackageError('invalid_request', false, { reason: 'request' });
-  assertExactKeys(input, ['operation', 'target', 'expectedRevision', 'expectedSaveSafety'], 'asset_package_request');
+  assertExactKeys(input, [
+    'operation',
+    'target',
+    'expectedRevision',
+    'expectedSaveSafety',
+    'expectedPackageDigest',
+  ], 'asset_package_request');
   if (input.operation !== undefined && input.operation !== ASSET_PACKAGE_OPERATION_ID) {
     throw assetPackageError('invalid_request', false, { reason: 'operation' });
   }
   const target = normalizeTarget(input.target);
   const expectedRevision = normalizeRevision(input.expectedRevision);
   const expectedSaveSafety = normalizeSaveSafety(input.expectedSaveSafety);
-  return { target, expectedRevision, expectedSaveSafety };
+  const expectedPackageDigest = normalizePackageDigest(input.expectedPackageDigest);
+  return { target, expectedRevision, expectedSaveSafety, expectedPackageDigest };
 }
 
 /**
@@ -311,7 +328,7 @@ export async function prepareAssetPackage(
     const saveSafety = dependencies.getSaveSafety();
     assertExactSavedRevision(context, request, saveSafety, dependencies, undefined);
     const state = captureAssetState(context, saveSafety);
-    const stem = createSafeFilenameStem(context.project.name.value);
+    const filenames = createAssetPackageFilenames(context.project.name.value, state.frames.length > 1);
     assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
 
     const savedProject = structuredClone(await context.project.saveProject({ rebuildIndexBuffers: false }));
@@ -324,7 +341,7 @@ export async function prepareAssetPackage(
     assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
     const source = createPreparedArtifact(
       'source',
-      `${stem}.pf`,
+      filenames.source,
       'application/octet-stream',
       sourceBytes,
       sourceDigest,
@@ -353,7 +370,7 @@ export async function prepareAssetPackage(
     assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
     const preview = createPreparedArtifact(
       'preview',
-      `${stem}-preview.png`,
+      filenames.preview,
       'image/png',
       previewBytes,
       previewDigest,
@@ -370,7 +387,7 @@ export async function prepareAssetPackage(
       assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
       sprite = createPreparedArtifact(
         'sprite-sheet',
-        `${stem}-sprite-sheet.png`,
+        filenames.spriteSheet,
         'image/png',
         spriteBytes,
         spriteDigest,
@@ -387,13 +404,17 @@ export async function prepareAssetPackage(
       renders,
       spriteSheet,
     );
-    const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
+    const manifestBytes = serializeBoundedJson(
+      manifest,
+      'manifest_bytes',
+      ASSET_PACKAGE_MAX_ARTIFACT_BYTES,
+    );
     assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
     const manifestDigest = await digestBytes(manifestBytes);
     assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
     const manifestArtifact = createPreparedArtifact(
       'manifest',
-      `${stem}-manifest.json`,
+      filenames.manifest,
       'application/json',
       manifestBytes,
       manifestDigest,
@@ -402,6 +423,37 @@ export async function prepareAssetPackage(
     validateArtifactBounds(artifacts);
     const packageDigest = await digestPackage(request, artifacts);
     assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
+    for (const artifact of artifacts) {
+      if (!Number.isSafeInteger(artifact.bytes.byteLength)) {
+        throw assetPackageError('internal', true, { reason: 'artifact_length' });
+      }
+      const verifiedDigest = await digestBytes(artifact.bytes);
+      assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
+      if (verifiedDigest !== artifact.digest) {
+        throw assetPackageError('internal', true, { reason: 'artifact_digest' });
+      }
+    }
+    const verifiedManifestBytes = serializeBoundedJson(
+      manifest,
+      'manifest_bytes',
+      ASSET_PACKAGE_MAX_ARTIFACT_BYTES,
+    );
+    if (!sameBytes(verifiedManifestBytes, manifestArtifact.bytes)) {
+      throw assetPackageError('internal', true, { reason: 'manifest_bytes' });
+    }
+    const verifiedManifestDigest = await digestBytes(manifestArtifact.bytes);
+    assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
+    if (verifiedManifestDigest !== manifestDigest || verifiedManifestDigest !== manifestArtifact.digest) {
+      throw assetPackageError('internal', true, { reason: 'manifest_digest' });
+    }
+    const verifiedPackageDigest = await digestPackage(request, artifacts);
+    assertExactSavedRevision(context, request, dependencies.getSaveSafety(), dependencies, state);
+    if (verifiedPackageDigest !== packageDigest) {
+      throw assetPackageError('internal', true, { reason: 'package_digest' });
+    }
+    if (request.expectedPackageDigest !== null && request.expectedPackageDigest !== packageDigest) {
+      throw assetPackageError('revision_conflict', true, { reason: 'package_digest' });
+    }
 
     return {
       type: 'project.asset-package',
@@ -429,6 +481,15 @@ function validateRequest(request: AssetPackagePrepareRequest): void {
   normalizeTarget(request.target);
   normalizeRevision(request.expectedRevision);
   normalizeSaveSafety(request.expectedSaveSafety);
+  normalizePackageDigest(request.expectedPackageDigest);
+}
+
+function normalizePackageDigest(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+    throw assetPackageError('invalid_request', false, { reason: 'package_digest' });
+  }
+  return value;
 }
 
 function assertEnvironment(context: ProjectContext): void {
@@ -661,15 +722,16 @@ function validateSourceBounds(
   validateTags(tags, frames.length);
   validatePalette(palette);
   validateCels(context, frames, layers, cels, width, height, palette.entries.length);
+  validateSourceBudget(context, frames, layers, cels, tags, palette, width, height);
 }
 
 function validateFrames(frames: readonly Frame[]): void {
   const ids = new Set<string>();
-  frames.forEach((frame) => {
+  frames.forEach((frame, index) => {
     validateIdentity(frame.id, 'frame');
     if (ids.has(frame.id)) throw assetPackageError('invalid_state', false, { reason: 'frame_identity' });
     ids.add(frame.id);
-    if (!Number.isSafeInteger(frame.order) || frame.order < 0) {
+    if (frame.order !== index) {
       throw assetPackageError('invalid_state', false, { reason: 'frame_order' });
     }
     if (!Number.isSafeInteger(frame.duration) || frame.duration < 1) {
@@ -793,6 +855,178 @@ function validateCels(
   }
 }
 
+// fallow-ignore-next-line complexity -- The bounded walker handles each structured-clone value family before serialization.
+class BoundedValueBudget {
+  private bytes = 0;
+  private nodes = 0;
+  private readonly ancestors = new Set<object>();
+  private readonly reason: string;
+
+  constructor(reason: string) {
+    this.reason = reason;
+  }
+
+  // fallow-ignore-next-line complexity -- The bounded walker handles every structured-clone value family before serialization.
+  addValue(value: unknown, depth = 0): void {
+    this.addBytes(8);
+    this.nodes++;
+    if (this.nodes > ASSET_PACKAGE_MAX_BUDGET_NODES) {
+      throw assetPackageError('limit_exceeded', false, {
+        reason: this.reason,
+        max: ASSET_PACKAGE_MAX_BUDGET_NODES,
+      });
+    }
+    if (depth > 32) {
+      throw assetPackageError('limit_exceeded', false, { reason: this.reason, max: 32 });
+    }
+    if (value === null || value === undefined || typeof value === 'boolean') return;
+    if (typeof value === 'string') {
+      this.addBytes(utf8ByteLength(value, ASSET_PACKAGE_MAX_SOURCE_BYTES) + 2);
+      return;
+    }
+    if (typeof value === 'number') {
+      this.addBytes(Number.isFinite(value) ? String(value).length : 4);
+      return;
+    }
+    if (typeof value === 'bigint') {
+      throw assetPackageError('invalid_state', false, { reason: this.reason });
+    }
+    if (typeof value !== 'object') return;
+
+    if (value instanceof Uint8Array || value instanceof Uint8ClampedArray
+        || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value))) {
+      this.addBytes(value.byteLength * 8 + 16);
+      return;
+    }
+    if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+      this.addBytes(value.byteLength * 8 + 16);
+      return;
+    }
+    if (typeof ImageData !== 'undefined' && value instanceof ImageData) {
+      this.addValue(value.width, depth + 1);
+      this.addValue(value.height, depth + 1);
+      this.addValue(value.data, depth + 1);
+      return;
+    }
+    if (this.ancestors.has(value)) {
+      throw assetPackageError('invalid_state', false, { reason: `${this.reason}_cycle` });
+    }
+    this.ancestors.add(value);
+    try {
+      if (value instanceof Set) {
+        this.addBytes(16);
+        for (const item of value) this.addValue(item, depth + 1);
+        return;
+      }
+      if (value instanceof Map) {
+        this.addBytes(16);
+        for (const [key, item] of value) {
+          this.addValue(key, depth + 1);
+          this.addValue(item, depth + 1);
+        }
+        return;
+      }
+      if (value instanceof Date) {
+        this.addBytes(32);
+        return;
+      }
+      for (const key of Object.keys(value)) {
+        this.addBytes(utf8ByteLength(key, ASSET_PACKAGE_MAX_SOURCE_BYTES) + 4);
+        let item: unknown;
+        try {
+          item = (value as Record<string, unknown>)[key];
+        } catch {
+          throw assetPackageError('invalid_state', false, { reason: this.reason });
+        }
+        this.addValue(item, depth + 1);
+      }
+    } finally {
+      this.ancestors.delete(value);
+    }
+  }
+
+  addBytes(value: number): void {
+    if (!Number.isSafeInteger(value) || value < 0 || this.bytes > ASSET_PACKAGE_MAX_SOURCE_BYTES - value) {
+      throw assetPackageError('limit_exceeded', false, {
+        reason: this.reason,
+        max: ASSET_PACKAGE_MAX_SOURCE_BYTES,
+      });
+    }
+    this.bytes += value;
+  }
+}
+
+// fallow-ignore-next-line complexity -- The source preflight accounts for every serialized field before any canvas or typed-array expansion.
+function validateSourceBudget(
+  context: ProjectContext,
+  frames: readonly Frame[],
+  layers: readonly Layer[],
+  cels: ReadonlyMap<string, Cel>,
+  tags: readonly FrameTag[],
+  palette: ProjectPaletteSnapshot,
+  width: number,
+  height: number,
+): void {
+  const budget = new BoundedValueBudget('source_bytes');
+  budget.addValue(context.project.name.value);
+  budget.addValue(width);
+  budget.addValue(height);
+  budget.addValue(palette.colors);
+  budget.addValue(palette.entries);
+  budget.addValue(tags);
+  budget.addValue(context.animation.fps.value);
+  budget.addValue(context.animation.currentFrameId.value);
+  for (const layer of layers) {
+    budget.addValue(layer.id);
+    budget.addValue(layer.name);
+    budget.addValue(layer.type);
+    budget.addValue(layer.visible);
+    budget.addValue(layer.locked);
+    budget.addValue(layer.opacity);
+    budget.addValue(layer.blendMode);
+    budget.addValue(layer.continuous);
+    budget.addValue(layer.parentId);
+    budget.addValue(layer.textData);
+    if (layer.referenceData) {
+      budget.addValue(layer.referenceData.mimeType);
+      budget.addValue(layer.referenceData.x);
+      budget.addValue(layer.referenceData.y);
+      budget.addValue(layer.referenceData.scale);
+      budget.addValue(layer.referenceData.desaturate);
+      budget.addValue(layer.referenceData.position);
+      budget.addBytes(layer.referenceData.bytes.byteLength * 8 + 16);
+    } else if (layer.type === 'group') {
+      budget.addBytes(context.project.getLoadedGroupLayerDataByteLength(layer.id) * 8 + 16);
+    } else {
+      budget.addBytes(width * height * 4 * 8 + 16);
+    }
+  }
+  for (const frame of frames) {
+    budget.addValue(frame.id);
+    budget.addValue(frame.order);
+    budget.addValue(frame.duration);
+    budget.addValue(frame.tags);
+    for (const layer of layers) {
+      if (layer.type === 'reference' || layer.type === 'group') continue;
+      const cel = cels.get(context.animation.getCelKey(layer.id, frame.id));
+      if (!cel) continue;
+      budget.addValue(cel.id);
+      budget.addValue(cel.layerId);
+      budget.addValue(cel.frameId);
+      budget.addValue(cel.linkedCelId);
+      budget.addValue(cel.linkType);
+      budget.addValue(cel.opacity);
+      budget.addValue(cel.textCelData);
+      budget.addBytes(width * height * 4 * 8 + 16);
+      if (cel.indexBuffer) budget.addBytes(cel.indexBuffer.byteLength * 8 + 16);
+    }
+  }
+  budget.addValue(context.animation.selectedCelKeys.value);
+  budget.addValue(context.selection.state.value);
+  budget.addValue(context.history.undoStack.value);
+  budget.addValue(context.history.redoStack.value);
+}
+
 function validateIdentity(value: string, reason: string): void {
   if (typeof value !== 'string' || value.length === 0) {
     throw assetPackageError('invalid_state', false, { reason });
@@ -827,15 +1061,31 @@ function validateProjectName(value: string): void {
 }
 
 function validateMetadataSize(value: unknown, reason: string): void {
-  const serialized = serializeForComparison(value);
-  if (serialized !== undefined && new TextEncoder().encode(serialized).byteLength > ASSET_PACKAGE_MAX_SOURCE_BYTES) {
-    throw assetPackageError('limit_exceeded', false, { reason, max: ASSET_PACKAGE_MAX_SOURCE_BYTES });
-  }
+  const budget = new BoundedValueBudget(reason);
+  budget.addValue(value);
+}
+
+function createAssetPackageFilenames(projectName: string, includeSpriteSheet: boolean): AssetPackageFilenames {
+  const stem = createSafeFilenameStem(projectName);
+  const filenames = {
+    source: `${stem}.pf`,
+    preview: `${stem}-preview.png`,
+    spriteSheet: `${stem}-sprite-sheet.png`,
+    manifest: `${stem}-manifest.json`,
+  };
+  validatePortableFilename(filenames.source);
+  validatePortableFilename(filenames.preview);
+  validatePortableFilename(filenames.manifest);
+  if (includeSpriteSheet) validatePortableFilename(filenames.spriteSheet);
+  return filenames;
 }
 
 // fallow-ignore-next-line complexity -- Filename safety keeps path, platform, and artifact-extension rejection together.
 function createSafeFilenameStem(value: string): string {
-  const stem = value.trim();
+  if (value !== value.trim()) {
+    throw assetPackageError('invalid_request', false, { reason: 'project_name' });
+  }
+  const stem = value;
   if (stem.length === 0 || stem === '.' || stem === '..'
       || stem.startsWith('.')
       || /[. ]$/.test(stem)
@@ -845,10 +1095,24 @@ function createSafeFilenameStem(value: string): string {
   }
   if (stem.length > ASSET_PACKAGE_MAX_NAME_LENGTH
       || stem.includes('/') || stem.includes('\\') || stem.includes(':')
+      || /[<>"|?*]/.test(stem)
       || hasControlCharacter(stem)) {
     throw assetPackageError('invalid_request', false, { reason: 'project_name' });
   }
   return stem;
+}
+
+// fallow-ignore-next-line complexity -- Portable filename validation keeps every platform-invalid generated-name case explicit.
+function validatePortableFilename(filename: string): void {
+  if (filename.length === 0 || filename === '.' || filename === '..'
+      || /[<>"|?*]/.test(filename)
+      || filename.includes('/') || filename.includes('\\') || filename.includes(':')
+      || hasControlCharacter(filename)
+      || /[. ]$/.test(filename)
+      || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:$|\.)/i.test(filename)
+      || utf8ByteLength(filename) > 255) {
+    throw assetPackageError('invalid_request', false, { reason: 'artifact_filename' });
+  }
 }
 
 function hasControlCharacter(value: string): boolean {
@@ -1021,32 +1285,12 @@ function assertCapturedCels(
   }
 }
 
-// fallow-ignore-next-line code-duplication -- Local byte equality keeps this package's detached revalidation independent of transaction helpers.
-function sameBytes(
-  first: ArrayLike<number> | undefined,
-  second: ArrayLike<number> | undefined,
-): boolean {
-  if (!first || !second) return first === second;
-  if (first.length !== second.length) return false;
-  for (let index = 0; index < first.length; index++) {
-    if (first[index] !== second[index]) return false;
-  }
-  return true;
-}
-
-function samePaletteSnapshot(first: ProjectPaletteSnapshot, second: ProjectPaletteSnapshot): boolean {
-  return first.currentPresetId === second.currentPresetId
-    && first.currentCustomPaletteId === second.currentCustomPaletteId
-    && first.isDirty === second.isDirty
-    && serializeForComparison(first.newColorFlags) === serializeForComparison(second.newColorFlags)
-    && serializeForComparison(first.colors) === serializeForComparison(second.colors)
-    && serializeForComparison(first.entries) === serializeForComparison(second.entries);
-}
-
 function serializeForComparison(value: unknown): string | undefined {
   if (value === undefined) return undefined;
+  const budget = new BoundedValueBudget('source_serialization');
+  budget.addValue(value);
   try {
-    return JSON.stringify(value, (_key, item: unknown) => {
+    const serialized = JSON.stringify(value, (_key, item: unknown) => {
       if (item instanceof Uint8Array || item instanceof Uint8ClampedArray) {
         return Array.from(item);
       }
@@ -1056,9 +1300,51 @@ function serializeForComparison(value: unknown): string | undefined {
       }
       return item;
     });
-  } catch {
+    if (serialized !== undefined && utf8ByteLength(serialized, ASSET_PACKAGE_MAX_SOURCE_BYTES) > ASSET_PACKAGE_MAX_SOURCE_BYTES) {
+      throw assetPackageError('limit_exceeded', false, {
+        reason: 'source_serialization',
+        max: ASSET_PACKAGE_MAX_SOURCE_BYTES,
+      });
+    }
+    return serialized;
+  } catch (error) {
+    if (error instanceof AssetPackageError) throw error;
     throw assetPackageError('invalid_state', false, { reason: 'source_serialization' });
   }
+}
+
+function serializeBoundedJson(value: unknown, reason: string, maxBytes: number): Uint8Array {
+  const budget = new BoundedValueBudget(reason);
+  budget.addValue(value);
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw assetPackageError('internal', true, { reason });
+  }
+  if (serialized === undefined) {
+    throw assetPackageError('invalid_state', false, { reason });
+  }
+  const byteLength = utf8ByteLength(serialized, maxBytes);
+  if (byteLength > maxBytes) {
+    throw assetPackageError('limit_exceeded', false, { reason, max: maxBytes });
+  }
+  try {
+    return new TextEncoder().encode(serialized);
+  } catch {
+    throw assetPackageError('internal', true, { reason });
+  }
+}
+
+function utf8ByteLength(value: string, stopAfter = Number.MAX_SAFE_INTEGER): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index++) {
+    const codePoint = value.codePointAt(index) ?? 0;
+    if (codePoint > 0xffff) index++;
+    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+    if (bytes > stopAfter) return bytes;
+  }
+  return bytes;
 }
 
 // fallow-ignore-next-line complexity -- Serialized source validation checks project dimensions, identity, and bounded JSON before compression.
@@ -1081,21 +1367,12 @@ function validateSavedProject(project: ProjectFile, state: CapturedAssetState): 
   })) {
     throw assetPackageError('invalid_state', false, { reason: 'source_snapshot' });
   }
-  const sourceJson = serializeProject(project);
-  if (sourceJson.byteLength > ASSET_PACKAGE_MAX_SOURCE_BYTES) {
-    throw assetPackageError('limit_exceeded', false, {
-      reason: 'source_bytes',
-      max: ASSET_PACKAGE_MAX_SOURCE_BYTES,
-    });
-  }
+  const budget = new BoundedValueBudget('source_bytes');
+  budget.addValue(project);
 }
 
 function serializeProject(project: ProjectFile): Uint8Array {
-  try {
-    return new TextEncoder().encode(JSON.stringify(project));
-  } catch {
-    throw assetPackageError('internal', true, { reason: 'source_encoding' });
-  }
+  return serializeBoundedJson(project, 'source_encoding', ASSET_PACKAGE_MAX_SOURCE_BYTES);
 }
 
 function compressProject(project: ProjectFile): Uint8Array {
@@ -1342,7 +1619,7 @@ async function digestPackage(
   request: AssetPackagePrepareRequest,
   artifacts: readonly PreparedArtifact[],
 ): Promise<string> {
-  const descriptor = new TextEncoder().encode(JSON.stringify({
+  const descriptor = serializeBoundedJson({
     type: 'project.asset-package',
     contractVersion: ASSET_PACKAGE_CONTRACT_VERSION,
     target: request.target,
@@ -1354,7 +1631,7 @@ async function digestPackage(
       byteLength: artifact.bytes.byteLength,
       digest: artifact.digest,
     })),
-  }));
+  }, 'package_descriptor', ASSET_PACKAGE_MAX_ARTIFACT_BYTES);
   let total = descriptor.byteLength + 1;
   for (const artifact of artifacts) total += artifact.bytes.byteLength;
   if (!Number.isSafeInteger(total) || total > ASSET_PACKAGE_MAX_TOTAL_BYTES) {

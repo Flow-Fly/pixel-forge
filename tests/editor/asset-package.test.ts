@@ -50,6 +50,7 @@ describe('asset package contract', () => {
         persistedRevision: 7,
         status: 'saved',
       },
+      expectedPackageDigest: null,
     });
     expect(request).toEqual({
       target: { projectId: 'asset-package-test' },
@@ -61,6 +62,7 @@ describe('asset package contract', () => {
         persistedRevision: 7,
         status: 'saved',
       },
+      expectedPackageDigest: null,
     });
 
     expect(() => normalizeAssetPackageRequest({
@@ -68,7 +70,22 @@ describe('asset package contract', () => {
       target: { projectId: 'asset-package-test' },
       expectedRevision: 7,
       expectedSaveSafety: request.expectedSaveSafety,
+      expectedPackageDigest: null,
       provenance: 'caller-authored',
+    })).toThrow();
+
+    expect(() => normalizeAssetPackageRequest({
+      operation: 'project.asset-package.prepare',
+      target: { projectId: 'asset-package-test' },
+      expectedRevision: 7,
+      expectedSaveSafety: request.expectedSaveSafety,
+    })).toThrow();
+    expect(() => normalizeAssetPackageRequest({
+      operation: 'project.asset-package.prepare',
+      target: { projectId: 'asset-package-test' },
+      expectedRevision: 7,
+      expectedSaveSafety: request.expectedSaveSafety,
+      expectedPackageDigest: 'A'.repeat(64),
     })).toThrow();
   });
 
@@ -87,6 +104,7 @@ describe('asset package contract', () => {
         persistedRevision: 0,
         status: 'dirty',
       },
+      expectedPackageDigest: null,
     });
     expect(result).toEqual({
       ok: false,
@@ -112,6 +130,7 @@ describe('asset package contract', () => {
         persistedRevision: 0,
         status: 'saved',
       },
+      expectedPackageDigest: null,
       provenance: { approved: true },
     });
     expect(result).toEqual({

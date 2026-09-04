@@ -3,7 +3,8 @@ import {
   createFixtureSession,
   type FixtureSession,
 } from '../../src/editor/fixture-session';
-import type { AssetPackageArtifact } from '../../src/editor/automation-adapter';
+import type { AssetPackageArtifact } from '../../src/editor/asset-package';
+import { FileService } from '../../src/services/file-service';
 
 const sessions: FixtureSession[] = [];
 
@@ -16,52 +17,148 @@ describe('Creative Asset Package Chromium evidence', () => {
   it('prepares static source, preview, and manifest without browser side effects', async () => {
     const objectUrl = vi.spyOn(URL, 'createObjectURL');
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+    const downloadBlob = vi.spyOn(FileService, 'downloadBlob');
+    const clipboardWrite = typeof navigator.clipboard?.write === 'function'
+      ? vi.spyOn(navigator.clipboard, 'write')
+      : undefined;
+    const clipboardWriteText = typeof navigator.clipboard?.writeText === 'function'
+      ? vi.spyOn(navigator.clipboard, 'writeText')
+      : undefined;
+    const share = typeof navigator.share === 'function'
+      ? vi.spyOn(navigator, 'share')
+      : undefined;
+    const execCommand = typeof document.execCommand === 'function'
+      ? vi.spyOn(document, 'execCommand')
+      : undefined;
     const session = createFixtureSession();
     sessions.push(session);
-    const journey = await session.runAssetPackage();
-    // The fixture's source round-trip intentionally exercises the normal load
-    // boundary, which decodes persisted image bytes through object URLs. Clear
-    // that evidence before checking the package operation and PNG decoder.
-    objectUrl.mockClear();
-    anchorClick.mockClear();
+    const journey = await session.runAssetPackage({
+      afterPackagePreparation: async (assetPackage, request) => {
+        expect(assetPackage.packageDigest).toHaveLength(64);
+        expect(objectUrl).not.toHaveBeenCalled();
+        expect(anchorClick).not.toHaveBeenCalled();
+        expect(downloadBlob).not.toHaveBeenCalled();
+        if (clipboardWrite) expect(clipboardWrite).not.toHaveBeenCalled();
+        if (clipboardWriteText) expect(clipboardWriteText).not.toHaveBeenCalled();
+        if (share) expect(share).not.toHaveBeenCalled();
+        if (execCommand) expect(execCommand).not.toHaveBeenCalled();
+        const frame = session.projectContext.animation.frames.value[0];
+        if (!frame) throw new Error('Static package fixture has no frame.');
+        frame.order = 1;
+        const badOrder = await session.adapter.request(request);
+        expect(badOrder).toMatchObject({
+          ok: false,
+          error: { code: 'invalid_state', details: { reason: 'frame_order' } },
+        });
+        frame.order = 0;
+        const invalidNames = ['bad<name', 'bad>name', 'bad"name', 'bad|name', 'bad?name', 'bad*name', 'CON', 'name.'];
+        for (const name of invalidNames) {
+          session.projectContext.project.name.value = name;
+          const badName = await session.adapter.request(request);
+          expect(badName).toMatchObject({
+            ok: false,
+            error: { code: 'invalid_request' },
+          });
+        }
+        session.projectContext.project.name.value = 'Fixture Project';
+        session.projectContext.project.name.value = '😀'.repeat(100);
+        const longFilename = await session.adapter.request(request);
+        expect(longFilename).toMatchObject({
+          ok: false,
+          error: { code: 'invalid_request', details: { reason: 'artifact_filename' } },
+        });
+        session.projectContext.project.name.value = 'Fixture Project';
+        const selectedCelKeys = session.projectContext.animation.selectedCelKeys.value;
+        session.projectContext.animation.selectedCelKeys.value = new Set(
+          Array.from({ length: 250_001 }, (_, index) => `selected-${index}`),
+        );
+        const oversizedMetadata = await session.adapter.request(request);
+        expect(oversizedMetadata).toMatchObject({
+          ok: false,
+          error: { code: 'limit_exceeded', details: { reason: 'source_bytes' } },
+        });
+        session.projectContext.animation.selectedCelKeys.value = selectedCelKeys;
+        const mismatch = await session.adapter.request({
+          ...request,
+          expectedPackageDigest: '0'.repeat(64),
+        });
+        expect(mismatch).toEqual({
+          ok: false,
+          error: {
+            code: 'revision_conflict',
+            retryable: true,
+            details: { reason: 'package_digest' },
+          },
+        });
+      },
+    });
 
     expect(journey.exact).toEqual({
       staticArtifacts: true,
       manifest: true,
       deterministic: true,
+      digests: true,
       source: true,
       render: true,
+      persistedSource: true,
+      reload: true,
+      reloadedRender: true,
+      isolation: true,
+      targetRebound: true,
     });
     expect(journey.assetPackage.artifacts.map((artifact) => artifact.role))
       .toEqual(['source', 'preview', 'manifest']);
     expect(journey.assetPackage.manifest.spriteSheet).toBeUndefined();
-    expect(objectUrl).not.toHaveBeenCalled();
-    expect(anchorClick).not.toHaveBeenCalled();
-
     const preview = requiredArtifact(journey.assetPackage.artifacts, 'preview');
     const previewPixels = await decodePng(preview, 4, 4);
     expect(Array.from(previewPixels)).toEqual(Array.from(journey.roundTrip.renderPixels));
   });
 
+  // fallow-ignore-next-line complexity -- This public animation journey proves source, sprite, reload, and side-effect boundaries.
   it('decodes animated sprite cells and matches every canonical frame', async () => {
     const objectUrl = vi.spyOn(URL, 'createObjectURL');
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+    const downloadBlob = vi.spyOn(FileService, 'downloadBlob');
+    const clipboardWrite = typeof navigator.clipboard?.write === 'function'
+      ? vi.spyOn(navigator.clipboard, 'write')
+      : undefined;
+    const clipboardWriteText = typeof navigator.clipboard?.writeText === 'function'
+      ? vi.spyOn(navigator.clipboard, 'writeText')
+      : undefined;
+    const share = typeof navigator.share === 'function'
+      ? vi.spyOn(navigator, 'share')
+      : undefined;
+    const execCommand = typeof document.execCommand === 'function'
+      ? vi.spyOn(document, 'execCommand')
+      : undefined;
     const session = createFixtureSession({ projectId: 'animated-package-fixture' });
     sessions.push(session);
-    const journey = await session.runAnimatedAssetPackage();
-    objectUrl.mockClear();
-    anchorClick.mockClear();
+    const journey = await session.runAnimatedAssetPackage({
+      afterPackagePreparation: (assetPackage) => {
+        expect(assetPackage.packageDigest).toHaveLength(64);
+        expect(objectUrl).not.toHaveBeenCalled();
+        expect(anchorClick).not.toHaveBeenCalled();
+        expect(downloadBlob).not.toHaveBeenCalled();
+        if (clipboardWrite) expect(clipboardWrite).not.toHaveBeenCalled();
+        if (clipboardWriteText) expect(clipboardWriteText).not.toHaveBeenCalled();
+        if (share) expect(share).not.toHaveBeenCalled();
+        if (execCommand) expect(execCommand).not.toHaveBeenCalled();
+      },
+    });
 
     expect(journey.exact).toEqual({
       sprite: true,
       cells: true,
       timing: true,
       deterministic: true,
+      digests: true,
       referenceExcluded: true,
+      persistedSource: true,
+      reload: true,
+      reloadedRender: true,
+      isolation: true,
+      targetRebound: true,
     });
-    expect(objectUrl).not.toHaveBeenCalled();
-    expect(anchorClick).not.toHaveBeenCalled();
-
     const sprite = requiredArtifact(journey.assetPackage.artifacts, 'sprite-sheet');
     const sheet = journey.assetPackage.manifest.spriteSheet;
     if (!sheet) throw new Error('Animated package did not include sprite metadata.');
@@ -76,6 +173,7 @@ describe('Creative Asset Package Chromium evidence', () => {
       .toEqual([100, 180, 260]);
   });
 
+  // fallow-ignore-next-line complexity -- This public failure journey covers each independent package safety boundary.
   it('rejects stale revisions, source mutation during an await, and oversized bounds', async () => {
     const session = createFixtureSession({ projectId: 'asset-package-failure-fixture' });
     sessions.push(session);
@@ -85,6 +183,7 @@ describe('Creative Asset Package Chromium evidence', () => {
       target: session.target,
       expectedRevision: journey.save.revision,
       expectedSaveSafety: journey.save.saveSafety,
+      expectedPackageDigest: null,
     };
 
     const stale = await session.adapter.request({
