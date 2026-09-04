@@ -8,6 +8,20 @@ import {
   CreativeRunController,
   type CreativeRunStep,
 } from '../../src/editor/creative-run';
+import type {
+  CreativeRunRecovery,
+  CreativeRunRecoveryDiagnosticBundle,
+  CreativeRunRecoveryRecord,
+  CreativeRunRecoveryResult,
+  CreativeRunRecoveryStatus,
+} from '../../src/editor/creative-run-recovery';
+import { CreativeRunRecoveryCoordinator } from '../../src/editor/creative-run-recovery';
+import { digestProjectFile } from '../../src/editor/creative-run-recovery';
+import { createProjectRecoveryTarget } from '../../src/editor/creative-run-recovery-boundaries';
+import { IndexedDbCreativeRunRecoveryPersistence, projectRepository } from '../../src/services/persistence/indexed-db';
+import type { Command } from '../../src/stores/history-store';
+import { createProjectContext, type ProjectContext } from '../../src/stores/project-context';
+import type { AutomationTransactionProvenance } from '../../src/editor/contracts';
 import { createFixtureSession, type FixtureSession } from '../../src/editor/fixture-session';
 import {
   restoreDefaultProjectContext,
@@ -19,15 +33,122 @@ import type { PFCreativeRunPanel } from '../../src/components/preview/pf-creativ
 
 const fixtures: FixtureSession[] = [];
 const managers: AutomationSessionManager[] = [];
+const recoveryContexts: ProjectContext[] = [];
+
+class BrowserRecoveryDouble implements CreativeRunRecovery {
+  private currentStatus: CreativeRunRecoveryStatus;
+  private releaseCopy: (() => void) | null = null;
+  holdCopy = false;
+  readonly calls: string[] = [];
+  record: CreativeRunRecoveryRecord = {} as CreativeRunRecoveryRecord;
+
+  constructor(interrupted = false) {
+    this.currentStatus = {
+      outcome: interrupted ? 'recovery-required' : null,
+      reason: interrupted ? 'work-unsettled' : null,
+      recoveryCopyId: null,
+      requiresReapproval: interrupted,
+      interrupted,
+      terminal: false,
+    };
+  }
+
+  get status(): CreativeRunRecoveryStatus {
+    return this.currentStatus;
+  }
+
+  async load(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('load');
+    return this.result();
+  }
+
+  async checkpointBeforeFirstWrite(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('checkpoint');
+    return this.result();
+  }
+
+  async recordCommittedTransaction(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('record');
+    return this.result();
+  }
+
+  async markInterrupted(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('interrupted');
+    this.currentStatus = {
+      ...this.currentStatus,
+      outcome: 'recovery-required',
+      reason: 'work-unsettled',
+      requiresReapproval: true,
+      interrupted: true,
+    };
+    return this.result('recovery-required', 'work-unsettled', 'recover-manually');
+  }
+
+  async rewind(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('rewind');
+    return this.result('rewound-to-owned-transaction', null, 'approve-brief');
+  }
+
+  async reject(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('reject');
+    return this.result('restored-original-with-rejected-copy', null, 'none', 'recovery-copy');
+  }
+
+  async createCheckpointCopy(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('copy');
+    if (this.holdCopy) {
+      await new Promise<void>((resolve) => {
+        this.releaseCopy = resolve;
+      });
+    }
+    this.currentStatus = { ...this.currentStatus, recoveryCopyId: 'recovery-copy' };
+    return this.result(null, null, 'review-result', 'recovery-copy');
+  }
+
+  releaseHeldCopy(): void {
+    const release = this.releaseCopy;
+    this.releaseCopy = null;
+    release?.();
+  }
+
+  getDiagnostics(): CreativeRunRecoveryDiagnosticBundle {
+    return {
+      schemaVersion: 1,
+      phase: 'ready',
+      outcome: this.currentStatus.outcome,
+      reason: this.currentStatus.reason,
+      transactionCount: 0,
+      eventCount: this.calls.length,
+      currentRevision: 0,
+      lastDurableRevision: 0,
+      checkpointRevision: 0,
+      checkpointDigest: null,
+      postRunDigest: null,
+      operationIds: [],
+      eventKinds: [],
+      durationsMs: [],
+    };
+  }
+
+  private result(
+    outcome: CreativeRunRecoveryResult['outcome'] = this.currentStatus.outcome,
+    reason: CreativeRunRecoveryResult['reason'] = this.currentStatus.reason,
+    nextAction: CreativeRunRecoveryResult['nextAction'] = 'none',
+    recoveryCopyId: string | null = this.currentStatus.recoveryCopyId,
+  ): CreativeRunRecoveryResult {
+    return { ok: true, outcome, reason, nextAction, recoveryCopyId };
+  }
+}
 
 afterEach(() => {
   document.body.replaceChildren();
   restoreDefaultProjectContext();
   for (const manager of managers.splice(0)) manager.dispose();
   for (const fixture of fixtures.splice(0)) fixture.dispose();
+  for (const context of recoveryContexts.splice(0)) context.dispose();
 });
 
-async function createRun(): Promise<{ element: PFCreativeRunPanel; controller: CreativeRunController; fixture: FixtureSession; manager: AutomationSessionManager }> {
+async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFCreativeRunPanel; controller: CreativeRunController; fixture: FixtureSession; manager: AutomationSessionManager }> {
   const fixture = createFixtureSession();
   fixtures.push(fixture);
   await fixture.runAnimationObservation();
@@ -86,6 +207,7 @@ async function createRun(): Promise<{ element: PFCreativeRunPanel; controller: C
       contentEgress: 'local-only',
     },
     getCurrentRevision: () => fixture.projectContext.project.revision.value,
+    recovery,
     stepSource: () => {
       if (emitted) return null;
       emitted = true;
@@ -123,6 +245,171 @@ async function createRun(): Promise<{ element: PFCreativeRunPanel; controller: C
   document.body.append(element);
   await element.updateComplete;
   return { element, controller, fixture, manager };
+}
+
+function deferred(): { readonly promise: Promise<void>; readonly release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
+function recoveryProvenance(
+  operationId: string,
+  runId: string,
+  projectId: string,
+  fromRevision: number,
+  toRevision: number,
+): AutomationTransactionProvenance {
+  return {
+    source: 'automation',
+    transactionId: operationId,
+    clientId: 'Chromium recovery fixture',
+    sessionId: `${runId}-session`,
+    runId,
+    operationId,
+    target: { projectId },
+    fromRevision,
+    toRevision,
+    transitionCount: 1,
+    transitionsTruncated: false,
+    transitions: [],
+    children: [],
+  };
+}
+
+async function createIndexedRecoveryJourney(kind: 'safe' | 'conflict'): Promise<{
+  readonly primary: ProjectContext;
+  readonly secondary: ProjectContext;
+  readonly recoveryResult: Awaited<ReturnType<CreativeRunRecoveryCoordinator['reject']>>;
+  readonly copyId: string | null;
+  readonly checkpointDigest: string;
+  readonly postRunDigest: string;
+}> {
+  const primary = createProjectContext();
+  const secondary = createProjectContext();
+  recoveryContexts.push(primary, secondary);
+  const suffix = crypto.randomUUID();
+  const primaryId = `browser-recovery-primary-${suffix}`;
+  const secondaryId = `browser-recovery-secondary-${suffix}`;
+  primary.project.id.value = primaryId;
+  primary.project.name.value = 'Browser recovery original';
+  secondary.project.id.value = secondaryId;
+  secondary.project.name.value = 'Browser recovery secondary';
+  const normalizedPrimary = await primary.project.saveProject();
+  await primary.project.loadProject(normalizedPrimary, false, { preserveRevision: 0 });
+  const secondaryBefore = await secondary.project.saveProject();
+  setActiveProjectContext(primary);
+
+  const runId = `browser-recovery-run-${suffix}`;
+  const releaseCreate = deferred();
+  let createStarted!: () => void;
+  const createStartedPromise = new Promise<void>((resolve) => { createStarted = resolve; });
+  const delayedRepository = {
+    create: async (...args: Parameters<typeof projectRepository.create>) => {
+      createStarted();
+      await releaseCreate.promise;
+      return projectRepository.create(...args);
+    },
+  };
+  const target = createProjectRecoveryTarget(
+    primary,
+    delayedRepository,
+    { projectId: primaryId },
+    () => `browser-recovery-copy-${suffix}`,
+  );
+  const brief = {
+    runId,
+    revision: 1,
+    targetId: primaryId,
+    targetName: 'Browser recovery original',
+    goal: 'Verify safe local recovery',
+    constraints: [],
+    requestedWriteCategories: ['structure'] as const,
+    transactionLimit: 2,
+    durationSeconds: 60,
+    contentEgress: 'local-only' as const,
+  };
+  const persistence = new IndexedDbCreativeRunRecoveryPersistence();
+  const dependencies = {
+    runId,
+    sessionId: `${runId}-session`,
+    brief,
+    target,
+    persistence,
+  };
+  const recovery = new CreativeRunRecoveryCoordinator(dependencies);
+  await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+  const operationId = `${runId}:step:1`;
+  const beforeName = primary.project.name.value;
+  const command: Command = {
+    id: operationId,
+    name: 'Browser recovery transaction',
+    provenance: recoveryProvenance(operationId, runId, primaryId, 0, 1),
+    execute: () => { primary.project.name.value = 'Browser recovery result'; },
+    undo: () => { primary.project.name.value = beforeName; },
+  };
+  await primary.history.execute(command);
+  await recovery.recordCommittedTransaction({
+    operationId,
+    ordinal: 1,
+    fromRevision: 0,
+    toRevision: 1,
+    provenance: recoveryProvenance(operationId, runId, primaryId, 0, 1),
+    durationMs: 12,
+  });
+
+  let reloaded = new CreativeRunRecoveryCoordinator(dependencies);
+  await reloaded.load();
+  const checkpointDigest = reloaded.record?.checkpoint.sourceDigest;
+  const postRunDigest = reloaded.record?.transactions.at(-1)?.postDigest;
+  if (!checkpointDigest || !postRunDigest) throw new Error('Expected persisted recovery digests.');
+  let recoveryContext = primary;
+  if (kind === 'conflict') {
+    const manualCommand: Command = {
+      id: `${runId}:manual`,
+      name: 'Manual browser edit',
+      execute: () => { primary.project.name.value = 'Browser manual edit'; },
+      undo: () => { primary.project.name.value = 'Browser recovery result'; },
+    };
+    await primary.history.execute(manualCommand);
+    primary.history.clear();
+
+    const savedManualProject = await primary.project.saveProject();
+    await projectRepository.save(primaryId, savedManualProject);
+    const reopened = createProjectContext();
+    recoveryContexts.push(reopened);
+    reopened.project.id.value = primaryId;
+    const reopenedProject = await projectRepository.load(primaryId);
+    if (!reopenedProject) throw new Error('Expected the saved conflict project.');
+    await reopened.project.loadProject(reopenedProject, false, { preserveRevision: 2 });
+    primary.dispose();
+    recoveryContext = reopened;
+    const reopenedTarget = createProjectRecoveryTarget(
+      reopened,
+      delayedRepository,
+      { projectId: primaryId },
+      () => `browser-recovery-copy-${suffix}`,
+    );
+    const reopenedDependencies = { ...dependencies, target: reopenedTarget };
+    reloaded = new CreativeRunRecoveryCoordinator(reopenedDependencies);
+    await reloaded.load();
+  }
+  setActiveProjectContext(recoveryContext);
+  const recoveryPromise = reloaded.reject(true);
+  await createStartedPromise;
+  setActiveProjectContext(secondary);
+  releaseCreate.release();
+  const recoveryResult = await recoveryPromise;
+  const copyId = recoveryResult.recoveryCopyId;
+  expect(await secondary.project.saveProject()).toEqual(secondaryBefore);
+  return {
+    primary: recoveryContext,
+    secondary,
+    recoveryResult,
+    copyId,
+    checkpointDigest,
+    postRunDigest,
+  };
 }
 
 describe('Creative Run panel in Chromium', () => {
@@ -163,6 +450,81 @@ describe('Creative Run panel in Chromium', () => {
     await element.updateComplete;
     await expect.element(page.getByRole('status')).toHaveTextContent('No active Creative Run.');
     expect(element.shadowRoot?.querySelector('button')).toBeNull();
+  });
+
+  it('renders recovery actions as keyboard controls and fences a busy copy action', async () => {
+    const recovery = new BrowserRecoveryDouble();
+    const { element, controller } = await createRun(recovery);
+    controller.stop();
+    await element.updateComplete;
+
+    await expect.element(page.getByText('Recovery safety')).toBeVisible();
+    const reject = page.getByRole('button', { name: 'Reject Run…' });
+    await expect.element(reject).toBeVisible();
+    await userEvent.click(reject);
+    await expect.element(page.getByRole('dialog', { name: 'Confirm reject' })).toBeVisible();
+    const cancel = page.getByRole('button', { name: 'Cancel' });
+    await userEvent.click(cancel);
+    await expect.element(page.getByRole('dialog', { name: 'Confirm reject' })).not.toBeInTheDocument();
+
+    recovery.holdCopy = true;
+    await userEvent.click(page.getByRole('button', { name: 'Create Recovery Copy' }));
+    const copyButton = page.getByRole('button', { name: 'Create Recovery Copy' });
+    await expect.element(copyButton).toBeDisabled();
+    expect(Array.from(element.shadowRoot?.querySelectorAll('button') ?? [])
+      .map((button) => button.textContent?.trim() ?? '')
+      .some((label) => /download|upload|delete|overwrite/i.test(label))).toBe(false);
+    recovery.releaseHeldCopy();
+    await expect.poll(() => recovery.calls.filter((call) => call === 'copy').length).toBe(1);
+    await expect.element(page.getByRole('button', { name: 'Open Recovery Copy' })).toBeVisible();
+  });
+
+  it('persists an offline interruption in Chromium and does not replay or create a copy', async () => {
+    const recovery = new BrowserRecoveryDouble();
+    const { element, controller } = await createRun(recovery);
+    window.dispatchEvent(new Event('offline'));
+    await expect.poll(() => recovery.calls.includes('interrupted')).toBe(true);
+    await expect.poll(() => controller.getState().phase).toBe('recovery-required');
+    await expect.element(page.getByText('This run was interrupted. A new session, fresh observation, and approval are required before writing.')).toBeVisible();
+    expect(recovery.calls).not.toContain('copy');
+    expect(controller.getState().transactionsUsed).toBe(0);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(recovery.calls.filter((call) => call === 'interrupted')).toHaveLength(1);
+    controller.dispose();
+    await element.updateComplete;
+  });
+
+  it('runs persisted safe reject and conflict-copy journeys without crossing active tabs', async () => {
+    const safe = await createIndexedRecoveryJourney('safe');
+    expect(safe.recoveryResult).toMatchObject({
+      ok: true,
+      outcome: 'restored-original-with-rejected-copy',
+    });
+    expect(safe.primary.project.name.value).toBe('Browser recovery original');
+    expect(safe.primary.project.revision.value).toBe(2);
+    expect(await digestProjectFile(await safe.primary.project.saveProject())).toBe(safe.checkpointDigest);
+    if (!safe.copyId) throw new Error('Expected a safe recovery copy.');
+    const safeCopy = await projectRepository.load(safe.copyId);
+    expect(safeCopy?.name).toBe('Rejected Result Recovery Copy');
+    expect(await digestProjectFile({ ...safeCopy!, name: 'Browser recovery result' })).toBe(safe.postRunDigest);
+    await projectRepository.delete(safe.copyId);
+
+    const conflict = await createIndexedRecoveryJourney('conflict');
+    expect(conflict.recoveryResult).toMatchObject({
+      ok: true,
+      outcome: 'preserved-original-with-checkpoint-copy',
+    });
+    expect(conflict.primary.project.name.value).toBe('Browser manual edit');
+    expect(conflict.primary.project.revision.value).toBe(2);
+    expect(await digestProjectFile(await conflict.primary.project.saveProject())).not.toBe(conflict.checkpointDigest);
+    if (!conflict.copyId) throw new Error('Expected a conflict recovery copy.');
+    const conflictCopy = await projectRepository.load(conflict.copyId);
+    expect(conflictCopy?.name).toBe('Checkpoint Recovery Copy');
+    expect(await digestProjectFile({ ...conflictCopy!, name: 'Browser recovery original' })).toBe(conflict.checkpointDigest);
+    await projectRepository.delete(conflict.copyId);
+    await projectRepository.delete(conflict.primary.project.id.value);
   });
 
   it('lets the composed app render and control a supplied run without creating one', async () => {

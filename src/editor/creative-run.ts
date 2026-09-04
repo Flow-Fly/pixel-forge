@@ -223,8 +223,12 @@ export type CreativeRunSessionBoundary = Pick<
   | 'executeArtistModeTransaction'
 >;
 
+export interface CreativeRunSessionEvents {
+  readonly events?: EventTarget;
+}
+
 export interface CreativeRunControllerOptions {
-  readonly sessionManager: CreativeRunSessionBoundary;
+  readonly sessionManager: CreativeRunSessionBoundary & CreativeRunSessionEvents;
   readonly sessionId: string;
   readonly runId: string;
   readonly brief: CreativeBriefInput;
@@ -248,7 +252,7 @@ export interface CreativeRunControllerOptions {
   /** Optional browser-local recovery collaborator for durable run safety. */
   readonly recovery?: CreativeRunRecovery;
   /**
-   * Builds a replacement controller with a new session after interruption.
+   * Builds a replacement controller with a new session/run after interruption.
    * The factory owns session creation, fresh observation, and reapproval.
    */
   readonly createReplacementController?: (
@@ -288,6 +292,7 @@ export class CreativeRunController {
   readonly events = new EventTarget();
 
   private readonly sessionManager: CreativeRunSessionBoundary;
+  private readonly lifecycleEvents?: EventTarget;
   private readonly sessionId: string;
   private readonly stepSource: CreativeRunStepSource;
   private readonly observationClass: InspectObservationClass;
@@ -339,6 +344,7 @@ export class CreativeRunController {
 
   constructor(options: CreativeRunControllerOptions) {
     this.sessionManager = options.sessionManager;
+    this.lifecycleEvents = options.sessionManager.events;
     this.sessionId = normalizeIdentity(options.sessionId, 'sessionId', CREATIVE_RUN_MAX_RUN_ID_LENGTH);
     const runId = normalizeIdentity(options.runId, 'runId', CREATIVE_RUN_MAX_RUN_ID_LENGTH);
     this.stepSource = options.stepSource;
@@ -467,6 +473,7 @@ export class CreativeRunController {
   // fallow-ignore-next-line complexity -- Start rechecks exact brief, live authority, and write ownership before one run loop.
   async start(): Promise<CreativeRunActionResult> {
     if (this.disposed) return this.disposedResult();
+    if (this.recovery?.status.interrupted) return this.fail('recovery_resume_required', false, 'resume-interrupted');
     if (this.phase !== 'ready') return this.fail('run_not_ready', false, 'approve-brief');
     if (this.approvedBriefRevision !== this.brief.revision) {
       return this.fail('brief_approval_required', false, 'approve-brief');
@@ -492,6 +499,7 @@ export class CreativeRunController {
 
   async resume(): Promise<CreativeRunActionResult> {
     if (this.disposed) return this.disposedResult();
+    if (this.recovery?.status.interrupted) return this.fail('recovery_resume_required', false, 'resume-interrupted');
     if (this.phase !== 'paused') return this.fail('invalid_transition', false, 'resume-run');
     if (this.approvedBriefRevision !== this.brief.revision) {
       return this.fail('brief_approval_required', false, 'approve-brief');
@@ -523,7 +531,6 @@ export class CreativeRunController {
     return this.succeed();
   }
 
-  // fallow-ignore-next-line unused-class-member -- Public manual takeover seam is consumed by editor coordination.
   requestManualTakeover(ownerId: string): CreativeRunActionResult {
     if (this.disposed) return this.disposedResult();
     if (!isBoundedString(ownerId, 256)) return this.fail('invalid_request', false, 'pause-run');
@@ -623,22 +630,11 @@ export class CreativeRunController {
    * asking the normal history boundary to undo anything.
    */
   async rewind(input: CreativeRunRecoveryRewindInput): Promise<CreativeRunActionResult> {
-    if (this.disposed) return this.disposedResult();
-    if (!this.recovery) return this.fail('unsupported', false, 'recover-manually');
-    if (this.inFlight) return this.fail('in_flight', true, 'rewind-run');
-    if (this.phase !== 'paused' && this.phase !== 'stopped' && this.phase !== 'recovery-required') {
-      return this.fail('invalid_transition', false, 'rewind-run');
-    }
-    this.generation += 1;
-    this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
-    const result = await this.recovery.rewind(input);
+    const prepared = this.prepareRecoverySelection('rewind-run');
+    if (!prepared.ok) return prepared.action;
+    const result = await prepared.recovery.rewind(input);
     if (!result.ok) return this.recoveryFailure(result.reason ?? 'recovery_required');
-    const record = this.recovery.record;
-    if (record) {
-      this.currentRevision = record.currentRevision;
-      this.lastDurableRevision = record.lastDurableRevision;
-      this.transactionsUsed = record.transactions.length;
-    }
+    this.syncRecoveryRecord();
     this.approvedBriefRevision = null;
     this.packagePreparedRevision = null;
     this.clearError();
@@ -648,15 +644,9 @@ export class CreativeRunController {
 
   /** Reject the old run only after an explicit creator confirmation. */
   async reject(confirmed = false): Promise<CreativeRunActionResult> {
-    if (this.disposed) return this.disposedResult();
-    if (!this.recovery) return this.fail('unsupported', false, 'recover-manually');
-    if (this.inFlight) return this.fail('in_flight', true, 'reject-run');
-    if (this.phase !== 'paused' && this.phase !== 'stopped' && this.phase !== 'recovery-required') {
-      return this.fail('invalid_transition', false, 'reject-run');
-    }
-    this.generation += 1;
-    this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
-    const result = await this.recovery.reject(confirmed);
+    const prepared = this.prepareRecoverySelection('reject-run');
+    if (!prepared.ok) return prepared.action;
+    const result = await prepared.recovery.reject(confirmed);
     if (!result.ok) return this.recoveryFailure(result.reason ?? 'recovery_required');
     if (result.outcome === 'restored-original-with-rejected-copy') {
       this.completeAuthority();
@@ -665,11 +655,7 @@ export class CreativeRunController {
       this.completeAuthority();
       this.setPhase('recovery-required');
     }
-    const record = this.recovery.record;
-    if (record) {
-      this.currentRevision = record.currentRevision;
-      this.lastDurableRevision = record.lastDurableRevision;
-    }
+    this.syncRecoveryRecord();
     this.clearError();
     return this.succeed();
   }
@@ -699,6 +685,7 @@ export class CreativeRunController {
   }
 
   /** Persist an interruption fact and require a fresh session on resume. */
+  // fallow-ignore-next-line unused-class-member -- Browser lifecycle hosts call this public interruption command before teardown.
   async markInterrupted(
     reason: Parameters<CreativeRunRecovery['markInterrupted']>[0] = 'work-unsettled',
   ): Promise<CreativeRunActionResult> {
@@ -720,22 +707,19 @@ export class CreativeRunController {
     if (!this.recovery || !this.recovery.status.interrupted) {
       return this.fail('invalid_transition', false, 'resume-interrupted');
     }
-    if (!this.createReplacementController) {
-      return this.fail('unsupported', false, 'recover-manually');
-    }
+    const factory = this.createReplacementController;
+    if (!factory) return this.fail('unsupported', false, 'recover-manually');
+    const previousSessionId = this.recovery.record?.sessionId ?? this.sessionId;
     try {
-      const replacement = await this.createReplacementController({
+      const replacement = await factory({
         runId: this.brief.runId,
-        previousSessionId: this.sessionId,
+        previousSessionId,
         brief: structuredClone(this.brief),
         target: this.target,
       });
       const replacementState = replacement.controller.getState();
-      if (replacement.sessionId === this.sessionId
-        || replacementState.sessionId !== replacement.sessionId
-        || replacementState.approvedBriefRevision !== null
-        || replacementState.phase !== 'draft'
-        || replacement.observedRevision !== replacementState.currentRevision) {
+      const currentRevision = readRevision(this.getCurrentRevision, replacementState.currentRevision);
+      if (!isValidReplacement(replacement, replacementState, previousSessionId, this.brief.runId, currentRevision)) {
         return this.fail('recovery_session_invalid', false, 'recover-manually');
       }
       this.replacementController = replacement.controller;
@@ -746,6 +730,7 @@ export class CreativeRunController {
     return this.succeed();
   }
 
+  // fallow-ignore-next-line unused-class-member -- Reload recovery UI calls this public hydration command on a new controller.
   async loadRecoveryRecord(): Promise<CreativeRunActionResult> {
     if (this.disposed) return this.disposedResult();
     if (!this.recovery) return this.fail('unsupported', false, 'recover-manually');
@@ -753,9 +738,7 @@ export class CreativeRunController {
     if (!result.ok) return this.recoveryFailure(result.reason ?? 'recovery_required');
     const record = this.recovery.record;
     if (record) {
-      this.currentRevision = record.currentRevision;
-      this.lastDurableRevision = record.lastDurableRevision;
-      this.transactionsUsed = record.transactions.length;
+      this.syncRecoveryRecord();
       if (this.recovery.status.interrupted || record.phase === 'recovery-required') {
         this.approvedBriefRevision = null;
         this.setPhase('recovery-required');
@@ -764,7 +747,29 @@ export class CreativeRunController {
     return this.succeed();
   }
 
-  // fallow-ignore-next-line unused-class-member -- Public disposal seam fences late run work when the panel leaves the editor.
+  private syncRecoveryRecord(): void {
+    const record = this.recovery?.record;
+    if (!record) return;
+    this.currentRevision = record.currentRevision;
+    this.lastDurableRevision = record.lastDurableRevision;
+    this.transactionsUsed = record.transactions.length;
+  }
+
+  private prepareRecoverySelection(
+    nextAction: 'rewind-run' | 'reject-run',
+  ): { readonly ok: true; readonly recovery: CreativeRunRecovery } | { readonly ok: false; readonly action: CreativeRunActionResult } {
+    if (this.disposed) return { ok: false, action: this.disposedResult() };
+    const recovery = this.recovery;
+    if (!recovery) return { ok: false, action: this.fail('unsupported', false, 'recover-manually') };
+    if (this.inFlight) return { ok: false, action: this.fail('in_flight', true, nextAction) };
+    if (this.phase !== 'paused' && this.phase !== 'stopped' && this.phase !== 'recovery-required') {
+      return { ok: false, action: this.fail('invalid_transition', false, nextAction) };
+    }
+    this.generation += 1;
+    this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
+    return { ok: true, recovery };
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -780,6 +785,7 @@ export class CreativeRunController {
   /** Fence a hidden/offline/page-disposed controller without replaying work. */
   private interruptForLifecycle(reason: Parameters<CreativeRunRecovery['markInterrupted']>[0]): void {
     if (this.disposed || this.phase === 'accepted' || this.phase === 'rejected') return;
+    if (this.recovery?.status.interrupted && !this.inFlight) return;
     this.generation += 1;
     this.interruptionPending = Boolean(this.recovery?.record);
     this.interruptionReason = reason;
@@ -798,7 +804,12 @@ export class CreativeRunController {
     this.interruptionPending = false;
     const pending = this.recovery.markInterrupted(this.interruptionReason);
     const guarded = pending.then((result) => {
-      if (!result.ok) {
+      if (result.ok) {
+        this.approvedBriefRevision = null;
+        this.setPhase('recovery-required');
+      } else {
+        this.approvedBriefRevision = null;
+        this.setPhase('recovery-required');
         this.error = {
           code: `recovery_${result.reason ?? 'persistence_failed'}`,
           retryable: false,
@@ -820,6 +831,8 @@ export class CreativeRunController {
   }
 
   private bindLifecycleEvents(): void {
+    this.lifecycleEvents?.addEventListener('automation-session-backgrounded', this.handleSessionInterruption);
+    this.lifecycleEvents?.addEventListener('automation-session-revoked', this.handleSessionInterruption);
     if (typeof window === 'undefined') return;
     window.addEventListener('offline', this.handleOffline);
     window.addEventListener('pagehide', this.handlePageHide);
@@ -827,6 +840,8 @@ export class CreativeRunController {
   }
 
   private unbindLifecycleEvents(): void {
+    this.lifecycleEvents?.removeEventListener('automation-session-backgrounded', this.handleSessionInterruption);
+    this.lifecycleEvents?.removeEventListener('automation-session-revoked', this.handleSessionInterruption);
     if (typeof window === 'undefined') return;
     window.removeEventListener('offline', this.handleOffline);
     window.removeEventListener('pagehide', this.handlePageHide);
@@ -838,6 +853,12 @@ export class CreativeRunController {
   };
 
   private readonly handlePageHide = (): void => {
+    this.interruptForLifecycle('work-unsettled');
+  };
+
+  private readonly handleSessionInterruption = (): void => {
+    const authority = this.readLiveAuthority();
+    if (!authority || authority.session.status === 'active') return;
     this.interruptForLifecycle('work-unsettled');
   };
 
@@ -862,6 +883,11 @@ export class CreativeRunController {
       const generation = this.generation;
       const authority = this.checkAuthority();
       if (!authority.ok) {
+        if (isInterruptionAuthorityCode(authority.code)) {
+          this.interruptForLifecycle('work-unsettled');
+          await this.flushInterruptionPersistence();
+          break;
+        }
         this.setPhase('failed');
         return this.fail(authority.code, authority.retryable, authority.nextAction);
       }
@@ -1430,6 +1456,34 @@ function createOperationId(runId: string, sequence: number): string {
 
 function isUnsafeFailure(code: EditorError['code']): boolean {
   return code === 'target_not_found' || code === 'revision_conflict' || code === 'internal';
+}
+
+function isInterruptionAuthorityCode(code: string): boolean {
+  return code === 'session_backgrounded'
+    || code === 'session_revoked'
+    || code === 'session_expired'
+    || code === 'run_backgrounded'
+    || code === 'run_revoked'
+    || code === 'run_expired';
+}
+
+function isValidReplacement(
+  replacement: {
+    readonly sessionId: string;
+    readonly observedRevision: number;
+  },
+  state: CreativeRunState,
+  previousSessionId: string,
+  previousRunId: string,
+  currentRevision: number,
+): boolean {
+  return replacement.sessionId !== previousSessionId
+    && state.sessionId === replacement.sessionId
+    && state.runId !== previousRunId
+    && state.approvedBriefRevision === null
+    && state.phase === 'draft'
+    && replacement.observedRevision === state.currentRevision
+    && replacement.observedRevision === currentRevision;
 }
 
 function normalizeIdentity(value: unknown, reason: string, max: number): string {

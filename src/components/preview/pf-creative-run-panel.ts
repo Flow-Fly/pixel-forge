@@ -319,12 +319,7 @@ export class PFCreativeRunPanel extends LitElement {
   protected render() {
     const controller = this.controller;
     if (!controller) {
-      return html`
-        <section class="surface" aria-labelledby="creative-run-title">
-          <h2 id="creative-run-title">Creative Run</h2>
-          <p class="empty" role="status">No active Creative Run.</p>
-        </section>
-      `;
+      return this.renderEmpty();
     }
 
     const state = controller.getState();
@@ -334,89 +329,16 @@ export class PFCreativeRunPanel extends LitElement {
           <h2 id="creative-run-title">Creative Run</h2>
           <p class="muted">Run ${state.runId}, Brief revision ${state.brief.revision}</p>
         </div>
-
-        <section class="brief" aria-labelledby="creative-run-brief-title">
-          <h3 id="creative-run-brief-title">Approved Creative Brief</h3>
-          <div class="brief-copy">
-            <p><strong>Goal:</strong> ${state.brief.goal}</p>
-            ${state.brief.constraints.length > 0
-              ? html`<p><strong>Constraints:</strong> ${state.brief.constraints.join(' · ')}</p>`
-              : nothing}
-          </div>
-          <dl>
-            <dt>Approval</dt><dd>${state.approvedBriefRevision === state.brief.revision ? `Approved revision ${state.brief.revision}` : 'Creator approval required'}</dd>
-            <dt>Project</dt><dd>${state.target.name}</dd>
-            <dt>Requested authority</dt><dd>${state.brief.requestedWriteCategories.join(', ')}</dd>
-            <dt>Content posture</dt><dd>${state.brief.contentEgress}</dd>
-            <dt>Duration</dt><dd>${state.brief.durationSeconds}s</dd>
-          </dl>
-        </section>
-
-        <section class="authority" aria-labelledby="creative-run-authority-title">
-          <h3 id="creative-run-authority-title">Run authority</h3>
-          <p class="status" role="status">${formatPhase(state.phase)}</p>
-          <dl>
-            <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
-            <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
-            <dt>Revision</dt><dd>${state.currentRevision} (last durable ${state.lastDurableRevision})</dd>
-            <dt>Grant</dt><dd>${state.grant ? formatGrant(state) : 'Not available'}</dd>
-          </dl>
-        </section>
+        ${this.renderBrief(state)}
+        ${this.renderAuthority(state)}
 
         <fieldset class="toolbar">
           <legend>Creative Run controls</legend>
           ${this.renderControls(state)}
         </fieldset>
-
-        ${state.recovery
-          ? html`
-              <section class="recovery-summary" aria-labelledby="creative-run-recovery-title">
-                <strong id="creative-run-recovery-title">Recovery safety</strong>
-                <p>
-                  ${state.recovery.recoveryCopyId
-                    ? `A Recovery Copy is preserved (${state.recovery.recoveryCopyId}). The original project remains unchanged until a confirmed action completes.`
-                    : 'The original project and any later edits remain preserved. Recovery never reuses or deletes a project key.'}
-                </p>
-                ${state.recovery.interrupted
-                  ? html`<p role="status">This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
-                  : nothing}
-              </section>
-            `
-          : nothing}
-
-        ${state.error
-          ? html`<p class="error" role="alert">${state.error.code}. Next action: ${state.error.nextAction}.</p>`
-          : nothing}
-
-        <section class="timeline" aria-labelledby="creative-run-timeline-title">
-          <h3 id="creative-run-timeline-title">Activity</h3>
-          ${state.collapsedTimelineEntries > 0
-            ? html`<p class="muted">${state.collapsedTimelineEntries} older entries collapsed.</p>`
-            : nothing}
-          <ol class="timeline-list">
-            ${state.timeline.map((entry) => html`
-              <li class="timeline-entry">
-                ${entry.kind === 'transaction'
-                  ? html`
-                      <details class="transaction-detail">
-                        <summary>${entryLabel(entry)}</summary>
-                        <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
-                        ${entry.operationId && state.recovery
-                          ? html`<button class="timeline-action" type="button" ?disabled=${this.actionBusy}
-                              @click=${() => this.requestRewind(entry.operationId!)}>
-                              Rewind after this transaction
-                            </button>`
-                          : nothing}
-                      </details>
-                    `
-                  : html`
-                      <strong>${entryLabel(entry)}</strong>
-                      <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
-                    `}
-              </li>
-            `)}
-          </ol>
-        </section>
+        ${this.renderRecoverySummary(state)}
+        ${this.renderError(state)}
+        ${this.renderTimeline(state)}
 
         <pf-agent-preview-surface
           .observation=${this.previewObservation}
@@ -425,6 +347,108 @@ export class PFCreativeRunPanel extends LitElement {
 
         ${this.renderConfirmationDialog(state)}
       </section>
+    `;
+  }
+
+  private renderEmpty() {
+    return html`
+      <section class="surface" aria-labelledby="creative-run-title">
+        <h2 id="creative-run-title">Creative Run</h2>
+        <p class="empty" role="status">No active Creative Run.</p>
+      </section>
+    `;
+  }
+
+  private renderBrief(state: CreativeRunState) {
+    return html`
+      <section class="brief" aria-labelledby="creative-run-brief-title">
+        <h3 id="creative-run-brief-title">Approved Creative Brief</h3>
+        <div class="brief-copy">
+          <p><strong>Goal:</strong> ${state.brief.goal}</p>
+          ${state.brief.constraints.length > 0
+            ? html`<p><strong>Constraints:</strong> ${state.brief.constraints.join(' · ')}</p>`
+            : nothing}
+        </div>
+        <dl>
+          <dt>Approval</dt><dd>${state.approvedBriefRevision === state.brief.revision ? `Approved revision ${state.brief.revision}` : 'Creator approval required'}</dd>
+          <dt>Project</dt><dd>${state.target.name}</dd>
+          <dt>Requested authority</dt><dd>${state.brief.requestedWriteCategories.join(', ')}</dd>
+          <dt>Content posture</dt><dd>${state.brief.contentEgress}</dd>
+          <dt>Duration</dt><dd>${state.brief.durationSeconds}s</dd>
+        </dl>
+      </section>
+    `;
+  }
+
+  private renderAuthority(state: CreativeRunState) {
+    return html`
+      <section class="authority" aria-labelledby="creative-run-authority-title">
+        <h3 id="creative-run-authority-title">Run authority</h3>
+        <p class="status" role="status">${formatPhase(state.phase)}</p>
+        <dl>
+          <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
+          <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
+          <dt>Revision</dt><dd>${state.currentRevision} (last durable ${state.lastDurableRevision})</dd>
+          <dt>Grant</dt><dd>${state.grant ? formatGrant(state) : 'Not available'}</dd>
+        </dl>
+      </section>
+    `;
+  }
+
+  private renderRecoverySummary(state: CreativeRunState) {
+    if (!state.recovery) return nothing;
+    return html`
+      <section class="recovery-summary" aria-labelledby="creative-run-recovery-title">
+        <strong id="creative-run-recovery-title">Recovery safety</strong>
+        <p>
+          ${state.recovery.recoveryCopyId
+            ? `A Recovery Copy is preserved (${state.recovery.recoveryCopyId}). The original project remains unchanged until a confirmed action completes.`
+            : 'The original project and any later edits remain preserved. Recovery never reuses or deletes a project key.'}
+        </p>
+        ${state.recovery.interrupted
+          ? html`<p role="status">This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
+          : nothing}
+      </section>
+    `;
+  }
+
+  private renderError(state: CreativeRunState) {
+    return state.error
+      ? html`<p class="error" role="alert">${state.error.code}. Next action: ${state.error.nextAction}.</p>`
+      : nothing;
+  }
+
+  private renderTimeline(state: CreativeRunState) {
+    return html`
+      <section class="timeline" aria-labelledby="creative-run-timeline-title">
+        <h3 id="creative-run-timeline-title">Activity</h3>
+        ${state.collapsedTimelineEntries > 0
+          ? html`<p class="muted">${state.collapsedTimelineEntries} older entries collapsed.</p>`
+          : nothing}
+        <ol class="timeline-list">
+          ${state.timeline.map((entry) => this.renderTimelineEntry(entry, state))}
+        </ol>
+      </section>
+    `;
+  }
+
+  private renderTimelineEntry(entry: CreativeRunState['timeline'][number], state: CreativeRunState) {
+    if (entry.kind !== 'transaction') {
+      return html`<li class="timeline-entry"><strong>${entryLabel(entry)}</strong><span>t=${entry.timestamp} · ${entryDetails(entry)}</span></li>`;
+    }
+    return html`
+      <li class="timeline-entry">
+        <details class="transaction-detail">
+          <summary>${entryLabel(entry)}</summary>
+          <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
+          ${entry.operationId && state.recovery
+            ? html`<button class="timeline-action" type="button" ?disabled=${this.actionBusy}
+                @click=${() => this.requestRewind(entry.operationId!)}>
+                Rewind after this transaction
+              </button>`
+            : nothing}
+        </details>
+      </li>
     `;
   }
 

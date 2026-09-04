@@ -31,8 +31,26 @@ function project(name = 'Original project'): ProjectFile {
     height: 8,
     palette: ['#000000'],
     paletteEntries: [{ id: 'black', color: '#000000' }],
-    layers: [],
-    frames: [],
+    layers: [{
+      id: 'layer-1',
+      name: 'Layer 1',
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 255,
+      parentId: null,
+      data: new Uint8Array(64),
+    }],
+    frames: [{
+      id: 'frame-1',
+      duration: 100,
+      cels: [{
+        id: 'cel-1',
+        layerId: 'layer-1',
+        data: new Uint8Array(64),
+        opacity: 100,
+      }],
+    }],
     animation: { fps: 12, currentFrameIndex: 0 },
     tags: [],
   };
@@ -70,6 +88,9 @@ function createPersistence() {
     persistence,
     setFail(value: boolean) {
       fail = value;
+    },
+    setRecord(next: Parameters<CreativeRunRecoveryPersistence['save']>[0] | null) {
+      record = next ? structuredClone(next) : null;
     },
     getRecord() {
       return record;
@@ -277,5 +298,246 @@ describe('CreativeRunRecoveryCoordinator', () => {
     expect(result).toMatchObject({ ok: true, outcome: 'preserved-original-with-checkpoint-copy', recoveryCopyId: 'copy-1' });
     expect(target.getProject().name).toBe('Manual edit');
     expect(target.getRevision()).toBe(2);
+  });
+
+  it('rewinds every owned transaction for checkpoint selection and keeps a latest selection safe', async () => {
+    const checkpointTarget = createTarget();
+    const checkpointPersistence = createPersistence();
+    const checkpointRecovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: checkpointTarget.target,
+      persistence: checkpointPersistence.persistence,
+    });
+    await checkpointRecovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(checkpointRecovery, checkpointTarget, 1);
+    await recordTransaction(checkpointRecovery, checkpointTarget, 2);
+
+    await expect(checkpointRecovery.rewind({ checkpoint: true })).resolves.toMatchObject({ ok: true });
+    expect(checkpointTarget.undoOrder).toEqual([]);
+    expect(checkpointTarget.getRevision()).toBe(4);
+    expect(checkpointRecovery.record?.transactions).toHaveLength(0);
+
+    const latestTarget = createTarget();
+    const latestPersistence = createPersistence();
+    const latestRecovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: latestTarget.target,
+      persistence: latestPersistence.persistence,
+    });
+    await latestRecovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(latestRecovery, latestTarget, 1);
+    await recordTransaction(latestRecovery, latestTarget, 2);
+
+    await expect(latestRecovery.rewind({ operationId: 'op-2' })).resolves.toMatchObject({ ok: true });
+    expect(latestTarget.undoOrder).toEqual(['op-1', 'op-2']);
+    expect(latestTarget.getRevision()).toBe(2);
+    expect(latestRecovery.status.requiresReapproval).toBe(true);
+  });
+
+  it.each([
+    ['foreign history', 'history-not-owned' as const, (target: ReturnType<typeof createTarget>) => {
+      target.historyEntries[target.historyEntries.length - 1] = {
+        operationId: 'foreign',
+        ordinal: 1,
+        fromRevision: 0,
+        toRevision: 1,
+        provenance: null,
+      };
+    }],
+    ['evicted history', 'history-evicted' as const, (target: ReturnType<typeof createTarget>) => {
+      target.historyEntries.shift();
+    }],
+  ])('rejects %s without undoing anything', async (_label, reason, alterHistory) => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(recovery, target, 1);
+    await recordTransaction(recovery, target, 2);
+    alterHistory(target);
+    const beforeRevision = target.getRevision();
+
+    await expect(recovery.rewind({ checkpoint: true })).resolves.toMatchObject({ ok: false, reason });
+    expect(target.getRevision()).toBe(beforeRevision);
+    expect(target.undoOrder).toEqual(['op-1', 'op-2']);
+    expect(persistence.getRecord()?.status).toBe('recovery-required');
+  });
+
+  it('copies before a collision and leaves the rejected result untouched', async () => {
+    const target = createTarget();
+    target.copies.set('copy-existing', project('Existing copy'));
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: { ...target.target, createProjectId: () => 'copy-existing' },
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(recovery, target, 1);
+    const before = target.getProject();
+
+    await expect(recovery.reject(true)).resolves.toMatchObject({ ok: false, reason: 'copy-collision' });
+    expect(target.getProject()).toEqual(before);
+    expect(target.getRevision()).toBe(1);
+    expect(target.copies.get('copy-existing')?.name).toBe('Existing copy');
+  });
+
+  it('preserves the rejected copy when restore fails after the copy is durable', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: {
+        ...target.target,
+        restoreProject: async () => {
+          throw new Error('restore unavailable');
+        },
+      },
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(recovery, target, 1);
+
+    await expect(recovery.reject(true)).resolves.toMatchObject({ ok: false, reason: 'restore-failed' });
+    expect(target.copies.get('copy-1')?.name).toBe('Rejected Result Recovery Copy');
+    expect(target.getProject().name).toBe('Result 1');
+    expect(target.getRevision()).toBe(1);
+  });
+
+  it('does not replay a terminal run or mutate its durable rejected record', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(recovery, target, 1);
+    await expect(recovery.reject(true)).resolves.toMatchObject({ ok: true });
+    const saved = persistence.getRecord();
+    if (!saved) throw new Error('Expected a durable rejected record.');
+    persistence.setFail(true);
+
+    await expect(recovery.recordCommittedTransaction({
+      operationId: 'op-after-reject',
+      ordinal: 2,
+      fromRevision: 2,
+      toRevision: 3,
+      provenance: provenance('op-after-reject', 2, 3),
+      durationMs: 20,
+    })).resolves.toMatchObject({ ok: false, reason: 'terminal-run', nextAction: 'none' });
+    expect(recovery.record).toEqual(saved);
+  });
+
+  it('reloads interruption state and refuses a queued transaction', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const first = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await first.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(first, target, 1);
+    await expect(first.markInterrupted()).resolves.toMatchObject({ ok: true });
+
+    const reloaded = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'replacement-session',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(reloaded.load()).resolves.toMatchObject({ ok: true, nextAction: 'approve-brief' });
+    expect(reloaded.status.interrupted).toBe(true);
+    expect(reloaded.status.requiresReapproval).toBe(true);
+    await expect(reloaded.recordCommittedTransaction({
+      operationId: 'queued-op',
+      ordinal: 2,
+      fromRevision: 1,
+      toRevision: 2,
+      provenance: provenance('queued-op', 1, 2),
+      durationMs: 20,
+    })).resolves.toMatchObject({ ok: false, reason: 'work-unsettled' });
+    expect(reloaded.record?.transactions.map((transaction) => transaction.operationId)).toEqual(['op-1']);
+  });
+
+  it('requires exact digest equality and real Web Crypto SHA-256', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    target.setProject({ ...target.getProject(), name: 'Changed without revision' }, 0);
+    await expect(recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 })).resolves.toMatchObject({
+      ok: false,
+      reason: 'content-ambiguous',
+    });
+
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: undefined });
+    try {
+      await expect(digestProjectFile(project())).rejects.toThrow('SHA-256 is unavailable');
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { configurable: true, value: originalCrypto });
+    }
+  });
+
+  it('rejects malformed persisted digest, sequence, and project data before recovery', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const first = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await first.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    const stored = persistence.getRecord();
+    if (!stored) throw new Error('Expected persisted recovery data.');
+    persistence.setRecord({
+      ...stored,
+      timeline: [{ ...stored.timeline[0], sequence: 0 }],
+      checkpoint: {
+        ...stored.checkpoint,
+        sourceDigest: 'not-a-sha256',
+        project: { ...stored.checkpoint.project, layers: [] },
+      },
+    } as typeof stored);
+
+    const reloaded = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(reloaded.load()).resolves.toMatchObject({ ok: false, reason: 'content-ambiguous' });
+    expect(reloaded.record).toBeNull();
   });
 });

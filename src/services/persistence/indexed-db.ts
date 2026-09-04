@@ -47,6 +47,27 @@ interface PixelForgeDB extends DBSchema {
   };
 }
 
+let pixelForgeDbPromise: Promise<IDBPDatabase<PixelForgeDB>> | null = null;
+
+function openPixelForgeDb(): Promise<IDBPDatabase<PixelForgeDB>> {
+  if (!pixelForgeDbPromise) {
+    pixelForgeDbPromise = openDB<PixelForgeDB>('pixel-forge-db', 2, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('sprites')) {
+          db.createObjectStore('sprites', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('creativeRunRecovery')) {
+          db.createObjectStore('creativeRunRecovery', { keyPath: 'runId' });
+        }
+      },
+    });
+  }
+  return pixelForgeDbPromise;
+}
+
 /**
  * IndexedDB-backed ProjectRepository.
  *
@@ -59,19 +80,7 @@ class IndexedDbProjectRepository implements ProjectRepository {
   private dbPromise: Promise<IDBPDatabase<PixelForgeDB>>;
 
   constructor() {
-    this.dbPromise = openDB<PixelForgeDB>('pixel-forge-db', 2, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains('sprites')) {
-          db.createObjectStore('sprites', { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains('settings')) {
-          db.createObjectStore('settings', { keyPath: 'key' });
-        }
-        if (!db.objectStoreNames.contains('creativeRunRecovery')) {
-          db.createObjectStore('creativeRunRecovery', { keyPath: 'runId' });
-        }
-      },
-    }).then((db) => this.migrateLegacySlot(db));
+    this.dbPromise = openPixelForgeDb().then((db) => this.migrateLegacySlot(db));
   }
 
   /**
@@ -198,19 +207,7 @@ export class IndexedDbCreativeRunRecoveryPersistence implements CreativeRunRecov
   private readonly dbPromise: Promise<IDBPDatabase<PixelForgeDB>>;
 
   constructor() {
-    this.dbPromise = openDB<PixelForgeDB>('pixel-forge-db', 2, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains('sprites')) {
-          db.createObjectStore('sprites', { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains('settings')) {
-          db.createObjectStore('settings', { keyPath: 'key' });
-        }
-        if (!db.objectStoreNames.contains('creativeRunRecovery')) {
-          db.createObjectStore('creativeRunRecovery', { keyPath: 'runId' });
-        }
-      },
-    });
+    this.dbPromise = openPixelForgeDb();
   }
 
   async load(runId: string): Promise<CreativeRunRecoveryRecord | null> {
@@ -224,13 +221,9 @@ export class IndexedDbCreativeRunRecoveryPersistence implements CreativeRunRecov
     await db.put('creativeRunRecovery', structuredClone(record));
   }
 
-  async list(): Promise<CreativeRunRecoveryRecord[]> {
-    const db = await this.dbPromise;
-    const records = await db.getAll('creativeRunRecovery');
-    return records.map((record) => structuredClone(record));
-  }
 }
 
+// fallow-ignore-next-line unused-export -- The Creative Run host binds this browser-local store when recovery is enabled.
 export const creativeRunRecoveryPersistence = new IndexedDbCreativeRunRecoveryPersistence();
 
 function parseWorkspaceState(value: unknown): WorkspaceState | null {
