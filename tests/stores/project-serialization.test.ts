@@ -342,6 +342,16 @@ describe('project save -> load -> save round-trip (structural)', () => {
     });
   });
 
+  it('reindexes runtime frame orders after loading persisted frames', async () => {
+    const saved = await buildSampleProject();
+    const expectedFrameIds = saved.frames.map((frame) => frame.id);
+
+    await projectStore.loadProject(structuredClone(saved), false);
+
+    expect(animationStore.frames.value.map((frame) => frame.order)).toEqual([0, 1, 2]);
+    expect(animationStore.frames.value.map((frame) => frame.id)).toEqual(expectedFrameIds);
+  });
+
   it('a second round-trip is a fixed point (no drift)', async () => {
     const saved = await buildSampleProject();
 

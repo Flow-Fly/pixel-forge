@@ -5,6 +5,7 @@ import {
 } from '../../src/editor/fixture-session';
 import type { AssetPackageArtifact } from '../../src/editor/asset-package';
 import { FileService } from '../../src/services/file-service';
+import { getActiveProjectContext } from '../../src/stores/project-context';
 
 const sessions: FixtureSession[] = [];
 
@@ -32,7 +33,9 @@ describe('Creative Asset Package Chromium evidence', () => {
       : undefined;
     const session = createFixtureSession();
     sessions.push(session);
+    const previousActiveContext = getActiveProjectContext();
     const journey = await session.runAssetPackage({
+      switchActiveTabDuringPreparation: true,
       afterPackagePreparation: async (assetPackage, request) => {
         expect(assetPackage.packageDigest).toHaveLength(64);
         expect(objectUrl).not.toHaveBeenCalled();
@@ -105,10 +108,14 @@ describe('Creative Asset Package Chromium evidence', () => {
       reloadedRender: true,
       isolation: true,
       targetRebound: true,
+      activeTab: true,
+      target: true,
+      bytes: true,
     });
     expect(journey.assetPackage.artifacts.map((artifact) => artifact.role))
       .toEqual(['source', 'preview', 'manifest']);
     expect(journey.assetPackage.manifest.spriteSheet).toBeUndefined();
+    expect(getActiveProjectContext()).toBe(previousActiveContext);
     const preview = requiredArtifact(journey.assetPackage.artifacts, 'preview');
     const previewPixels = await decodePng(preview, 4, 4);
     expect(Array.from(previewPixels)).toEqual(Array.from(journey.roundTrip.renderPixels));
@@ -133,7 +140,9 @@ describe('Creative Asset Package Chromium evidence', () => {
       : undefined;
     const session = createFixtureSession({ projectId: 'animated-package-fixture' });
     sessions.push(session);
+    const previousActiveContext = getActiveProjectContext();
     const journey = await session.runAnimatedAssetPackage({
+      switchActiveTabDuringPreparation: true,
       afterPackagePreparation: (assetPackage) => {
         expect(assetPackage.packageDigest).toHaveLength(64);
         expect(objectUrl).not.toHaveBeenCalled();
@@ -158,7 +167,11 @@ describe('Creative Asset Package Chromium evidence', () => {
       reloadedRender: true,
       isolation: true,
       targetRebound: true,
+      activeTab: true,
+      target: true,
+      bytes: true,
     });
+    expect(getActiveProjectContext()).toBe(previousActiveContext);
     const sprite = requiredArtifact(journey.assetPackage.artifacts, 'sprite-sheet');
     const sheet = journey.assetPackage.manifest.spriteSheet;
     if (!sheet) throw new Error('Animated package did not include sprite metadata.');

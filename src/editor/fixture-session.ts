@@ -5,7 +5,13 @@ import {
   type WorkspaceState,
 } from '../services/persistence/project-repository';
 import { AutoSaveService, createAutoSaveService } from '../services/auto-save';
-import { createProjectContext, type ProjectContext } from '../stores/project-context';
+import {
+  createProjectContext,
+  defaultProjectContext,
+  getActiveProjectContext,
+  setActiveProjectContext,
+  type ProjectContext,
+} from '../stores/project-context';
 import { decodeProjectFile, PROJECT_VERSION, type ProjectFile, type ProjectFileInput } from '../types/project';
 import pako from 'pako';
 import {
@@ -127,6 +133,9 @@ export interface FixtureAssetPackageJourneyResult {
     readonly reloadedRender: boolean;
     readonly isolation: boolean;
     readonly targetRebound: boolean;
+    readonly activeTab: boolean;
+    readonly target: boolean;
+    readonly bytes: boolean;
   };
 }
 
@@ -135,6 +144,7 @@ export interface FixtureAssetPackageJourneyOptions {
     assetPackage: AssetPackageResult,
     request: Record<string, unknown>,
   ) => void | Promise<void>;
+  readonly switchActiveTabDuringPreparation?: boolean;
 }
 
 interface PreparedAssetPackageJourney {
@@ -146,12 +156,18 @@ interface PreparedAssetPackageJourney {
   readonly inactiveBefore: ProjectFile;
   readonly assetPackage: AssetPackageResult;
   readonly replay: AssetPackageResult;
+  readonly activeTabSwitched: boolean;
 }
 
 interface AssetPackageSourceRoundTrip {
   readonly project: ProjectFile;
   readonly document: ProjectFile;
   readonly renders: readonly Uint8Array[];
+}
+
+interface AssetPackagePreparationCheckpoint {
+  readonly assetPackage: AssetPackageResult;
+  readonly activeTabSwitched: boolean;
 }
 
 export interface FixtureAnimatedAssetPackageJourneyResult {
@@ -181,6 +197,9 @@ export interface FixtureAnimatedAssetPackageJourneyResult {
     readonly reloadedRender: boolean;
     readonly isolation: boolean;
     readonly targetRebound: boolean;
+    readonly activeTab: boolean;
+    readonly target: boolean;
+    readonly bytes: boolean;
   };
 }
 
@@ -496,6 +515,7 @@ export class FixtureSession {
       inactiveBefore,
       assetPackage,
       replay,
+      activeTabSwitched,
     } = await this.prepareAssetPackageJourney(undefined, options);
     const source = assetPackage.artifacts.find((artifact) => artifact.role === 'source');
     const manifest = assetPackage.artifacts.find((artifact) => artifact.role === 'manifest');
@@ -551,6 +571,7 @@ export class FixtureSession {
           && sameBytes(reloadedPixels, sourceRoundTrip.renders[0] ?? new Uint8Array(0)),
         isolation: sameProjectFile(inactiveBefore, inactiveAfter),
         targetRebound: rebound,
+        ...assetPackageIdentityEvidence(assetPackage, this.target, activeTabSwitched),
       },
     };
   }
@@ -569,6 +590,7 @@ export class FixtureSession {
       inactiveBefore,
       assetPackage,
       replay,
+      activeTabSwitched,
     } = await this.prepareAssetPackageJourney(
       () => prepareAnimationObservationFixture(this.context),
       options,
@@ -626,6 +648,7 @@ export class FixtureSession {
             && sameBytes(render, canonicalRenders[index] ?? new Uint8Array(0))),
         isolation: sameProjectFile(inactiveBefore, inactiveAfter),
         targetRebound: rebound,
+        ...assetPackageIdentityEvidence(assetPackage, this.target, activeTabSwitched),
       },
     };
   }
@@ -1801,8 +1824,20 @@ export class FixtureSession {
     seedInactiveFixturePixel(inactiveContext);
     this.targetContexts.set(`${this.target.projectId}-inactive`, inactiveContext);
     const inactiveBefore = await snapshotProject(inactiveContext);
-    const assetPackage = await requestSuccess<AssetPackageResult>(this.adapter, packageRequest);
-    await options.afterPackagePreparation?.(assetPackage, packageRequest);
+    const packagePreparation = options.switchActiveTabDuringPreparation
+      ? await this.prepareAssetPackageDuringActiveTabSwitch(
+        packageRequest,
+        inactiveContext,
+        options.afterPackagePreparation,
+      )
+      : {
+        assetPackage: await requestSuccess<AssetPackageResult>(this.adapter, packageRequest),
+        activeTabSwitched: false,
+      };
+    const { assetPackage, activeTabSwitched } = packagePreparation;
+    if (!options.switchActiveTabDuringPreparation) {
+      await options.afterPackagePreparation?.(assetPackage, packageRequest);
+    }
     const replay = await requestSuccess<AssetPackageResult>(this.adapter, {
       ...packageRequest,
       expectedPackageDigest: assetPackage.packageDigest,
@@ -1816,7 +1851,33 @@ export class FixtureSession {
       inactiveBefore,
       assetPackage,
       replay,
+      activeTabSwitched,
     };
+  }
+
+  private async prepareAssetPackageDuringActiveTabSwitch(
+    packageRequest: Record<string, unknown>,
+    inactiveContext: ProjectContext,
+    afterPackagePreparation: FixtureAssetPackageJourneyOptions['afterPackagePreparation'],
+  ): Promise<AssetPackagePreparationCheckpoint> {
+    const previousActiveContext = getActiveProjectContext();
+    const originalSaveProject = this.context.project.saveProject.bind(this.context.project);
+    let activeTabSwitched = false;
+    this.context.project.saveProject = async (...args: Parameters<typeof originalSaveProject>) => {
+      const saved = await originalSaveProject(...args);
+      setActiveProjectContext(inactiveContext);
+      activeTabSwitched = getActiveProjectContext() === inactiveContext;
+      return saved;
+    };
+    setActiveProjectContext(this.context);
+    try {
+      const assetPackage = await requestSuccess<AssetPackageResult>(this.adapter, packageRequest);
+      await afterPackagePreparation?.(assetPackage, packageRequest);
+      return { assetPackage, activeTabSwitched };
+    } finally {
+      this.context.project.saveProject = originalSaveProject;
+      setActiveProjectContext(previousActiveContext.isDisposed ? defaultProjectContext : previousActiveContext);
+    }
   }
 
   private async completeAssetPackageJourney(
@@ -2302,6 +2363,20 @@ function exactAssetPackageReload(
     reload: reload.revision === save.revision
       && reload.observation.revision === save.revision
       && sameProjectFile(reloadedDocument, sourceRoundTrip.document),
+  };
+}
+
+function assetPackageIdentityEvidence(
+  assetPackage: AssetPackageResult,
+  target: { readonly projectId: string },
+  activeTabSwitched: boolean,
+): { readonly activeTab: boolean; readonly target: boolean; readonly bytes: boolean } {
+  return {
+    activeTab: activeTabSwitched,
+    target: assetPackage.target.projectId === target.projectId,
+    bytes: assetPackage.artifacts.length > 0 && assetPackage.artifacts.every((artifact) => (
+      artifact.bytes instanceof Uint8Array && artifact.byteLength === artifact.bytes.byteLength
+    )),
   };
 }
 
