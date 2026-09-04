@@ -692,27 +692,28 @@ export class AutomationPolicyGate {
       result = await this.adapter.executeTransaction(adapterInput);
     } catch (error) {
       run.inFlight = false;
-      this.finalizeArtistTurn(run);
+      this.prepareArtistTurnSettlement(run, session);
+      this.finalizeArtistTurn(run, this.canTransferManualTurn(run, session));
       return failureFromUnknown(error);
     }
 
     run.inFlight = false;
     if (!result.ok) {
-      this.finalizeArtistTurn(run);
+      this.prepareArtistTurnSettlement(run, session);
+      this.finalizeArtistTurn(run, this.canTransferManualTurn(run, session));
       return sanitizeFailure(result);
     }
     if (run.context.project.revision.value !== request.expectedRevision + 1) {
-      this.finalizeArtistTurn(run);
+      this.prepareArtistTurnSettlement(run, session);
+      this.finalizeArtistTurn(run, this.canTransferManualTurn(run, session));
       return failureResult('revision_conflict', true, {
         expectedRevision: request.expectedRevision,
       });
     }
 
     this.completeArtistTransaction(run, request.operationId);
-    const currentContext = this.resolveTarget(session);
-    const currentBindingFailure = validateTargetBinding(session, currentContext);
-    if (currentBindingFailure) this.releaseArtistRun(run, 'expired');
-    this.finalizeArtistTurn(run);
+    this.prepareArtistTurnSettlement(run, session);
+    this.finalizeArtistTurn(run, this.canTransferManualTurn(run, session));
     return success(stripTargetIdentity(result.result));
   }
 
@@ -765,13 +766,35 @@ export class AutomationPolicyGate {
     };
   }
 
-  private finalizeArtistTurn(run: InternalArtistModeRun): void {
+  private prepareArtistTurnSettlement(
+    run: InternalArtistModeRun,
+    session: InternalSessionGrant,
+  ): void {
+    if (this.isManagerDisposed()) {
+      run.pendingTurnAction = null;
+      return;
+    }
+    const currentContext = this.resolveTarget(session);
+    if (!validateTargetBinding(session, currentContext)) return;
+    run.pendingTurnAction = null;
+    this.releaseArtistRun(run, 'expired');
+  }
+
+  private canTransferManualTurn(
+    run: InternalArtistModeRun,
+    session: InternalSessionGrant,
+  ): boolean {
+    if (this.isManagerDisposed() || run.pendingTurnAction?.kind !== 'manual') return false;
+    return !validateTargetBinding(session, this.resolveTarget(session));
+  }
+
+  private finalizeArtistTurn(run: InternalArtistModeRun, allowManualTransfer = true): void {
     if (!this.writeTurns) return;
     const pendingAction = run.pendingTurnAction;
     run.pendingTurnAction = null;
     const owner = this.artistTurnOwner(run);
 
-    if (pendingAction?.kind === 'manual') {
+    if (allowManualTransfer && pendingAction?.kind === 'manual') {
       this.writeTurns.release(run.targetId, owner);
       this.writeTurns.replaceWithManual(run.targetId, pendingAction.ownerId);
       return;
@@ -1590,7 +1613,10 @@ export class AutomationSessionManager {
     this.pendingRequests.clear();
     this.pendingArtistModeRequests.clear();
     for (const session of this.sessions.values()) session.status = 'revoked';
-    for (const run of this.artistRuns.values()) this.releaseArtistRun(run, 'revoked');
+    for (const run of this.artistRuns.values()) {
+      run.pendingTurnAction = null;
+      this.releaseArtistRun(run, 'revoked');
+    }
     this.sessions.clear();
     if (this.visibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.visibilityListener);

@@ -659,7 +659,6 @@ describe('AutomationSessionManager', () => {
 
   it('settles an in-flight Artist transaction before handing the turn to manual editing', async () => {
     const target = createTarget('deferred-project', 'Deferred project');
-    let targets: readonly AutomationLocalTarget[] = [target];
     const writeTurns = new ProjectWriteTurnStore();
     let resolveAdapter!: (result: AutomationResult<unknown>) => void;
     let signalDispatch!: () => void;
@@ -679,7 +678,7 @@ describe('AutomationSessionManager', () => {
       },
     } as unknown as AutomationAdapter;
     const manager = new AutomationSessionManager({
-      targets: () => targets,
+      targets: () => [target],
       adapter,
       writeTurns,
       isPageVisible: () => true,
@@ -751,7 +750,6 @@ describe('AutomationSessionManager', () => {
     });
 
     const event = target.context.project.commitChange('deferred-operation', ['layer-state', 'timeline']);
-    targets = [createTarget('deferred-project', 'Rebound deferred project')];
     resolveAdapter({
       ok: true,
       result: {
@@ -782,9 +780,220 @@ describe('AutomationSessionManager', () => {
     expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
       transactionsUsed: 1,
       remainingTransactions: 0,
-      status: 'expired',
+      status: 'paused',
     });
     expect(writeTurns.owner(target.id)).toEqual({ kind: 'manual', ownerId: 'human' });
+  });
+
+  it('accounts a committed deferred transaction but cancels manual handoff after a target rebound', async () => {
+    const original = createTarget('deferred-rebound-project', 'Original deferred project');
+    const replacement = createTarget('deferred-rebound-project', 'Replacement deferred project');
+    const other = createTarget('deferred-rebound-other', 'Other deferred project');
+    let targets: readonly AutomationLocalTarget[] = [original, other];
+    const writeTurns = new ProjectWriteTurnStore();
+    const otherOwner = { kind: 'manual' as const, ownerId: 'other-human' };
+    expect(writeTurns.acquire(other.id, otherOwner)).toMatchObject({ ok: true });
+    let resolveAdapter!: (result: AutomationResult<unknown>) => void;
+    let signalDispatch!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      signalDispatch = resolve;
+    });
+    const adapterResult = new Promise<AutomationResult<unknown>>((resolve) => {
+      resolveAdapter = resolve;
+    });
+    const adapter = {
+      negotiateCatalog: () => ({ ok: true, result: {} }),
+      executeTransaction: async () => {
+        signalDispatch();
+        return adapterResult;
+      },
+    } as unknown as AutomationAdapter;
+    const manager = new AutomationSessionManager({
+      targets: () => targets,
+      adapter,
+      writeTurns,
+      isPageVisible: () => true,
+      requestIdFactory: (() => {
+        let count = 0;
+        return () => `deferred-rebound-request-${++count}`;
+      })(),
+      sessionIdFactory: () => 'deferred-rebound-session',
+    });
+    managers.push(manager);
+
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, original.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'deferred-rebound-run',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, ['structure', 'timeline'], 1);
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    const layer = original.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+
+    const transactionPromise = manager.executeArtistModeTransaction(
+      grant.result.sessionId,
+      grant.result.runId,
+      {
+        operationId: 'deferred-rebound-operation',
+        profile: 'layer-and-tag',
+        expectedRevision: 0,
+        children: [
+          {
+            command: 'project.layer.state',
+            input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+          },
+          {
+            command: 'project.animation.frame-tag',
+            input: {
+              kind: 'tag.create',
+              name: 'Deferred rebound fixture',
+              color: '#123456',
+              startFrameIndex: 0,
+              endFrameIndex: 0,
+            },
+          },
+        ],
+      },
+    );
+    await dispatched;
+    expect(manager.takeoverProjectWriteTurn(original.id, 'human')).toBe(true);
+    expect(writeTurns.owner(original.id)).toMatchObject({ kind: 'artist-mode' });
+
+    targets = [replacement, other];
+    const event = original.context.project.commitChange(
+      'deferred-rebound-operation',
+      ['layer-state', 'timeline'],
+    );
+    resolveAdapter({
+      ok: true,
+      result: {
+        type: 'project.transaction.execute',
+        target: { projectId: original.id },
+        revision: event.toRevision,
+      },
+    });
+    const result = await transactionPromise;
+
+    expect(result).toMatchObject({ ok: true, result: { type: 'project.transaction.execute' } });
+    expectTargetFree(result);
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 1,
+      remainingTransactions: 0,
+      status: 'expired',
+    });
+    expect(writeTurns.owner(original.id)).toBeUndefined();
+    expect(writeTurns.owner(replacement.id)).toBeUndefined();
+    expect(writeTurns.owner(other.id)).toEqual(otherOwner);
+  });
+
+  it('cancels a queued manual handoff when disposal occurs before deferred settlement', async () => {
+    const target = createTarget('deferred-disposal-project', 'Deferred disposal project');
+    const writeTurns = new ProjectWriteTurnStore();
+    let resolveAdapter!: (result: AutomationResult<unknown>) => void;
+    let signalDispatch!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      signalDispatch = resolve;
+    });
+    const adapterResult = new Promise<AutomationResult<unknown>>((resolve) => {
+      resolveAdapter = resolve;
+    });
+    const adapter = {
+      negotiateCatalog: () => ({ ok: true, result: {} }),
+      executeTransaction: async () => {
+        signalDispatch();
+        return adapterResult;
+      },
+    } as unknown as AutomationAdapter;
+    const manager = new AutomationSessionManager({
+      targets: () => [target],
+      adapter,
+      writeTurns,
+      isPageVisible: () => true,
+      requestIdFactory: (() => {
+        let count = 0;
+        return () => `deferred-disposal-request-${++count}`;
+      })(),
+      sessionIdFactory: () => 'deferred-disposal-session',
+    });
+    managers.push(manager);
+
+    const inspect = request(manager, ['structure', 'timeline']);
+    if (!inspect.ok) throw new Error('Expected an inspect request.');
+    const inspectGrant = approve(manager, inspect.result.requestId, target.id, ['structure', 'timeline']);
+    if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
+    const artistRequest = manager.requestArtistMode({
+      sessionId: inspectGrant.result.sessionId,
+      runId: 'deferred-disposal-run',
+      requestedWriteCategories: ['structure', 'timeline'],
+      requestedTransactionLimit: 1,
+      requestedDurationSeconds: 60,
+    });
+    if (!artistRequest.ok) throw new Error('Expected an Artist Mode request.');
+    manager.captureArtistModeTarget(artistRequest.result.requestId);
+    const grant = manager.approveArtistMode(artistRequest.result.requestId, ['structure', 'timeline'], 1);
+    if (!grant.ok) throw new Error('Expected an Artist Mode grant.');
+    const layer = target.context.layers.layers.value[0];
+    if (!layer) throw new Error('Expected a fixture layer.');
+    const transactionPromise = manager.executeArtistModeTransaction(
+      grant.result.sessionId,
+      grant.result.runId,
+      {
+        operationId: 'deferred-disposal-operation',
+        profile: 'layer-and-tag',
+        expectedRevision: 0,
+        children: [
+          {
+            command: 'project.layer.state',
+            input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+          },
+          {
+            command: 'project.animation.frame-tag',
+            input: {
+              kind: 'tag.create',
+              name: 'Deferred disposal fixture',
+              color: '#123456',
+              startFrameIndex: 0,
+              endFrameIndex: 0,
+            },
+          },
+        ],
+      },
+    );
+    await dispatched;
+    expect(manager.takeoverProjectWriteTurn(target.id, 'human')).toBe(true);
+    manager.dispose();
+    expect(writeTurns.owner(target.id)).toMatchObject({ kind: 'artist-mode' });
+
+    const event = target.context.project.commitChange(
+      'deferred-disposal-operation',
+      ['layer-state', 'timeline'],
+    );
+    resolveAdapter({
+      ok: true,
+      result: {
+        type: 'project.transaction.execute',
+        target: { projectId: target.id },
+        revision: event.toRevision,
+      },
+    });
+    const result = await transactionPromise;
+
+    expect(result).toMatchObject({ ok: true, result: { type: 'project.transaction.execute' } });
+    expectTargetFree(result);
+    expect(manager.listLocalArtistModeRuns()[0]).toMatchObject({
+      transactionsUsed: 1,
+      status: 'revoked',
+    });
+    expect(writeTurns.owner(target.id)).toBeUndefined();
   });
 
   // fallow-ignore-next-line complexity -- The table-driven journey exercises every approved Artist Mode profile through the public manager boundary.
