@@ -55,8 +55,6 @@ import type {
   RasterObservation,
 } from './symbol-grid';
 import type {
-  EditorTransactionChildInput,
-  EditorTransactionProfile,
   EditorTransactionResult,
 } from './transaction';
 import type {
@@ -69,6 +67,7 @@ import type {
   AssetPackageArtifact,
   AssetPackageResult,
 } from './asset-package';
+import { sameBytes } from './structure-support';
 import type { EditorError, ProjectTarget } from './contracts';
 import {
   decodeProjectFile,
@@ -111,20 +110,48 @@ export interface GoldenAutomationFailureProof {
   readonly error: AutomationFailure['error'];
   readonly revisionBefore: number;
   readonly revisionAfter: number;
+  readonly beforeObservation: ProjectObservation;
+  readonly afterObservation: ProjectObservation;
+  readonly transactionsUsedBefore: number;
+  readonly transactionsUsedAfter: number;
 }
 
 export interface GoldenBudgetFailureProof {
   readonly firstTransaction: EditorTransactionResult;
+  readonly firstController: CreativeRunState;
+  readonly beforeRejection: ProjectObservation;
+  readonly afterRejection: ProjectObservation;
+  readonly transactionsUsedBefore: number;
+  readonly transactionsUsedAfter: number;
+  readonly restored: ProjectObservation;
+  readonly continuationRevision: number;
   readonly exhausted: GoldenAutomationFailureProof;
-  readonly restored: boolean;
 }
 
 export interface GoldenHistoryProof {
   readonly edit: EditorTransactionResult;
-  readonly undo: HistoryTransitionResult;
-  readonly redo: HistoryTransitionResult;
   readonly before: ProjectObservation;
+  readonly undo: HistoryTransitionResult;
+  readonly undone: ProjectObservation;
+  readonly redo: HistoryTransitionResult;
   readonly after: ProjectObservation;
+  readonly save: SaveResult;
+  readonly reload: ReloadResult;
+  readonly reloaded: ProjectObservation;
+}
+
+export type GoldenPublicTransactionResult = Omit<EditorTransactionResult, 'target' | 'provenance'> & {
+  readonly provenance: Omit<EditorTransactionResult['provenance'], 'target'>;
+};
+
+export type GoldenPublicRasterObservation = Omit<RasterObservation, 'target'>;
+
+export interface GoldenRasterProof {
+  readonly frameIndex: number;
+  readonly frameId: string;
+  readonly celId: string;
+  readonly observation: GoldenPublicRasterObservation;
+  readonly expectedPattern: readonly string[];
 }
 
 export interface GoldenRecoveryProof {
@@ -135,9 +162,11 @@ export interface GoldenRecoveryProof {
   readonly freshSessionId: string;
   readonly freshRunId: string;
   readonly freshObservationCount: number;
+  readonly freshObservationRevisions: readonly number[];
   readonly reapproved: boolean;
   readonly revisionBeforeInterruption: number;
   readonly revisionAfterLateResult: number;
+  readonly oldAuthorityFailure: GoldenAutomationFailureProof;
   readonly queuedWriteWasNotReplayed: boolean;
 }
 
@@ -164,6 +193,7 @@ export interface GoldenControllerProof {
   readonly initialPause: CreativeRunState;
   readonly midJourney: {
     readonly paused: CreativeRunState;
+    readonly beforeReload: ProjectObservation;
     readonly save: SaveResult;
     readonly reload: ReloadResult;
     readonly reobserved: ProjectObservation;
@@ -184,6 +214,8 @@ export interface GoldenAutomationJourneyResult {
   };
   readonly history: GoldenHistoryProof;
   readonly transactions: readonly EditorTransactionResult[];
+  readonly rawTransactions: readonly GoldenPublicTransactionResult[];
+  readonly rasterProofs: readonly GoldenRasterProof[];
   readonly beforeRefinement: AnimationEvaluationBundle;
   readonly afterRefinement: AnimationEvaluationBundle;
   readonly finalObservation: ProjectObservation;
@@ -195,10 +227,7 @@ export interface GoldenAutomationJourneyResult {
     readonly staleRevision: GoldenAutomationFailureProof;
     readonly deniedOperation: GoldenAutomationFailureProof;
     readonly budget: GoldenBudgetFailureProof;
-    readonly lateResult: {
-      readonly suppressed: boolean;
-      readonly transactionsUsed: number;
-    };
+    readonly lateResult: GoldenLateResultProof;
     readonly interruptedResumption: {
       readonly originalPhase: CreativeRunState['phase'];
       readonly replacementPhase: CreativeRunState['phase'];
@@ -209,6 +238,14 @@ export interface GoldenAutomationJourneyResult {
     readonly frameCount: number;
     readonly tagId: string;
   };
+}
+
+export interface GoldenLateResultProof {
+  readonly suppressed: boolean;
+  readonly beforeObservation: ProjectObservation;
+  readonly afterObservation: ProjectObservation;
+  readonly transactionsUsedBefore: number;
+  readonly transactionsUsedAfter: number;
 }
 
 interface JourneyAuthority {
@@ -225,6 +262,8 @@ interface Deferred<T> {
 }
 
 type GoldenPlan =
+  | { readonly kind: 'history'; readonly frameId: string }
+  | { readonly kind: 'budget'; readonly frameId: string }
   | { readonly kind: 'static' }
   | { readonly kind: 'raster'; readonly frameIndex: number }
   | { readonly kind: 'frame'; readonly duration: number }
@@ -245,7 +284,41 @@ interface JourneyPlanRuntime {
   refinementTransaction: EditorTransactionResult | null;
   replacementAuthority: JourneyAuthority | null;
   freshObservationCount: number;
+  readonly freshObservationRevisions: number[];
+  readonly rawTransactions: GoldenPublicTransactionResult[];
+  readonly rasterProofs: GoldenRasterProof[];
+  readonly controllers: Set<CreativeRunController>;
+  readonly managers: Set<AutomationSessionManager>;
   readonly transactions: EditorTransactionResult[];
+}
+
+function createJourneyRuntime(
+  queue: readonly GoldenPlan[],
+  controllers: Set<CreativeRunController>,
+  managers: Set<AutomationSessionManager>,
+  initialPause: boolean,
+): JourneyPlanRuntime {
+  return {
+    queue,
+    cursor: 0,
+    initialPause,
+    initialLateStep: null,
+    initialPauseStarted: deferred<void>(),
+    interruptionStarted: deferred<void>(),
+    interruptionLateStep: null,
+    interruptionArmed: false,
+    beforeRefinement: null,
+    afterRefinement: null,
+    refinementTransaction: null,
+    replacementAuthority: null,
+    freshObservationCount: 0,
+    freshObservationRevisions: [],
+    rawTransactions: [],
+    rasterProofs: [],
+    controllers,
+    managers,
+    transactions: [],
+  };
 }
 
 /**
@@ -262,6 +335,8 @@ export async function runGoldenAutomationJourney(
     projectIdFactory: () => GOLDEN_PROJECT_ID,
     entityIdFactory: createEntityIdFactory(),
   });
+  const controllers = new Set<CreativeRunController>();
+  const managers = new Set<AutomationSessionManager>();
 
   try {
     const negotiationResult = fixture.adapter.negotiateCatalog({ version: '1.0' });
@@ -269,21 +344,61 @@ export async function runGoldenAutomationJourney(
     const created = await fixture.createBlankProject(GOLDEN_PROJECT_NAME, GOLDEN_WIDTH, GOLDEN_HEIGHT);
     const target = created.creation.target;
     const context = fixture.getTargetContext(target);
-    const authority = createAuthority(fixture, target, GOLDEN_RUN_ID, 'primary');
 
-    const initialObservation = await observeStructure(authority, 0);
-    const initialFrame = initialObservation.frames[0];
-    const initialLayer = initialObservation.layers.find((layer) => layer.type === 'image');
-    if (!initialFrame || !initialLayer) throw new Error('Golden project has no editable starting frame.');
+    const budget = await captureBudgetFailure(fixture, target, created.observation, managers, controllers);
+    const historyAuthority = createAuthority(fixture, target, `${GOLDEN_RUN_ID}-history`, 'history');
+    managers.add(historyAuthority.manager);
+    const historyStartObservation = await observeStructure(historyAuthority, budget.continuationRevision);
+    const initialFrame = historyStartObservation.frames[0];
+    if (!initialFrame) throw new Error('Golden project has no editable starting frame.');
+    const historyRuntime = createJourneyRuntime(
+      [{ kind: 'history', frameId: initialFrame.id }],
+      controllers,
+      managers,
+      false,
+    );
+    const historyController = createController(
+      fixture,
+      historyAuthority,
+      historyRuntime,
+      createBrief(target),
+      undefined,
+      undefined,
+    );
+    controllers.add(historyController);
+    const historyApproval = approveController(historyController);
+    if (!historyApproval.ok) throw new Error(`Golden history brief approval failed: ${historyApproval.error.code}`);
+    const historyRun = await historyController.start();
+    if (!historyRun.ok || historyRun.state.phase !== 'stopped') {
+      throw new Error('Golden history controller did not stop after its approved edit.');
+    }
+    const history = await exerciseHistory(
+      fixture.adapter,
+      historyAuthority,
+      historyStartObservation,
+      historyRuntime.transactions[0],
+      initialFrame.id,
+    );
+
+    const authority = createAuthority(fixture, target, GOLDEN_RUN_ID, 'primary');
+    managers.add(authority.manager);
+    const journeyStartObservation = await observeStructure(authority, history.reloaded.revision);
+    const initialLayer = journeyStartObservation.layers.find((layer) => layer.type === 'image');
+    if (!initialLayer) throw new Error('Golden project has no editable starting layer.');
     const initialCel = initialFrame.cels.find((cel) => cel.layerId === initialLayer.id);
     if (!initialCel) throw new Error('Golden project has no editable starting cel.');
 
-    const history = await exerciseHistory(fixture.adapter, authority, initialObservation, initialFrame.id);
-    const staleRevision = await captureStaleRevisionFailure(authority, history.after.revision, initialFrame.id);
-    const deniedOperation = await captureDeniedObservation(authority, target, history.after.revision, initialLayer, initialFrame.id, initialCel.id);
+    const staleRevision = await captureStaleRevisionFailure(authority, journeyStartObservation.revision, initialFrame.id);
+    const deniedOperation = await captureDeniedObservation(
+      authority,
+      target,
+      journeyStartObservation.revision,
+      initialLayer,
+      initialFrame.id,
+      initialCel.id,
+    );
 
-    const runtime: JourneyPlanRuntime = {
-      queue: [
+    const runtime = createJourneyRuntime([
         { kind: 'static' },
         { kind: 'raster', frameIndex: 0 },
         { kind: 'frame', duration: 180 },
@@ -293,20 +408,10 @@ export async function runGoldenAutomationJourney(
         { kind: 'tag' },
         { kind: 'refinement' },
       ],
-      cursor: 0,
-      initialPause: true,
-      initialLateStep: null,
-      initialPauseStarted: deferred<void>(),
-      interruptionStarted: deferred<void>(),
-      interruptionLateStep: null,
-      interruptionArmed: false,
-      beforeRefinement: null,
-      afterRefinement: null,
-      refinementTransaction: null,
-      replacementAuthority: null,
-      freshObservationCount: 0,
-      transactions: [],
-    };
+      controllers,
+      managers,
+      true,
+    );
 
     const persistence = createDeterministicRecoveryPersistence();
     const brief: CreativeBriefInput = createBrief(target);
@@ -332,19 +437,29 @@ export async function runGoldenAutomationJourney(
       recovery,
       () => createReplacementController(fixture, target, runtime, brief, authority.sessionId),
     );
+    controllers.add(primaryController);
     const initialApproval = approveController(primaryController);
     if (!initialApproval.ok) throw new Error(`Golden brief approval failed: ${initialApproval.error.code}`);
 
+    const initialLateBefore = await observeStructure(authority, journeyStartObservation.revision);
+    const initialLateTransactionsBefore = readArtistGrant(authority).transactionsUsed;
     const initialStart = primaryController.start();
     await runtime.initialPauseStarted.promise;
     const pauseDuringStep = primaryController.pause();
     if (!pauseDuringStep.ok) throw new Error(`Golden pause failed: ${pauseDuringStep.error.code}`);
-    runtime.initialLateStep?.resolve(runtime.queue[0] ? stepForPlan(runtime.queue[0], initialObservation) : {
+    runtime.initialLateStep?.resolve(runtime.queue[0] ? stepForPlan(runtime.queue[0], journeyStartObservation) : {
       profile: 'animation',
       children: [],
     });
     const initialPauseResult = await initialStart;
     if (!initialPauseResult.ok) throw new Error(`Golden initial run failed: ${initialPauseResult.error.code}`);
+    const initialLateAfter = await observeStructure(authority, initialLateBefore.revision);
+    const initialLateTransactionsAfter = readArtistGrant(authority).transactionsUsed;
+    if (!sameObservationContent(initialLateBefore, initialLateAfter)
+        || initialLateBefore.revision !== initialLateAfter.revision
+        || initialLateTransactionsBefore !== initialLateTransactionsAfter) {
+      throw new Error('Golden paused late result changed public work or consumption.');
+    }
 
     const refinedApproval = primaryController.refineBrief({
       goal: 'Compose a small golden creature with an explicit editable timeline.',
@@ -353,37 +468,45 @@ export async function runGoldenAutomationJourney(
     const reapproval = approveController(primaryController);
     if (!reapproval.ok) throw new Error(`Golden brief reapproval failed: ${reapproval.error.code}`);
 
-    let midJourneyPause: Deferred<void> | null = deferred<void>();
     let midJourneyPaused = false;
     const midJourneyListener = (event: Event): void => {
       const state = (event as CustomEvent<CreativeRunState>).detail;
       if (
         !midJourneyPaused
         && state.phase === 'running'
-        && state.transactionsUsed === 1
+        && state.transactionsUsed === 2
         && state.inFlight === 'observation'
       ) {
         midJourneyPaused = true;
         primaryController.pause();
-        midJourneyPause?.resolve();
-        midJourneyPause = null;
       }
     };
     primaryController.events.addEventListener('creative-run-state-changed', midJourneyListener);
-    const midJourneyResult = await primaryController.resume();
-    primaryController.events.removeEventListener('creative-run-state-changed', midJourneyListener);
+    let midJourneyResult: Awaited<ReturnType<CreativeRunController['resume']>>;
+    try {
+      midJourneyResult = await primaryController.resume();
+    } finally {
+      primaryController.events.removeEventListener('creative-run-state-changed', midJourneyListener);
+    }
     if (!midJourneyResult.ok && midJourneyResult.error.code !== 'invalid_transition') {
-      throw new Error(`Golden composed run paused unexpectedly: ${midJourneyResult.error.code}`);
+      throw new Error(`Golden journey paused unexpectedly: ${midJourneyResult.error.code}`);
     }
-    if (!midJourneyPaused) {
-      midJourneyPause?.resolve();
-      throw new Error('Golden journey did not reach its save/reload pause boundary.');
-    }
+    if (!midJourneyPaused) throw new Error('Golden journey did not reach its mid-journey pause.');
 
     const pausedState = primaryController.getState();
+    const midBeforeReload = await observeStructure(authority, pausedState.currentRevision);
+    const midFrame = midBeforeReload.frames[0];
+    if (!midFrame) throw new Error('Golden mid-journey reload has no frame to compare.');
+    const midRasterBefore = await observeRasterForFrame(authority, midBeforeReload, midFrame.id);
     const midSave = await saveRevision(fixture.adapter, target, pausedState.currentRevision);
-    const midReload = await reloadRevision(fixture.adapter, target, pausedState.currentRevision);
-    const midReobserved = await observeStructure(authority, pausedState.currentRevision);
+    const midReload = await reloadRevision(fixture.adapter, target, midSave.revision);
+    const midReobserved = await observeStructure(authority, midReload.revision);
+    const midRasterAfter = await observeRasterForFrame(authority, midReobserved, midFrame.id);
+    if (!sameObservationContent(midBeforeReload, midReobserved)
+        || midRasterBefore.digest !== midRasterAfter.digest
+        || midRasterBefore.rows.join('\n') !== midRasterAfter.rows.join('\n')) {
+      throw new Error('Golden mid-journey reload changed the public project content.');
+    }
     const midJourney = primaryController.resume();
 
     await runtime.interruptionStarted.promise;
@@ -407,6 +530,11 @@ export async function runGoldenAutomationJourney(
     await waitFor(() => recovery.status.interrupted);
     const originalAfterInterruption = primaryController.getState();
     const revisionAfterLateResult = await readPublicRevision(authority, revisionBeforeInterruption);
+    const oldAuthorityFailure = await captureInterruptedAuthorityFailure(
+      authority,
+      revisionBeforeInterruption,
+      midReobserved.frames[0]?.id ?? initialFrame.id,
+    );
     const checkpointRecord = persistence.records.get(GOLDEN_RUN_ID);
     if (!checkpointRecord) throw new Error('Golden recovery checkpoint was not persisted.');
 
@@ -444,17 +572,13 @@ export async function runGoldenAutomationJourney(
       finalSave,
     );
 
-    const oldAuthorityInvalidated = authority.manager.listLocalArtistModeRuns().every((run) => run.status !== 'running' && run.status !== 'paused');
-    const budget = await captureBudgetFailure(fixture, target, finalObservation, finalAnimation);
+    const oldAuthorityInvalidated = oldAuthorityFailure.error.code === 'capability_denied';
     const previewTag = finalAnimation.tags[0];
     if (!previewTag) throw new Error('Golden animation tag was not created.');
 
-    primaryController.dispose();
-    replacement.dispose();
-    replacementAuthority.manager.dispose();
-    authority.manager.dispose();
-
-    const transactions = runtime.transactions.map((transaction) => structuredClone(transaction));
+    const transactions = runtime.transactions.map((transaction: EditorTransactionResult) => structuredClone(transaction));
+    const rawTransactions = runtime.rawTransactions.map((transaction: GoldenPublicTransactionResult) => structuredClone(transaction));
+    const rasterProofs = runtime.rasterProofs.map((proof: GoldenRasterProof) => structuredClone(proof));
     const beforeRefinement = runtime.beforeRefinement;
     const afterRefinement = runtime.afterRefinement;
     const refinementTransaction = runtime.refinementTransaction;
@@ -466,6 +590,7 @@ export async function runGoldenAutomationJourney(
       initialPause: initialPauseResult.state,
       midJourney: {
         paused: pausedState,
+        beforeReload: midBeforeReload,
         save: midSave,
         reload: midReload,
         reobserved: midReobserved,
@@ -482,17 +607,18 @@ export async function runGoldenAutomationJourney(
       freshSessionId: replacementState.sessionId,
       freshRunId: replacementState.runId,
       freshObservationCount: runtime.freshObservationCount,
+      freshObservationRevisions: [...runtime.freshObservationRevisions],
       reapproved: replacementApproval.ok,
       revisionBeforeInterruption,
       revisionAfterLateResult,
+      oldAuthorityFailure,
       queuedWriteWasNotReplayed: revisionAfterLateResult === revisionBeforeInterruption,
     };
 
-    if (ownsFixture) fixture.dispose();
     return {
       negotiation,
       creation: created.creation,
-      initialObservation,
+      initialObservation: created.observation,
       authority: {
         sessionId: authority.sessionId,
         runId: authority.runId,
@@ -500,6 +626,8 @@ export async function runGoldenAutomationJourney(
       },
       history,
       transactions,
+      rawTransactions,
+      rasterProofs,
       beforeRefinement,
       afterRefinement,
       finalObservation,
@@ -513,7 +641,10 @@ export async function runGoldenAutomationJourney(
         budget,
         lateResult: {
           suppressed: initialPauseResult.state.transactionsUsed === 0,
-          transactionsUsed: initialPauseResult.state.transactionsUsed,
+          beforeObservation: initialLateBefore,
+          afterObservation: initialLateAfter,
+          transactionsUsedBefore: initialLateTransactionsBefore,
+          transactionsUsedAfter: initialLateTransactionsAfter,
         },
         interruptedResumption: {
           originalPhase: originalAfterInterruption.phase,
@@ -527,6 +658,8 @@ export async function runGoldenAutomationJourney(
       },
     };
   } finally {
+    for (const controller of controllers) controller.dispose();
+    for (const manager of managers) manager.dispose();
     if (ownsFixture) fixture.dispose();
   }
 }
@@ -536,14 +669,14 @@ function createEntityIdFactory(): () => string {
   return () => `golden-entity-${++sequence}`;
 }
 
-function createBrief(target: ProjectTarget): CreativeBriefInput {
+function createBrief(target: ProjectTarget, transactionLimit = 12): CreativeBriefInput {
   return {
     targetId: target.projectId,
     targetName: GOLDEN_PROJECT_NAME,
     goal: 'Compose a deterministic editable golden automation journey.',
     constraints: ['Keep the 32 × 32 canvas.', 'Use only local public editor contracts.'],
     requestedWriteCategories: WRITE_CATEGORIES,
-    transactionLimit: 12,
+    transactionLimit,
     durationSeconds: GOLDEN_DURATION_SECONDS,
     contentEgress: 'local-only',
   };
@@ -613,13 +746,17 @@ async function createReplacementController(
 ): Promise<{ readonly controller: CreativeRunController; readonly sessionId: string; readonly observedRevision: number }> {
   const authority = createAuthority(fixture, target, `${GOLDEN_RUN_ID}-replacement`, 'replacement');
   runtime.replacementAuthority = authority;
-  const controller = createController(fixture, authority, runtime, brief, undefined, undefined, () => {
-    if (runtime.freshObservationCount === 0) runtime.freshObservationCount = 1;
-  });
+  runtime.managers.add(authority.manager);
+  const controller = createController(fixture, authority, runtime, brief, undefined, undefined, true);
+  runtime.controllers.add(controller);
+  const observed = await controller.observeForRecovery();
+  if (!observed.ok || observed.observedRevision === undefined) {
+    throw new Error('Golden replacement did not capture a public recovery observation.');
+  }
   return {
     controller,
     sessionId: authority.sessionId,
-    observedRevision: authority.target.context.project.revision.value,
+    observedRevision: observed.observedRevision,
   };
 }
 
@@ -630,8 +767,9 @@ function createController(
   brief: CreativeBriefInput,
   recovery: CreativeRunRecovery | undefined,
   createReplacement: (() => Promise<{ readonly controller: CreativeRunController; readonly sessionId: string; readonly observedRevision: number }>) | undefined,
-  onObservation?: () => void,
+  recordFreshObservation = false,
 ): CreativeRunController {
+  let freshObservationPending = recordFreshObservation;
   const controller = new CreativeRunController({
     sessionManager: authority.manager,
     sessionId: authority.sessionId,
@@ -641,17 +779,29 @@ function createController(
     observationClass: 'structure',
     getCurrentRevision: () => authority.target.context.project.revision.value,
     observe: (sessionId, observationClass, input) => {
-      onObservation?.();
-      return authority.manager.observe(sessionId, observationClass, input);
+      return authority.manager.observe(sessionId, observationClass, input).then((result) => {
+        if (freshObservationPending && result.ok && observationClass === 'structure' && isPublicObservation(result.result)) {
+          freshObservationPending = false;
+          runtime.freshObservationCount += 1;
+          runtime.freshObservationRevisions.push(result.result.revision);
+        }
+        return result;
+      });
     },
     executeTransaction: async (sessionId, runId, input) => {
       const result = await authority.manager.executeArtistModeTransaction(sessionId, runId, input);
       if (!result.ok) return result;
-      const transaction = restoreTargetBinding(result.result as EditorTransactionResult, authority.target.id);
+      const rawTransaction = result.result as GoldenPublicTransactionResult;
+      runtime.rawTransactions.push(structuredClone(rawTransaction));
+      const transaction = bindHostTransactionTarget(rawTransaction, authority.target.id);
       runtime.transactions.push(structuredClone(transaction));
+      const plan = runtime.queue[runtime.cursor];
       runtime.cursor += 1;
       if (transaction.compositeEquality) {
         runtime.refinementTransaction = transaction;
+      }
+      if (plan?.kind === 'raster') {
+        await captureRasterProof(authority, runtime, plan.frameIndex, transaction.revision);
       }
       return { ok: true, result: transaction };
     },
@@ -710,6 +860,15 @@ function stepForPlan(
   observation: ProjectObservation,
 ): CreativeRunStep {
   switch (plan.kind) {
+    case 'history':
+    case 'budget':
+      return {
+        profile: 'animation',
+        children: [{
+          command: ANIMATION_FRAME_COMMAND_ID,
+          input: { kind: 'frame.duration', frameId: plan.frameId, duration: 110 },
+        }],
+      };
     case 'static':
       return createStaticStructureStep(observation);
     case 'raster':
@@ -798,6 +957,26 @@ function createStaticStructureStep(observation: ProjectObservation): CreativeRun
   };
 }
 
+async function observeRasterForFrame(
+  authority: JourneyAuthority,
+  observation: ProjectObservation,
+  frameId: string,
+): Promise<GoldenPublicRasterObservation> {
+  const layer = observation.layers.find((candidate) => candidate.name === 'Golden Body')
+    ?? observation.layers.find((candidate) => candidate.type === 'image');
+  const frame = observation.frames.find((candidate) => candidate.id === frameId);
+  if (!layer || !frame) throw new Error(`Golden raster observation target is missing for frame ${frameId}.`);
+  const cel = frame.cels.find((candidate) => candidate.layerId === layer.id);
+  if (!cel) throw new Error(`Golden raster observation cel is missing for frame ${frameId}.`);
+  const result = await authority.manager.observe(authority.sessionId, 'raster', {
+    source: { kind: 'layer', layerId: layer.id, frameId: frame.id, celId: cel.id },
+    region: { x: 0, y: 0, width: GOLDEN_WIDTH, height: GOLDEN_HEIGHT },
+    expectedRevision: observation.revision,
+  });
+  if (!result.ok) throw new Error(`Golden raster observation failed: ${result.error.code}`);
+  return result.result as GoldenPublicRasterObservation;
+}
+
 async function createRasterStep(
   authority: JourneyAuthority,
   observation: ProjectObservation,
@@ -817,13 +996,42 @@ async function createRasterStep(
   });
   if (!rasterResult.ok) throw new Error(`Golden raster observation failed: ${rasterResult.error.code}`);
   return createRasterStepFromObservation(
-    rasterResult.result as RasterObservation,
+    rasterResult.result as GoldenPublicRasterObservation,
     layer.id,
     frame.id,
     cel.id,
     region,
     frameIndex,
   );
+}
+
+// fallow-ignore-next-line code-duplication -- Raster step creation and post-commit proof intentionally repeat the public raster boundary.
+async function captureRasterProof(
+  authority: JourneyAuthority,
+  runtime: JourneyPlanRuntime,
+  frameIndex: number,
+  expectedRevision: number,
+): Promise<void> {
+  const observation = await observeStructure(authority, expectedRevision);
+  const layer = observation.layers.find((candidate) => candidate.name === 'Golden Body')
+    ?? observation.layers.find((candidate) => candidate.type === 'image');
+  const frame = observation.frames[frameIndex];
+  if (!layer || !frame) throw new Error(`Golden raster proof target is missing at frame ${frameIndex}.`);
+  const cel = frame.cels.find((candidate) => candidate.layerId === layer.id);
+  if (!cel) throw new Error(`Golden raster proof cel is missing at frame ${frameIndex}.`);
+  const result = await authority.manager.observe(authority.sessionId, 'raster', {
+    source: { kind: 'layer', layerId: layer.id, frameId: frame.id, celId: cel.id },
+    region: { x: 0, y: 0, width: GOLDEN_WIDTH, height: GOLDEN_HEIGHT },
+    expectedRevision,
+  });
+  if (!result.ok) throw new Error(`Golden raster proof observation failed: ${result.error.code}`);
+  runtime.rasterProofs.push({
+    frameIndex,
+    frameId: frame.id,
+    celId: cel.id,
+    observation: result.result as GoldenPublicRasterObservation,
+    expectedPattern: createPattern(frameIndex),
+  });
 }
 
 function createRefinementStep(observation: ProjectObservation): CreativeRunStep {
@@ -865,7 +1073,7 @@ function createPattern(frameIndex: number): readonly string[] {
 }
 
 function createRasterStepFromObservation(
-  observation: RasterObservation,
+  observation: GoldenPublicRasterObservation,
   layerId: string,
   frameId: string,
   celId: string,
@@ -921,10 +1129,18 @@ async function observeAnimationBundle(
     expectedDigest: null,
   });
   if (!result.ok) throw new Error(`Golden animation observation failed: ${result.error.code}`);
-  return restoreAnimationTarget(result.result as AnimationEvaluationBundle, authority.target.id);
+  return bindHostAnimationTarget(result.result as AnimationEvaluationBundle, authority.target.id);
 }
 
-function restoreAnimationTarget(bundle: AnimationEvaluationBundle, targetId: string): AnimationEvaluationBundle {
+function readArtistGrant(authority: JourneyAuthority): ArtistModeGrant {
+  return requireSessionSuccess(
+    authority.manager.getArtistModeGrant(authority.sessionId, authority.runId),
+    'Artist Mode grant evidence',
+  );
+}
+
+/** HOST-ONLY: recovery/controller consumers need the already-bound local target. */
+function bindHostAnimationTarget(bundle: AnimationEvaluationBundle, targetId: string): AnimationEvaluationBundle {
   const target = { projectId: targetId };
   return {
     ...bundle,
@@ -938,34 +1154,50 @@ function restoreAnimationTarget(bundle: AnimationEvaluationBundle, targetId: str
   };
 }
 
+// fallow-ignore-next-line complexity -- The approved history proof keeps edit, undo, redo, save, reload, and raster evidence together.
 async function exerciseHistory(
   adapter: AutomationAdapter,
   authority: JourneyAuthority,
   initial: ProjectObservation,
+  edit: EditorTransactionResult | undefined,
   frameId: string,
 ): Promise<GoldenHistoryProof> {
-  const edit = await executeManagerTransaction(authority, {
-    operationId: 'golden-history-duration',
-    profile: 'animation',
-    expectedRevision: initial.revision,
-    children: [{
-      command: ANIMATION_FRAME_COMMAND_ID,
-      input: { kind: 'frame.duration', frameId, duration: 110 },
-    }],
-  });
+  if (!edit || edit.fromRevision !== initial.revision) {
+    throw new Error('Golden history edit was not committed from the observed starting revision.');
+  }
   const before = await observeStructure(authority, edit.revision);
   const undo = requireAdapterSuccess<HistoryTransitionResult>(await adapter.request({
     operation: 'project.history.undo',
     target: { projectId: authority.target.id },
     expectedRevision: edit.revision,
   }), 'history undo');
+  const undone = await observeStructure(authority, undo.revision);
+  const initialFrame = initial.frames.find((frame) => frame.id === frameId);
+  const undoneFrame = undone.frames.find((frame) => frame.id === frameId);
+  if (!initialFrame || !undoneFrame || undoneFrame.duration !== initialFrame.duration) {
+    throw new Error('Golden history undo did not restore the observed frame duration.');
+  }
   const redo = requireAdapterSuccess<HistoryTransitionResult>(await adapter.request({
     operation: 'project.history.redo',
     target: { projectId: authority.target.id },
     expectedRevision: undo.revision,
   }), 'history redo');
   const after = await observeStructure(authority, redo.revision);
-  return { edit, undo, redo, before, after };
+  const editedFrame = after.frames.find((frame) => frame.id === frameId);
+  if (!editedFrame || editedFrame.duration !== 110) {
+    throw new Error('Golden history redo did not restore the committed duration.');
+  }
+  const save = await saveRevision(adapter, { projectId: authority.target.id }, after.revision);
+  const reload = await reloadRevision(adapter, { projectId: authority.target.id }, save.revision);
+  const reloaded = await observeStructure(authority, reload.revision);
+  const afterRaster = await observeRasterForFrame(authority, after, frameId);
+  const reloadedRaster = await observeRasterForFrame(authority, reloaded, frameId);
+  if (!sameObservationContent(after, reloaded)
+      || afterRaster.digest !== reloadedRaster.digest
+      || afterRaster.rows.join('\n') !== reloadedRaster.rows.join('\n')) {
+    throw new Error('Golden history reload changed the public project content.');
+  }
+  return { edit, before, undo, undone, redo, after, save, reload, reloaded };
 }
 
 async function captureStaleRevisionFailure(
@@ -973,17 +1205,20 @@ async function captureStaleRevisionFailure(
   currentRevision: number,
   frameId: string,
 ): Promise<GoldenAutomationFailureProof> {
-  const result = await authority.manager.executeArtistModeTransaction(authority.sessionId, authority.runId, {
-    operationId: 'golden-stale-revision',
-    profile: 'animation',
-    expectedRevision: currentRevision - 1,
-    children: [{
-      command: ANIMATION_FRAME_COMMAND_ID,
-      input: { kind: 'frame.duration', frameId, duration: 111 },
-    }],
-  });
-  if (result.ok) throw new Error('Golden stale revision unexpectedly committed.');
-  return { error: result.error, revisionBefore: currentRevision, revisionAfter: currentRevision };
+  return captureFailureEvidence(
+    authority,
+    currentRevision,
+    (expectedRevision) => authority.manager.executeArtistModeTransaction(authority.sessionId, authority.runId, {
+      operationId: 'golden-stale-revision',
+      profile: 'animation',
+      expectedRevision: expectedRevision - 1,
+      children: [{
+        command: ANIMATION_FRAME_COMMAND_ID,
+        input: { kind: 'frame.duration', frameId, duration: 111 },
+      }],
+    }),
+    'Golden stale revision unexpectedly committed.',
+  );
 }
 
 async function captureDeniedObservation(
@@ -1005,59 +1240,144 @@ async function captureDeniedObservation(
     authority.manager.approveRequest(request.requestId, target.projectId, ['structure']),
     'denied inspect approval',
   );
-  const observation = await authority.manager.observe(grant.sessionId, 'raster', {
+  return captureFailureEvidence(
+    authority,
     expectedRevision,
-    source: { kind: 'layer', layerId: layer.id, frameId, celId },
-    region: { x: 0, y: 0, width: GOLDEN_WIDTH, height: GOLDEN_HEIGHT },
-  });
-  authority.manager.revokeSession(grant.sessionId);
-  if (observation.ok) throw new Error('Golden denied observation unexpectedly succeeded.');
-  return { error: observation.error, revisionBefore: expectedRevision, revisionAfter: expectedRevision };
+    async (observedRevision) => {
+      try {
+        return await authority.manager.observe(grant.sessionId, 'raster', {
+          expectedRevision: observedRevision,
+          source: { kind: 'layer', layerId: layer.id, frameId, celId },
+          region: { x: 0, y: 0, width: GOLDEN_WIDTH, height: GOLDEN_HEIGHT },
+        });
+      } finally {
+        authority.manager.revokeSession(grant.sessionId);
+      }
+    },
+    'Golden denied observation unexpectedly succeeded.',
+  );
 }
 
+async function captureInterruptedAuthorityFailure(
+  authority: JourneyAuthority,
+  currentRevision: number,
+  frameId: string,
+): Promise<GoldenAutomationFailureProof> {
+  return captureFailureEvidence(
+    authority,
+    currentRevision,
+    (expectedRevision) => authority.manager.executeArtistModeTransaction(authority.sessionId, authority.runId, {
+      operationId: 'golden-interrupted-old-authority',
+      profile: 'animation',
+      expectedRevision,
+      children: [{
+        command: ANIMATION_FRAME_COMMAND_ID,
+        input: { kind: 'frame.duration', frameId, duration: 999 },
+      }],
+    }),
+    'Golden interrupted authority unexpectedly committed.',
+  );
+}
+
+async function captureFailureEvidence(
+  authority: JourneyAuthority,
+  expectedRevision: number,
+  attempt: (revision: number) => Promise<AutomationSessionResult<unknown>>,
+  successMessage: string,
+): Promise<GoldenAutomationFailureProof> {
+  const beforeObservation = await observeStructure(authority, expectedRevision);
+  const transactionsUsedBefore = readArtistGrant(authority).transactionsUsed;
+  const result = await attempt(beforeObservation.revision);
+  if (result.ok) throw new Error(successMessage);
+  const afterObservation = await observeStructure(authority, beforeObservation.revision);
+  const transactionsUsedAfter = readArtistGrant(authority).transactionsUsed;
+  return {
+    error: result.error,
+    revisionBefore: beforeObservation.revision,
+    revisionAfter: afterObservation.revision,
+    beforeObservation,
+    afterObservation,
+    transactionsUsedBefore,
+    transactionsUsedAfter,
+  };
+}
+
+// fallow-ignore-next-line complexity -- The bounded budget proof keeps approval, rejection, immediate evidence, and authorized undo together.
 async function captureBudgetFailure(
   fixture: FixtureSession,
   target: ProjectTarget,
   observation: ProjectObservation,
-  animation: AnimationEvaluationBundle,
+  managers: Set<AutomationSessionManager>,
+  controllers: Set<CreativeRunController>,
 ): Promise<GoldenBudgetFailureProof> {
   const authority = createAuthority(fixture, target, 'golden-budget-run', 'budget', 1);
+  managers.add(authority.manager);
   const frame = observation.frames[0];
   if (!frame) throw new Error('Golden budget probe has no frame.');
-  const first = await executeManagerTransaction(authority, {
-    operationId: 'golden-budget-first',
-    profile: 'animation',
-    expectedRevision: observation.revision,
-    children: [{
-      command: ANIMATION_FRAME_COMMAND_ID,
-      input: { kind: 'frame.duration', frameId: frame.id, duration: frame.duration + 1 },
-    }],
-  });
-  const exhausted = await authority.manager.executeArtistModeTransaction(authority.sessionId, authority.runId, {
-    operationId: 'golden-budget-second',
-    profile: 'animation',
-    expectedRevision: first.revision,
-    children: [{
-      command: ANIMATION_FRAME_COMMAND_ID,
-      input: { kind: 'frame.duration', frameId: frame.id, duration: frame.duration + 2 },
-    }],
-  });
-  if (exhausted.ok) throw new Error('Golden budget probe unexpectedly exceeded its limit.');
-  const beforeUndo = first.revision;
-  authority.manager.pauseArtistMode(authority.sessionId, authority.runId);
+  const runtime = createJourneyRuntime(
+    [{ kind: 'budget', frameId: frame.id }],
+    controllers,
+    managers,
+    false,
+  );
+  const controller = createController(
+    fixture,
+    authority,
+    runtime,
+    createBrief(target, 1),
+    undefined,
+    undefined,
+  );
+  controllers.add(controller);
+  const approval = approveController(controller);
+  if (!approval.ok) throw new Error(`Golden budget brief approval failed: ${approval.error.code}`);
+  const firstResult = await controller.start();
+  if (!firstResult.ok || firstResult.state.phase !== 'paused') {
+    throw new Error('Golden budget controller did not pause at its approved transaction limit.');
+  }
+  const first = runtime.transactions[0];
+  if (!first) throw new Error('Golden budget controller did not return its committed transaction.');
+  const exhausted = await captureFailureEvidence(
+    authority,
+    first.revision,
+    (expectedRevision) => authority.manager.executeArtistModeTransaction(authority.sessionId, authority.runId, {
+      operationId: 'golden-budget-second',
+      profile: 'animation',
+      expectedRevision,
+      children: [{
+        command: ANIMATION_FRAME_COMMAND_ID,
+        input: { kind: 'frame.duration', frameId: frame.id, duration: frame.duration + 2 },
+      }],
+    }),
+    'Golden budget probe unexpectedly exceeded its limit.',
+  );
+  const beforeRejection = exhausted.beforeObservation;
+  const afterRejection = exhausted.afterObservation;
+  if (!sameObservationContent(beforeRejection, afterRejection)
+      || exhausted.revisionBefore !== exhausted.revisionAfter
+      || exhausted.transactionsUsedBefore !== exhausted.transactionsUsedAfter) {
+    throw new Error('Golden budget rejection changed public work or consumption.');
+  }
   const undo = requireAdapterSuccess<HistoryTransitionResult>(await fixture.adapter.request({
     operation: 'project.history.undo',
     target,
-    expectedRevision: beforeUndo,
+    expectedRevision: first.revision,
   }), 'budget probe undo');
-  const after = await observeStructure(authority, undo.revision);
-  authority.manager.dispose();
+  const restored = await observeStructure(authority, undo.revision);
+  const restoredFrame = restored.frames.find((candidate) => candidate.id === frame.id);
+  if (!restoredFrame || restoredFrame.duration !== frame.duration) {
+    throw new Error('Golden budget continuation did not restore the original duration.');
+  }
   return {
     firstTransaction: first,
-    exhausted: { error: exhausted.error, revisionBefore: beforeUndo, revisionAfter: after.revision },
-    restored: after.frames[0]?.duration === observation.frames[0]?.duration
-      && after.revision === undo.revision
-      && animation.frames[0]?.duration === observation.frames[0]?.duration,
+    firstController: firstResult.state,
+    beforeRejection,
+    afterRejection,
+    transactionsUsedBefore: exhausted.transactionsUsedBefore,
+    transactionsUsedAfter: exhausted.transactionsUsedAfter,
+    restored,
+    continuationRevision: restored.revision,
+    exhausted,
   };
 }
 
@@ -1142,6 +1462,13 @@ function hasExactManifest(
   return manifest.target.projectId === target.projectId
     && manifest.revision === finalAnimation.revision
     && manifest.frames.length === finalAnimation.frames.length
+    && manifest.frames.every((frame, index) => {
+      const observed = finalAnimation.frames[index];
+      return observed !== undefined
+        && frame.id === observed.frameId
+        && frame.duration === observed.duration
+        && frame.renderDigest === observed.renderedDigest;
+    })
     && manifest.tags.length === finalAnimation.tags.length
     && manifest.tags.every((tag, index) => sameTag(tag, finalAnimation.tags[index]))
     && sameBytes(manifestArtifact.bytes, new TextEncoder().encode(JSON.stringify(manifest)));
@@ -1188,6 +1515,26 @@ function hasExactReconstruction(finalAnimation: AnimationEvaluationBundle): bool
     .every((grid, index) => sameGrid(grid, finalAnimation.frames[index]?.grid));
 }
 
+function sameObservationContent(left: ProjectObservation, right: ProjectObservation): boolean {
+  const content = (observation: ProjectObservation) => ({
+    name: observation.name,
+    canvas: observation.canvas,
+    currentFrameId: observation.currentFrameId,
+    fps: observation.fps,
+    layers: observation.layers,
+    frames: observation.frames.map((frame) => ({
+      ...frame,
+      cels: frame.cels.map((cel) => {
+        const { indexed: _indexed, indexLength: _indexLength, ...contentCel } = cel;
+        return contentCel;
+      }),
+    })),
+    tags: observation.tags,
+    palette: observation.palette,
+  });
+  return JSON.stringify(content(left)) === JSON.stringify(content(right));
+}
+
 function sameContactCellPixels(
   animation: AnimationEvaluationBundle,
   cell: AnimationEvaluationBundle['contactSheet']['cells'][number],
@@ -1229,11 +1576,6 @@ function sameTag(
     && left.collapsed === right.collapsed;
 }
 
-function sameBytes(left: Uint8Array | undefined, right: Uint8Array | undefined): boolean {
-  if (!left || !right || left.length !== right.length) return false;
-  return left.every((byte, index) => byte === right[index]);
-}
-
 async function preparePackage(
   adapter: AutomationAdapter,
   target: ProjectTarget,
@@ -1257,25 +1599,8 @@ async function reloadRevision(adapter: AutomationAdapter, target: ProjectTarget,
   return requireAdapterSuccess<ReloadResult>(await adapter.request({ operation: 'project.reload', target, expectedRevision }), 'project reload');
 }
 
-async function executeManagerTransaction(
-  authority: JourneyAuthority,
-  input: {
-    readonly operationId: string;
-    readonly profile: EditorTransactionProfile;
-    readonly expectedRevision: number;
-    readonly children: readonly EditorTransactionChildInput[];
-  },
-): Promise<EditorTransactionResult> {
-  const result = await authority.manager.executeArtistModeTransaction(
-    authority.sessionId,
-    authority.runId,
-    input,
-  );
-  if (!result.ok) throw new Error(`Golden transaction failed: ${result.error.code}`);
-  return restoreTargetBinding(result.result as EditorTransactionResult, authority.target.id);
-}
-
-function restoreTargetBinding(transaction: EditorTransactionResult, targetId: string): EditorTransactionResult {
+/** HOST-ONLY: keep the public transaction evidence target-free; bind only the local controller result. */
+function bindHostTransactionTarget(transaction: GoldenPublicTransactionResult, targetId: string): EditorTransactionResult {
   return {
     ...transaction,
     target: { projectId: targetId },
@@ -1286,6 +1611,7 @@ function restoreTargetBinding(transaction: EditorTransactionResult, targetId: st
   };
 }
 
+/** HOST-ONLY: the package adapter requires the local binding at its browser boundary. */
 function addTargetToSaveSafety(value: unknown, targetId: string): unknown {
   if (!isRecordValue(value)) return value;
   return { ...value, target: { projectId: targetId } };
@@ -1356,4 +1682,12 @@ function requireSessionSuccess<T>(
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPublicObservation(value: unknown): value is { readonly revision: number } {
+  return isRecordValue(value)
+    && (value.type === 'project.observation' || value.type === 'project.structure.observation')
+    && typeof value.revision === 'number'
+    && Number.isSafeInteger(value.revision)
+    && value.revision >= 0;
 }
