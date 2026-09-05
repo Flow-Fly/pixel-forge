@@ -1,52 +1,19 @@
+import type {
+  CreativeRunRecoveryDiagnosticBundle,
+  CreativeRunRecoveryRecord,
+} from './creative-run-recovery';
+
 const MAX_DIAGNOSTIC_OPERATIONS = 50;
 const MAX_DIAGNOSTIC_EVENTS = 200;
 
-type RecoveryOutcome =
-  | 'restored-original-with-rejected-copy'
-  | 'preserved-original-with-checkpoint-copy'
-  | 'rewound-to-owned-transaction'
-  | 'recovery-required';
-type RecoveryReason =
-  | 'checkpoint-persistence'
-  | 'checkpoint-too-large'
-  | 'target-drift'
-  | 'revision-conflict'
-  | 'content-ambiguous'
-  | 'history-not-owned'
-  | 'history-evicted'
-  | 'work-unsettled'
-  | 'copy-collision'
-  | 'copy-failed'
-  | 'restore-failed'
-  | 'persistence-failed'
-  | 'invalid-selection'
-  | 'terminal-run';
-type RecoveryTimelineKind = 'checkpoint' | 'transaction' | 'interrupted' | 'rewound' | 'rejected' | 'recovery-required';
-type RecoveryRecord = {
-  readonly phase: string;
-  readonly outcome: RecoveryOutcome | null;
-  readonly reason: RecoveryReason | null;
-  readonly currentRevision: number;
-  readonly lastDurableRevision: number;
-  readonly checkpoint: { readonly sourceRevision: number; readonly sourceDigest: string };
-  readonly transactions: readonly { readonly operationId: string; readonly postDigest: string; readonly durationMs: number }[];
-  readonly timeline: readonly { readonly kind: RecoveryTimelineKind }[];
-};
-interface RecoveryDiagnostics {
-  readonly schemaVersion: 1;
-  readonly phase: string;
-  readonly outcome: RecoveryOutcome | null;
-  readonly reason: RecoveryReason | null;
+type RecoveryRecord = Pick<
+  CreativeRunRecoveryRecord,
+  'phase' | 'outcome' | 'reason' | 'currentRevision' | 'lastDurableRevision'
+  | 'checkpoint' | 'transactions' | 'timeline' | 'collapsedEventCount'
+>;
+
+interface RecoveryDiagnostics extends CreativeRunRecoveryDiagnosticBundle {
   readonly transactionCount: number;
-  readonly eventCount: number;
-  readonly currentRevision: number;
-  readonly lastDurableRevision: number;
-  readonly checkpointRevision: number | null;
-  readonly checkpointDigest: string | null;
-  readonly postRunDigest: string | null;
-  readonly operationIds: readonly string[];
-  readonly eventKinds: readonly RecoveryTimelineKind[];
-  readonly durationsMs: readonly number[];
 }
 
 export function buildRecoveryDiagnostics(
@@ -54,27 +21,71 @@ export function buildRecoveryDiagnostics(
 ): RecoveryDiagnostics {
   const transactions = record?.transactions ?? [];
   const timeline = record?.timeline ?? [];
-  const lastTransaction = transactions.at(-1);
   return {
     schemaVersion: 1,
-    phase: record?.phase ?? 'draft',
-    outcome: record?.outcome ?? null,
-    reason: record?.reason ?? null,
     transactionCount: transactions.length,
-    eventCount: timeline.length,
-    currentRevision: record?.currentRevision ?? 0,
-    lastDurableRevision: record?.lastDurableRevision ?? 0,
-    checkpointRevision: record?.checkpoint.sourceRevision ?? null,
-    checkpointDigest: record?.checkpoint.sourceDigest ?? null,
-    postRunDigest: lastTransaction?.postDigest ?? record?.checkpoint.sourceDigest ?? null,
-    operationIds: transactions
-      .slice(0, MAX_DIAGNOSTIC_OPERATIONS)
-      .map((transaction) => transaction.operationId),
-    eventKinds: timeline
-      .slice(0, MAX_DIAGNOSTIC_EVENTS)
-      .map((entry) => entry.kind),
-    durationsMs: transactions
-      .slice(0, MAX_DIAGNOSTIC_OPERATIONS)
-      .map((transaction) => transaction.durationMs),
+    ...buildRecordFacts(record, transactions),
+    ...buildTimelineFacts(record, timeline),
   };
+}
+
+function buildRecordFacts(
+  record: RecoveryRecord | null,
+  transactions: RecoveryRecord['transactions'],
+): Pick<RecoveryDiagnostics, 'phase' | 'outcome' | 'reason' | 'currentRevision' | 'lastDurableRevision' | 'checkpointRevision' | 'checkpointDigest' | 'postRunDigest' | 'operationIds' | 'durationsMs'> {
+  return {
+    ...buildRecordStateFacts(record),
+    ...buildCheckpointFacts(record),
+    ...buildTransactionFacts(record, transactions),
+  };
+}
+
+function buildRecordStateFacts(
+  record: RecoveryRecord | null,
+): Pick<RecoveryDiagnostics, 'phase' | 'outcome' | 'reason' | 'currentRevision' | 'lastDurableRevision'> {
+  return {
+    phase: defaultTo(record?.phase, 'draft'),
+    outcome: defaultTo(record?.outcome, null),
+    reason: defaultTo(record?.reason, null),
+    currentRevision: defaultTo(record?.currentRevision, 0),
+    lastDurableRevision: defaultTo(record?.lastDurableRevision, 0),
+  };
+}
+
+function buildCheckpointFacts(
+  record: RecoveryRecord | null,
+): Pick<RecoveryDiagnostics, 'checkpointRevision' | 'checkpointDigest'> {
+  const checkpoint = record?.checkpoint;
+  return {
+    checkpointRevision: checkpoint?.sourceRevision ?? null,
+    checkpointDigest: checkpoint?.sourceDigest ?? null,
+  };
+}
+
+function buildTransactionFacts(
+  record: RecoveryRecord | null,
+  transactions: RecoveryRecord['transactions'],
+): Pick<RecoveryDiagnostics, 'postRunDigest' | 'operationIds' | 'durationsMs'> {
+  const lastTransaction = transactions.at(-1);
+  return {
+    postRunDigest: lastTransaction?.postDigest ?? record?.checkpoint.sourceDigest ?? null,
+    operationIds: transactions.slice(0, MAX_DIAGNOSTIC_OPERATIONS).map((transaction) => transaction.operationId),
+    durationsMs: transactions.slice(0, MAX_DIAGNOSTIC_OPERATIONS).map((transaction) => transaction.durationMs),
+  };
+}
+
+function buildTimelineFacts(
+  record: RecoveryRecord | null,
+  timeline: RecoveryRecord['timeline'],
+): Pick<RecoveryDiagnostics, 'eventCount' | 'collapsedEventCount' | 'eventKinds'> {
+  const collapsedEventCount = record?.collapsedEventCount ?? 0;
+  return {
+    eventCount: timeline.length + collapsedEventCount,
+    collapsedEventCount,
+    eventKinds: timeline.slice(0, MAX_DIAGNOSTIC_EVENTS).map((entry) => entry.kind),
+  };
+}
+
+function defaultTo<T>(value: T | undefined, fallback: T): T {
+  return value === undefined ? fallback : value;
 }

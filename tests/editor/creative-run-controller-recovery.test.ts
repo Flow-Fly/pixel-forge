@@ -52,6 +52,8 @@ function createAuthority(options: { readonly sessionId?: string; readonly runId?
   let runStatus: AutomationLocalArtistModeRun['status'] = 'running';
   let transactionsUsed = 0;
   let executeCount = 0;
+  let observeCount = 0;
+  const operationIds: string[] = [];
   let holdNextTransaction = false;
   let releaseTransaction: (() => void) | null = null;
   let signalTransactionStarted: (() => void) | null = null;
@@ -117,10 +119,14 @@ function createAuthority(options: { readonly sessionId?: string; readonly runId?
       runStatus = 'paused';
       return true;
     },
-    observe: async () => success({ type: 'project.structure.observation', revision }),
+    observe: async () => {
+      observeCount += 1;
+      return success({ type: 'project.structure.observation', revision });
+    },
     executeArtistModeTransaction: async (_session, _run, input) => {
       executeCount += 1;
       const request = input as { expectedRevision: number; operationId: string };
+      operationIds.push(request.operationId);
       const result = success<EditorTransactionResult>({
         type: 'project.transaction.execute',
         target: { projectId: targetId },
@@ -166,6 +172,8 @@ function createAuthority(options: { readonly sessionId?: string; readonly runId?
     boundary,
     get revision() { return revision; },
     get executeCount() { return executeCount; },
+    get observeCount() { return observeCount; },
+    operationIds,
     pause() { runStatus = 'paused'; },
     holdTransaction() { holdNextTransaction = true; },
     transactionStarted,
@@ -189,6 +197,8 @@ class RecoveryDouble implements CreativeRunRecovery {
   readonly calls: string[] = [];
   readonly failCommit: boolean;
   record: CreativeRunRecovery['record'] = null;
+  holdCopy = false;
+  private releaseCopy: (() => void) | null = null;
 
   constructor(failCommit = false) {
     this.failCommit = failCommit;
@@ -220,6 +230,12 @@ class RecoveryDouble implements CreativeRunRecovery {
     return { ok: true, outcome: 'recovery-required', reason: 'work-unsettled', nextAction: 'recover-manually', recoveryCopyId: null };
   }
 
+  async reactivateAfterReapproval(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('reactivate');
+    this.currentStatus = { ...this.currentStatus, requiresReapproval: false, interrupted: false };
+    return { ok: true, outcome: null, reason: null, nextAction: 'none', recoveryCopyId: null };
+  }
+
   async rewind(): Promise<CreativeRunRecoveryResult> {
     this.calls.push('rewind');
     return { ok: true, outcome: 'rewound-to-owned-transaction', reason: null, nextAction: 'approve-brief', recoveryCopyId: null };
@@ -232,7 +248,24 @@ class RecoveryDouble implements CreativeRunRecovery {
 
   async createCheckpointCopy(): Promise<CreativeRunRecoveryResult> {
     this.calls.push('copy');
+    if (this.holdCopy) {
+      await new Promise<void>((resolve) => { this.releaseCopy = resolve; });
+    }
     return { ok: true, outcome: null, reason: null, nextAction: 'review-result', recoveryCopyId: 'copy' };
+  }
+
+  releaseHeldCopy(): void {
+    const release = this.releaseCopy;
+    this.releaseCopy = null;
+    release?.();
+  }
+
+  setRewound(): void {
+    this.currentStatus = {
+      ...this.currentStatus,
+      requiresReapproval: true,
+      outcome: 'rewound-to-owned-transaction',
+    };
   }
 
   getDiagnostics(): CreativeRunRecoveryDiagnosticBundle {
@@ -243,6 +276,7 @@ class RecoveryDouble implements CreativeRunRecovery {
       reason: null,
       transactionCount: 0,
       eventCount: 0,
+      collapsedEventCount: 0,
       currentRevision: 0,
       lastDurableRevision: 0,
       checkpointRevision: 0,
@@ -349,6 +383,7 @@ describe('CreativeRunController recovery boundaries', () => {
       brief: { ...brief, runId: 'replacement-run' },
       stepSource: () => null,
       getCurrentRevision: () => replacementAuthority.revision,
+      clock: () => 10_000,
     });
     const controller = new CreativeRunController({
       sessionManager: authority.boundary,
@@ -379,8 +414,77 @@ describe('CreativeRunController recovery boundaries', () => {
     expect(result).toMatchObject({ ok: true });
     expect(factoryCalls).toBe(1);
     expect(observed).toBe(1);
+    expect(replacementAuthority.observeCount).toBe(1);
     expect(controller.replacement).toBe(replacement);
     expect(replacement.getState().approvedBriefRevision).toBeNull();
     expect(replacement.getState().phase).toBe('draft');
+  });
+
+  it('serializes recovery actions at the controller boundary', async () => {
+    const authority = createAuthority();
+    const recovery = new RecoveryDouble();
+    recovery.holdCopy = true;
+    const controller = createController(authority, recovery, () => null);
+    controller.approveBrief(approval(controller));
+    controller.stop();
+
+    const first = controller.createRecoveryCopy();
+    await Promise.resolve();
+    const second = await controller.createRecoveryCopy();
+    expect(second).toMatchObject({ ok: false, error: { code: 'recovery_busy' } });
+    expect(controller.approveBrief(approval(controller))).toMatchObject({ error: { code: 'recovery_busy' } });
+    expect(controller.refineBrief({ goal: 'another goal' })).toMatchObject({ error: { code: 'recovery_busy' } });
+    expect(controller.pause()).toMatchObject({ error: { code: 'recovery_busy' } });
+    expect(controller.requestManualTakeover('creator')).toMatchObject({ error: { code: 'recovery_busy' } });
+    expect(controller.stop()).toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.start()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.resume()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.accept()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.reject(true)).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.rewind({ checkpoint: true })).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.markInterrupted()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.openRecoveryCopy()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.loadRecoveryRecord()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.observeForRecovery()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    await expect(controller.resumeAfterInterruption()).resolves.toMatchObject({ error: { code: 'recovery_busy' } });
+    controller.dispose();
+    expect(recovery.calls).not.toContain('interrupted');
+    recovery.releaseHeldCopy();
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(recovery.calls.filter((call) => call === 'copy')).toHaveLength(1);
+    expect(recovery.calls.filter((call) => call === 'interrupted')).toHaveLength(1);
+  });
+
+  it('reactivates a rewound recovery record after fresh observation before dispatch', async () => {
+    const authority = createAuthority();
+    const recovery = new RecoveryDouble();
+    recovery.setRewound();
+    const controller = createController(authority, recovery, () => null);
+    controller.approveBrief(approval(controller));
+    const result = await controller.start();
+
+    expect(result).toMatchObject({ ok: true, state: { phase: 'stopped' } });
+    expect(recovery.calls).toEqual(['reactivate']);
+    expect(authority.observeCount).toBe(1);
+  });
+
+  it('retains the ordinal suffix when a run id reaches the operation-id limit', async () => {
+    const longRunId = 'r'.repeat(256);
+    const authority = createAuthority({ runId: longRunId });
+    let stepCount = 0;
+    const controller = new CreativeRunController({
+      sessionManager: authority.boundary,
+      sessionId,
+      runId: longRunId,
+      brief,
+      stepSource: () => (stepCount++ === 0 ? step() : null),
+      getCurrentRevision: () => authority.revision,
+      clock: () => 10_000,
+    });
+    controller.approveBrief(approval(controller));
+    await controller.start();
+
+    expect(authority.operationIds[0]).toHaveLength(256);
+    expect(authority.operationIds[0]).toMatch(/:step:1$/);
   });
 });

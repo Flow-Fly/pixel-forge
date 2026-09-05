@@ -7,6 +7,7 @@ import {
   type ProjectRepository,
 } from '../../../src/services/persistence/project-repository';
 import type { CreativeRunRecoveryRecord } from '../../../src/editor/creative-run-recovery';
+import { decodeProjectFile, type ProjectFileInput } from '../../../src/types/project';
 
 function makeProject(name: string, width = 8, height = 8): ProjectFile {
   return {
@@ -16,6 +17,55 @@ function makeProject(name: string, width = 8, height = 8): ProjectFile {
     height,
     layers: [],
     frames: [],
+    animation: { fps: 12, currentFrameIndex: 0 },
+  };
+}
+
+function makeLegacyProject(name: string): ProjectFileInput {
+  return {
+    version: '1.0.0',
+    name,
+    width: 2,
+    height: 2,
+    layers: [{
+      id: 'legacy-layer',
+      name: 'Legacy layer',
+      visible: true,
+      opacity: 255,
+      data: new Uint8Array(4),
+    }],
+    frames: [{
+      id: 'legacy-frame',
+      duration: 100,
+      cels: [{ layerId: 'legacy-layer', data: new Uint8Array(4) }],
+    }],
+    animation: { fps: 12, currentFrameIndex: 0 },
+  };
+}
+
+function makeCurrentProject(name: string): ProjectFile {
+  return {
+    version: '4.3.0',
+    name,
+    width: 2,
+    height: 2,
+    palette: ['#000000'],
+    paletteEntries: [{ id: 'current-black', color: '#000000' }],
+    layers: [{
+      id: 'current-layer',
+      name: 'Current layer',
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 255,
+      parentId: null,
+      data: new Uint8Array(4),
+    }],
+    frames: [{
+      id: 'current-frame',
+      duration: 100,
+      cels: [{ id: 'current-cel', layerId: 'current-layer', data: new Uint8Array(4), opacity: 100 }],
+    }],
     animation: { fps: 12, currentFrameIndex: 0 },
   };
 }
@@ -154,11 +204,29 @@ describe('IndexedDbProjectRepository', () => {
       },
       transactions: [],
       timeline: [{ sequence: 1, kind: 'checkpoint' as const }],
+      collapsedEventCount: 0,
       recoveryCopyId: null,
     } satisfies CreativeRunRecoveryRecord;
 
     await recoveryPersistence.save(record);
     expect(await recoveryPersistence.load(record.runId)).toEqual(record);
+  });
+
+  it('keeps legacy and current Project Files compatible across the additive upgrade', async () => {
+    const legacy = makeLegacyProject('Legacy compatible');
+    const current = makeCurrentProject('Current compatible');
+    await repo.save('legacy-compatible', legacy as unknown as ProjectFile);
+    await repo.save('current-compatible', current);
+
+    const legacyLoaded = await repo.load('legacy-compatible');
+    const currentLoaded = await repo.load('current-compatible');
+    if (!legacyLoaded || !currentLoaded) throw new Error('Expected both compatible projects.');
+    expect(decodeProjectFile(legacyLoaded)).toMatchObject({
+      name: 'Legacy compatible',
+      layers: [{ type: 'image', locked: false, parentId: null }],
+      frames: [{ cels: [{ id: expect.any(String), opacity: 100 }] }],
+    });
+    expect(decodeProjectFile(currentLoaded)).toEqual(current);
   });
 
   it('returns null for unknown ids', async () => {

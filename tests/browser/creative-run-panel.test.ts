@@ -6,6 +6,7 @@ import {
 } from '../../src/editor/automation-session';
 import {
   CreativeRunController,
+  type CreativeRunControllerOptions,
   type CreativeRunStep,
 } from '../../src/editor/creative-run';
 import type {
@@ -38,9 +39,11 @@ const recoveryContexts: ProjectContext[] = [];
 class BrowserRecoveryDouble implements CreativeRunRecovery {
   private currentStatus: CreativeRunRecoveryStatus;
   private releaseCopy: (() => void) | null = null;
+  private releaseRewind: (() => void) | null = null;
   holdCopy = false;
+  holdRewind = false;
   readonly calls: string[] = [];
-  record: CreativeRunRecoveryRecord = {} as CreativeRunRecoveryRecord;
+  record: CreativeRunRecoveryRecord | null = null;
 
   constructor(interrupted = false) {
     this.currentStatus = {
@@ -84,8 +87,19 @@ class BrowserRecoveryDouble implements CreativeRunRecovery {
     return this.result('recovery-required', 'work-unsettled', 'recover-manually');
   }
 
+  async reactivateAfterReapproval(): Promise<CreativeRunRecoveryResult> {
+    this.calls.push('reactivate');
+    this.currentStatus = { ...this.currentStatus, requiresReapproval: false, interrupted: false };
+    return this.result(null, null, 'none');
+  }
+
   async rewind(): Promise<CreativeRunRecoveryResult> {
     this.calls.push('rewind');
+    if (this.holdRewind) {
+      await new Promise<void>((resolve) => {
+        this.releaseRewind = resolve;
+      });
+    }
     return this.result('rewound-to-owned-transaction', null, 'approve-brief');
   }
 
@@ -111,6 +125,12 @@ class BrowserRecoveryDouble implements CreativeRunRecovery {
     release?.();
   }
 
+  releaseHeldRewind(): void {
+    const release = this.releaseRewind;
+    this.releaseRewind = null;
+    release?.();
+  }
+
   getDiagnostics(): CreativeRunRecoveryDiagnosticBundle {
     return {
       schemaVersion: 1,
@@ -119,6 +139,7 @@ class BrowserRecoveryDouble implements CreativeRunRecovery {
       reason: this.currentStatus.reason,
       transactionCount: 0,
       eventCount: this.calls.length,
+      collapsedEventCount: 0,
       currentRevision: 0,
       lastDurableRevision: 0,
       checkpointRevision: 0,
@@ -148,10 +169,48 @@ afterEach(() => {
   for (const context of recoveryContexts.splice(0)) context.dispose();
 });
 
-async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFCreativeRunPanel; controller: CreativeRunController; fixture: FixtureSession; manager: AutomationSessionManager }> {
-  const fixture = createFixtureSession();
+interface CreateRunOptions {
+  readonly fixture?: FixtureSession;
+  readonly sessionId?: string;
+  readonly runId?: string;
+  readonly approve?: boolean;
+  readonly createReplacementController?: CreativeRunControllerOptions['createReplacementController'];
+}
+
+interface BrowserRunAuthority {
+  readonly manager: AutomationSessionManager;
+  readonly target: AutomationLocalTarget;
+  readonly sessionId: string;
+  readonly runId: string;
+}
+
+async function createRun(
+  recovery?: CreativeRunRecovery,
+  options: CreateRunOptions = {},
+): Promise<{ element: PFCreativeRunPanel; controller: CreativeRunController; fixture: FixtureSession; manager: AutomationSessionManager }> {
+  const fixture = await prepareFixture(options);
+  const authority = createBrowserAuthority(fixture, options);
+  const controller = createBrowserController(authority, fixture, recovery, options);
+  if (options.approve !== false) approveBrowserRun(controller, authority.target.id);
+  const element = document.createElement('pf-creative-run-panel') as PFCreativeRunPanel;
+  element.controller = controller;
+  document.body.append(element);
+  await element.updateComplete;
+  return { element, controller, fixture, manager: authority.manager };
+}
+
+async function prepareFixture(options: CreateRunOptions): Promise<FixtureSession> {
+  const fixture = options.fixture ?? createFixtureSession();
+  if (options.fixture) return fixture;
   fixtures.push(fixture);
   await fixture.runAnimationObservation();
+  return fixture;
+}
+
+function createBrowserAuthority(
+  fixture: FixtureSession,
+  options: CreateRunOptions,
+): BrowserRunAuthority {
   const target: AutomationLocalTarget = {
     id: fixture.target.projectId,
     name: 'Creative Fixture',
@@ -162,7 +221,7 @@ async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFC
     targets: () => [target],
     isPageVisible: () => true,
     requestIdFactory: () => `creative-browser-request-${++requestNumber}`,
-    sessionIdFactory: () => 'creative-browser-session',
+    sessionIdFactory: () => options.sessionId ?? 'creative-browser-session',
   });
   managers.push(manager);
 
@@ -178,7 +237,7 @@ async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFC
   if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
   const artistRequest = manager.requestArtistMode({
     sessionId: inspectGrant.result.sessionId,
-    runId: 'creative-browser-run',
+    runId: options.runId ?? 'creative-browser-run',
     runIntent: 'Prepare one fixture title card',
     requestedWriteCategories: ['structure', 'timeline'],
     requestedTransactionLimit: 2,
@@ -188,17 +247,30 @@ async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFC
   manager.captureArtistModeTarget(artistRequest.result.requestId);
   const artistGrant = manager.approveArtistMode(artistRequest.result.requestId, ['structure', 'timeline'], 2);
   if (!artistGrant.ok) throw new Error('Expected an Artist Mode grant.');
+  return {
+    manager,
+    target,
+    sessionId: inspectGrant.result.sessionId,
+    runId: artistGrant.result.runId,
+  };
+}
 
+function createBrowserController(
+  authority: BrowserRunAuthority,
+  fixture: FixtureSession,
+  recovery: CreativeRunRecovery | undefined,
+  options: CreateRunOptions,
+): CreativeRunController {
   const layer = fixture.projectContext.layers.layers.value[0];
   if (!layer) throw new Error('Expected a fixture layer.');
   let emitted = false;
   const controller = new CreativeRunController({
-    sessionManager: manager,
-    sessionId: inspectGrant.result.sessionId,
-    runId: artistGrant.result.runId,
+    sessionManager: authority.manager,
+    sessionId: authority.sessionId,
+    runId: authority.runId,
     brief: {
-      targetId: target.id,
-      targetName: target.name,
+      targetId: authority.target.id,
+      targetName: authority.target.name,
       goal: 'Make a calm title card',
       constraints: ['Keep the existing canvas'],
       requestedWriteCategories: ['structure', 'timeline'],
@@ -208,6 +280,7 @@ async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFC
     },
     getCurrentRevision: () => fixture.projectContext.project.revision.value,
     recovery,
+    createReplacementController: options.createReplacementController,
     stepSource: () => {
       if (emitted) return null;
       emitted = true;
@@ -232,19 +305,18 @@ async function createRun(recovery?: CreativeRunRecovery): Promise<{ element: PFC
       };
     },
   });
+  return controller;
+}
+
+function approveBrowserRun(controller: CreativeRunController, targetId: string): void {
   controller.approveBrief({
     briefRevision: 1,
-    targetId: target.id,
+    targetId,
     requestedWriteCategories: ['structure', 'timeline'],
     transactionLimit: 2,
     durationSeconds: 30,
     contentEgress: 'local-only',
   });
-  const element = document.createElement('pf-creative-run-panel') as PFCreativeRunPanel;
-  element.controller = controller;
-  document.body.append(element);
-  await element.updateComplete;
-  return { element, controller, fixture, manager };
 }
 
 function deferred(): { readonly promise: Promise<void>; readonly release: () => void } {
@@ -277,10 +349,10 @@ function recoveryProvenance(
   };
 }
 
-async function createIndexedRecoveryJourney(kind: 'safe' | 'conflict'): Promise<{
+async function createIndexedRecoveryJourney(kind: 'safe' | 'conflict' | 'rewind'): Promise<{
   readonly primary: ProjectContext;
   readonly secondary: ProjectContext;
-  readonly recoveryResult: Awaited<ReturnType<CreativeRunRecoveryCoordinator['reject']>>;
+  readonly recoveryResult: CreativeRunRecoveryResult;
   readonly copyId: string | null;
   readonly checkpointDigest: string;
   readonly postRunDigest: string;
@@ -394,6 +466,19 @@ async function createIndexedRecoveryJourney(kind: 'safe' | 'conflict'): Promise<
     reloaded = new CreativeRunRecoveryCoordinator(reopenedDependencies);
     await reloaded.load();
   }
+  if (kind === 'rewind') {
+    setActiveProjectContext(primary);
+    const recoveryResult = await reloaded.rewind({ checkpoint: true });
+    expect(await secondary.project.saveProject()).toEqual(secondaryBefore);
+    return {
+      primary,
+      secondary,
+      recoveryResult,
+      copyId: null,
+      checkpointDigest,
+      postRunDigest,
+    };
+  }
   setActiveProjectContext(recoveryContext);
   const recoveryPromise = reloaded.reject(true);
   await createStartedPromise;
@@ -455,6 +540,7 @@ describe('Creative Run panel in Chromium', () => {
   it('renders recovery actions as keyboard controls and fences a busy copy action', async () => {
     const recovery = new BrowserRecoveryDouble();
     const { element, controller } = await createRun(recovery);
+    element.style.inlineSize = '240px';
     controller.stop();
     await element.updateComplete;
 
@@ -463,9 +549,30 @@ describe('Creative Run panel in Chromium', () => {
     await expect.element(reject).toBeVisible();
     await userEvent.click(reject);
     await expect.element(page.getByRole('dialog', { name: 'Confirm reject' })).toBeVisible();
+    await expect.element(page.getByText(/resets conventional undo\/redo history/)).toBeVisible();
+    await expect.poll(() => element.shadowRoot?.activeElement?.textContent?.trim()).toBe('Cancel');
+    const surface = element.shadowRoot?.querySelector<HTMLElement>('.surface');
+    expect(surface && surface.scrollWidth <= surface.clientWidth).toBe(true);
     const cancel = page.getByRole('button', { name: 'Cancel' });
     await userEvent.click(cancel);
     await expect.element(page.getByRole('dialog', { name: 'Confirm reject' })).not.toBeInTheDocument();
+
+    const checkpointRewind = page.getByRole('button', { name: 'Rewind to Checkpoint…' });
+    await userEvent.click(checkpointRewind);
+    const rewindDialog = page.getByRole('dialog', { name: 'Confirm rewind' });
+    await expect.element(rewindDialog).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(rewindDialog).not.toBeInTheDocument();
+
+    recovery.holdRewind = true;
+    await userEvent.click(checkpointRewind);
+    await userEvent.click(page.getByRole('button', { name: 'Rewind', exact: true }));
+    await expect.poll(() => recovery.calls.filter((call) => call === 'rewind').length).toBe(1);
+    await expect.element(page.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(element.shadowRoot?.querySelector('.surface-content')?.hasAttribute('inert')).toBe(true);
+    recovery.releaseHeldRewind();
+    await expect.poll(() => recovery.calls.filter((call) => call === 'rewind').length).toBe(1);
+    await expect.element(rewindDialog).not.toBeInTheDocument();
 
     recovery.holdCopy = true;
     await userEvent.click(page.getByRole('button', { name: 'Create Recovery Copy' }));
@@ -494,6 +601,95 @@ describe('Creative Run panel in Chromium', () => {
     expect(recovery.calls.filter((call) => call === 'interrupted')).toHaveLength(1);
     controller.dispose();
     await element.updateComplete;
+  });
+
+  it('persists a hidden-tab interruption when visibility changes to hidden', async () => {
+    const recovery = new BrowserRecoveryDouble();
+    const { controller } = await createRun(recovery);
+    const previousVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await expect.poll(() => recovery.calls.includes('interrupted')).toBe(true);
+      await expect.poll(() => controller.getState().phase).toBe('recovery-required');
+    } finally {
+      if (previousVisibility) {
+        Object.defineProperty(document, 'visibilityState', previousVisibility);
+      } else {
+        Reflect.deleteProperty(document, 'visibilityState');
+      }
+    }
+    expect(recovery.calls).not.toContain('copy');
+    expect(controller.getState().transactionsUsed).toBe(0);
+  });
+
+  it('hands reload recovery to a fresh observed session and rebinds the panel', async () => {
+    const recovery = new BrowserRecoveryDouble();
+    let replacement: Awaited<ReturnType<typeof createRun>> | null = null;
+    let secondReplacement: Awaited<ReturnType<typeof createRun>> | null = null;
+    const originalFixture = createFixtureSession();
+    fixtures.push(originalFixture);
+    await originalFixture.runAnimationObservation();
+    const original = await createRun(recovery, {
+      fixture: originalFixture,
+      createReplacementController: async () => {
+        const replacementRecovery = new BrowserRecoveryDouble();
+        replacement = await createRun(replacementRecovery, {
+          fixture: originalFixture,
+          sessionId: 'creative-browser-replacement-session',
+          runId: 'creative-browser-replacement-run',
+          approve: false,
+          createReplacementController: async () => {
+            secondReplacement = await createRun(undefined, {
+              fixture: originalFixture,
+              sessionId: 'creative-browser-second-replacement-session',
+              runId: 'creative-browser-second-replacement-run',
+              approve: false,
+            });
+            secondReplacement.element.remove();
+            return {
+              controller: secondReplacement.controller,
+              sessionId: 'creative-browser-second-replacement-session',
+              observedRevision: -1,
+            };
+          },
+        });
+        replacement.element.remove();
+        return {
+          controller: replacement.controller,
+          sessionId: 'creative-browser-replacement-session',
+          observedRevision: -1,
+        };
+      },
+    });
+    await original.controller.markInterrupted();
+    await expect.element(page.getByRole('button', { name: 'Resume with New Session…' })).toBeVisible();
+
+    await userEvent.click(page.getByRole('button', { name: 'Resume with New Session…' }));
+    await expect.poll(() => original.controller.replacement !== null).toBe(true);
+    expect(original.controller.replacement).not.toBeNull();
+    const replacementController = original.controller.replacement;
+    if (!replacementController) throw new Error('Expected a replacement controller.');
+    expect(replacementController.getState()).toMatchObject({
+      phase: 'draft',
+      approvedBriefRevision: null,
+      sessionId: 'creative-browser-replacement-session',
+      runId: 'creative-browser-replacement-run',
+    });
+    expect(original.controller.getState().approvedBriefRevision).toBeNull();
+    expect(original.controller.getState().phase).toBe('recovery-required');
+    await expect.element(page.getByText('Run creative-browser-replacement-run, Brief revision 1')).toBeVisible();
+    expect(replacement).not.toBeNull();
+    if (!replacement) throw new Error('Expected the first replacement controller.');
+    await replacement.controller.markInterrupted();
+    await expect.element(page.getByRole('button', { name: 'Resume with New Session…' })).toBeVisible();
+    await userEvent.click(page.getByRole('button', { name: 'Resume with New Session…' }));
+    await expect.poll(() => replacement.controller.replacement !== null).toBe(true);
+    expect(secondReplacement).not.toBeNull();
+    await expect.element(page.getByText('Run creative-browser-second-replacement-run, Brief revision 1')).toBeVisible();
   });
 
   it('runs persisted safe reject and conflict-copy journeys without crossing active tabs', async () => {
@@ -525,6 +721,15 @@ describe('Creative Run panel in Chromium', () => {
     expect(await digestProjectFile({ ...conflictCopy!, name: 'Browser recovery original' })).toBe(conflict.checkpointDigest);
     await projectRepository.delete(conflict.copyId);
     await projectRepository.delete(conflict.primary.project.id.value);
+
+    const rewind = await createIndexedRecoveryJourney('rewind');
+    expect(rewind.recoveryResult).toMatchObject({
+      ok: true,
+      outcome: 'rewound-to-owned-transaction',
+    });
+    expect(rewind.primary.project.name.value).toBe('Browser recovery original');
+    expect(rewind.primary.project.revision.value).toBe(2);
+    expect(await digestProjectFile(await rewind.primary.project.saveProject())).toBe(rewind.checkpointDigest);
   });
 
   it('lets the composed app render and control a supplied run without creating one', async () => {

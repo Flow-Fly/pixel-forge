@@ -31,17 +31,29 @@ export function isProjectSizeError(error: unknown): boolean {
 }
 
 export function isCompatibleRecord(
-  record: CreativeRunRecoveryRecord,
+  record: unknown,
   runId: string,
   target: ProjectTarget,
-): boolean {
+): record is CreativeRunRecoveryRecord {
+  if (!isRecordObject(record)) return false;
   return isRecordHeaderCompatible(record, runId, target)
     && isCheckpointCompatible(record.checkpoint, runId, target)
     && isBriefCompatible(record.brief, runId, target)
     && isRecordStateCompatible(record)
     && isValidRecoveryTimeline(record.timeline)
-    && record.transactions.every((transaction, index) =>
-      isValidStoredTransaction(transaction, index, runId, record.sessionId, target));
+    && isValidRecoveryTransactionChain(record, runId, target);
+}
+
+/** Verify the actual persisted checkpoint bytes before loading or restoring them. */
+export async function isCheckpointDigestValid(
+  record: Pick<CreativeRunRecoveryRecord, 'checkpoint'>,
+): Promise<boolean> {
+  try {
+    const digest = await digestProjectFile(record.checkpoint.project);
+    return digest === record.checkpoint.sourceDigest;
+  } catch {
+    return false;
+  }
 }
 
 function isRecordHeaderCompatible(
@@ -64,7 +76,7 @@ function isRecordIdentityCompatible(
     && record.runId === runId
     && isBoundedString(record.runId)
     && isBoundedString(record.sessionId)
-    && isBoundedString(record.phase)
+    && isPhase(record.phase)
     && isTarget(record.target, target.projectId);
 }
 
@@ -72,7 +84,8 @@ function isRecordCollectionCompatible(record: Record<string, unknown>): boolean 
   return Array.isArray(record.transactions)
     && Array.isArray(record.timeline)
     && record.transactions.length <= MAX_TRANSACTIONS
-    && record.timeline.length <= MAX_TIMELINE_ENTRIES;
+    && record.timeline.length <= MAX_TIMELINE_ENTRIES
+    && isNonNegativeBoundedInteger(record.collapsedEventCount ?? 0);
 }
 
 function isCheckpointCompatible(
@@ -137,6 +150,36 @@ function isRecordStateCompatible(record: CreativeRunRecoveryRecord): boolean {
     && isRevision(record.currentRevision)
     && isRevision(record.lastDurableRevision)
     && record.lastDurableRevision === record.currentRevision;
+}
+
+function isValidRecoveryTransactionChain(
+  record: CreativeRunRecoveryRecord,
+  runId: string,
+  target: ProjectTarget,
+): boolean {
+  let chainRevision = record.checkpoint.sourceRevision;
+  for (const [index, transaction] of record.transactions.entries()) {
+    if (!isValidStoredTransaction(transaction, index, runId, record.sessionId, target)) {
+      return false;
+    }
+    if (transaction.fromRevision !== chainRevision) {
+      if (!hasRewindBoundary(record.timeline, transaction.fromRevision)) return false;
+    }
+    chainRevision = transaction.toRevision;
+  }
+  if (record.status === 'rejected') return record.currentRevision === chainRevision + 1;
+  if (record.status === 'active' || record.status === 'interrupted') {
+    return record.currentRevision === chainRevision
+      || hasRewindBoundary(record.timeline, record.currentRevision);
+  }
+  return record.currentRevision >= chainRevision;
+}
+
+function hasRewindBoundary(
+  timeline: readonly CreativeRunRecoveryTimelineFact[],
+  revision: number,
+): boolean {
+  return timeline.some((entry) => entry.kind === 'rewound' && entry.toRevision === revision);
 }
 
 function isTarget(value: unknown, projectId: string): boolean {
@@ -245,6 +288,7 @@ function isProvenanceIdentity(
 ): boolean {
   return provenance.source === 'automation'
     && isBoundedString(provenance.transactionId)
+    && provenance.transactionId === operationId
     && isBoundedString(provenance.clientId)
     && provenance.sessionId === sessionId
     && isBoundedString(provenance.sessionId)
@@ -310,12 +354,20 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isPhase(value: unknown): value is string {
+  return ['ready', 'running', 'paused', 'recovery-required', 'rejected'].includes(value as string);
+}
+
 export function isRevision(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function isSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value);
+}
+
+function isNonNegativeBoundedInteger(value: unknown): value is number {
+  return isSafeInteger(value) && value >= 0 && value <= MAX_TIMELINE_ENTRIES;
 }
 
 export function boundedIdentity(value: string, reason: string): string {

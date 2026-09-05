@@ -17,6 +17,7 @@ import {
   digestProjectFile,
   isBoundedString,
   isCompatibleRecord,
+  isCheckpointDigestValid,
   isProjectSizeError,
   isRevision,
   isValidTransactionInput,
@@ -120,6 +121,8 @@ export interface CreativeRunRecoveryRecord {
   readonly checkpoint: CreativeRunRecoveryCheckpoint;
   readonly transactions: readonly CreativeRunRecoveryTransaction[];
   readonly timeline: readonly CreativeRunRecoveryTimelineFact[];
+  /** Number of bounded recovery events omitted from the retained timeline. */
+  readonly collapsedEventCount: number;
   readonly recoveryCopyId: string | null;
 }
 
@@ -208,6 +211,7 @@ export interface CreativeRunRecoveryDiagnosticBundle {
   readonly checkpointRevision: number | null;
   readonly checkpointDigest: string | null;
   readonly postRunDigest: string | null;
+  readonly collapsedEventCount: number;
   readonly operationIds: readonly string[];
   readonly eventKinds: readonly CreativeRunRecoveryTimelineFact['kind'][];
   readonly durationsMs: readonly number[];
@@ -241,6 +245,8 @@ export interface CreativeRunRecovery {
   checkpointBeforeFirstWrite(input: CheckpointBeforeWriteInput): Promise<CreativeRunRecoveryResult>;
   recordCommittedTransaction(input: CommittedRecoveryTransactionInput): Promise<CreativeRunRecoveryResult>;
   markInterrupted(reason?: CreativeRunRecoveryReason): Promise<CreativeRunRecoveryResult>;
+  /** Reactivate a rewound record only after fresh observation and approval. */
+  reactivateAfterReapproval(expectedRevision: number): Promise<CreativeRunRecoveryResult>;
   rewind(input: CreativeRunRecoveryRewindInput): Promise<CreativeRunRecoveryResult>;
   reject(confirmed: boolean): Promise<CreativeRunRecoveryResult>;
   createCheckpointCopy(): Promise<CreativeRunRecoveryResult>;
@@ -263,6 +269,7 @@ interface MutableRecoveryRecord {
   checkpoint: CreativeRunRecoveryCheckpoint;
   transactions: CreativeRunRecoveryTransaction[];
   timeline: CreativeRunRecoveryTimelineFact[];
+  collapsedEventCount: number;
   recoveryCopyId: string | null;
 }
 
@@ -297,6 +304,14 @@ type OwnedHistory =
 type RejectPreparation =
   | { readonly ok: true; readonly before: Extract<CapturedProject, { readonly ok: true }>; readonly recoveryCopyId: string | null; readonly restoredRevision: number }
   | { readonly ok: false; readonly result: CreativeRunRecoveryResult };
+
+type LoadedRecoveryRecord =
+  | { readonly ok: true; readonly record: CreativeRunRecoveryRecord | null }
+  | { readonly ok: false; readonly reason: CreativeRunRecoveryReason };
+
+type ReactivationSnapshot =
+  | { readonly ok: true; readonly revision: number }
+  | { readonly ok: false; readonly reason: CreativeRunRecoveryReason };
 
 /** Browser-local recovery coordinator for one Creative Run. */
 export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
@@ -337,21 +352,44 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
 
   async load(): Promise<CreativeRunRecoveryResult> {
     if (this.mutableRecord) return this.success();
-    let stored: CreativeRunRecoveryRecord | null;
+    const loaded = await this.readStoredRecord();
+    if (!loaded.ok) return this.required(loaded.reason);
+    if (!loaded.record) return this.required('checkpoint-persistence');
+    const validationReason = await this.validateStoredRecord(loaded.record);
+    if (validationReason) return this.required(validationReason);
+    this.adoptStoredRecord(loaded.record);
+    return this.success(
+      loaded.record.outcome,
+      loaded.record.reason,
+      this.requiresReapproval ? 'approve-brief' : 'none',
+    );
+  }
+
+  private async readStoredRecord(): Promise<LoadedRecoveryRecord> {
     try {
-      stored = await this.persistence.load(this.runId);
+      return { ok: true, record: await this.persistence.load(this.runId) };
     } catch {
-      return this.required('persistence-failed');
+      return { ok: false, reason: 'persistence-failed' };
     }
-    if (!stored) return this.required('checkpoint-persistence');
-    if (!isCompatibleRecord(stored, this.runId, this.target.target)) {
-      return this.required('content-ambiguous');
+  }
+
+  private async validateStoredRecord(
+    stored: CreativeRunRecoveryRecord,
+  ): Promise<CreativeRunRecoveryReason | null> {
+    if (!isCompatibleRecord(stored, this.runId, this.target.target)) return 'content-ambiguous';
+    try {
+      return await isCheckpointDigestValid(stored) ? null : 'content-ambiguous';
+    } catch {
+      return 'persistence-failed';
     }
+  }
+
+  private adoptStoredRecord(stored: CreativeRunRecoveryRecord): void {
     this.mutableRecord = cloneRecord(stored);
+    this.mutableRecord.collapsedEventCount = stored.collapsedEventCount ?? 0;
     this.interrupted = stored.status === 'interrupted' || stored.phase === 'recovery-required';
     this.terminal = stored.status === 'rejected' || stored.outcome === 'preserved-original-with-checkpoint-copy';
     this.requiresReapproval = this.interrupted || stored.status === 'rewound';
-    return this.success(stored.outcome, stored.reason, this.requiresReapproval ? 'approve-brief' : 'none');
   }
 
   async checkpointBeforeFirstWrite(
@@ -446,7 +484,22 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
   async markInterrupted(
     reason: CreativeRunRecoveryReason = 'work-unsettled',
   ): Promise<CreativeRunRecoveryResult> {
-    if (!this.mutableRecord) return this.required('checkpoint-persistence');
+    if (!this.mutableRecord) {
+      const checkpoint = await this.captureCheckpoint(this.target.getRevision());
+      if (!checkpoint.ok) return this.required(checkpoint.reason);
+      this.mutableRecord = createRecord(
+        this.runId,
+        this.sessionId,
+        this.brief,
+        this.target.target,
+        checkpoint.revision,
+        checkpoint,
+      );
+      if (!(await this.persistRecord())) {
+        this.mutableRecord = null;
+        return this.required('checkpoint-persistence');
+      }
+    }
     if (this.terminal) return this.terminalFailure();
     this.interrupted = true;
     this.mutableRecord.status = 'interrupted';
@@ -456,6 +509,40 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
     this.appendTimeline({ kind: 'interrupted', outcome: 'recovery-required', reason });
     if (!(await this.persistRecord())) return this.required('persistence-failed');
     return this.success('recovery-required', reason, 'recover-manually');
+  }
+
+  async reactivateAfterReapproval(expectedRevision: number): Promise<CreativeRunRecoveryResult> {
+    const record = this.mutableRecord;
+    if (!record?.checkpoint) return this.required('checkpoint-persistence');
+    if (this.terminal) return this.terminalFailure();
+    if (record.status !== 'rewound' || !this.requiresReapproval) {
+      return record.status === 'active' ? this.success() : this.required('work-unsettled');
+    }
+    const snapshot = await this.readReactivationSnapshot(record, expectedRevision);
+    if (!snapshot.ok) return this.required(snapshot.reason);
+    record.currentRevision = snapshot.revision;
+    record.lastDurableRevision = snapshot.revision;
+    record.status = 'active';
+    record.phase = 'running';
+    record.outcome = null;
+    record.reason = null;
+    this.requiresReapproval = false;
+    this.interrupted = false;
+    if (await this.persistRecord()) return this.success();
+    return this.required('persistence-failed');
+  }
+
+  private async readReactivationSnapshot(
+    record: MutableRecoveryRecord,
+    expectedRevision: number,
+  ): Promise<ReactivationSnapshot> {
+    if (!isRevision(expectedRevision)) return { ok: false, reason: 'revision-conflict' };
+    const current = await this.captureCurrentDigest();
+    if (!current.ok) return current;
+    if (current.revision !== expectedRevision || !matchesCurrentRecord(record, current.revision, current.digest)) {
+      return { ok: false, reason: 'content-ambiguous' };
+    }
+    return { ok: true, revision: current.revision };
   }
 
   async rewind(input: CreativeRunRecoveryRewindInput): Promise<CreativeRunRecoveryResult> {
@@ -639,6 +726,7 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
     | { readonly ok: true; readonly revision: number }
     | { readonly ok: false; readonly reason: 'restore-failed' }
   > {
+    if (!(await isCheckpointDigestValid(record))) return { ok: false, reason: 'restore-failed' };
     let transition: CreativeRunRecoveryHistoryTransition;
     try {
       transition = await this.target.restoreProject(structuredClone(record.checkpoint.project), expectedRevision);
@@ -760,6 +848,7 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
     if (!record) return;
     if (record.timeline.length >= CREATIVE_RUN_RECOVERY_MAX_TIMELINE_ENTRIES) {
       record.timeline.splice(0, 1);
+      record.collapsedEventCount += 1;
     }
     const sequence = (record.timeline.at(-1)?.sequence ?? 0) + 1;
     record.timeline.push({ sequence, ...entry });
@@ -795,6 +884,7 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
   }
 
   private async required(reason: CreativeRunRecoveryReason): Promise<CreativeRunRecoveryResult> {
+    let durable = true;
     if (this.mutableRecord) {
       this.mutableRecord.status = 'recovery-required';
       this.mutableRecord.phase = 'recovery-required';
@@ -803,12 +893,14 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
       this.appendTimeline({ kind: 'recovery-required', outcome: 'recovery-required', reason });
       // The caller has already stopped future work; record the failure before
       // returning so recovery-required is never only an in-memory claim.
-      await this.persistRecord();
+      durable = await this.persistRecord();
     }
+    const effectiveReason = durable ? reason : 'persistence-failed';
+    if (!durable && this.mutableRecord) this.mutableRecord.reason = effectiveReason;
     return {
       ok: false,
       outcome: 'recovery-required',
-      reason,
+      reason: effectiveReason,
       nextAction: 'recover-manually',
       recoveryCopyId: this.mutableRecord?.recoveryCopyId ?? null,
     };
@@ -852,6 +944,7 @@ function createRecord(
       fromRevision: revision,
       toRevision: revision,
     }],
+    collapsedEventCount: 0,
     recoveryCopyId: null,
   };
 }

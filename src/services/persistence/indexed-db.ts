@@ -213,7 +213,9 @@ export class IndexedDbCreativeRunRecoveryPersistence implements CreativeRunRecov
   async load(runId: string): Promise<CreativeRunRecoveryRecord | null> {
     const db = await this.dbPromise;
     const record = await db.get('creativeRunRecovery', runId);
-    return record ? structuredClone(record) : null;
+    if (!record) return null;
+    const cloned = structuredClone(record) as CreativeRunRecoveryRecord & { collapsedEventCount?: number };
+    return { ...cloned, collapsedEventCount: cloned.collapsedEventCount ?? 0 };
   }
 
   async save(record: CreativeRunRecoveryRecord): Promise<void> {

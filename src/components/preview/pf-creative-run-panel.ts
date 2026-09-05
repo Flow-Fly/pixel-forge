@@ -314,36 +314,40 @@ export class PFCreativeRunPanel extends LitElement {
 
   protected updated(): void {
     this.bindController();
+    this.syncConfirmationDialog();
   }
 
   protected render() {
-    const controller = this.controller;
+    const controller = this.activeController;
     if (!controller) {
       return this.renderEmpty();
     }
 
     const state = controller.getState();
+    const modalOpen = this.pendingConfirmation !== null;
     return html`
       <section class="surface" aria-labelledby="creative-run-title">
-        <div>
-          <h2 id="creative-run-title">Creative Run</h2>
-          <p class="muted">Run ${state.runId}, Brief revision ${state.brief.revision}</p>
+        <div class="surface-content" ?inert=${modalOpen}>
+          <div>
+            <h2 id="creative-run-title">Creative Run</h2>
+            <p class="muted">Run ${state.runId}, Brief revision ${state.brief.revision}</p>
+          </div>
+          ${this.renderBrief(state)}
+          ${this.renderAuthority(state)}
+
+          <fieldset class="toolbar">
+            <legend>Creative Run controls</legend>
+            ${this.renderControls(state)}
+          </fieldset>
+          ${this.renderRecoverySummary(state)}
+          ${this.renderError(state)}
+          ${this.renderTimeline(state)}
+
+          <pf-agent-preview-surface
+            .observation=${this.previewObservation}
+            .error=${this.previewError}
+          ></pf-agent-preview-surface>
         </div>
-        ${this.renderBrief(state)}
-        ${this.renderAuthority(state)}
-
-        <fieldset class="toolbar">
-          <legend>Creative Run controls</legend>
-          ${this.renderControls(state)}
-        </fieldset>
-        ${this.renderRecoverySummary(state)}
-        ${this.renderError(state)}
-        ${this.renderTimeline(state)}
-
-        <pf-agent-preview-surface
-          .observation=${this.previewObservation}
-          .error=${this.previewError}
-        ></pf-agent-preview-surface>
 
         ${this.renderConfirmationDialog(state)}
       </section>
@@ -454,7 +458,7 @@ export class PFCreativeRunPanel extends LitElement {
 
   // fallow-ignore-next-line complexity -- Controls are conditionally rendered for each supervised lifecycle phase.
   private renderControls(state: CreativeRunState) {
-    const controller = this.controller;
+    const controller = this.activeController;
     if (!controller) return nothing;
     const approveDisabled = state.approvedBriefRevision === state.brief.revision
       || state.phase === 'running'
@@ -486,6 +490,9 @@ export class PFCreativeRunPanel extends LitElement {
         : nothing}
       ${state.recovery && (state.phase === 'paused' || state.phase === 'stopped')
         ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => this.requestCheckpointRewind()}>
+              Rewind to Checkpoint…
+            </button>
             <button type="button" ?disabled=${this.actionBusy} @click=${() => this.requestReject()}>
               Reject Run…
             </button>
@@ -535,7 +542,7 @@ export class PFCreativeRunPanel extends LitElement {
 
   private actionBusy = false;
   private diagnosticsOpen = false;
-  private pendingConfirmation: { readonly kind: 'reject' | 'rewind'; readonly operationId?: string } | null = null;
+  private pendingConfirmation: { readonly kind: 'reject' | 'rewind'; readonly operationId?: string; readonly checkpoint?: boolean } | null = null;
 
   private requestReject(): void {
     this.pendingConfirmation = { kind: 'reject' };
@@ -547,21 +554,29 @@ export class PFCreativeRunPanel extends LitElement {
     this.requestUpdate();
   }
 
+  private requestCheckpointRewind(): void {
+    this.pendingConfirmation = { kind: 'rewind', checkpoint: true };
+    this.requestUpdate();
+  }
+
   private renderConfirmationDialog(state: CreativeRunState) {
     const pending = this.pendingConfirmation;
     if (!pending) return nothing;
     const rewind = pending.kind === 'rewind';
+    const checkpoint = pending.checkpoint === true;
     return html`
-      <dialog open aria-labelledby="creative-run-confirm-title" aria-describedby="creative-run-confirm-copy">
+      <dialog aria-modal="true" aria-labelledby="creative-run-confirm-title" aria-describedby="creative-run-confirm-copy" @cancel=${this.handleDialogCancel}>
         <h3 id="creative-run-confirm-title">${rewind ? 'Confirm rewind' : 'Confirm reject'}</h3>
         <p id="creative-run-confirm-copy">
           ${rewind
-            ? 'Later Creative Run transactions will be undone through the owned history boundary. The selected transaction remains, and a fresh observation and approval will be required.'
-            : 'The rejected result will be preserved under a fresh Recovery Copy before the original checkpoint is restored. Later edits stop this restore and remain untouched.'}
+            ? checkpoint
+              ? 'All owned Creative Run transactions will be undone through the owned history boundary to the pre-run checkpoint. A fresh observation and approval will be required.'
+              : 'Later Creative Run transactions will be undone through the owned history boundary. The selected transaction remains, and a fresh observation and approval will be required.'
+            : 'The rejected result will be preserved under a fresh Recovery Copy before the original checkpoint is restored. Later edits stop this restore and remain untouched. A successful in-place reject resets conventional undo/redo history; both states remain recoverable.'}
         </p>
         <p class="muted">Project: ${state.target.name}. No copy is deleted or overwritten.</p>
         <div class="dialog-actions">
-          <button type="button" @click=${this.cancelConfirmation}>Cancel</button>
+          <button type="button" autofocus ?disabled=${this.actionBusy} @click=${this.cancelConfirmation}>Cancel</button>
           <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.confirmPendingAction()}>
             ${rewind ? 'Rewind' : 'Reject Run'}
           </button>
@@ -571,20 +586,25 @@ export class PFCreativeRunPanel extends LitElement {
   }
 
   private cancelConfirmation = (): void => {
+    if (this.actionBusy) return;
+    const dialog = this.renderRoot.querySelector<HTMLDialogElement>('dialog');
+    if (dialog?.open) dialog.close();
     this.pendingConfirmation = null;
     this.requestUpdate();
   };
 
   private async confirmPendingAction(): Promise<void> {
     const pending = this.pendingConfirmation;
-    const controller = this.controller;
+    const controller = this.activeController;
     if (!pending || !controller) return;
-    this.pendingConfirmation = null;
     if (pending.kind === 'rewind' && pending.operationId) {
       await this.runAction(() => controller.rewind({ operationId: pending.operationId }));
+    } else if (pending.kind === 'rewind' && pending.checkpoint) {
+      await this.runAction(() => controller.rewind({ checkpoint: true }));
     } else {
       await this.runAction(() => controller.reject(true));
     }
+    this.cancelConfirmation();
   }
 
   private async runAction(action: () => Promise<unknown>): Promise<void> {
@@ -605,12 +625,38 @@ export class PFCreativeRunPanel extends LitElement {
   }
 
   private bindController(): void {
-    if (this.observedController === this.controller) return;
+    const controller = this.activeController;
+    if (this.observedController === controller) return;
     this.unbindController();
-    if (!this.controller) return;
-    this.observedController = this.controller;
+    if (!controller) return;
+    this.observedController = controller;
     this.observedController.events.addEventListener('creative-run-state-changed', this.handleControllerChange);
   }
+
+  private get activeController(): CreativeRunController | null {
+    let current = this.controller;
+    const visited = new Set<CreativeRunController>();
+    while (current?.replacement && !visited.has(current)) {
+      visited.add(current);
+      current = current.replacement;
+    }
+    return current;
+  }
+
+  private syncConfirmationDialog(): void {
+    const dialog = this.renderRoot.querySelector<HTMLDialogElement>('dialog');
+    if (!dialog || !this.pendingConfirmation) return;
+    if (!dialog.open) dialog.showModal();
+    this.renderRoot.querySelector<HTMLElement>('dialog [autofocus]')?.focus();
+  }
+
+  private readonly handleDialogCancel = (event: Event): void => {
+    if (this.actionBusy) {
+      event.preventDefault();
+      return;
+    }
+    this.cancelConfirmation();
+  };
 
   private unbindController(): void {
     this.observedController?.events.removeEventListener('creative-run-state-changed', this.handleControllerChange);

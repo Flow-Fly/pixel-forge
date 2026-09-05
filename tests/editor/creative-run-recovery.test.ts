@@ -230,6 +230,44 @@ describe('CreativeRunRecoveryCoordinator', () => {
     expect(recovery.record).toBeNull();
   });
 
+  it('lazily checkpoints an approved target before recording interruption', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+
+    await expect(recovery.markInterrupted()).resolves.toMatchObject({
+      ok: true,
+      reason: 'work-unsettled',
+    });
+    expect(recovery.record?.checkpoint.sourceRevision).toBe(0);
+    expect(persistence.getRecord()?.status).toBe('interrupted');
+  });
+
+  it('reports persistence-failed when an interruption transition cannot be durable', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    persistence.setFail(true);
+
+    await expect(recovery.markInterrupted()).resolves.toMatchObject({
+      ok: false,
+      reason: 'persistence-failed',
+    });
+  });
+
   it('rewinds only later owned transactions in reverse order with monotonic revisions', async () => {
     const target = createTarget();
     const persistence = createPersistence();
@@ -338,6 +376,55 @@ describe('CreativeRunRecoveryCoordinator', () => {
     expect(latestRecovery.status.requiresReapproval).toBe(true);
   });
 
+  it('reactivates a rewound record only after the retained state is freshly observed', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(recovery, target, 1);
+    await recordTransaction(recovery, target, 2);
+    await recovery.rewind({ operationId: 'op-1' });
+    target.setProject({ ...target.getProject(), name: 'Result 1' }, 3);
+
+    await expect(recovery.reactivateAfterReapproval(3)).resolves.toMatchObject({ ok: true });
+    expect(recovery.status.requiresReapproval).toBe(false);
+    expect(recovery.record?.status).toBe('active');
+    expect(persistence.getRecord()?.status).toBe('active');
+
+    const reloaded = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'replacement-session',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(reloaded.load()).resolves.toMatchObject({ ok: true });
+    target.setProject({ ...target.getProject(), name: 'Result 2' }, 4);
+    target.addHistory('op-2-after-rewind', 2, 3, 4);
+    await expect(reloaded.recordCommittedTransaction({
+      operationId: 'op-2-after-rewind',
+      ordinal: 2,
+      fromRevision: 3,
+      toRevision: 4,
+      provenance: provenance('op-2-after-rewind', 3, 4),
+      durationMs: 20,
+    })).resolves.toMatchObject({ ok: true });
+    const resumedReload = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'replacement-session-2',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(resumedReload.load()).resolves.toMatchObject({ ok: true });
+  });
+
   it.each([
     ['foreign history', 'history-not-owned' as const, (target: ReturnType<typeof createTarget>) => {
       target.historyEntries[target.historyEntries.length - 1] = {
@@ -416,6 +503,31 @@ describe('CreativeRunRecoveryCoordinator', () => {
     expect(target.copies.get('copy-1')?.name).toBe('Rejected Result Recovery Copy');
     expect(target.getProject().name).toBe('Result 1');
     expect(target.getRevision()).toBe(1);
+  });
+
+  it('rejects a restore that does not report one exact forward revision', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: {
+        ...target.target,
+        restoreProject: async (next, expectedRevision) => {
+          target.setProject(next, expectedRevision + 2);
+          return { fromRevision: expectedRevision, toRevision: expectedRevision + 2 };
+        },
+      },
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    await recordTransaction(recovery, target, 1);
+
+    await expect(recovery.reject(true)).resolves.toMatchObject({ ok: false, reason: 'restore-failed' });
+    expect(target.copies.get('copy-1')?.name).toBe('Rejected Result Recovery Copy');
+    expect(target.getProject().name).toBe('Original project');
+    expect(target.getRevision()).toBe(3);
   });
 
   it('does not replay a terminal run or mutate its durable rejected record', async () => {
@@ -539,5 +651,70 @@ describe('CreativeRunRecoveryCoordinator', () => {
     });
     await expect(reloaded.load()).resolves.toMatchObject({ ok: false, reason: 'content-ambiguous' });
     expect(reloaded.record).toBeNull();
+  });
+
+  it('verifies checkpoint bytes and the transaction revision chain before loading', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const first = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await first.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    const stored = persistence.getRecord();
+    if (!stored) throw new Error('Expected persisted recovery data.');
+    persistence.setRecord({
+      ...stored,
+      checkpoint: { ...stored.checkpoint, project: { ...stored.checkpoint.project, name: 'Tampered' } },
+    });
+
+    const tampered = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(tampered.load()).resolves.toMatchObject({ ok: false, reason: 'content-ambiguous' });
+    expect(tampered.record).toBeNull();
+
+    persistence.setRecord(stored);
+    await recordTransaction(first, target, 1);
+    const withTransaction = persistence.getRecord();
+    if (!withTransaction) throw new Error('Expected persisted transaction data.');
+    persistence.setRecord({
+      ...withTransaction,
+      transactions: [{ ...withTransaction.transactions[0], fromRevision: 4 }],
+    });
+    const brokenChain = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(brokenChain.load()).resolves.toMatchObject({ ok: false, reason: 'content-ambiguous' });
+  });
+
+  it('retains collapsed recovery events in bounded diagnostics', async () => {
+    const target = createTarget();
+    const persistence = createPersistence();
+    const recovery = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'session-587',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await recovery.checkpointBeforeFirstWrite({ expectedRevision: 0 });
+    for (let index = 0; index < 205; index += 1) await recovery.markInterrupted();
+
+    const diagnostics = recovery.getDiagnostics();
+    expect(diagnostics.collapsedEventCount).toBeGreaterThan(0);
+    expect(diagnostics.eventCount).toBeGreaterThan(200);
+    expect(persistence.getRecord()?.collapsedEventCount).toBe(diagnostics.collapsedEventCount);
   });
 });
