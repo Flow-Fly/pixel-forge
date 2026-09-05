@@ -1005,7 +1005,7 @@ export class CreativeRunController {
     if (typeof window === 'undefined') return;
     window.addEventListener('offline', this.handleOffline);
     window.addEventListener('orientationchange', this.handleOrientationChange);
-    window.addEventListener('freeze', this.handleFreeze);
+    document.addEventListener('freeze', this.handleFreeze);
     window.addEventListener('pagehide', this.handlePageHide);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
   }
@@ -1016,7 +1016,7 @@ export class CreativeRunController {
     if (typeof window === 'undefined') return;
     window.removeEventListener('offline', this.handleOffline);
     window.removeEventListener('orientationchange', this.handleOrientationChange);
-    window.removeEventListener('freeze', this.handleFreeze);
+    document.removeEventListener('freeze', this.handleFreeze);
     window.removeEventListener('pagehide', this.handlePageHide);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   }

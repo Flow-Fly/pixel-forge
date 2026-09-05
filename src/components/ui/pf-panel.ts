@@ -4,6 +4,8 @@ import { BaseComponent } from "../../core/base-component";
 import { panelStore, type PanelId } from "../../stores/panels";
 import { scrollbarStyles } from "../../styles/scrollbar-styles";
 
+let panelContentSequence = 0;
+
 /**
  * Reusable panel component with optional collapsible behavior.
  * Wraps content components and provides a consistent header.
@@ -21,6 +23,8 @@ import { scrollbarStyles } from "../../styles/scrollbar-styles";
  */
 @customElement("pf-panel")
 export class PFPanel extends BaseComponent {
+  private readonly contentId = `pf-panel-content-${++panelContentSequence}`;
+
   static styles = css`
     ${scrollbarStyles}
 
@@ -151,7 +155,7 @@ export class PFPanel extends BaseComponent {
       display: none;
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 760px), (max-height: 500px) and (orientation: landscape) {
       .header-toggle {
         min-height: 44px;
       }
@@ -200,6 +204,7 @@ export class PFPanel extends BaseComponent {
                 class="header-toggle"
                 type="button"
                 aria-expanded=${String(!this.collapsed)}
+                aria-controls=${this.contentId}
                 @click=${this.handleHeaderClick}
               >
                 <span class="header-left">
@@ -219,7 +224,13 @@ export class PFPanel extends BaseComponent {
         </div>
       </div>
 
-      <div class="content" data-scrollbar="vertical">
+      <div
+        id=${this.contentId}
+        class="content"
+        data-scrollbar="vertical"
+        ?hidden=${this.collapsed}
+        ?inert=${this.collapsed}
+      >
         <div class="content-inner">
           <slot></slot>
         </div>

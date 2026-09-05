@@ -290,10 +290,10 @@ export class PixelForgeApp extends BaseComponent {
     /* Agent Mode keeps the artwork viewport above its supervision surface on
        narrow screens. The desktop side panels are intentionally not allowed
        to compete for the portrait result surface. */
-    @media (max-width: 760px) {
+    @media (max-width: 760px), (max-height: 500px) and (orientation: landscape) {
       :host([data-agent-mode]) {
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: 48px 36px minmax(min(160px, 24vh), 1fr) minmax(0, 38vh) 28px;
+        grid-template-rows: 48px 36px minmax(min(160px, 24vh), 1fr) minmax(0, 22vh) 28px;
         height: 100dvh;
         min-width: 0;
         min-height: 100dvh;
@@ -319,6 +319,10 @@ export class PixelForgeApp extends BaseComponent {
         grid-row: 3;
         min-width: 0;
         min-height: 0;
+      }
+
+      :host([data-agent-mode]) .workspace > pf-project-tabs {
+        display: none;
       }
 
       :host([data-agent-mode]) .workspace > pf-preview-overlay {
@@ -369,7 +373,7 @@ export class PixelForgeApp extends BaseComponent {
       }
     }
 
-    @media (max-width: 760px) and (orientation: landscape) {
+    @media (max-width: 760px) and (orientation: landscape), (max-height: 500px) and (orientation: landscape) {
       :host([data-agent-mode]) {
         grid-template-columns: minmax(0, 1fr) minmax(280px, 42vw);
         grid-template-rows: 48px 36px minmax(0, 1fr) 28px;
@@ -1045,6 +1049,12 @@ export class PixelForgeApp extends BaseComponent {
     this.requestUpdate();
   };
 
+  private isCompactAgentViewport(): boolean {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth <= 760
+      || (window.innerHeight <= 500 && window.innerWidth > window.innerHeight);
+  }
+
   private handleSidebarResizeStart = (event: PointerEvent) => {
     const { min, max } = this.sidebarWidthBounds;
     if (this.isResizingSidebar || event.button !== 0 || min === max) return;
@@ -1312,7 +1322,9 @@ export class PixelForgeApp extends BaseComponent {
                 class="timeline-container"
                 style="height: ${this.timelineHeight}px;"
               >
-                <pf-timeline></pf-timeline>
+                <pf-timeline
+                  .compact=${this.creativeRunController !== null && this.isCompactAgentViewport()}
+                ></pf-timeline>
               </div>
             `
           : ""}

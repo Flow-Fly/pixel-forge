@@ -1,5 +1,5 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { html, css, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext } from '../../stores/project-context';
 import { AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
@@ -78,15 +78,17 @@ export class PFPlaybackControls extends BaseComponent {
       color: var(--pf-color-text-main);
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 760px), (max-height: 500px) and (orientation: landscape) {
       button,
       .unit-toggle {
         min-height: 44px;
+        min-width: 44px;
       }
     }
   `;
 
   @state() private durationUnit: 'ms' | 'fps' = 'ms';
+  @property({ type: Boolean }) compact = false;
   private context = defaultProjectContext;
 
   // fallow-ignore-next-line code-duplication -- Playback and timeline-header controls independently subscribe to the active project context.
@@ -174,41 +176,45 @@ export class PFPlaybackControls extends BaseComponent {
         &gt;|
       </button>
 
-      <div
-        style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
-      ></div>
+      ${this.compact
+        ? nothing
+        : html`
+            <div
+              style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
+            ></div>
 
-      <button
-        type="button"
-        @click=${this.addFrame}
-        title=${guidedProject ? 'Guided projects keep one frame' : 'Add Duplicate Frame'}
-        ?disabled=${guidedProject}
-      >
-        + Frame
-      </button>
-      <button
-        type="button"
-        @click=${this.deleteFrame}
-        title=${guidedProject ? 'Guided projects keep one frame' : 'Delete Current Frame'}
-        ?disabled=${guidedProject || frameCount <= 1}
-      >
-        - Frame
-      </button>
+            <button
+              type="button"
+              @click=${this.addFrame}
+              title=${guidedProject ? 'Guided projects keep one frame' : 'Add Duplicate Frame'}
+              ?disabled=${guidedProject}
+            >
+              + Frame
+            </button>
+            <button
+              type="button"
+              @click=${this.deleteFrame}
+              title=${guidedProject ? 'Guided projects keep one frame' : 'Delete Current Frame'}
+              ?disabled=${guidedProject || frameCount <= 1}
+            >
+              - Frame
+            </button>
 
-      <span class="info-text">
-        ${frameCount} Frames |
-        <button
-          type="button"
-          class="unit-toggle"
-          @click=${this.toggleUnit}
-          aria-label="Toggle playback duration units"
-          title="Click to toggle between duration and FPS"
-        >
-          ${
-            this.durationUnit === 'fps' ? `${effectiveFPS} FPS` : this.formatDuration(totalDuration)
-          }
-        </button>
-      </span>
+            <span class="info-text">
+              ${frameCount} Frames |
+              <button
+                type="button"
+                class="unit-toggle"
+                @click=${this.toggleUnit}
+                aria-label="Toggle playback duration units"
+                title="Click to toggle between duration and FPS"
+              >
+                ${
+                  this.durationUnit === 'fps' ? `${effectiveFPS} FPS` : this.formatDuration(totalDuration)
+                }
+              </button>
+            </span>
+          `}
     `;
   }
 }

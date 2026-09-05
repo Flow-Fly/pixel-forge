@@ -474,7 +474,7 @@ export class PFCreativeRunPanel extends LitElement {
     return html`
       <section class="authority" aria-labelledby="creative-run-authority-title">
         <h3 id="creative-run-authority-title">Run authority</h3>
-        <p class="status" role="status">${formatPhase(state.phase)}</p>
+        <p class="status" role="status">${formatStatus(state)}</p>
         <dl>
           <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
           <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
@@ -497,7 +497,7 @@ export class PFCreativeRunPanel extends LitElement {
             : 'The original project and any later edits remain preserved. Recovery never reuses or deletes a project key.'}
         </p>
         ${state.recovery.interrupted
-          ? html`<p role="status">This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
+          ? html`<p>This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
           : nothing}
       </section>
     `;
@@ -775,18 +775,24 @@ function formatPhase(phase: CreativeRunPhase): string {
   return phase.replaceAll('-', ' ');
 }
 
+function formatStatus(state: CreativeRunState): string {
+  const phase = formatPhase(state.phase);
+  if (!state.recovery?.interrupted) return phase;
+  return `${phase}. This run was interrupted; a new session, fresh observation, and approval are required before writing.`;
+}
+
 function formatGrant(state: CreativeRunState): string {
   if (!state.grant) return 'Not available';
   return `${state.grant.status}, ${state.grant.categories.join(', ')}`;
 }
 
 function formatLastAction(state: CreativeRunState): string {
+  if (state.packagePreparedRevision !== null) {
+    return `Package prepared · revision ${state.packagePreparedRevision}`;
+  }
   const transaction = state.lastDurableResult;
   if (transaction) {
     return `${transaction.profile} transaction · revision ${transaction.fromRevision} → ${transaction.toRevision}`;
-  }
-  if (state.packagePreparedRevision !== null) {
-    return `Package prepared · revision ${state.packagePreparedRevision}`;
   }
   if (state.phase === 'draft') return 'No committed action yet';
   if (state.phase === 'recovery-required') return 'Recovery required before another write';
