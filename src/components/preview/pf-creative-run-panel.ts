@@ -226,6 +226,62 @@ export class PFCreativeRunPanel extends LitElement {
       overflow-wrap: anywhere;
     }
 
+    .timeline-action {
+      justify-self: start;
+      min-height: 32px;
+      margin-top: 4px;
+    }
+
+    .recovery-summary {
+      border: 1px solid var(--creative-run-border);
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+    }
+
+    .recovery-summary strong {
+      color: var(--creative-run-accent);
+      font-size: 0.8125rem;
+    }
+
+    .recovery-summary p {
+      font-size: 0.75rem;
+      line-height: 1.45;
+    }
+
+    dialog {
+      background: var(--creative-run-panel);
+      border: 1px solid var(--creative-run-border);
+      border-radius: 8px;
+      color: var(--creative-run-text);
+      max-inline-size: min(28rem, calc(100vw - 2rem));
+      padding: 16px;
+    }
+
+    dialog::backdrop {
+      background: rgb(0 0 0 / 55%);
+    }
+
+    .dialog-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: end;
+      margin-top: 12px;
+    }
+
+    .diagnostics {
+      background: #101720;
+      border: 1px solid var(--creative-run-border);
+      font-size: 0.6875rem;
+      line-height: 1.35;
+      max-block-size: 180px;
+      overflow: auto;
+      padding: 8px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
     pf-agent-preview-surface {
       margin-top: 2px;
     }
@@ -258,104 +314,157 @@ export class PFCreativeRunPanel extends LitElement {
 
   protected updated(): void {
     this.bindController();
+    this.syncConfirmationDialog();
   }
 
   protected render() {
-    const controller = this.controller;
+    const controller = this.activeController;
     if (!controller) {
-      return html`
-        <section class="surface" aria-labelledby="creative-run-title">
-          <h2 id="creative-run-title">Creative Run</h2>
-          <p class="empty" role="status">No active Creative Run.</p>
-        </section>
-      `;
+      return this.renderEmpty();
     }
 
     const state = controller.getState();
+    const modalOpen = this.pendingConfirmation !== null;
     return html`
       <section class="surface" aria-labelledby="creative-run-title">
-        <div>
-          <h2 id="creative-run-title">Creative Run</h2>
-          <p class="muted">Run ${state.runId}, Brief revision ${state.brief.revision}</p>
+        <div class="surface-content" ?inert=${modalOpen}>
+          <div>
+            <h2 id="creative-run-title">Creative Run</h2>
+            <p class="muted">Run ${state.runId}, Brief revision ${state.brief.revision}</p>
+          </div>
+          ${this.renderBrief(state)}
+          ${this.renderAuthority(state)}
+
+          <fieldset class="toolbar">
+            <legend>Creative Run controls</legend>
+            ${this.renderControls(state)}
+          </fieldset>
+          ${this.renderRecoverySummary(state)}
+          ${this.renderError(state)}
+          ${this.renderTimeline(state)}
+
+          <pf-agent-preview-surface
+            .observation=${this.previewObservation}
+            .error=${this.previewError}
+          ></pf-agent-preview-surface>
         </div>
 
-        <section class="brief" aria-labelledby="creative-run-brief-title">
-          <h3 id="creative-run-brief-title">Approved Creative Brief</h3>
-          <div class="brief-copy">
-            <p><strong>Goal:</strong> ${state.brief.goal}</p>
-            ${state.brief.constraints.length > 0
-              ? html`<p><strong>Constraints:</strong> ${state.brief.constraints.join(' · ')}</p>`
-              : nothing}
-          </div>
-          <dl>
-            <dt>Approval</dt><dd>${state.approvedBriefRevision === state.brief.revision ? `Approved revision ${state.brief.revision}` : 'Creator approval required'}</dd>
-            <dt>Project</dt><dd>${state.target.name}</dd>
-            <dt>Requested authority</dt><dd>${state.brief.requestedWriteCategories.join(', ')}</dd>
-            <dt>Content posture</dt><dd>${state.brief.contentEgress}</dd>
-            <dt>Duration</dt><dd>${state.brief.durationSeconds}s</dd>
-          </dl>
-        </section>
-
-        <section class="authority" aria-labelledby="creative-run-authority-title">
-          <h3 id="creative-run-authority-title">Run authority</h3>
-          <p class="status" role="status">${formatPhase(state.phase)}</p>
-          <dl>
-            <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
-            <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
-            <dt>Revision</dt><dd>${state.currentRevision} (last durable ${state.lastDurableRevision})</dd>
-            <dt>Grant</dt><dd>${state.grant ? formatGrant(state) : 'Not available'}</dd>
-          </dl>
-        </section>
-
-        <fieldset class="toolbar">
-          <legend>Creative Run controls</legend>
-          ${this.renderControls(state)}
-        </fieldset>
-
-        ${state.error
-          ? html`<p class="error" role="alert">${state.error.code}. Next action: ${state.error.nextAction}.</p>`
-          : nothing}
-
-        <section class="timeline" aria-labelledby="creative-run-timeline-title">
-          <h3 id="creative-run-timeline-title">Activity</h3>
-          ${state.collapsedTimelineEntries > 0
-            ? html`<p class="muted">${state.collapsedTimelineEntries} older entries collapsed.</p>`
-            : nothing}
-          <ol class="timeline-list">
-            ${state.timeline.map((entry) => html`
-              <li class="timeline-entry">
-                ${entry.kind === 'transaction'
-                  ? html`
-                      <details class="transaction-detail">
-                        <summary>${entryLabel(entry)}</summary>
-                        <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
-                      </details>
-                    `
-                  : html`
-                      <strong>${entryLabel(entry)}</strong>
-                      <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
-                    `}
-              </li>
-            `)}
-          </ol>
-        </section>
-
-        <pf-agent-preview-surface
-          .observation=${this.previewObservation}
-          .error=${this.previewError}
-        ></pf-agent-preview-surface>
+        ${this.renderConfirmationDialog(state)}
       </section>
+    `;
+  }
+
+  private renderEmpty() {
+    return html`
+      <section class="surface" aria-labelledby="creative-run-title">
+        <h2 id="creative-run-title">Creative Run</h2>
+        <p class="empty" role="status">No active Creative Run.</p>
+      </section>
+    `;
+  }
+
+  private renderBrief(state: CreativeRunState) {
+    return html`
+      <section class="brief" aria-labelledby="creative-run-brief-title">
+        <h3 id="creative-run-brief-title">Approved Creative Brief</h3>
+        <div class="brief-copy">
+          <p><strong>Goal:</strong> ${state.brief.goal}</p>
+          ${state.brief.constraints.length > 0
+            ? html`<p><strong>Constraints:</strong> ${state.brief.constraints.join(' · ')}</p>`
+            : nothing}
+        </div>
+        <dl>
+          <dt>Approval</dt><dd>${state.approvedBriefRevision === state.brief.revision ? `Approved revision ${state.brief.revision}` : 'Creator approval required'}</dd>
+          <dt>Project</dt><dd>${state.target.name}</dd>
+          <dt>Requested authority</dt><dd>${state.brief.requestedWriteCategories.join(', ')}</dd>
+          <dt>Content posture</dt><dd>${state.brief.contentEgress}</dd>
+          <dt>Duration</dt><dd>${state.brief.durationSeconds}s</dd>
+        </dl>
+      </section>
+    `;
+  }
+
+  private renderAuthority(state: CreativeRunState) {
+    return html`
+      <section class="authority" aria-labelledby="creative-run-authority-title">
+        <h3 id="creative-run-authority-title">Run authority</h3>
+        <p class="status" role="status">${formatPhase(state.phase)}</p>
+        <dl>
+          <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
+          <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
+          <dt>Revision</dt><dd>${state.currentRevision} (last durable ${state.lastDurableRevision})</dd>
+          <dt>Grant</dt><dd>${state.grant ? formatGrant(state) : 'Not available'}</dd>
+        </dl>
+      </section>
+    `;
+  }
+
+  private renderRecoverySummary(state: CreativeRunState) {
+    if (!state.recovery) return nothing;
+    return html`
+      <section class="recovery-summary" aria-labelledby="creative-run-recovery-title">
+        <strong id="creative-run-recovery-title">Recovery safety</strong>
+        <p>
+          ${state.recovery.recoveryCopyId
+            ? `A Recovery Copy is preserved (${state.recovery.recoveryCopyId}). The original project remains unchanged until a confirmed action completes.`
+            : 'The original project and any later edits remain preserved. Recovery never reuses or deletes a project key.'}
+        </p>
+        ${state.recovery.interrupted
+          ? html`<p role="status">This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
+          : nothing}
+      </section>
+    `;
+  }
+
+  private renderError(state: CreativeRunState) {
+    return state.error
+      ? html`<p class="error" role="alert">${state.error.code}. Next action: ${state.error.nextAction}.</p>`
+      : nothing;
+  }
+
+  private renderTimeline(state: CreativeRunState) {
+    return html`
+      <section class="timeline" aria-labelledby="creative-run-timeline-title">
+        <h3 id="creative-run-timeline-title">Activity</h3>
+        ${state.collapsedTimelineEntries > 0
+          ? html`<p class="muted">${state.collapsedTimelineEntries} older entries collapsed.</p>`
+          : nothing}
+        <ol class="timeline-list">
+          ${state.timeline.map((entry) => this.renderTimelineEntry(entry, state))}
+        </ol>
+      </section>
+    `;
+  }
+
+  private renderTimelineEntry(entry: CreativeRunState['timeline'][number], state: CreativeRunState) {
+    if (entry.kind !== 'transaction') {
+      return html`<li class="timeline-entry"><strong>${entryLabel(entry)}</strong><span>t=${entry.timestamp} · ${entryDetails(entry)}</span></li>`;
+    }
+    return html`
+      <li class="timeline-entry">
+        <details class="transaction-detail">
+          <summary>${entryLabel(entry)}</summary>
+          <span>t=${entry.timestamp} · ${entryDetails(entry)}</span>
+          ${entry.operationId && state.recovery
+            ? html`<button class="timeline-action" type="button" ?disabled=${this.actionBusy}
+                @click=${() => this.requestRewind(entry.operationId!)}>
+                Rewind after this transaction
+              </button>`
+            : nothing}
+        </details>
+      </li>
     `;
   }
 
   // fallow-ignore-next-line complexity -- Controls are conditionally rendered for each supervised lifecycle phase.
   private renderControls(state: CreativeRunState) {
-    const controller = this.controller;
+    const controller = this.activeController;
     if (!controller) return nothing;
     const approveDisabled = state.approvedBriefRevision === state.brief.revision
       || state.phase === 'running'
       || state.phase === 'pausing'
-      || state.phase === 'stopping';
+      || state.phase === 'stopping'
+      || this.actionBusy;
     return html`
       <button type="button" ?disabled=${approveDisabled} @click=${() => controller.approveBrief(toApproval(state))}>
         Approve Brief
@@ -374,9 +483,44 @@ export class PFCreativeRunPanel extends LitElement {
         : nothing}
       ${state.phase === 'paused' || state.phase === 'stopped'
         ? html`
-            <button type="button" ?disabled=${state.packagePreparedRevision !== null} @click=${() => void controller.accept()}>
+            <button type="button" ?disabled=${state.packagePreparedRevision !== null || this.actionBusy} @click=${() => void this.runAction(() => controller.accept())}>
               Accept / Prepare Package
             </button>
+          `
+        : nothing}
+      ${state.recovery && (state.phase === 'paused' || state.phase === 'stopped')
+        ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => this.requestCheckpointRewind()}>
+              Rewind to Checkpoint…
+            </button>
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => this.requestReject()}>
+              Reject Run…
+            </button>
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.createRecoveryCopy())}>
+              Create Recovery Copy
+            </button>
+          `
+        : nothing}
+      ${state.recovery?.recoveryCopyId
+        ? html`<button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.openRecoveryCopy())}>
+            Open Recovery Copy
+          </button>`
+        : nothing}
+      ${state.recovery?.interrupted
+        ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.resumeAfterInterruption())}>
+              Resume with New Session…
+            </button>
+          `
+        : nothing}
+      ${state.recovery
+        ? html`
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => { this.diagnosticsOpen = !this.diagnosticsOpen; }}>
+              ${this.diagnosticsOpen ? 'Hide local diagnostics' : 'Inspect local diagnostics'}
+            </button>
+            ${this.diagnosticsOpen
+              ? html`<pre class="diagnostics" aria-label="Local recovery diagnostics">${JSON.stringify(controller.getRecoveryDiagnostics(), null, 2)}</pre>`
+              : nothing}
           `
         : nothing}
       ${state.phase !== 'accepted' && state.phase !== 'rejected'
@@ -396,18 +540,123 @@ export class PFCreativeRunPanel extends LitElement {
     `;
   }
 
+  private actionBusy = false;
+  private diagnosticsOpen = false;
+  private pendingConfirmation: { readonly kind: 'reject' | 'rewind'; readonly operationId?: string; readonly checkpoint?: boolean } | null = null;
+
+  private requestReject(): void {
+    this.pendingConfirmation = { kind: 'reject' };
+    this.requestUpdate();
+  }
+
+  private requestRewind(operationId: string): void {
+    this.pendingConfirmation = { kind: 'rewind', operationId };
+    this.requestUpdate();
+  }
+
+  private requestCheckpointRewind(): void {
+    this.pendingConfirmation = { kind: 'rewind', checkpoint: true };
+    this.requestUpdate();
+  }
+
+  private renderConfirmationDialog(state: CreativeRunState) {
+    const pending = this.pendingConfirmation;
+    if (!pending) return nothing;
+    const rewind = pending.kind === 'rewind';
+    const checkpoint = pending.checkpoint === true;
+    return html`
+      <dialog aria-modal="true" aria-labelledby="creative-run-confirm-title" aria-describedby="creative-run-confirm-copy" @cancel=${this.handleDialogCancel}>
+        <h3 id="creative-run-confirm-title">${rewind ? 'Confirm rewind' : 'Confirm reject'}</h3>
+        <p id="creative-run-confirm-copy">
+          ${rewind
+            ? checkpoint
+              ? 'All owned Creative Run transactions will be undone through the owned history boundary to the pre-run checkpoint. A fresh observation and approval will be required.'
+              : 'Later Creative Run transactions will be undone through the owned history boundary. The selected transaction remains, and a fresh observation and approval will be required.'
+            : 'The rejected result will be preserved under a fresh Recovery Copy before the original checkpoint is restored. Later edits stop this restore and remain untouched. A successful in-place reject resets conventional undo/redo history; both states remain recoverable.'}
+        </p>
+        <p class="muted">Project: ${state.target.name}. No copy is deleted or overwritten.</p>
+        <div class="dialog-actions">
+          <button type="button" autofocus ?disabled=${this.actionBusy} @click=${this.cancelConfirmation}>Cancel</button>
+          <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.confirmPendingAction()}>
+            ${rewind ? 'Rewind' : 'Reject Run'}
+          </button>
+        </div>
+      </dialog>
+    `;
+  }
+
+  private cancelConfirmation = (): void => {
+    if (this.actionBusy) return;
+    const dialog = this.renderRoot.querySelector<HTMLDialogElement>('dialog');
+    if (dialog?.open) dialog.close();
+    this.pendingConfirmation = null;
+    this.requestUpdate();
+  };
+
+  private async confirmPendingAction(): Promise<void> {
+    const pending = this.pendingConfirmation;
+    const controller = this.activeController;
+    if (!pending || !controller) return;
+    if (pending.kind === 'rewind' && pending.operationId) {
+      await this.runAction(() => controller.rewind({ operationId: pending.operationId }));
+    } else if (pending.kind === 'rewind' && pending.checkpoint) {
+      await this.runAction(() => controller.rewind({ checkpoint: true }));
+    } else {
+      await this.runAction(() => controller.reject(true));
+    }
+    this.cancelConfirmation();
+  }
+
+  private async runAction(action: () => Promise<unknown>): Promise<void> {
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    this.requestUpdate();
+    try {
+      await action();
+    } finally {
+      this.actionBusy = false;
+      this.requestUpdate();
+    }
+  }
+
   private refineBrief(controller: CreativeRunController): void {
     const goal = this.renderRoot.querySelector<HTMLTextAreaElement>('#creative-run-refine-goal')?.value;
     if (goal) controller.refineBrief({ goal });
   }
 
   private bindController(): void {
-    if (this.observedController === this.controller) return;
+    const controller = this.activeController;
+    if (this.observedController === controller) return;
     this.unbindController();
-    if (!this.controller) return;
-    this.observedController = this.controller;
+    if (!controller) return;
+    this.observedController = controller;
     this.observedController.events.addEventListener('creative-run-state-changed', this.handleControllerChange);
   }
+
+  private get activeController(): CreativeRunController | null {
+    let current = this.controller;
+    const visited = new Set<CreativeRunController>();
+    while (current?.replacement && !visited.has(current)) {
+      visited.add(current);
+      current = current.replacement;
+    }
+    return current;
+  }
+
+  private syncConfirmationDialog(): void {
+    const dialog = this.renderRoot.querySelector<HTMLDialogElement>('dialog');
+    if (!dialog || !this.pendingConfirmation) return;
+    if (!dialog.open) dialog.showModal();
+    this.renderRoot.querySelector<HTMLElement>('dialog [autofocus]')?.focus();
+  }
+
+  private readonly handleDialogCancel = (event: Event): void => {
+    if (this.actionBusy) {
+      event.preventDefault();
+      return;
+    }
+    this.cancelConfirmation();
+  };
 
   private unbindController(): void {
     this.observedController?.events.removeEventListener('creative-run-state-changed', this.handleControllerChange);
