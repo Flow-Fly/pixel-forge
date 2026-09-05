@@ -3,6 +3,7 @@ import {
   createFixtureSession,
   type FixtureSession,
 } from '../../src/editor/fixture-session';
+import type { RenderObservation } from '../../src/editor/observations';
 import { createProjectContext } from '../../src/stores/project-context';
 import '../../src/components/preview/pf-agent-preview-surface';
 import type { PFAgentPreviewSurface } from '../../src/components/preview/pf-agent-preview-surface';
@@ -375,6 +376,29 @@ describe('static render observation and agent preview surface', () => {
     expect(getComputedStyle(figuresList[1]!).order).toBe('-1');
     expect(figuresList[1]?.querySelector('canvas')?.getAttribute('aria-label')).toContain('nearest-neighbor inspection scale');
 
+    const rectangular: RenderObservation = {
+      ...journey.composite,
+      width: 64,
+      height: 16,
+      stride: 256,
+      region: { x: 0, y: 0, width: 64, height: 16 },
+      pixels: new Uint8Array(64 * 16 * 4),
+    };
+    surface.observation = rectangular;
+    surface.style.width = '96px';
+    await surface.updateComplete;
+    const rectangularIntended = surface.shadowRoot?.querySelector<HTMLCanvasElement>('.intended-canvas');
+    const rectangularInspection = surface.shadowRoot?.querySelector<HTMLCanvasElement>('.inspection-canvas');
+    const intendedRect = rectangularIntended?.getBoundingClientRect();
+    const inspectionRect = rectangularInspection?.getBoundingClientRect();
+    expect(intendedRect?.width).toBeGreaterThan(0);
+    expect(inspectionRect?.width).toBeLessThan(64 * rectangular.scale);
+    expect((intendedRect?.width ?? 0) / (intendedRect?.height ?? 1)).toBeCloseTo(4, 1);
+    expect((inspectionRect?.width ?? 0) / (inspectionRect?.height ?? 1)).toBeCloseTo(4, 1);
+
+    surface.observation = journey.composite;
+    surface.style.width = '320px';
+    await surface.updateComplete;
     surface.error = 'Render checkpoint unavailable.';
     await surface.updateComplete;
     expect(surface.shadowRoot?.querySelector('[role="alert"]')?.textContent)

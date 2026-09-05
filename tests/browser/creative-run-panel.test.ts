@@ -547,6 +547,27 @@ describe('Creative Run panel in Chromium', () => {
     expect(authority).toContain('Revision');
   });
 
+  it('keeps a package failure alert visible when the activity timeline is collapsed', async () => {
+    const { element, controller } = await createRun(undefined, {
+      preparePackage: async () => ({ ok: false, error: { code: 'internal', retryable: true } }),
+    });
+
+    await userEvent.click(page.getByRole('button', { name: 'Start Run' }));
+    await expect.poll(() => controller.getState().phase).toBe('stopped');
+    await userEvent.click(page.getByRole('button', { name: 'Accept / Prepare Package' }));
+    await expect.poll(() => controller.getState().phase).toBe('failed');
+
+    const timeline = element.shadowRoot?.querySelector<HTMLDetailsElement>('.timeline-disclosure');
+    timeline?.removeAttribute('open');
+    await element.updateComplete;
+
+    expect(timeline?.open).toBe(false);
+    const alert = element.shadowRoot?.querySelector<HTMLElement>('[role="alert"]');
+    expect(alert?.closest('details')).toBeNull();
+    expect(alert?.getBoundingClientRect().height).toBeGreaterThan(0);
+    await expect.element(page.getByRole('alert')).toHaveTextContent('internal');
+  });
+
   it('renders a narrow-friendly empty state without inventing authority', async () => {
     const element = document.createElement('pf-creative-run-panel') as PFCreativeRunPanel;
     document.body.append(element);

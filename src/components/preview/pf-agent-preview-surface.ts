@@ -138,13 +138,15 @@ export class PFAgentPreviewSurface extends LitElement {
     }
 
     .intended-canvas {
-      height: var(--canvas-height);
       width: var(--canvas-width);
+      height: auto;
+      aspect-ratio: var(--canvas-ratio);
     }
 
     .inspection-canvas {
-      height: var(--inspection-height);
       width: var(--inspection-width);
+      height: auto;
+      aspect-ratio: var(--canvas-ratio);
     }
 
     @container (max-width: 640px) {
@@ -221,8 +223,8 @@ export class PFAgentPreviewSurface extends LitElement {
     const backgroundStyle = background.kind === 'solid'
       ? `--agent-preview-background: ${background.color}`
       : '';
-    const canvasStyle = `--canvas-width: ${observation.width}px; --canvas-height: ${observation.height}px;`;
-    const inspectionStyle = `--inspection-width: ${observation.width * observation.scale}px; --inspection-height: ${observation.height * observation.scale}px;`;
+    const canvasStyle = `--canvas-width: ${observation.width}px; --canvas-ratio: ${observation.width} / ${observation.height};`;
+    const inspectionStyle = `--inspection-width: ${observation.width * observation.scale}px; --canvas-ratio: ${observation.width} / ${observation.height};`;
     const sourceDescription = describeSource(observation.source);
     const metadataLabel = `${sourceLabel} source ${sourceDescription}, revision ${observation.revision}, region ${regionLabel}, scale ${observation.scale}, digest ${observation.digest}`;
 
