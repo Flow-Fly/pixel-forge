@@ -477,6 +477,20 @@ export class FixtureSession {
     return this.context;
   }
 
+  /**
+   * Bind a host-owned context for a target created through the public adapter.
+   *
+   * The golden journey uses this only to wire browser authority and recovery;
+   * client operations continue through the target-free public seams.
+   */
+  getTargetContext(target: { readonly projectId: string }): ProjectContext {
+    const context = this.targetContexts.get(target.projectId);
+    if (!context || context.isDisposed || context.project.id.value !== target.projectId) {
+      throw new Error(`Fixture target is not bound: ${target.projectId}`);
+    }
+    return context;
+  }
+
   /** Create one isolated Preview-sized target without changing the fixture tab. */
   async createBlankProject(
     name: string,
