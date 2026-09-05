@@ -226,6 +226,23 @@ describe('CreativeRunController', () => {
     expect(controller.approveBrief(approval(controller))).toMatchObject({ ok: true, state: { phase: 'ready' } });
   });
 
+  it('keeps an approved pause boundary while a creator refines and reapproves the brief', () => {
+    const authority = createAuthority();
+    const controller = createController(authority);
+
+    controller.approveBrief(approval(controller));
+    expect(controller.pause()).toMatchObject({ ok: true, state: { phase: 'paused' } });
+    expect(controller.refineBrief({ goal: 'Use a warmer title card' })).toMatchObject({
+      ok: true,
+      state: { phase: 'paused', brief: { revision: 2 }, approvedBriefRevision: null },
+    });
+
+    expect(controller.approveBrief(approval(controller))).toMatchObject({
+      ok: true,
+      state: { phase: 'paused', approvedBriefRevision: 2 },
+    });
+  });
+
   it('fences a paused run before dispatching a step', async () => {
     const authority = createAuthority();
     let resolveStep!: (value: CreativeRunStep | null) => void;

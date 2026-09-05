@@ -1,4 +1,4 @@
-import { html, css, nothing } from "lit";
+import { html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
 import { panelStore, type PanelId } from "../../stores/panels";
@@ -35,24 +35,53 @@ export class PFPanel extends BaseComponent {
 
     /* Header */
     .header {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--pf-color-border, #333);
-      display: flex;
-      justify-content: space-between;
       align-items: center;
-      font-size: 11px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0;
-      color: var(--pf-color-text-muted, #808080);
       background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
+      border-bottom: 1px solid var(--pf-color-border, #333);
+      border-inline: 0;
+      border-top: 0;
+      color: var(--pf-color-text-muted, #808080);
+      cursor: default;
+      display: flex;
+      font-size: 11px;
+      font-weight: 500;
+      justify-content: space-between;
+      letter-spacing: 0;
+      padding: 12px 16px;
+      text-align: start;
+      text-transform: uppercase;
       user-select: none;
+      width: 100%;
+    }
+
+    .header-toggle {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      display: flex;
+      flex: 1;
+      font: inherit;
+      justify-content: flex-start;
+      min-width: 0;
+      padding: 0;
+      text-align: start;
+      text-transform: inherit;
+    }
+
+    .header-toggle:focus-visible {
+      outline: 2px solid var(--pf-color-accent, #c8ad7f);
+      outline-offset: -2px;
     }
 
     :host([collapsible]) .header {
       cursor: pointer;
       transition: background-color 0.15s ease;
+    }
+
+    :host([collapsible]) .header-toggle {
+      cursor: pointer;
     }
 
     :host([collapsible]) .header:hover {
@@ -121,6 +150,12 @@ export class PFPanel extends BaseComponent {
     :host(:not([collapsible])) .chevron {
       display: none;
     }
+
+    @media (max-width: 760px) {
+      .header-toggle {
+        min-height: 44px;
+      }
+    }
   `;
 
   /** Panel header title */
@@ -158,15 +193,28 @@ export class PFPanel extends BaseComponent {
     }
 
     return html`
-      <div
-        class="header"
-        @click=${this.collapsible ? this.handleHeaderClick : nothing}
-      >
-        <div class="header-left">
-          <span class="chevron">▼</span>
-          <span class="header-title">${this.header}</span>
-        </div>
-        <div class="header-actions" @click=${this.stopPropagation}>
+      <div class="header">
+        ${this.collapsible
+          ? html`
+              <button
+                class="header-toggle"
+                type="button"
+                aria-expanded=${String(!this.collapsed)}
+                @click=${this.handleHeaderClick}
+              >
+                <span class="header-left">
+                  <span class="chevron">▼</span>
+                  <span class="header-title">${this.header}</span>
+                </span>
+              </button>
+            `
+          : html`
+              <div class="header-left">
+                <span class="chevron">▼</span>
+                <span class="header-title">${this.header}</span>
+              </div>
+            `}
+        <div class="header-actions">
           <slot name="header-actions"></slot>
         </div>
       </div>
@@ -195,10 +243,6 @@ export class PFPanel extends BaseComponent {
     }
   }
 
-  private stopPropagation(e: Event) {
-    // Prevent header click when clicking on actions
-    e.stopPropagation();
-  }
 }
 
 declare global {

@@ -22,6 +22,7 @@ export class PFAgentPreviewSurface extends LitElement {
       display: block;
       font-family: system-ui, sans-serif;
       min-width: 0;
+      min-height: 0;
       container-type: inline-size;
     }
 
@@ -33,6 +34,7 @@ export class PFAgentPreviewSurface extends LitElement {
       display: grid;
       gap: 16px;
       min-width: 0;
+      min-height: 0;
       padding: 16px;
     }
 
@@ -132,6 +134,7 @@ export class PFAgentPreviewSurface extends LitElement {
       flex: 0 0 auto;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
+      max-inline-size: 100%;
     }
 
     .intended-canvas {
@@ -151,6 +154,20 @@ export class PFAgentPreviewSurface extends LitElement {
 
       .figures {
         grid-template-columns: minmax(0, 1fr);
+      }
+
+      .figures figure:nth-child(2) {
+        order: -1;
+      }
+
+      .canvas-frame {
+        justify-content: center;
+        max-block-size: min(48vh, 360px);
+      }
+
+      .intended-canvas,
+      .inspection-canvas {
+        max-block-size: min(44vh, 320px);
       }
     }
 

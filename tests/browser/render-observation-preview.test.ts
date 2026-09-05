@@ -371,6 +371,9 @@ describe('static render observation and agent preview surface', () => {
     await surface.updateComplete;
     const figures = surface.shadowRoot?.querySelector<HTMLElement>('.figures');
     expect(getComputedStyle(figures!).gridTemplateColumns.trim().split(/\s+/)).toHaveLength(1);
+    const figuresList = [...(surface.shadowRoot?.querySelectorAll<HTMLElement>('.figures figure') ?? [])];
+    expect(getComputedStyle(figuresList[1]!).order).toBe('-1');
+    expect(figuresList[1]?.querySelector('canvas')?.getAttribute('aria-label')).toContain('nearest-neighbor inspection scale');
 
     surface.error = 'Render checkpoint unavailable.';
     await surface.updateComplete;
