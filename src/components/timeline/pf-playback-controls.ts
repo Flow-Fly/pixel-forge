@@ -1,5 +1,5 @@
-import { html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { html, css, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext } from '../../stores/project-context';
 import { AddFrameCommand, DeleteFrameCommand } from '../../commands/animation-commands';
@@ -34,6 +34,12 @@ export class PFPlaybackControls extends BaseComponent {
       color: var(--pf-color-text-main);
     }
 
+    button:focus-visible,
+    .unit-toggle:focus-visible {
+      outline: 2px solid var(--pf-color-accent);
+      outline-offset: 2px;
+    }
+
     button:disabled {
       cursor: not-allowed;
       opacity: 0.45;
@@ -56,7 +62,12 @@ export class PFPlaybackControls extends BaseComponent {
     }
 
     .unit-toggle {
+      background: transparent;
+      border: 0;
+      color: inherit;
       cursor: pointer;
+      font: inherit;
+      min-height: 0;
       padding: 2px 4px;
       border-radius: var(--pf-radius-sm);
       transition: background-color 0.15s;
@@ -66,11 +77,21 @@ export class PFPlaybackControls extends BaseComponent {
       background-color: var(--pf-color-bg-hover);
       color: var(--pf-color-text-main);
     }
+
+    @media (max-width: 760px), (max-height: 500px) and (orientation: landscape) {
+      button,
+      .unit-toggle {
+        min-height: 44px;
+        min-width: 44px;
+      }
+    }
   `;
 
   @state() private durationUnit: 'ms' | 'fps' = 'ms';
+  @property({ type: Boolean }) compact = false;
   private context = defaultProjectContext;
 
+  // fallow-ignore-next-line code-duplication -- Playback and timeline-header controls independently subscribe to the active project context.
   connectedCallback() {
     super.connectedCallback();
     this.subscribeToActiveProjectContext((context) => {
@@ -146,46 +167,54 @@ export class PFPlaybackControls extends BaseComponent {
     const totalDuration = this.getTotalDuration();
     const guidedProject = this.context.guidedDrawing.active;
 
-    return html`
-      <button @click=${() => animation.goToFrame(animation.frames.value[0]?.id)}>|&lt;</button>
-      <button class=${isPlaying ? 'active' : ''} @click=${this.togglePlay}>
+      return html`
+      <button type="button" aria-label="First frame" @click=${() => animation.goToFrame(animation.frames.value[0]?.id)}>|&lt;</button>
+      <button type="button" class=${isPlaying ? 'active' : ''} aria-label=${isPlaying ? 'Pause playback' : 'Play playback'} @click=${this.togglePlay}>
         ${isPlaying ? 'Pause' : 'Play'}
       </button>
-      <button @click=${() => animation.goToFrame(animation.frames.value[frameCount - 1]?.id)}>
+      <button type="button" aria-label="Last frame" @click=${() => animation.goToFrame(animation.frames.value[frameCount - 1]?.id)}>
         &gt;|
       </button>
 
-      <div
-        style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
-      ></div>
+      ${this.compact
+        ? nothing
+        : html`
+            <div
+              style="width: 1px; height: 16px; background: var(--pf-color-border); margin: 0 4px;"
+            ></div>
 
-      <button
-        @click=${this.addFrame}
-        title=${guidedProject ? 'Guided projects keep one frame' : 'Add Duplicate Frame'}
-        ?disabled=${guidedProject}
-      >
-        + Frame
-      </button>
-      <button
-        @click=${this.deleteFrame}
-        title=${guidedProject ? 'Guided projects keep one frame' : 'Delete Current Frame'}
-        ?disabled=${guidedProject || frameCount <= 1}
-      >
-        - Frame
-      </button>
+            <button
+              type="button"
+              @click=${this.addFrame}
+              title=${guidedProject ? 'Guided projects keep one frame' : 'Add Duplicate Frame'}
+              ?disabled=${guidedProject}
+            >
+              + Frame
+            </button>
+            <button
+              type="button"
+              @click=${this.deleteFrame}
+              title=${guidedProject ? 'Guided projects keep one frame' : 'Delete Current Frame'}
+              ?disabled=${guidedProject || frameCount <= 1}
+            >
+              - Frame
+            </button>
 
-      <span class="info-text">
-        ${frameCount} Frames |
-        <span
-          class="unit-toggle"
-          @click=${this.toggleUnit}
-          title="Click to toggle between duration and FPS"
-        >
-          ${
-            this.durationUnit === 'fps' ? `${effectiveFPS} FPS` : this.formatDuration(totalDuration)
-          }
-        </span>
-      </span>
+            <span class="info-text">
+              ${frameCount} Frames |
+              <button
+                type="button"
+                class="unit-toggle"
+                @click=${this.toggleUnit}
+                aria-label="Toggle playback duration units"
+                title="Click to toggle between duration and FPS"
+              >
+                ${
+                  this.durationUnit === 'fps' ? `${effectiveFPS} FPS` : this.formatDuration(totalDuration)
+                }
+              </button>
+            </span>
+          `}
     `;
   }
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { cdp, page, userEvent } from 'vitest/browser';
 import {
   AutomationSessionManager,
   type AutomationLocalTarget,
@@ -175,6 +175,8 @@ interface CreateRunOptions {
   readonly runId?: string;
   readonly approve?: boolean;
   readonly createReplacementController?: CreativeRunControllerOptions['createReplacementController'];
+  readonly stepSource?: CreativeRunControllerOptions['stepSource'];
+  readonly preparePackage?: CreativeRunControllerOptions['preparePackage'];
 }
 
 interface BrowserRunAuthority {
@@ -228,12 +230,12 @@ function createBrowserAuthority(
   const inspect = manager.requestSession({
     client: { name: 'Creative Run Chromium', identity: 'self-declared' },
     compatibility: { minVersion: '1.0', maxVersion: '1.0' },
-    observationClasses: ['structure', 'timeline'],
+    observationClasses: ['structure', 'timeline', 'save-state'],
     lifetimeSeconds: 60,
   });
   if (!inspect.ok) throw new Error('Expected an inspect request.');
   manager.captureLocalTargets(inspect.result.requestId);
-  const inspectGrant = manager.approveRequest(inspect.result.requestId, target.id, ['structure', 'timeline']);
+  const inspectGrant = manager.approveRequest(inspect.result.requestId, target.id, ['structure', 'timeline', 'save-state']);
   if (!inspectGrant.ok) throw new Error('Expected an inspect grant.');
   const artistRequest = manager.requestArtistMode({
     sessionId: inspectGrant.result.sessionId,
@@ -281,7 +283,8 @@ function createBrowserController(
     getCurrentRevision: () => fixture.projectContext.project.revision.value,
     recovery,
     createReplacementController: options.createReplacementController,
-    stepSource: () => {
+    preparePackage: options.preparePackage,
+    stepSource: options.stepSource ?? (() => {
       if (emitted) return null;
       emitted = true;
       return {
@@ -303,7 +306,7 @@ function createBrowserController(
           },
         ],
       };
-    },
+    }),
   });
   return controller;
 }
@@ -498,6 +501,7 @@ async function createIndexedRecoveryJourney(kind: 'safe' | 'conflict' | 'rewind'
 }
 
 describe('Creative Run panel in Chromium', () => {
+  // fallow-ignore-next-line complexity -- This browser proof keeps the public run, focus, and progressive disclosure assertions together.
   it('shows approved brief, factual activity, budget state, and keyboard controls', async () => {
     const { element, controller, fixture } = await createRun();
 
@@ -527,6 +531,41 @@ describe('Creative Run panel in Chromium', () => {
     const firstControl = element.shadowRoot?.querySelector<HTMLButtonElement>('button:not([disabled])');
     firstControl?.focus();
     expect(element.shadowRoot?.activeElement).toBe(firstControl);
+    expect(element.shadowRoot?.querySelector('.surface')?.getAttribute('data-run-id')).toBe(controller.getState().runId);
+    expect(element.shadowRoot?.querySelector('.surface')?.getAttribute('data-target-id')).toBe(controller.getState().target.id);
+    for (const button of element.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+      expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    }
+
+    const timeline = element.shadowRoot?.querySelector<HTMLDetailsElement>('.timeline-disclosure');
+    expect(timeline?.open).toBe(true);
+    timeline?.removeAttribute('open');
+    expect(element.shadowRoot?.querySelector('.status')?.textContent).toContain('stopped');
+    const authority = element.shadowRoot?.querySelector('.authority')?.textContent ?? '';
+    expect(authority).toContain('Transactions');
+    expect(authority).toContain('Grant');
+    expect(authority).toContain('Revision');
+  });
+
+  it('keeps a package failure alert visible when the activity timeline is collapsed', async () => {
+    const { element, controller } = await createRun(undefined, {
+      preparePackage: async () => ({ ok: false, error: { code: 'internal', retryable: true } }),
+    });
+
+    await userEvent.click(page.getByRole('button', { name: 'Start Run' }));
+    await expect.poll(() => controller.getState().phase).toBe('stopped');
+    await userEvent.click(page.getByRole('button', { name: 'Accept / Prepare Package' }));
+    await expect.poll(() => controller.getState().phase).toBe('failed');
+
+    const timeline = element.shadowRoot?.querySelector<HTMLDetailsElement>('.timeline-disclosure');
+    timeline?.removeAttribute('open');
+    await element.updateComplete;
+
+    expect(timeline?.open).toBe(false);
+    const alert = element.shadowRoot?.querySelector<HTMLElement>('[role="alert"]');
+    expect(alert?.closest('details')).toBeNull();
+    expect(alert?.getBoundingClientRect().height).toBeGreaterThan(0);
+    await expect.element(page.getByRole('alert')).toHaveTextContent('internal');
   });
 
   it('renders a narrow-friendly empty state without inventing authority', async () => {
@@ -593,6 +632,8 @@ describe('Creative Run panel in Chromium', () => {
     await expect.poll(() => recovery.calls.includes('interrupted')).toBe(true);
     await expect.poll(() => controller.getState().phase).toBe('recovery-required');
     await expect.element(page.getByText('This run was interrupted. A new session, fresh observation, and approval are required before writing.')).toBeVisible();
+    expect(element.shadowRoot?.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toContain('interrupted');
     expect(recovery.calls).not.toContain('copy');
     expect(controller.getState().transactionsUsed).toBe(0);
 
@@ -624,6 +665,24 @@ describe('Creative Run panel in Chromium', () => {
     }
     expect(recovery.calls).not.toContain('copy');
     expect(controller.getState().transactionsUsed).toBe(0);
+  });
+
+  it('fences orientation and suspension events without resuming on foreground return', async () => {
+    const recovery = new BrowserRecoveryDouble();
+    const { controller } = await createRun(recovery);
+
+    window.dispatchEvent(new Event('orientationchange'));
+    await expect.poll(() => recovery.calls.includes('interrupted')).toBe(true);
+    await expect.poll(() => controller.getState().phase).toBe('recovery-required');
+
+    document.dispatchEvent(new Event('freeze'));
+    window.dispatchEvent(new Event('online'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(recovery.calls.filter((call) => call === 'interrupted')).toHaveLength(1);
+    expect(controller.getState().phase).toBe('recovery-required');
+    expect(controller.getState().transactionsUsed).toBe(0);
+    controller.dispose();
   });
 
   it('hands reload recovery to a fresh observed session and rebinds the panel', async () => {
@@ -753,6 +812,370 @@ describe('Creative Run panel in Chromium', () => {
     expect(fixture.projectContext.project.revision.value).toBe(revisionBefore + 1);
     expect(manager.listLocalArtistModeRuns()[0]?.status).toBe('completed');
   });
+
+  // fallow-ignore-next-line complexity -- This browser proof keeps responsive dominance and control reachability together.
+  it('keeps the result viewport dominant and the same run panel reachable in Chrome portrait', async () => {
+    const { controller, element } = await createRun();
+    element.remove();
+    const app = document.createElement('pixel-forge-app') as HTMLElement & {
+      creativeRunController: CreativeRunController | null;
+      updateComplete: Promise<unknown>;
+    };
+    app.creativeRunController = controller;
+    document.body.append(app);
+
+    try {
+      await page.viewport(390, 844);
+      await app.updateComplete;
+
+      const root = app.shadowRoot;
+      const workspace = root?.querySelector<HTMLElement>('.workspace');
+      const panels = root?.querySelector<HTMLElement>('.panels');
+      const toolbar = root?.querySelector<HTMLElement>('.toolbar');
+      const runPanel = root?.querySelector<HTMLElement>('pf-panel[panel-id="creative-run"]');
+      const otherPanels = [...(root?.querySelectorAll<HTMLElement>('.panels > pf-panel:not([panel-id="creative-run"])') ?? [])];
+
+      expect(getComputedStyle(toolbar!).display).toBe('none');
+      expect(workspace?.getBoundingClientRect().width).toBeLessThanOrEqual(390);
+      expect(panels?.getBoundingClientRect().width).toBeLessThanOrEqual(390);
+      expect(workspace?.getBoundingClientRect().height).toBeGreaterThan(panels?.getBoundingClientRect().height ?? 0);
+      expect(getComputedStyle(runPanel!).display).not.toBe('none');
+      expect(otherPanels.every((panel) => getComputedStyle(panel).display === 'none')).toBe(true);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      expect(root?.querySelector('pf-creative-run-panel')?.getAttribute('data-run-id')).toBeNull();
+      const runSurface = runPanel?.querySelector('pf-creative-run-panel')?.shadowRoot?.querySelector('[data-run-id]');
+      expect(runSurface?.getAttribute('data-run-id')).toBe(controller.getState().runId);
+      expect(app.hasAttribute('data-agent-mode')).toBe(true);
+
+      const panelToggle = runPanel?.shadowRoot?.querySelector<HTMLButtonElement>('.header-toggle');
+      const panelContent = runPanel?.shadowRoot?.querySelector<HTMLElement>('.content');
+      expect(panelToggle?.getAttribute('aria-controls')).toBe(panelContent?.id);
+      expect(panelContent?.hasAttribute('hidden')).toBe(false);
+
+      const timeline = root?.querySelector('pf-timeline')?.shadowRoot;
+      const playback = timeline?.querySelector('pf-playback-controls')?.shadowRoot;
+      for (const button of playback?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      }
+
+      await page.viewport(844, 390);
+      await app.updateComplete;
+      expect(workspace?.getBoundingClientRect().width).toBeGreaterThan(0);
+      expect(panels?.getBoundingClientRect().width).toBeGreaterThanOrEqual(280);
+      expect(getComputedStyle(toolbar!).display).toBe('none');
+      expect(otherPanels.every((panel) => getComputedStyle(panel).display === 'none')).toBe(true);
+      const canvas = root?.querySelector<HTMLElement>('pf-canvas-viewport');
+      expect((canvas?.getBoundingClientRect().width ?? 0) * (canvas?.getBoundingClientRect().height ?? 0))
+        .toBeGreaterThan((panels?.getBoundingClientRect().width ?? 0) * (panels?.getBoundingClientRect().height ?? 0));
+      const landscapePlayback = root?.querySelector('pf-timeline')?.shadowRoot
+        ?.querySelector<HTMLElement>('pf-playback-controls');
+      for (const button of landscapePlayback?.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+        expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+      }
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      await page.viewport(390, 844);
+    } finally {
+      await page.viewport(1280, 800);
+    }
+  });
+
+  it('keeps the ordinary narrow editor intact when Agent Mode is not active', async () => {
+    const app = document.createElement('pixel-forge-app') as HTMLElement & { updateComplete: Promise<unknown> };
+    document.body.append(app);
+
+    try {
+      await page.viewport(390, 844);
+      await app.updateComplete;
+
+      const root = app.shadowRoot;
+      expect(app.hasAttribute('data-agent-mode')).toBe(false);
+      const toolbar = root?.querySelector<HTMLElement>('.toolbar');
+      expect(toolbar).not.toBeNull();
+      if (!toolbar) throw new Error('Expected the ordinary editor toolbar.');
+      expect(getComputedStyle(toolbar).display).not.toBe('none');
+      expect(root?.querySelectorAll('.panels > pf-panel')).toHaveLength(4);
+    } finally {
+      await page.viewport(1280, 800);
+    }
+  });
+
+  it('preserves recovery truth when the same controller crosses portrait and desktop viewports', async () => {
+    const recovery = new BrowserRecoveryDouble();
+    const { element, controller } = await createRun(recovery);
+    element.remove();
+    localStorage.removeItem('pf-panel-states');
+
+    const app = document.createElement('pixel-forge-app') as HTMLElement & {
+      creativeRunController: CreativeRunController | null;
+      updateComplete: Promise<unknown>;
+    };
+    app.creativeRunController = controller;
+    document.body.append(app);
+    try {
+      await controller.markInterrupted('work-unsettled');
+      await app.updateComplete;
+
+      const runPanel = app.shadowRoot?.querySelector('pf-panel[panel-id="creative-run"]')
+        ?.querySelector('pf-creative-run-panel') as PFCreativeRunPanel | null;
+      const timeline = runPanel?.shadowRoot?.querySelector<HTMLDetailsElement>('.timeline-disclosure');
+      timeline?.removeAttribute('open');
+      const initial = controller.getState();
+      const recoveryTruth = {
+        runId: initial.runId,
+        targetId: initial.target.id,
+        currentRevision: initial.currentRevision,
+        lastDurableRevision: initial.lastDurableRevision,
+        transactionsUsed: initial.transactionsUsed,
+        packagePreparedRevision: initial.packagePreparedRevision,
+        recovery: initial.recovery,
+      };
+      expect(recoveryTruth.recovery).toMatchObject({
+        outcome: 'recovery-required',
+        reason: 'work-unsettled',
+        interrupted: true,
+        requiresReapproval: true,
+      });
+
+      for (const viewport of [[195, 422], [1280, 800]] as const) {
+        await page.viewport(viewport[0], viewport[1]);
+        await app.updateComplete;
+        expect(runPanel?.shadowRoot?.querySelector<HTMLDetailsElement>('.timeline-disclosure')?.open).toBe(false);
+        expect(runPanel?.shadowRoot?.querySelector('.status')?.textContent).toContain('recovery required');
+        expect(runPanel?.shadowRoot?.querySelector('.recovery-summary')?.textContent).toContain('interrupted');
+        expect(runPanel?.shadowRoot?.querySelector<HTMLElement>('[data-run-id]')?.dataset.runId)
+          .toBe(recoveryTruth.runId);
+        expect(runPanel?.shadowRoot?.querySelector<HTMLElement>('[data-run-id]')?.dataset.targetId)
+          .toBe(recoveryTruth.targetId);
+        expect(controller.getState()).toMatchObject({
+          runId: recoveryTruth.runId,
+          currentRevision: recoveryTruth.currentRevision,
+          lastDurableRevision: recoveryTruth.lastDurableRevision,
+          transactionsUsed: recoveryTruth.transactionsUsed,
+          packagePreparedRevision: recoveryTruth.packagePreparedRevision,
+          recovery: recoveryTruth.recovery,
+        });
+      }
+    } finally {
+      await page.viewport(1280, 800);
+    }
+  });
+
+  // fallow-ignore-next-line complexity -- This Chromium proof keeps the complete creator journey and portrait emulation together.
+  it('completes Brief to accept through the portrait controls with reduced motion and 200% CSS density', async () => {
+    const fixture = createFixtureSession();
+    fixtures.push(fixture);
+    await fixture.runAnimationObservation();
+    const portraitRevisionBefore = fixture.projectContext.project.revision.value;
+    const layer = fixture.projectContext.layers.layers.value[0];
+    const frame = fixture.projectContext.animation.frames.value[1];
+    if (!layer || !frame) throw new Error('Expected the portrait journey fixture.');
+
+    let planNumber = 0;
+    let releasePendingPlan!: () => void;
+    const pendingPlan = new Promise<void>((resolve) => { releasePendingPlan = resolve; });
+    const firstStep: CreativeRunStep = {
+      profile: 'layer-and-tag',
+      children: [
+        {
+          command: 'project.layer.state',
+          input: { kind: 'layer.visibility', layerId: layer.id, visible: false },
+        },
+        {
+          command: 'project.animation.frame-tag',
+          input: {
+            kind: 'tag.create',
+            name: 'Portrait journey',
+            color: '#123456',
+            startFrameIndex: 0,
+            endFrameIndex: 0,
+          },
+        },
+      ],
+    };
+    const secondStep: CreativeRunStep = {
+      profile: 'animation',
+      children: [
+        {
+          command: 'project.animation.frame',
+          input: { kind: 'frame.duration', frameId: frame.id, duration: frame.duration + 20 },
+        },
+      ],
+    };
+
+    const { controller, element } = await createRun(undefined, {
+      fixture,
+      stepSource: async () => {
+        if (planNumber === 0) {
+          planNumber += 1;
+          return firstStep;
+        }
+        if (planNumber === 1) {
+          planNumber += 1;
+          await pendingPlan;
+          return secondStep;
+        }
+        if (planNumber === 2) {
+          planNumber += 1;
+          return secondStep;
+        }
+        return null;
+      },
+      preparePackage: async () => ({ ok: true, result: {} as never }),
+    });
+    element.remove();
+    setActiveProjectContext(fixture.projectContext);
+
+    const app = document.createElement('pixel-forge-app') as HTMLElement & {
+      creativeRunController: CreativeRunController | null;
+      updateComplete: Promise<unknown>;
+    };
+    app.creativeRunController = controller;
+    document.body.append(app);
+
+    const browserCdp = cdp();
+    try {
+      await browserCdp.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+      });
+      // A 195 CSS-pixel layout viewport is the reduced viewport Chromium
+      // exposes for a 390-pixel phone viewed at 200% browser zoom.
+      await page.viewport(195, 422);
+      await app.updateComplete;
+
+      expect(window.innerWidth).toBe(195);
+      expect(window.visualViewport?.width).toBe(195);
+      expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+      expect(app.hasAttribute('data-agent-mode')).toBe(true);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+
+      const root = app.shadowRoot;
+      const workspace = root?.querySelector<HTMLElement>('.workspace');
+      const panels = root?.querySelector<HTMLElement>('.panels');
+      const canvas = root?.querySelector<HTMLElement>('pf-canvas-viewport');
+      const compactPlaybackHost = root?.querySelector('pf-timeline')?.shadowRoot?.querySelector<HTMLElement>('pf-playback-controls');
+      expect(getComputedStyle(compactPlaybackHost!).display).not.toBe('none');
+      expect((canvas?.getBoundingClientRect().height ?? 0)).toBeGreaterThan(0);
+      expect(canvas?.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+        (workspace?.getBoundingClientRect().height ?? 0) - 120,
+      );
+      for (const button of compactPlaybackHost?.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+        expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+      }
+      const runPanel = root?.querySelector('pf-panel[panel-id="creative-run"]')
+        ?.querySelector('pf-creative-run-panel') as PFCreativeRunPanel | null;
+      for (const button of runPanel?.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? []) {
+        if (button.getClientRects().length === 0) continue;
+        expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+        expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+      }
+      expect((canvas?.getBoundingClientRect().width ?? 0) * (canvas?.getBoundingClientRect().height ?? 0))
+        .toBeGreaterThan((panels?.getBoundingClientRect().width ?? 0) * (panels?.getBoundingClientRect().height ?? 0));
+
+      await expect.element(page.getByText('Approved Creative Brief')).toBeVisible();
+      await userEvent.click(page.getByRole('button', { name: 'Start Run' }));
+      await expect.poll(() => controller.getState().phase).toBe('running');
+
+      await userEvent.click(page.getByRole('button', { name: 'Pause' }));
+      await expect.poll(() => controller.getState().phase).toBe('pausing');
+      releasePendingPlan();
+      await expect.poll(() => controller.getState().phase).toBe('paused');
+      expect(controller.getState().transactionsUsed).toBe(1);
+
+      await userEvent.click(page.getByText('Refine Brief', { exact: true }));
+      await userEvent.fill(page.getByRole('textbox', { name: 'New goal' }), 'Make a portrait title card');
+      await userEvent.click(page.getByRole('button', { name: 'Apply Brief Revision' }));
+      await expect.poll(() => controller.getState().brief.revision).toBe(2);
+      expect(controller.getState().phase).toBe('paused');
+      await userEvent.click(page.getByRole('button', { name: 'Approve Brief' }));
+      await expect.poll(() => controller.getState().approvedBriefRevision).toBe(2);
+      expect(controller.getState().phase).toBe('paused');
+
+      await userEvent.click(page.getByRole('button', { name: 'Resume Run' }));
+      await expect.poll(() => controller.getState().phase).toBe('paused');
+      expect(controller.getState().transactionsUsed).toBe(2);
+      await userEvent.click(page.getByRole('button', { name: 'Stop' }));
+      await expect.poll(() => controller.getState().phase).toBe('stopped');
+
+      const timeline = app.shadowRoot?.querySelector('pf-timeline')?.shadowRoot;
+      const playbackHost = timeline?.querySelector<HTMLElement>('pf-playback-controls');
+      expect(getComputedStyle(playbackHost!).display).not.toBe('none');
+      setActiveProjectContext(fixture.projectContext);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect.element(page.getByRole('button', { name: 'Play playback' })).toBeVisible();
+      await userEvent.click(page.getByRole('button', { name: 'Play playback' }));
+      await expect.poll(() => fixture.projectContext.animation.isPlaying.value).toBe(true);
+      await userEvent.click(page.getByRole('button', { name: 'Pause playback' }));
+      await expect.poll(() => fixture.projectContext.animation.isPlaying.value).toBe(false);
+
+      await userEvent.click(page.getByRole('button', { name: 'Accept / Prepare Package' }));
+      await expect.poll(() => controller.getState().phase).toBe('accepted');
+      expect(controller.getState().packagePreparedRevision).toBe(fixture.projectContext.project.revision.value);
+      expect(controller.getState().transactionsUsed).toBe(2);
+      expect(fixture.projectContext.project.revision.value).toBe(portraitRevisionBefore + 2);
+
+      const acceptedState = controller.getState();
+      const acceptedPanel = app.shadowRoot?.querySelector('pf-panel[panel-id="creative-run"]')
+        ?.querySelector('pf-creative-run-panel') as PFCreativeRunPanel | null;
+      const acceptedTimeline = acceptedPanel?.shadowRoot?.querySelector<HTMLDetailsElement>('.timeline-disclosure');
+      acceptedTimeline?.removeAttribute('open');
+      await acceptedPanel?.updateComplete;
+      expect(acceptedPanel?.shadowRoot?.querySelector('.status')?.textContent).toContain('accepted');
+      const acceptedAuthority = acceptedPanel?.shadowRoot?.querySelector('.authority')?.textContent ?? '';
+      expect(acceptedAuthority).toContain('Grant');
+      expect(acceptedAuthority).toContain('remaining');
+      expect(acceptedAuthority).toContain('Package prepared');
+      const acceptedTruth = {
+        runId: acceptedState.runId,
+        targetId: acceptedState.target.id,
+        currentRevision: acceptedState.currentRevision,
+        lastDurableRevision: acceptedState.lastDurableRevision,
+        transactionsUsed: acceptedState.transactionsUsed,
+        packagePreparedRevision: acceptedState.packagePreparedRevision,
+        recovery: acceptedState.recovery,
+      };
+
+      await page.viewport(1280, 800);
+      await app.updateComplete;
+      expect(app.shadowRoot?.querySelector('pf-timeline')?.hasAttribute('compact')).toBe(false);
+      expect(acceptedPanel?.shadowRoot?.querySelector('.timeline-disclosure')?.open).toBe(false);
+      expect(acceptedPanel?.shadowRoot?.querySelector('.status')?.textContent).toContain('accepted');
+      expect(acceptedPanel?.shadowRoot?.querySelector<HTMLElement>('[data-run-id]')?.dataset.runId)
+        .toBe(acceptedTruth.runId);
+      expect(acceptedPanel?.shadowRoot?.querySelector<HTMLElement>('[data-run-id]')?.dataset.targetId)
+        .toBe(acceptedTruth.targetId);
+      expect(controller.getState()).toMatchObject({
+        runId: acceptedTruth.runId,
+        currentRevision: acceptedTruth.currentRevision,
+        lastDurableRevision: acceptedTruth.lastDurableRevision,
+        transactionsUsed: acceptedTruth.transactionsUsed,
+        packagePreparedRevision: acceptedTruth.packagePreparedRevision,
+        recovery: acceptedTruth.recovery,
+      });
+
+      await page.viewport(195, 422);
+      await app.updateComplete;
+      expect(app.shadowRoot?.querySelector('pf-timeline')?.hasAttribute('compact')).toBe(true);
+      expect(acceptedPanel?.shadowRoot?.querySelector('.timeline-disclosure')?.open).toBe(false);
+      expect(acceptedPanel?.shadowRoot?.querySelector('.status')?.textContent).toContain('accepted');
+      expect(acceptedPanel?.shadowRoot?.querySelector<HTMLElement>('[data-run-id]')?.dataset.runId)
+        .toBe(acceptedTruth.runId);
+      expect(acceptedPanel?.shadowRoot?.querySelector('.authority')?.textContent).toContain('Package prepared');
+      expect(controller.getState()).toMatchObject({
+        runId: acceptedTruth.runId,
+        currentRevision: acceptedTruth.currentRevision,
+        lastDurableRevision: acceptedTruth.lastDurableRevision,
+        transactionsUsed: acceptedTruth.transactionsUsed,
+        packagePreparedRevision: acceptedTruth.packagePreparedRevision,
+        recovery: acceptedTruth.recovery,
+      });
+    } finally {
+      await browserCdp.send('Emulation.setEmulatedMedia', { features: [] });
+      await browserCdp.send('Emulation.clearDeviceMetricsOverride');
+      await page.viewport(1280, 800);
+    }
+  }, 30_000);
 
   it('completes the deterministic two-project supervision journey without touching the second project', async () => {
     const primary = createFixtureSession({ projectId: 'creative-journey-primary' });

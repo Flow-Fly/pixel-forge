@@ -25,6 +25,8 @@ export class PFCreativeRunPanel extends LitElement {
       color: var(--creative-run-text);
       display: block;
       min-width: 0;
+      min-height: 0;
+      container-type: inline-size;
       font-family: system-ui, sans-serif;
     }
 
@@ -36,7 +38,15 @@ export class PFCreativeRunPanel extends LitElement {
       display: grid;
       gap: 12px;
       min-width: 0;
+      min-height: 0;
       padding: 12px;
+    }
+
+    .surface-content {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      min-height: 0;
     }
 
     h2,
@@ -108,6 +118,10 @@ export class PFCreativeRunPanel extends LitElement {
       text-transform: capitalize;
     }
 
+    .last-action {
+      overflow-wrap: anywhere;
+    }
+
     .toolbar {
       border: 0;
       display: flex;
@@ -130,8 +144,11 @@ export class PFCreativeRunPanel extends LitElement {
     }
 
     .refine summary {
+      align-items: center;
       cursor: pointer;
+      display: flex;
       font-size: 0.75rem;
+      min-height: 44px;
       padding: 4px 0;
     }
 
@@ -167,8 +184,10 @@ export class PFCreativeRunPanel extends LitElement {
       cursor: pointer;
       font: inherit;
       font-size: 0.75rem;
-      min-height: 36px;
+      min-height: 44px;
+      min-width: 44px;
       padding: 6px 10px;
+      touch-action: manipulation;
     }
 
     button:hover:not(:disabled) {
@@ -194,6 +213,32 @@ export class PFCreativeRunPanel extends LitElement {
       padding: 0;
     }
 
+    .timeline-disclosure {
+      min-width: 0;
+    }
+
+    .timeline-disclosure > summary {
+      align-items: center;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      min-height: 44px;
+      padding: 4px 0;
+    }
+
+    .timeline-disclosure > summary:focus-visible {
+      outline: 2px solid var(--creative-run-accent);
+      outline-offset: 2px;
+    }
+
+    .timeline-count {
+      color: var(--creative-run-muted);
+      font-size: 0.6875rem;
+      font-weight: 400;
+      overflow-wrap: anywhere;
+      text-align: end;
+    }
+
     .timeline-entry {
       border-inline-start: 2px solid var(--creative-run-border);
       display: grid;
@@ -208,9 +253,12 @@ export class PFCreativeRunPanel extends LitElement {
     }
 
     .transaction-detail summary {
+      align-items: center;
       cursor: pointer;
+      display: flex;
       font-size: 0.75rem;
       font-weight: 600;
+      min-height: 44px;
       overflow-wrap: anywhere;
     }
 
@@ -228,7 +276,6 @@ export class PFCreativeRunPanel extends LitElement {
 
     .timeline-action {
       justify-self: start;
-      min-height: 32px;
       margin-top: 4px;
     }
 
@@ -294,6 +341,35 @@ export class PFCreativeRunPanel extends LitElement {
         transition-duration: 0.001ms !important;
       }
     }
+
+    @container (max-width: 560px) {
+      .surface {
+        border-radius: 0;
+        border-inline: 0;
+        padding: 10px;
+      }
+
+      .surface-content {
+        gap: 10px;
+      }
+
+      .toolbar {
+        gap: 8px;
+      }
+
+      .toolbar button {
+        flex: 1 1 auto;
+      }
+
+      .timeline-list {
+        max-block-size: min(32vh, 220px);
+      }
+
+      pf-agent-preview-surface {
+        order: -1;
+      }
+    }
+
   `;
 
   @property({ attribute: false }) controller: CreativeRunController | null = null;
@@ -326,7 +402,13 @@ export class PFCreativeRunPanel extends LitElement {
     const state = controller.getState();
     const modalOpen = this.pendingConfirmation !== null;
     return html`
-      <section class="surface" aria-labelledby="creative-run-title">
+      <section
+        class="surface"
+        aria-labelledby="creative-run-title"
+        data-run-id=${state.runId}
+        data-target-id=${state.target.id}
+        data-phase=${state.phase}
+      >
         <div class="surface-content" ?inert=${modalOpen}>
           <div>
             <h2 id="creative-run-title">Creative Run</h2>
@@ -343,10 +425,14 @@ export class PFCreativeRunPanel extends LitElement {
           ${this.renderError(state)}
           ${this.renderTimeline(state)}
 
-          <pf-agent-preview-surface
-            .observation=${this.previewObservation}
-            .error=${this.previewError}
-          ></pf-agent-preview-surface>
+          ${this.previewObservation || this.previewError
+            ? html`
+                <pf-agent-preview-surface
+                  .observation=${this.previewObservation}
+                  .error=${this.previewError}
+                ></pf-agent-preview-surface>
+              `
+            : nothing}
         </div>
 
         ${this.renderConfirmationDialog(state)}
@@ -388,12 +474,13 @@ export class PFCreativeRunPanel extends LitElement {
     return html`
       <section class="authority" aria-labelledby="creative-run-authority-title">
         <h3 id="creative-run-authority-title">Run authority</h3>
-        <p class="status" role="status">${formatPhase(state.phase)}</p>
+        <p class="status" role="status">${formatStatus(state)}</p>
         <dl>
           <dt>Transactions</dt><dd>${state.transactionsUsed} used · ${state.remainingTransactions} remaining</dd>
           <dt>Run time</dt><dd>${state.elapsedSeconds}s elapsed · ${state.remainingDurationSeconds}s remaining</dd>
           <dt>Revision</dt><dd>${state.currentRevision} (last durable ${state.lastDurableRevision})</dd>
           <dt>Grant</dt><dd>${state.grant ? formatGrant(state) : 'Not available'}</dd>
+          <dt>Last action</dt><dd class="last-action">${formatLastAction(state)}</dd>
         </dl>
       </section>
     `;
@@ -410,7 +497,7 @@ export class PFCreativeRunPanel extends LitElement {
             : 'The original project and any later edits remain preserved. Recovery never reuses or deletes a project key.'}
         </p>
         ${state.recovery.interrupted
-          ? html`<p role="status">This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
+          ? html`<p>This run was interrupted. A new session, fresh observation, and approval are required before writing.</p>`
           : nothing}
       </section>
     `;
@@ -425,13 +512,18 @@ export class PFCreativeRunPanel extends LitElement {
   private renderTimeline(state: CreativeRunState) {
     return html`
       <section class="timeline" aria-labelledby="creative-run-timeline-title">
-        <h3 id="creative-run-timeline-title">Activity</h3>
-        ${state.collapsedTimelineEntries > 0
-          ? html`<p class="muted">${state.collapsedTimelineEntries} older entries collapsed.</p>`
-          : nothing}
-        <ol class="timeline-list">
-          ${state.timeline.map((entry) => this.renderTimelineEntry(entry, state))}
-        </ol>
+        <details class="timeline-disclosure" open>
+          <summary id="creative-run-timeline-title">
+            <span>Activity timeline</span>
+            <span class="timeline-count">${timelineCountLabel(state)}</span>
+          </summary>
+          ${state.collapsedTimelineEntries > 0
+            ? html`<p class="muted">${state.collapsedTimelineEntries} older entries collapsed.</p>`
+            : nothing}
+          <ol class="timeline-list">
+            ${state.timeline.map((entry) => this.renderTimelineEntry(entry, state))}
+          </ol>
+        </details>
       </section>
     `;
   }
@@ -683,9 +775,38 @@ function formatPhase(phase: CreativeRunPhase): string {
   return phase.replaceAll('-', ' ');
 }
 
+function formatStatus(state: CreativeRunState): string {
+  const phase = formatPhase(state.phase);
+  if (!state.recovery?.interrupted) return phase;
+  return `${phase}. This run was interrupted; a new session, fresh observation, and approval are required before writing.`;
+}
+
 function formatGrant(state: CreativeRunState): string {
   if (!state.grant) return 'Not available';
   return `${state.grant.status}, ${state.grant.categories.join(', ')}`;
+}
+
+function formatLastAction(state: CreativeRunState): string {
+  if (state.packagePreparedRevision !== null) {
+    return `Package prepared · revision ${state.packagePreparedRevision}`;
+  }
+  const transaction = state.lastDurableResult;
+  if (transaction) {
+    return `${transaction.profile} transaction · revision ${transaction.fromRevision} → ${transaction.toRevision}`;
+  }
+  if (state.phase === 'draft') return 'No committed action yet';
+  if (state.phase === 'recovery-required') return 'Recovery required before another write';
+  if (state.phase === 'accepted') return 'Run accepted';
+  if (state.phase === 'rejected') return 'Run rejected';
+  return 'No committed transaction yet';
+}
+
+function timelineCountLabel(state: CreativeRunState): string {
+  const recentCount = state.timeline.length;
+  if (state.collapsedTimelineEntries === 0) {
+    return `${recentCount} ${recentCount === 1 ? 'entry' : 'entries'}`;
+  }
+  return `${recentCount} recent · ${state.collapsedTimelineEntries} older collapsed`;
 }
 
 function isReviewable(phase: CreativeRunPhase): boolean {

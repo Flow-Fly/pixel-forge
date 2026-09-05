@@ -72,6 +72,10 @@ const SIDEBAR_KEYBOARD_STEP = 16;
 export class PixelForgeApp extends BaseComponent {
   @property({ attribute: false }) creativeRunController: CreativeRunController | null = null;
 
+  protected willUpdate(): void {
+    this.toggleAttribute("data-agent-mode", this.creativeRunController !== null);
+  }
+
   static styles = css`
     ${scrollbarStyles}
 
@@ -281,6 +285,116 @@ export class PixelForgeApp extends BaseComponent {
       font-size: var(--pf-font-size-xs);
       color: var(--pf-color-text-muted);
       backdrop-filter: blur(12px);
+    }
+
+    /* Agent Mode keeps the artwork viewport above its supervision surface on
+       narrow screens. The desktop side panels are intentionally not allowed
+       to compete for the portrait result surface. */
+    @media (max-width: 760px), (max-height: 500px) and (orientation: landscape) {
+      :host([data-agent-mode]) {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: 48px 36px minmax(min(160px, 24vh), 1fr) minmax(0, 22vh) 28px;
+        height: 100dvh;
+        min-width: 0;
+        min-height: 100dvh;
+        overflow: hidden;
+      }
+
+      :host([data-agent-mode]) .menu-bar {
+        min-width: 0;
+        padding-inline: 8px;
+      }
+
+      :host([data-agent-mode]) .context-bar {
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      :host([data-agent-mode]) .toolbar {
+        display: none;
+      }
+
+      :host([data-agent-mode]) .workspace {
+        grid-column: 1;
+        grid-row: 3;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      :host([data-agent-mode]) .workspace > pf-project-tabs {
+        display: none;
+      }
+
+      :host([data-agent-mode]) .workspace > pf-preview-overlay {
+        display: none;
+      }
+
+      :host([data-agent-mode]) .timeline-resize-handle {
+        display: none;
+      }
+
+      :host([data-agent-mode]) .timeline-container {
+        display: block;
+        height: 64px !important;
+        max-height: 64px;
+        min-height: 64px;
+        overflow: hidden;
+      }
+
+      :host([data-agent-mode]) .panels {
+        grid-column: 1;
+        grid-row: 4;
+        min-width: 0;
+        min-height: 0;
+        border-left: 0;
+        border-top: 1px solid var(--pf-color-border);
+        overflow: hidden;
+        overscroll-behavior: contain;
+      }
+
+      :host([data-agent-mode]) .panels > :not([panel-id="creative-run"]) {
+        display: none;
+      }
+
+      :host([data-agent-mode]) .panels > pf-panel[panel-id="creative-run"] {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      :host([data-agent-mode]) .sidebar-resize-handle {
+        display: none;
+      }
+
+      :host([data-agent-mode]) .status-bar {
+        grid-column: 1;
+        grid-row: 5;
+        min-width: 0;
+        padding-inline: 8px;
+      }
+    }
+
+    @media (max-width: 760px) and (orientation: landscape), (max-height: 500px) and (orientation: landscape) {
+      :host([data-agent-mode]) {
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 42vw);
+        grid-template-rows: 48px 36px minmax(0, 1fr) 28px;
+      }
+
+      :host([data-agent-mode]) .workspace {
+        grid-column: 1;
+        grid-row: 3;
+      }
+
+      :host([data-agent-mode]) .panels {
+        grid-column: 2;
+        grid-row: 3;
+        border-left: 1px solid var(--pf-color-border);
+        border-top: 0;
+      }
+
+      :host([data-agent-mode]) .status-bar {
+        grid-column: 1 / -1;
+        grid-row: 4;
+      }
     }
 
     /* Warning toasts render at app level to avoid viewport transform issues. */
@@ -935,6 +1049,12 @@ export class PixelForgeApp extends BaseComponent {
     this.requestUpdate();
   };
 
+  private isCompactAgentViewport(): boolean {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth <= 760
+      || (window.innerHeight <= 500 && window.innerWidth > window.innerHeight);
+  }
+
   private handleSidebarResizeStart = (event: PointerEvent) => {
     const { min, max } = this.sidebarWidthBounds;
     if (this.isResizingSidebar || event.button !== 0 || min === max) return;
@@ -1202,7 +1322,9 @@ export class PixelForgeApp extends BaseComponent {
                 class="timeline-container"
                 style="height: ${this.timelineHeight}px;"
               >
-                <pf-timeline></pf-timeline>
+                <pf-timeline
+                  .compact=${this.creativeRunController !== null && this.isCompactAgentViewport()}
+                ></pf-timeline>
               </div>
             `
           : ""}

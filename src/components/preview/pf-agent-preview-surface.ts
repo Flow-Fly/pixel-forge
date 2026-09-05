@@ -22,6 +22,7 @@ export class PFAgentPreviewSurface extends LitElement {
       display: block;
       font-family: system-ui, sans-serif;
       min-width: 0;
+      min-height: 0;
       container-type: inline-size;
     }
 
@@ -33,6 +34,7 @@ export class PFAgentPreviewSurface extends LitElement {
       display: grid;
       gap: 16px;
       min-width: 0;
+      min-height: 0;
       padding: 16px;
     }
 
@@ -132,16 +134,19 @@ export class PFAgentPreviewSurface extends LitElement {
       flex: 0 0 auto;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
+      max-inline-size: 100%;
     }
 
     .intended-canvas {
-      height: var(--canvas-height);
       width: var(--canvas-width);
+      height: auto;
+      aspect-ratio: var(--canvas-ratio);
     }
 
     .inspection-canvas {
-      height: var(--inspection-height);
       width: var(--inspection-width);
+      height: auto;
+      aspect-ratio: var(--canvas-ratio);
     }
 
     @container (max-width: 640px) {
@@ -151,6 +156,20 @@ export class PFAgentPreviewSurface extends LitElement {
 
       .figures {
         grid-template-columns: minmax(0, 1fr);
+      }
+
+      .figures figure:nth-child(2) {
+        order: -1;
+      }
+
+      .canvas-frame {
+        justify-content: center;
+        max-block-size: min(48vh, 360px);
+      }
+
+      .intended-canvas,
+      .inspection-canvas {
+        max-block-size: min(44vh, 320px);
       }
     }
 
@@ -204,8 +223,8 @@ export class PFAgentPreviewSurface extends LitElement {
     const backgroundStyle = background.kind === 'solid'
       ? `--agent-preview-background: ${background.color}`
       : '';
-    const canvasStyle = `--canvas-width: ${observation.width}px; --canvas-height: ${observation.height}px;`;
-    const inspectionStyle = `--inspection-width: ${observation.width * observation.scale}px; --inspection-height: ${observation.height * observation.scale}px;`;
+    const canvasStyle = `--canvas-width: ${observation.width}px; --canvas-ratio: ${observation.width} / ${observation.height};`;
+    const inspectionStyle = `--inspection-width: ${observation.width * observation.scale}px; --canvas-ratio: ${observation.width} / ${observation.height};`;
     const sourceDescription = describeSource(observation.source);
     const metadataLabel = `${sourceLabel} source ${sourceDescription}, revision ${observation.revision}, region ${regionLabel}, scale ${observation.scale}, digest ${observation.digest}`;
 

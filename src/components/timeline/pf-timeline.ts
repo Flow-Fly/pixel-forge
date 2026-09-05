@@ -1,5 +1,5 @@
-import { html, css } from 'lit';
-import { customElement, query, state } from 'lit/decorators.js';
+import { html, css, nothing } from 'lit';
+import { customElement, property, query, state } from 'lit/decorators.js';
 import { BaseComponent } from '../../core/base-component';
 import { defaultProjectContext } from '../../stores/project-context';
 import { AddLayerCommand, RemoveLayerCommand } from '../../commands/layer-commands';
@@ -17,6 +17,8 @@ import type { PFTimelineHeader } from './pf-timeline-header';
 
 @customElement('pf-timeline')
 export class PFTimeline extends BaseComponent {
+  @property({ type: Boolean, reflect: true }) compact = false;
+
   static styles = css`
     ${scrollbarStyles}
 
@@ -127,6 +129,16 @@ export class PFTimeline extends BaseComponent {
     .scroll-container.panning {
       cursor: grabbing;
       user-select: none;
+    }
+
+    :host([compact]) .controls-area {
+      box-sizing: border-box;
+      min-height: 64px;
+    }
+
+    :host([compact]) .header-row,
+    :host([compact]) .scroll-container {
+      display: none;
     }
   `;
 
@@ -274,8 +286,11 @@ export class PFTimeline extends BaseComponent {
 
     return html`
       <div class="controls-area">
-        <pf-playback-controls @unit-change=${this.handleUnitChange}></pf-playback-controls>
-        <pf-onion-skin-controls></pf-onion-skin-controls>
+        <pf-playback-controls
+          .compact=${this.compact}
+          @unit-change=${this.handleUnitChange}
+        ></pf-playback-controls>
+        ${this.renderOnionSkinControls()}
       </div>
       <div class="header-row">
         <div class="layers-toolbar">
@@ -323,5 +338,10 @@ export class PFTimeline extends BaseComponent {
         </div>
       </div>
     `;
+  }
+
+  private renderOnionSkinControls() {
+    if (this.compact) return nothing;
+    return html`<pf-onion-skin-controls></pf-onion-skin-controls>`;
   }
 }

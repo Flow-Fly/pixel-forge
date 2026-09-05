@@ -448,6 +448,7 @@ export class CreativeRunController {
       return this.fail('brief_revision_mismatch', false, 'approve-brief');
     }
 
+    const wasPaused = this.phase === 'paused';
     this.approvedBriefRevision = this.brief.revision;
     this.clearError();
     const authority = this.checkAuthority();
@@ -458,7 +459,7 @@ export class CreativeRunController {
     this.currentRevision = readRevision(this.getCurrentRevision, this.currentRevision);
     this.lastDurableRevision = this.currentRevision;
     this.appendTimeline({ kind: 'grant', outcome: 'prepared' });
-    this.setPhase('ready');
+    this.setPhase(wasPaused ? 'paused' : 'ready');
     return this.succeed();
   }
 
@@ -478,6 +479,7 @@ export class CreativeRunController {
     this.clearError();
     this.generation += 1;
 
+    const wasPaused = this.phase === 'paused';
     if (this.inFlight) {
       this.pendingLifecycle = { phase: 'draft' };
       this.setPhase('pausing');
@@ -488,7 +490,10 @@ export class CreativeRunController {
     if (this.phase === 'running' || this.phase === 'pausing' || this.phase === 'stopping') {
       this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
     }
-    this.setPhase('draft');
+    // A paused run keeps its pause boundary while the creator edits the brief.
+    // Reapproval can therefore return to the same run through Resume without
+    // silently starting a new write turn.
+    this.setPhase(wasPaused ? 'paused' : 'draft');
     return this.succeed();
   }
 
@@ -999,6 +1004,8 @@ export class CreativeRunController {
     this.lifecycleEvents?.addEventListener('automation-session-revoked', this.handleSessionInterruption);
     if (typeof window === 'undefined') return;
     window.addEventListener('offline', this.handleOffline);
+    window.addEventListener('orientationchange', this.handleOrientationChange);
+    document.addEventListener('freeze', this.handleFreeze);
     window.addEventListener('pagehide', this.handlePageHide);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
   }
@@ -1008,11 +1015,21 @@ export class CreativeRunController {
     this.lifecycleEvents?.removeEventListener('automation-session-revoked', this.handleSessionInterruption);
     if (typeof window === 'undefined') return;
     window.removeEventListener('offline', this.handleOffline);
+    window.removeEventListener('orientationchange', this.handleOrientationChange);
+    document.removeEventListener('freeze', this.handleFreeze);
     window.removeEventListener('pagehide', this.handlePageHide);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   }
 
   private readonly handleOffline = (): void => {
+    this.interruptForLifecycle('work-unsettled');
+  };
+
+  private readonly handleOrientationChange = (): void => {
+    this.interruptForLifecycle('work-unsettled');
+  };
+
+  private readonly handleFreeze = (): void => {
     this.interruptForLifecycle('work-unsettled');
   };
 
