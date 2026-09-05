@@ -501,6 +501,7 @@ async function createIndexedRecoveryJourney(kind: 'safe' | 'conflict' | 'rewind'
 }
 
 describe('Creative Run panel in Chromium', () => {
+  // fallow-ignore-next-line complexity -- This browser proof keeps the public run, focus, and progressive disclosure assertions together.
   it('shows approved brief, factual activity, budget state, and keyboard controls', async () => {
     const { element, controller, fixture } = await createRun();
 

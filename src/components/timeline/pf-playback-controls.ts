@@ -89,6 +89,7 @@ export class PFPlaybackControls extends BaseComponent {
   @state() private durationUnit: 'ms' | 'fps' = 'ms';
   private context = defaultProjectContext;
 
+  // fallow-ignore-next-line code-duplication -- Playback and timeline-header controls independently subscribe to the active project context.
   connectedCallback() {
     super.connectedCallback();
     this.subscribeToActiveProjectContext((context) => {
