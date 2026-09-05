@@ -18,6 +18,7 @@ import {
   isBoundedString,
   isCompatibleRecord,
   isCheckpointDigestValid,
+  MAX_COLLAPSED_EVENT_COUNT,
   isProjectSizeError,
   isRevision,
   isValidTransactionInput,
@@ -848,7 +849,10 @@ export class CreativeRunRecoveryCoordinator implements CreativeRunRecovery {
     if (!record) return;
     if (record.timeline.length >= CREATIVE_RUN_RECOVERY_MAX_TIMELINE_ENTRIES) {
       record.timeline.splice(0, 1);
-      record.collapsedEventCount += 1;
+      record.collapsedEventCount = Math.min(
+        record.collapsedEventCount + 1,
+        MAX_COLLAPSED_EVENT_COUNT,
+      );
     }
     const sequence = (record.timeline.at(-1)?.sequence ?? 0) + 1;
     record.timeline.push({ sequence, ...entry });

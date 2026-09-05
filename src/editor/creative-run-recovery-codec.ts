@@ -19,6 +19,8 @@ import { decodeProjectFile, type ProjectFile } from '../types/project';
 const MAX_TIMELINE_ENTRIES = 200;
 const MAX_TRANSACTIONS = 50;
 const MAX_DURATION_MS = 3_600_000;
+/** Keep the collapsed count factual for long-lived records without allowing unbounded numbers. */
+export const MAX_COLLAPSED_EVENT_COUNT = 2_147_483_647;
 
 export function assertProjectSize(project: ProjectFile): void {
   if (measureProjectBytes(project) > ASSET_PACKAGE_MAX_SOURCE_BYTES) {
@@ -367,7 +369,7 @@ function isSafeInteger(value: unknown): value is number {
 }
 
 function isNonNegativeBoundedInteger(value: unknown): value is number {
-  return isSafeInteger(value) && value >= 0 && value <= MAX_TIMELINE_ENTRIES;
+  return isSafeInteger(value) && value >= 0 && value <= MAX_COLLAPSED_EVENT_COUNT;
 }
 
 export function boundedIdentity(value: string, reason: string): string {

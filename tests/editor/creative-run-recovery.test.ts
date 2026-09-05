@@ -9,6 +9,7 @@ import {
 import type { CreativeBrief } from '../../src/editor/creative-run';
 import type { ProjectFile } from '../../src/types/project';
 import { ProjectAlreadyExistsError } from '../../src/services/persistence/project-repository';
+import { MAX_COLLAPSED_EVENT_COUNT } from '../../src/editor/creative-run-recovery-codec';
 
 const brief: CreativeBrief = {
   runId: 'run-587',
@@ -716,5 +717,19 @@ describe('CreativeRunRecoveryCoordinator', () => {
     expect(diagnostics.collapsedEventCount).toBeGreaterThan(0);
     expect(diagnostics.eventCount).toBeGreaterThan(200);
     expect(persistence.getRecord()?.collapsedEventCount).toBe(diagnostics.collapsedEventCount);
+
+    const stored = persistence.getRecord();
+    if (!stored) throw new Error('Expected the bounded recovery record.');
+    persistence.setRecord({ ...stored, collapsedEventCount: MAX_COLLAPSED_EVENT_COUNT });
+    const reloaded = new CreativeRunRecoveryCoordinator({
+      runId: brief.runId,
+      sessionId: 'replacement-session',
+      brief,
+      target: target.target,
+      persistence: persistence.persistence,
+    });
+    await expect(reloaded.load()).resolves.toMatchObject({ ok: true });
+    await expect(reloaded.markInterrupted()).resolves.toMatchObject({ ok: true });
+    expect(persistence.getRecord()?.collapsedEventCount).toBe(MAX_COLLAPSED_EVENT_COUNT);
   });
 });
