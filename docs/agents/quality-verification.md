@@ -37,6 +37,10 @@ commands, environment, producer root, tools and results.
 | `server`  | All `server/tests/**/*.test.ts` except database and storage suites   | `server/src/**/*.ts`, excluding declarations                               | Node                                       |
 | `worker`  | `tests/workers/telemetry-worker.test.ts`                             | `workers/telemetry/src/**/*.ts`, excluding declarations                    | Node/happy-dom with mocked Worker bindings |
 
+The root coverage command limits Vitest to two workers. This keeps full-suite
+coverage and the CLI fixtures from saturating local CPUs; test selection and
+timeouts stay unchanged. The limit is part of the recorded and accepted command.
+
 Each profile uses the installed Vitest V8 provider and emits its own
 Istanbul-shaped JSON map. Every declared source file must appear, including
 zero-hit files and empty type-only or barrel maps. The five maps are independent;
