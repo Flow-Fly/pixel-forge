@@ -18,18 +18,41 @@ export interface SiteSchema {
   readonly oneOf?: readonly SiteSchema[];
 }
 
-export const siteString = (maxLength = 256): SiteSchema => ({ type: 'string', minLength: 1, maxLength });
-export const siteInteger = (minimum = 0, maximum = Number.MAX_SAFE_INTEGER): SiteSchema => ({ type: 'integer', minimum, maximum });
-export const siteEnum = (values: readonly string[]): SiteSchema => ({ type: 'string', enum: values });
-export const siteArray = (items: SiteSchema, maxItems: number, minItems = 0): SiteSchema => ({ type: 'array', items, minItems, maxItems });
-export const siteObject = (properties: Readonly<Record<string, SiteSchema>>, optional: readonly string[] = []): SiteSchema => ({
-  type: 'object', properties, required: Object.keys(properties).filter((key) => !optional.includes(key)), additionalProperties: false,
+export const siteString = (maxLength = 256): SiteSchema => ({
+  type: 'string',
+  minLength: 1,
+  maxLength,
+});
+export const siteInteger = (minimum = 0, maximum = Number.MAX_SAFE_INTEGER): SiteSchema => ({
+  type: 'integer',
+  minimum,
+  maximum,
+});
+export const siteEnum = (values: readonly string[]): SiteSchema => ({
+  type: 'string',
+  enum: values,
+});
+export const siteArray = (items: SiteSchema, maxItems: number, minItems = 0): SiteSchema => ({
+  type: 'array',
+  items,
+  minItems,
+  maxItems,
+});
+export const siteObject = (
+  properties: Readonly<Record<string, SiteSchema>>,
+  optional: readonly string[] = []
+): SiteSchema => ({
+  type: 'object',
+  properties,
+  required: Object.keys(properties).filter((key) => !optional.includes(key)),
+  additionalProperties: false,
 });
 
 /** Validation and published schemas use the same bounded definitions. */
 export function matchesSiteSchema(value: unknown, schema: SiteSchema, depth = 0): boolean {
   if (depth > 24) return false;
-  if (schema.oneOf) return schema.oneOf.filter((item) => matchesSiteSchema(value, item, depth + 1)).length === 1;
+  if (schema.oneOf)
+    return schema.oneOf.filter((item) => matchesSiteSchema(value, item, depth + 1)).length === 1;
   if ('const' in schema && value !== schema.const) return false;
   if (schema.enum && !schema.enum.includes(value as string)) return false;
   return matchesSchemaType(value, schema, depth);
@@ -37,33 +60,50 @@ export function matchesSiteSchema(value: unknown, schema: SiteSchema, depth = 0)
 
 function matchesSchemaType(value: unknown, schema: SiteSchema, depth: number): boolean {
   switch (schema.type) {
-    case 'null': return value === null;
-    case 'boolean': return typeof value === 'boolean';
+    case 'null':
+      return value === null;
+    case 'boolean':
+      return typeof value === 'boolean';
     case 'integer':
-    case 'number': return matchesNumber(value, schema);
-    case 'string': return matchesString(value, schema);
-    case 'array': return matchesArray(value, schema, depth);
-    case 'object': return matchesObject(value, schema, depth);
-    default: return 'const' in schema || !!schema.enum;
+    case 'number':
+      return matchesNumber(value, schema);
+    case 'string':
+      return matchesString(value, schema);
+    case 'array':
+      return matchesArray(value, schema, depth);
+    case 'object':
+      return matchesObject(value, schema, depth);
+    default:
+      return 'const' in schema || !!schema.enum;
   }
 }
 
 function matchesNumber(value: unknown, schema: SiteSchema): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false;
   if (schema.type === 'integer' && !Number.isSafeInteger(value)) return false;
-  return value >= (schema.minimum ?? -Number.MAX_VALUE) && value <= (schema.maximum ?? Number.MAX_VALUE);
+  return (
+    value >= (schema.minimum ?? -Number.MAX_VALUE) && value <= (schema.maximum ?? Number.MAX_VALUE)
+  );
 }
 
 function matchesString(value: unknown, schema: SiteSchema): boolean {
   if (typeof value !== 'string') return false;
-  if (value.length < (schema.minLength ?? 0) || value.length > (schema.maxLength ?? Number.MAX_SAFE_INTEGER)) return false;
+  if (
+    value.length < (schema.minLength ?? 0) ||
+    value.length > (schema.maxLength ?? Number.MAX_SAFE_INTEGER)
+  )
+    return false;
   return !schema.pattern || new RegExp(schema.pattern).test(value);
 }
 
 function matchesArray(value: unknown, schema: SiteSchema, depth: number): boolean {
   if (!Array.isArray(value) || !schema.items) return false;
   if (value.length < (schema.minItems ?? 0) || value.length > (schema.maxItems ?? 0)) return false;
-  if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) return false;
+  if (
+    schema.uniqueItems &&
+    new Set(value.map((item) => JSON.stringify(item))).size !== value.length
+  )
+    return false;
   return value.every((item) => matchesSiteSchema(item, schema.items!, depth + 1));
 }
 
@@ -73,5 +113,7 @@ function matchesObject(value: unknown, schema: SiteSchema, depth: number): boole
   const record = value as Record<string, unknown>;
   if (!Object.keys(record).every((key) => Object.hasOwn(schema.properties!, key))) return false;
   if (!(schema.required ?? []).every((key) => Object.hasOwn(record, key))) return false;
-  return Object.entries(record).every(([key, child]) => matchesSiteSchema(child, schema.properties![key], depth + 1));
+  return Object.entries(record).every(([key, child]) =>
+    matchesSiteSchema(child, schema.properties![key], depth + 1)
+  );
 }

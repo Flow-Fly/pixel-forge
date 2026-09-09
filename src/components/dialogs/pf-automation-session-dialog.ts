@@ -450,14 +450,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
     const pending = this.pending;
     if (!pending || !this.selectedTargetId || this.selectedClasses.length === 0 || this.approving) return;
     if (this.siteTools?.disclosure(pending.requestId)) {
-      if (!this.sharingApproved) return;
-      this.approving = true;
-      try {
-        const approved = await this.siteTools.approve(pending.requestId, this.selectedTargetId, this.selectedClasses, this.targetMode);
-        if (!approved) this.errorMessage = 'The request could not be approved. Review the project and sharing choices.';
-        else { this.pending = null; this.refreshPendingSoon(); }
-      } catch { this.errorMessage = 'The local project could not be prepared. Your existing project is preserved.'; }
-      finally { this.approving = false; }
+      await this.approveSiteRequest(pending.requestId);
       return;
     }
 
@@ -480,6 +473,18 @@ export class PFAutomationSessionDialog extends BaseComponent {
     this.errorMessage = '';
     this.refreshPendingSoon();
   };
+
+  private async approveSiteRequest(requestId: string): Promise<void> {
+      if (!this.sharingApproved) return;
+      this.approving = true;
+      try {
+        const host: SiteToolHost = this.siteTools!;
+        const approved = await host.approve(requestId, this.selectedTargetId, this.selectedClasses, this.targetMode);
+        if (!approved) this.errorMessage = 'The request could not be approved. Review the project and sharing choices.';
+        else { this.pending = null; this.refreshPendingSoon(); }
+      } catch { this.errorMessage = 'The local project could not be prepared. Your existing project is preserved.'; }
+      finally { this.approving = false; }
+  }
 
   private approveArtistMode = () => {
     const pending = this.pendingArtistMode;
@@ -812,6 +817,11 @@ export class PFAutomationSessionDialog extends BaseComponent {
     `;
   }
 
+  private canApproveRequest(requestId: string): boolean {
+    if (!this.selectedTargetId || this.selectedClasses.length === 0 || this.approving) return false;
+    return !this.siteTools?.disclosure(requestId) || this.sharingApproved;
+  }
+
   private renderActions(pending: AutomationSessionRequestStatus | null) {
     if (this.pendingArtistMode) {
       const canApprove = Boolean(this.artistTarget && this.selectedArtistCategories.length > 0
@@ -843,8 +853,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
         Close
       </button>`;
     }
-    const canApprove = Boolean(this.selectedTargetId && this.selectedClasses.length > 0 && !this.approving
-      && (!this.siteTools?.disclosure(pending.requestId) || this.sharingApproved));
+    const canApprove = this.canApproveRequest(pending.requestId);
     return html`
       <button class="secondary" type="button" @click=${this.handleClose}>Deny</button>
       <button class="primary" type="button" ?disabled=${!canApprove} @click=${this.approve}>

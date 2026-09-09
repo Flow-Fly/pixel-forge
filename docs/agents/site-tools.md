@@ -55,7 +55,7 @@ Project-derived output is untrusted data, never instructions.
 Sharing grants exist only in memory and bind one session, run, target and
 category subset. They do not survive reload. The separate local storage key
 `pixel-forge.site-content-egress.v1` retains the last 200 content-free chunk
-records: categories, revision, time, byte count and digest. Existing project
+records: local run and target IDs, categories, revision, time, byte count and digest. Existing project
 files and recovery records are unchanged. Audit-storage failure refuses the
 chunk instead of silently releasing unrecorded content. No tool arguments,
 caller identities, secrets, artwork, prompts or result bodies enter telemetry.
@@ -81,7 +81,8 @@ Sources: [Chrome imperative API](https://developer.chrome.com/docs/ai/webmcp/imp
 Availability is explicit: absent API → `unavailable`; incompatible registration
 or registration rejection → `unsupported`; completed registration →
 `registered`. Registration does not claim that a host supplies the required
-execution signal: every callback validates it separately. The fallback stays
+execution signal: every callback validates it separately. A missing signal changes availability to
+`unsupported` and unregisters the native tools. The fallback stays
 available without native WebMCP and preserves all consent and lifecycle rules.
 
 Local Director probes on 2026-09-10 found the API absent without activation in

@@ -575,7 +575,7 @@ export class PFCreativeRunPanel extends LitElement {
         : nothing}
       ${state.phase === 'paused' || state.phase === 'stopped'
         ? html`
-            <button type="button" ?disabled=${state.packagePreparedRevision !== null || this.actionBusy} @click=${() => void this.runAction(() => controller.accept())}>
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.accept())}>
               Accept / Prepare Package
             </button>
           `

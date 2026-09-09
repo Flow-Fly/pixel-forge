@@ -2,7 +2,9 @@ import { SITE_TOOL_MAX_RESULT_BYTES, SITE_TOOL_MAX_CHUNK_BYTES } from './site-to
 
 export async function siteDigest(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes.slice().buffer);
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join(
+    ''
+  );
 }
 
 export function siteBase64(bytes: Uint8Array): string {
@@ -13,7 +15,9 @@ export function siteBase64(bytes: Uint8Array): string {
   return btoa(text);
 }
 
-interface WireBudget { remaining: number }
+interface WireBudget {
+  remaining: number;
+}
 
 /** Snapshot mutable binary leaves before hashing or releasing any result. */
 export async function encodeSiteResult(value: unknown): Promise<Uint8Array> {
@@ -43,10 +47,20 @@ async function encodeValue(input: unknown, budget: WireBudget, depth: number): P
 
 async function encodeBytes(bytes: Uint8Array, budget: WireBudget): Promise<unknown> {
   consume(budget, bytes.byteLength * 2);
-  return { type: 'pf-bytes/1', encoding: 'base64', byteLength: bytes.byteLength, digest: await siteDigest(bytes), data: siteBase64(bytes) };
+  return {
+    type: 'pf-bytes/1',
+    encoding: 'base64',
+    byteLength: bytes.byteLength,
+    digest: await siteDigest(bytes),
+    data: siteBase64(bytes),
+  };
 }
 
-async function encodeArray(input: unknown[], budget: WireBudget, depth: number): Promise<unknown[]> {
+async function encodeArray(
+  input: unknown[],
+  budget: WireBudget,
+  depth: number
+): Promise<unknown[]> {
   if (input.length > 250_000) throw new Error('result_limit');
   consume(budget, input.length);
   const output = [];
@@ -54,7 +68,11 @@ async function encodeArray(input: unknown[], budget: WireBudget, depth: number):
   return output;
 }
 
-async function encodeObject(input: object, budget: WireBudget, depth: number): Promise<Record<string, unknown>> {
+async function encodeObject(
+  input: object,
+  budget: WireBudget,
+  depth: number
+): Promise<Record<string, unknown>> {
   if (Object.getPrototypeOf(input) !== Object.prototype) throw new Error('result_type');
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(input)) {
@@ -67,6 +85,9 @@ async function encodeObject(input: object, budget: WireBudget, depth: number): P
 function encodeScalar(input: unknown, budget: WireBudget): unknown {
   if (input === null || typeof input === 'boolean') return input;
   if (typeof input === 'number' && Number.isFinite(input)) return input;
-  if (typeof input === 'string') { consume(budget, input.length * 2); return input; }
+  if (typeof input === 'string') {
+    consume(budget, input.length * 2);
+    return input;
+  }
   throw new Error('result_type');
 }

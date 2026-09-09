@@ -667,16 +667,10 @@ export class CreativeRunController {
 
   /** Prepare a review package without accepting the result or ending consent. */
   async preparePackageForReview(): Promise<CreativeRunPackageResponse> {
-    if (this.disposed || this.recoveryActionPromise || this.inFlight || this.phase !== 'paused') {
-      return failure('invalid_state', false);
-    }
-    if (this.approvedBriefRevision !== this.brief.revision || !this.checkAuthority().ok) {
-      return failure('capability_denied', false);
-    }
-    const prepare = this.preparePackageBoundary;
+    const blocked = this.packageReviewBlock();
+    if (blocked) return blocked;
+    const prepare = this.preparePackageBoundary!;
     const revision = readRevision(this.getCurrentRevision, this.currentRevision);
-    if (!prepare) return failure('unsupported', false);
-    if (revision !== this.lastDurableRevision) return failure('revision_conflict', true);
     const generation = this.generation;
     this.inFlight = 'observation';
     this.publish();
@@ -698,6 +692,18 @@ export class CreativeRunController {
       this.settlePendingLifecycle();
       this.publish();
     }
+  }
+
+  private packageReviewBlock(): ReturnType<typeof failure> | null {
+    if (this.disposed || this.recoveryActionPromise || this.inFlight || this.phase !== 'paused') return failure('invalid_state', false);
+    if (!this.preparePackageBoundary) return failure('unsupported', false);
+    return this.packageReviewAuthorityBlock();
+  }
+
+  private packageReviewAuthorityBlock(): ReturnType<typeof failure> | null {
+    if (this.approvedBriefRevision !== this.brief.revision || !this.checkAuthority().ok) return failure('capability_denied', false);
+    const revision = readRevision(this.getCurrentRevision, this.currentRevision);
+    return revision === this.lastDurableRevision ? null : failure('revision_conflict', true);
   }
 
   /**
