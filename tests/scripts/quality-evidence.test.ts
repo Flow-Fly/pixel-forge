@@ -278,7 +278,7 @@ describe('public quality evidence CLI', () => {
     expect(check().status).toBe(1);
     rmSync(resolve(fixture, 'new-input.txt'));
     expect(check().status).toBe(0);
-  });
+  }, 30_000);
 
   it('refuses a committed lockfile that disagrees with the installed tool', () => {
     const original = readFileSync(resolve(fixture, 'package-lock.json'), 'utf8');

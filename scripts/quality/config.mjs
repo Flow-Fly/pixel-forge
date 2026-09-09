@@ -58,7 +58,7 @@ export function profiles(inputs) {
       id: 'root',
       runtime: 'Node/happy-dom',
       cwd: '.',
-      command: ['node_modules/.bin/vitest', 'run', '--maxWorkers=2'],
+      command: ['node_modules/.bin/vitest', 'run', '--maxWorkers=1'],
       config: ['vitest.config.ts'],
       include: 'src/**/*.ts',
       exclude: ['**/*.d.ts', 'src/**/*.test.ts', 'src/main.ts'],
