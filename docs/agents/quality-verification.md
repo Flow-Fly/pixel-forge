@@ -51,7 +51,9 @@ Absolute includes prevent Vitest 4's substring glob matching from collecting
 this regression: its root tests import all three areas, but each profile keeps
 its declared scope. `excludeAfterRemap` also applies exclusions after source-map
 translation. V8 can serialize an unbounded end column as `null`; this remains a
-valid location, while hit counts must be nonnegative integers.
+valid location, while hit counts must be nonnegative integers. The remapper also
+emits `{start: {}, end: {}}` for the second location of a two-way `if` branch
+with no explicit `else`; only that precise implicit-branch sentinel is accepted.
 
 The Worker command runs from the root npm workspace caller, generates its types,
 and records root `INIT_CWD`. It does not measure workerd or deployed bindings.

@@ -45,6 +45,18 @@ export function validateCoverage(map, profile, producerRoot) {
     );
 }
 
+// The V8 remapper emits this sentinel for the implicit else of an if statement.
+function implicitElse(value) {
+  return (
+    object(value) &&
+    Object.keys(value).length === 2 &&
+    object(value.start) &&
+    object(value.end) &&
+    Object.keys(value.start).length === 0 &&
+    Object.keys(value.end).length === 0
+  );
+}
+
 function validateFileCounters(file, profileId) {
   for (const [counters, mappings] of [
     ['s', 'statementMap'],
@@ -69,7 +81,14 @@ function validateFileCounters(file, profileId) {
           !location(mapping.loc) ||
           !Array.isArray(mapping.locations) ||
           value.length !== mapping.locations.length ||
-          !mapping.locations.every(location)
+          !mapping.locations.every(
+            (value, index) =>
+              location(value) ||
+              (mapping.type === 'if' &&
+                mapping.locations.length === 2 &&
+                index === 1 &&
+                implicitElse(value))
+          )
         )
           throw new Error(`${profileId}: malformed branch coverage`);
       } else if (

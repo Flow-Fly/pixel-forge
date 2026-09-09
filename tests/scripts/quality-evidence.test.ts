@@ -96,7 +96,10 @@ beforeAll(() => {
   );
   write('src/main.ts', 'export const main = 1;\n');
   write('src/value.ts', 'export const value = 2;\n');
-  write('src/zero.ts', 'export function uncalled() { return 3; }\n');
+  write(
+    'src/zero.ts',
+    'export function uncalled(flag: boolean) { if (flag) return 1; return 3; }\n'
+  );
   write('src/types.ts', 'export interface Value { value: number }\n');
   write('shared/src/index.ts', 'export const shared = 3;\n');
   write('server/src/index.ts', 'export const server = 4;\n');
@@ -163,6 +166,12 @@ describe('public quality evidence CLI', () => {
       Object.values(rootMap[resolve(fixture, 'src/zero.ts')].s).every((hits) => hits === 0)
     ).toBe(true);
     expect(rootMap[resolve(fixture, 'src/types.ts')].s).toEqual({});
+    const branches = Object.values(rootMap[resolve(fixture, 'src/zero.ts')].branchMap) as any[];
+    expect(
+      branches.some(
+        (branch) => JSON.stringify(branch.locations[1]) === JSON.stringify({ start: {}, end: {} })
+      )
+    ).toBe(true);
     const relocated = resolve(fixture, '.fallow/downloaded');
     cpSync(bundle, relocated, { recursive: true });
     expect(check(relocated).status).toBe(0);
@@ -204,12 +213,18 @@ describe('public quality evidence CLI', () => {
     const map = JSON.parse(original);
     const incomplete = { ...map };
     delete incomplete[resolve(fixture, 'src/zero.ts')];
+    const malformedBranch = JSON.parse(original);
+    const firstBranch = Object.values(
+      malformedBranch[resolve(fixture, 'src/zero.ts')].branchMap
+    )[0] as any;
+    firstBranch.locations[0] = { start: {}, end: {} };
     const malformed = JSON.parse(original);
     malformed[resolve(fixture, 'src/value.ts')].s = { 0: -1 };
     for (const [replacement, message] of [
       ['{}', 'empty or malformed'],
       [JSON.stringify(incomplete), 'incomplete or wrong-profile'],
       [JSON.stringify(malformed), 'malformed'],
+      [JSON.stringify(malformedBranch), 'malformed branch'],
       [original.replaceAll(fixture, '/foreign/root'), 'foreign'],
       [readFileSync(resolve(bundle, 'server/coverage-final.json'), 'utf8'), 'wrong-profile'],
     ]) {
