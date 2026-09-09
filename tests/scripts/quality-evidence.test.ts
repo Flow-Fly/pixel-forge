@@ -180,6 +180,17 @@ describe('public quality evidence CLI', () => {
     );
   });
 
+  it('rejects a manifest symlink outside the selected bundle', () => {
+    const relocated = resolve(fixture, '.fallow/external-manifest');
+    cpSync(bundle, relocated, { recursive: true });
+    const manifestPath = resolve(relocated, 'manifest.json');
+    rmSync(manifestPath);
+    symlinkSync(resolve(bundle, 'manifest.json'), manifestPath);
+    const result = check(relocated);
+    expect(result.status).toBe(1);
+    expect(result.text).toContain('artifact path escapes bundle');
+  });
+
   it('rejects absent, malformed, incomplete, foreign, or mixed artifacts', () => {
     expect(check(resolve(fixture, '.fallow/absent')).status).toBe(1);
     for (const [path, replacement] of [

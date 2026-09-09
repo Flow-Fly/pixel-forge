@@ -95,8 +95,9 @@ failed, stale, wrong-profile, empty or foreign evidence fails closed.
 
 For downloaded evidence, retain the original `producerRoot`. It translates
 absolute coverage paths; it never permits reading artifacts outside the selected
-bundle. The consumer OS need not match the producer OS. Replacing the original
-root with the download directory invalidates the evidence.
+bundle. Evidence can move between the verified macOS developer host and Linux CI.
+Windows producer and consumer paths are unsupported and unverified in this slice.
+Replacing the original root with the download directory invalidates the evidence.
 
 An input change invalidates acceptance even if HEAD did not change. Restoring
 the exact revision and inputs can make the same intact historical bundle valid

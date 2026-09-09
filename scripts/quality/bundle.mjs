@@ -98,7 +98,7 @@ export function artifactDigests(bundle, paths) {
 
 export function validateBundle(root, bundle, base, head, certification = true) {
   exactRevision(root, base, head);
-  const manifest = readJson(resolve(bundle, 'manifest.json'));
+  const manifest = readJson(artifact(bundle, 'manifest.json'));
   const current = identity(root);
   if (current.dirty) throw new Error('checkout inputs changed: dirty tree');
   const expectedProfiles = profiles(current.inputs);
@@ -187,7 +187,7 @@ export function validateBundle(root, bundle, base, head, certification = true) {
   if (certification)
     same(
       readJson(artifact(bundle, 'certification.json')),
-      { base, head, manifest: digest(readFileSync(resolve(bundle, 'manifest.json'))) },
+      { base, head, manifest: digest(readFileSync(artifact(bundle, 'manifest.json'))) },
       'certification'
     );
   return manifest;
