@@ -21,13 +21,27 @@ untrusted input; async observability; dependencies and client bundles; UI
 accessibility and async states; and whether changed tests execute and assert
 the changed production behavior.
 
+Before reading the diff and before returning, record the exact requirement
+source/version/body digest and retrieval/update times, candidate repository,
+base/head/range and dirty-state check, changed and excluded scopes, and each
+verification command's producer, configuration, revision, source/test scope,
+exclusions, result, evidence path, and provenance as described in
+docs/agents/handoffs.md. Report Standards and Spec conclusions separately.
+Finalizer findings name severity, evidence, affected requirement or standard,
+and status; the Director verifies each finding and adds the disposition and
+rationale. Use
+FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run fallow:audit and
+verify the report range; a bare, branch-upstream, or self-comparison audit is
+not delivery evidence.
+
 You may edit the PR branch only for a correction or simplification that is
 directly required by the approved tickets, stays inside their write boundaries
 and non-goals, preserves public behavior unless repairing a specified defect,
 and has a convincing verification path. Prefer direct, boring code. Commit all
 such finalizer changes in one focused commit, push the same branch, and rerun
 the affected checks plus npx tsc --noEmit, npm run lint, npm run test:run, npm
-run build, npm run fallow:audit, and git diff --check.
+run build, FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run
+fallow:audit, and git diff --check.
 
 Return exactly one verdict:
 

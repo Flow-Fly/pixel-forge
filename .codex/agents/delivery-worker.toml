@@ -40,10 +40,21 @@ meaningful commit, push the feature branch and open a draft PR against develop.
 Copy the canonical Linked task issues list into the PR body and keep it updated
 so progress, decisions, and checks remain visible in GitHub.
 
+Return the exact handoff record from docs/agents/handoffs.md: requirement URLs,
+versions, raw UTF-8 body SHA-256 digests, retrieval/update times and mandate;
+repository, worktree, branch, integration baseline, base/head, range, dirty
+state, changed/excluded scope; each command's producer, configuration, exact
+revision, source/test scope, exclusions, result, evidence path and provenance;
+and the separate Standards and Spec review inputs. A body digest is computed
+from the parsed GitHub body bytes without trimming or adding a CLI newline.
+Use the exact starting origin/develop SHA in
+FALLOW_AUDIT_BASE=<sha> npm run fallow:audit and verify Fallow's reported range.
+
 When every linked issue's acceptance criteria are satisfied, run relevant
 focused checks plus npx tsc --noEmit, npm run lint, npm run test:run, npm run
-build, npm run fallow:audit, and git diff --check. Keep the PR in draft, do not
-merge, and hand the complete PR diff and exact head to pr-finalizer. Your task
+build, FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run fallow:audit,
+and git diff --check. Keep the PR in draft, do not merge, and hand the complete
+PR diff and exact head to pr-finalizer. Your task
 ends at that handoff unless the workflow director explicitly returns a bounded
 implementation gap that the finalizer classified as STOP.
 """

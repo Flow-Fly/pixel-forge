@@ -71,6 +71,11 @@ must not carry `needs-human`, `not-ready-for-agent`, or `agent:blocked`.
 Task issues do not duplicate their parent slice's native dependencies and do
 not block sibling tasks from the same pull request.
 
+Use [`docs/agents/handoffs.md`](../agents/handoffs.md) for the concrete
+requirement, candidate, verification, review, and recovery records. It is a
+record template, not a second workflow policy; this document remains
+canonical.
+
 ## 1. Shape and manage — `workflow-director`
 
 The director owns product coherence and future-work selection. It does not
@@ -167,13 +172,18 @@ npx tsc --noEmit
 npm run lint
 npm run test:run
 npm run build
-npm run fallow:audit
+FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run fallow:audit
 git diff --check
 ```
 
-The worker keeps the draft pull request updated against `develop`. After every
-linked issue's acceptance criteria are satisfied and the implementation checks
-are green, it hands the complete diff and exact head to `pr-finalizer`.
+The worker records the producer, configuration, exact revision, source/test
+scope, exclusions, result, and evidence location for every command. It verifies
+the Fallow report's comparison range matches the handed-off base; a bare audit
+may select `main` or a branch upstream, and a self-comparison is not delivery
+evidence. The worker keeps the draft pull request updated against `develop`.
+After every linked issue's acceptance criteria are satisfied and the
+implementation checks are green, it hands the complete diff and exact head to
+`pr-finalizer`.
 
 ## 3. Finalize — `pr-finalizer`
 
@@ -192,6 +202,12 @@ The pass combines:
   code that is difficult for a junior-to-mid-level developer to follow;
 - direct application of safe corrections and simplifications already
   determined by the approved slice.
+
+The report keeps `Standards` and `Spec` conclusions separate. Every finding
+names severity, evidence, affected requirement or standard, status, and the
+Director's explicit disposition and rationale. If the finalizer makes a safe
+in-scope correction, it uses one focused commit and returns `FIXED`; that new
+head receives a fresh finalizer pass.
 
 A safe finalizer edit stays inside the named write boundaries and product
 behavior, has a convincing verification path, and requires no new decision.

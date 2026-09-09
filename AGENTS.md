@@ -27,6 +27,10 @@ Before issue- or pull-request-driven delivery work, read:
 - `docs/operations/codex-agent-workflow.md`;
 - `.agentic-loop.yml`;
 
+Before changing a named responsibility, consult
+[`docs/agents/change-map.md`](docs/agents/change-map.md) for its supported
+interface, principal callers, behavior tests, and governing contract.
+
 Before any change, read the source files and active documentation that own the
 requested behavior. For direct maintenance without a linked GitHub item, do
 not invent issue, branch, or pull-request state.
