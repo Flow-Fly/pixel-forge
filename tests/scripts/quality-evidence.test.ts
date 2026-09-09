@@ -340,7 +340,9 @@ describe('public quality evidence CLI', () => {
     ).toBe(true);
     const sarifPath = resolve(bundle, 'audit.sarif.json');
     const sarif = JSON.parse(readFileSync(sarifPath, 'utf8'));
-    const nativeResult = sarif.runs.flatMap((run: any) => run.results ?? [])[0];
+    const nativeResult = sarif.runs
+      .flatMap((run: any) => run.results ?? [])
+      .find((result: any) => result.ruleId === 'fallow/high-crap-score');
     expect(nativeResult.level).toBe('error');
     nativeResult.ruleId = 'fallow/css-broken-reference';
     const changedSarif = JSON.stringify(sarif);
