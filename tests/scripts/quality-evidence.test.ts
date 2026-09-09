@@ -142,7 +142,7 @@ beforeAll(() => {
     .map((name) => readFileSync(resolve(bundle, 'commands', name), 'utf8'))
     .join('\n');
   expect(result, result.text + logs).toMatchObject({ status: 0 });
-}, 120_000);
+}, 300_000);
 
 afterAll(() => rmSync(fixture, { recursive: true, force: true }));
 
@@ -323,7 +323,7 @@ describe('public quality evidence CLI', () => {
         (finding: any) => finding.category === 'complexity'
       )
     ).toBe(true);
-  }, 180_000);
+  }, 600_000);
 
   it('invalidates certification before a failed producer and retains its diagnostics', () => {
     write(

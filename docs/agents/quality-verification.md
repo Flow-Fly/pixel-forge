@@ -42,6 +42,10 @@ Istanbul-shaped JSON map. Every declared source file must appear, including
 zero-hit files and empty type-only or barrel maps. The five maps are independent;
 there is no combined percentage or coverage threshold.
 
+`scripts/**` is outside all five coverage maps. The CLI exercises prove tooling
+behavior, but they do not produce measured coverage for these modules. Fallow
+function scores for tooling therefore retain estimated provenance.
+
 Absolute includes prevent Vitest 4's substring glob matching from collecting
 `shared/src` and Worker files in the root profile. The public fixture preserves
 this regression: its root tests import all three areas, but each profile keeps
@@ -140,7 +144,7 @@ Standards/Spec review, Director dispositions, fresh finalizer after `FIXED`, or
 human merge approval.
 
 CI uploads only `.fallow/quality`, including hidden files, under `if: always()`;
-missing artifacts are an error. Artifacts are named with the source head and
+missing artifacts are an error. Artifacts are named with the source head, run ID and attempt, and
 retained for 14 days. Record the Actions artifact ID and digest in the handoff.
 After expiration, check out the same source revision, install its lockfile and
 Chromium, then regenerate with the same exact base. That creates new evidence

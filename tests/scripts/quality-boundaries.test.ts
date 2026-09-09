@@ -35,32 +35,42 @@ it('blocks local source crossings even outside a changed-files audit', () => {
 });
 
 it('rejects static, literal dynamic and computed imports in each production runtime', () => {
-  for (const [filename, specifier] of [
-    ['src/fixture.ts', 'hono'],
-    ['shared/src/fixture.ts', 'node:fs'],
-    ['server/src/fixture.ts', 'lit'],
-    ['workers/telemetry/src/fixture.ts', 'lit'],
-    ['scripts/fixture.mjs', 'lit'],
+  const cases = [];
+  for (const [directory, extension, specifier] of [
+    ['src', 'ts', 'hono'],
+    ['shared/src', 'ts', 'node:fs'],
+    ['server/src', 'ts', 'lit'],
+    ['workers/telemetry/src', 'ts', 'lit'],
+    ['scripts', 'mjs', 'lit'],
   ]) {
-    for (const source of [
+    mkdirSync(resolve(fixture, directory), { recursive: true });
+    const sources = [
       `import * as value from '${specifier}'; export { value };`,
       `export const value = import('${specifier}');`,
       "const destination = './local.js'; export const value = import(destination);",
-    ]) {
-      const result = spawnSync(
-        resolve(repository, 'node_modules/.bin/eslint'),
-        ['--stdin', '--stdin-filename', filename, '--format', 'json'],
-        { cwd: fixture, encoding: 'utf8', input: source }
-      );
-      expect(result.status, result.stderr).toBe(1);
-      expect(
-        JSON.parse(result.stdout)[0].messages.some((message: { ruleId: string }) =>
-          ['no-restricted-imports', 'no-restricted-syntax'].includes(message.ruleId)
-        )
-      ).toBe(true);
+    ];
+    for (const [index, source] of sources.entries()) {
+      const filename = `${directory}/case-${index}.${extension}`;
+      writeFileSync(resolve(fixture, filename), source);
+      cases.push(filename);
     }
   }
-}, 30_000);
+  const result = spawnSync(
+    resolve(repository, 'node_modules/.bin/eslint'),
+    [...cases, '--format', 'json'],
+    { cwd: fixture, encoding: 'utf8' }
+  );
+  expect(result.status, result.stderr).toBe(1);
+  const reports = JSON.parse(result.stdout);
+  expect(reports).toHaveLength(cases.length);
+  for (const report of reports)
+    expect(
+      report.messages.some((message: { ruleId: string }) =>
+        ['no-restricted-imports', 'no-restricted-syntax'].includes(message.ruleId)
+      ),
+      report.filePath
+    ).toBe(true);
+}, 60_000);
 
 it('keeps a type-accepted wrong-runtime package blocked by the import policy', () => {
   writeFileSync(

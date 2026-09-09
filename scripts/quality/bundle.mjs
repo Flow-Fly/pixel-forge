@@ -20,7 +20,7 @@ export function same(actual, expected, label) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} mismatch`);
 }
 
-export function exactRevision(root, base, head) {
+function exactRevision(root, base, head) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || !/^[a-f0-9]{40}$/.test(head ?? ''))
     throw new Error('base and head must be exact commit SHAs');
   same(git(root, 'rev-parse', `${base}^{commit}`), base, 'base');
