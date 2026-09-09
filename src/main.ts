@@ -33,3 +33,13 @@ autoSaveService.start();
 // Register after the editor has started. Updates remain waiting until the user
 // explicitly chooses to restart.
 registerPwa();
+
+// One browser host owns local consent and the visible Creative Run panel.
+import type { PixelForgeApp } from './components/app/pixel-forge-app';
+import { SiteToolHost } from './editor/site-tool-host';
+const editorApp = document.querySelector<PixelForgeApp>('pixel-forge-app');
+const siteToolHost = new SiteToolHost(undefined, (controller) => {
+  if (editorApp) editorApp.creativeRunController = controller;
+});
+if (editorApp) editorApp.siteToolHost = siteToolHost;
+
