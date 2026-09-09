@@ -52,6 +52,11 @@ can review the new identity.
 
 ## Verification record
 
+For collection, downloaded-bundle acceptance, and finalizer rechecks, follow
+[quality verification](quality-verification.md). Record the bundle path, manifest
+and certification digests, five separate producer scopes, and CI artifact ID,
+digest and expiry alongside the command records below.
+
 Each command is an attributable record, not just a pass label:
 
 | Field                      | Required value                                                                                                                                                                                         |

@@ -124,14 +124,15 @@ failures, and a regression test for each confirmed bug.
   or externally visible identifiers that lack a compatibility path. Preserve
   the existing contract or add an explicit versioned migration.
 
+Before collecting or accepting quality evidence, read
+[`docs/agents/quality-verification.md`](docs/agents/quality-verification.md).
 Before handoff, run the relevant focused checks plus:
 
 ```sh
 npx tsc --noEmit
 npm run lint
-npm run test:run
+npm run quality:verify -- --base <exact-starting-origin-develop-sha>
 npm run build
-npm run fallow:audit
 git diff --check
 ```
 

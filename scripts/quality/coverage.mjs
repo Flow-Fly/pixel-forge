@@ -8,6 +8,7 @@ function count(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+// V8 serializes its unbounded end columns (Infinity) as null in JSON.
 function location(value) {
   return (
     object(value) &&
@@ -36,38 +37,48 @@ export function validateCoverage(map, profile, producerRoot) {
     )
       throw new Error(`${profile.id}: foreign or inconsistent coverage path`);
     found.push(path.slice(root.length + 1));
-    for (const [counters, mappings] of [
-      ['s', 'statementMap'],
-      ['f', 'fnMap'],
-      ['b', 'branchMap'],
-    ]) {
-      if (
-        !object(file[counters]) ||
-        !object(file[mappings]) ||
-        JSON.stringify(Object.keys(file[counters]).sort()) !==
-          JSON.stringify(Object.keys(file[mappings]).sort())
-      )
-        throw new Error(`${profile.id}: malformed coverage counters`);
-      for (const [id, value] of Object.entries(file[counters])) {
-        const mapping = file[mappings][id];
-        if (counters === 'b') {
-          if (
-            !Array.isArray(value) ||
-            !value.every(count) ||
-            !object(mapping) ||
-            !Array.isArray(mapping.locations) ||
-            value.length !== mapping.locations.length ||
-            !mapping.locations.every(location)
-          )
-            throw new Error(`${profile.id}: malformed branch coverage`);
-        } else if (!count(value) || !location(counters === 's' ? mapping : mapping?.loc)) {
-          throw new Error(`${profile.id}: malformed statement/function coverage`);
-        }
-      }
-    }
+    validateFileCounters(file, profile.id);
   }
   if (JSON.stringify(found.sort()) !== JSON.stringify(profile.sources))
     throw new Error(
       `${profile.id}: incomplete or wrong-profile source coverage; missing ${profile.sources.filter((path) => !found.includes(path)).join(', ')}; unexpected ${found.filter((path) => !profile.sources.includes(path)).join(', ')}`
     );
+}
+
+function validateFileCounters(file, profileId) {
+  for (const [counters, mappings] of [
+    ['s', 'statementMap'],
+    ['f', 'fnMap'],
+    ['b', 'branchMap'],
+  ]) {
+    if (
+      !object(file[counters]) ||
+      !object(file[mappings]) ||
+      JSON.stringify(Object.keys(file[counters]).sort()) !==
+        JSON.stringify(Object.keys(file[mappings]).sort())
+    )
+      throw new Error(`${profileId}: malformed coverage counters`);
+    for (const [id, value] of Object.entries(file[counters])) {
+      const mapping = file[mappings][id];
+      if (counters === 'b') {
+        if (
+          !Array.isArray(value) ||
+          !value.every(count) ||
+          !object(mapping) ||
+          typeof mapping.type !== 'string' ||
+          !location(mapping.loc) ||
+          !Array.isArray(mapping.locations) ||
+          value.length !== mapping.locations.length ||
+          !mapping.locations.every(location)
+        )
+          throw new Error(`${profileId}: malformed branch coverage`);
+      } else if (
+        !count(value) ||
+        !location(counters === 's' ? mapping : mapping?.loc) ||
+        (counters === 'f' && (typeof mapping.name !== 'string' || !location(mapping.decl)))
+      ) {
+        throw new Error(`${profileId}: malformed statement/function coverage`);
+      }
+    }
+  }
 }

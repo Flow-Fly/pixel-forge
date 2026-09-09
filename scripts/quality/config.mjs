@@ -35,11 +35,14 @@ export function toolsIdentity(root) {
     'typescript',
     'wrangler',
   ];
+  const locked = readJson(resolve(root, 'package-lock.json')).packages;
   return Object.fromEntries(
-    packages.map((name) => [
-      name,
-      readJson(resolve(root, 'node_modules', name, 'package.json')).version,
-    ])
+    packages.map((name) => {
+      const installed = readJson(resolve(root, 'node_modules', name, 'package.json')).version;
+      if (installed !== locked?.[`node_modules/${name}`]?.version)
+        throw new Error(`${name}: installed tool does not match package-lock.json`);
+      return [name, installed];
+    })
   );
 }
 

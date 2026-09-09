@@ -265,6 +265,23 @@ describe('public quality evidence CLI', () => {
     expect(check().status).toBe(0);
   });
 
+  it('refuses a committed lockfile that disagrees with the installed tool', () => {
+    const original = readFileSync(resolve(fixture, 'package-lock.json'), 'utf8');
+    const lock = JSON.parse(original);
+    lock.packages['node_modules/vitest'].version = '0.0.0';
+    write('package-lock.json', JSON.stringify(lock));
+    git('add', '.');
+    git('commit', '-qm', 'contradictory tool lock');
+    const result = cli('verify', '--base', base);
+    expect(result.status).toBe(1);
+    expect(result.text).toContain('installed tool does not match package-lock.json');
+    expect(existsSync(resolve(bundle, 'certification.json'))).toBe(false);
+    write('package-lock.json', original);
+    git('add', '.');
+    git('commit', '-qm', 'restore tool lock');
+    head = git('rev-parse', 'HEAD');
+  });
+
   it('preserves new-only required errors while native complexity errors stay advisory', () => {
     const commit = (source: string) => {
       write('scripts/fixture-lib.mjs', source);

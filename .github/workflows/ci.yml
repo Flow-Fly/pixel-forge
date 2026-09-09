@@ -9,12 +9,17 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  QUALITY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+  QUALITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -28,14 +33,14 @@ jobs:
       - name: Install Chromium for Browser Mode
         run: npx playwright install --with-deps --only-shell chromium
 
-      - name: Shared workspace checks
-        run: npm run shared:check
+      - name: Shared typecheck
+        run: npm run shared:typecheck
 
-      - name: Server workspace checks
-        run: npm run server:check
+      - name: Server typecheck and lint
+        run: npm run server:typecheck && npm run server:lint
 
-      - name: Telemetry worker checks
-        run: npm run telemetry:typecheck && npm run telemetry:test && npm run telemetry:dry-run
+      - name: Telemetry worker typecheck and dry run
+        run: npm run telemetry:typecheck && npm run telemetry:dry-run
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -43,32 +48,34 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Tests
-        run: npm run test:run
+      - name: Quality evidence
+        run: |
+          npm run quality:verify -- --base "$QUALITY_BASE"
+          npm run quality:check -- --base "$QUALITY_BASE" --head "$QUALITY_HEAD"
 
-      - name: Browser tests
-        run: npm run test:browser
+      - name: Retain quality evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: quality-${{ env.QUALITY_HEAD }}
+          path: .fallow/quality
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Build
         run: npm run build
-
-      - name: Fallow audit
-        uses: fallow-rs/fallow@v2
-        with:
-          command: audit
-          version: 3.2.0
-          artifacts-dir: .fallow/ci
-          no-cache: true
 
   server-container:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      PIXEL_FORGE_IMAGE_REVISION: ${{ github.sha }}
+      PIXEL_FORGE_IMAGE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       PIXEL_FORGE_SMOKE_PROJECT_NAME: pixel-forge-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Build and smoke the linux/amd64 server image

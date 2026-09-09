@@ -168,11 +168,17 @@ export function validateBundle(root, bundle, base, head, certification = true) {
       !tests.success ||
       tests.numFailedTests ||
       !tests.numTotalTests ||
+      !tests.numPassedTests ||
       !Array.isArray(tests.testResults)
     )
       throw new Error(`${profile.id}: failed or absent test results`);
     const executed = tests.testResults
-      .map((test) => test.name.replaceAll('\\', '/').slice(producer.producerRoot.length + 1))
+      .map((test) => {
+        const path = test.name.replaceAll('\\', '/');
+        if (!path.startsWith(`${producer.producerRoot}/`))
+          throw new Error(`${profile.id}: foreign test result`);
+        return path.slice(producer.producerRoot.length + 1);
+      })
       .sort();
     same(executed, profile.tests, `${profile.id} executed tests`);
   }

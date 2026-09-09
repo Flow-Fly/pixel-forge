@@ -165,20 +165,21 @@ Use the smallest convincing behavior-first test set:
 Do not generate exhaustive equivalent-value matrices, test private helpers,
 or add a second harness.
 
+Before collecting, accepting downloaded evidence, or finalizing its PR, read
+[quality verification](../agents/quality-verification.md).
 Before handoff, run relevant focused checks plus:
 
 ```sh
 npx tsc --noEmit
 npm run lint
-npm run test:run
+npm run quality:verify -- --base <exact-starting-origin-develop-sha>
 npm run build
-FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run fallow:audit
 git diff --check
 ```
 
 The worker records the producer, configuration, exact revision, source/test
 scope, exclusions, result, and evidence location for every command. It verifies
-the Fallow report's comparison range matches the handed-off base; a bare audit
+the quality bundle and Fallow comparison range match the handed-off base; a bare audit
 may select `main` or a branch upstream, and a self-comparison is not delivery
 evidence. The worker keeps the draft pull request updated against `develop`.
 After every linked issue's acceptance criteria are satisfied and the
