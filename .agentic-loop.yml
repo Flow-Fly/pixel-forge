@@ -54,7 +54,7 @@ verification:
     - "npm run lint"
     - "npm run test:run"
     - "npm run build"
-    - "npm run fallow:audit"
+    - 'FALLOW_AUDIT_BASE="${FALLOW_AUDIT_BASE:?Set the exact approved integration base SHA}" npm run fallow:audit'
     - "git diff --check"
 
 human:

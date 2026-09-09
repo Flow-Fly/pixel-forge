@@ -31,6 +31,19 @@ Use native blocked-by relationships only between delivery slices. Record the
 execution order of sibling tasks in the delivery brief and pull request, then
 make every linked task executable together when the slice is approved.
 
+Use docs/agents/handoffs.md for every dispatch, worker return, review, and
+Director disposition. Record the canonical issue URLs/numbers, supplied
+requirement versions and exact UTF-8 body digests with retrieval and update
+times; the repository, isolated branch, integration baseline, exact base/head,
+comparison range, changed and excluded scopes; each command's producer,
+configuration, revision, measured scopes, exclusions, result, evidence
+location, and provenance; and separate Standards and Spec findings with an
+explicit disposition and rationale. Compare requirement content when its body
+or governing decision changes. A changed head, wrong scope, absent evidence,
+or wrong checkout invalidates affected approval and evidence. For local Fallow,
+pin FALLOW_AUDIT_BASE to the exact starting origin/develop SHA and verify the
+reported comparison range.
+
 Every delivery brief names the outcome, acceptance criteria, non-goals, write
 boundaries, contract and runtime surfaces, decision and safety gates,
 verification, and dependencies. It includes a canonical Linked task issues
