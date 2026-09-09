@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -116,6 +117,15 @@ beforeAll(() => {
       path,
       `import { expect, it } from 'vitest'; import { ${name} } from '${source}'; it('executes ${name}', () => expect(${name}).toBe(${value}));\n`
     );
+  const fallow = JSON.parse(readFileSync(resolve(fixture, '.fallowrc.json'), 'utf8'));
+  fallow.entry.push('scripts/fixture-entry.mjs');
+  fallow.rules = { 'unused-exports': 'warn', 'unresolved-imports': 'error' };
+  write('.fallowrc.json', JSON.stringify(fallow));
+  write(
+    'scripts/fixture-entry.mjs',
+    "import { used } from './fixture-lib.mjs'; console.log(used);\n"
+  );
+  write('scripts/fixture-lib.mjs', 'export function used() { return 1; }\n');
   git('init', '-q');
   git('config', 'user.email', 'quality@example.invalid');
   git('config', 'user.name', 'Quality fixture');
@@ -187,6 +197,34 @@ describe('public quality evidence CLI', () => {
     }
   });
 
+  it('validates coverage structure even when a changed artifact has a matching digest', () => {
+    const path = 'root/coverage-final.json';
+    const original = readFileSync(resolve(bundle, path), 'utf8');
+    const savedManifest = readFileSync(resolve(bundle, 'manifest.json'), 'utf8');
+    const map = JSON.parse(original);
+    const incomplete = { ...map };
+    delete incomplete[resolve(fixture, 'src/zero.ts')];
+    const malformed = JSON.parse(original);
+    malformed[resolve(fixture, 'src/value.ts')].s = { 0: -1 };
+    for (const [replacement, message] of [
+      ['{}', 'empty or malformed'],
+      [JSON.stringify(incomplete), 'incomplete or wrong-profile'],
+      [JSON.stringify(malformed), 'malformed'],
+      [original.replaceAll(fixture, '/foreign/root'), 'foreign'],
+      [readFileSync(resolve(bundle, 'server/coverage-final.json'), 'utf8'), 'wrong-profile'],
+    ]) {
+      writeFileSync(resolve(bundle, path), replacement);
+      const manifest = JSON.parse(savedManifest);
+      manifest.artifacts[path] = createHash('sha256').update(replacement).digest('hex');
+      writeFileSync(resolve(bundle, 'manifest.json'), JSON.stringify(manifest));
+      const result = check();
+      expect(result.status).toBe(1);
+      expect(result.text).toContain(message);
+    }
+    writeFileSync(resolve(bundle, path), original);
+    writeFileSync(resolve(bundle, 'manifest.json'), savedManifest);
+  });
+
   it('rejects wrong revisions, tool/config/scope identities and changed inputs', () => {
     expect(check(bundle, head).status).toBe(1);
     expect(check(bundle, base, base).status).toBe(1);
@@ -226,6 +264,49 @@ describe('public quality evidence CLI', () => {
     rmSync(resolve(fixture, 'new-input.txt'));
     expect(check().status).toBe(0);
   });
+
+  it('preserves new-only required errors while native complexity errors stay advisory', () => {
+    const commit = (source: string) => {
+      write('scripts/fixture-lib.mjs', source);
+      git('add', '.');
+      git('commit', '-qm', 'audit fixture');
+      head = git('rev-parse', 'HEAD');
+    };
+    commit('export function used() { return 1; }\nexport const unused = 2;\n');
+    let result = cli('verify', '--base', base);
+    expect(result, result.text).toMatchObject({ status: 0 });
+    expect(
+      JSON.parse(readFileSync(resolve(bundle, 'review.json'), 'utf8')).advisories.some(
+        (finding: any) => finding.category === 'unused_exports'
+      )
+    ).toBe(true);
+    commit("import { missing } from './missing.js';\nexport function used() { return missing; }\n");
+    result = cli('verify', '--base', base);
+    expect(result.status).toBe(1);
+    expect(result.text).toContain('required Fallow findings');
+    const inheritedBase = head;
+    commit(
+      "import { missing } from './missing.js';\nexport function used() { return missing; }\nexport const unused = 2;\n"
+    );
+    result = cli('verify', '--base', inheritedBase);
+    expect(result, result.text).toMatchObject({ status: 0 });
+    const review = JSON.parse(readFileSync(resolve(bundle, 'review.json'), 'utf8'));
+    expect(review.blockers).toEqual([]);
+    expect(review.advisories.some((finding: any) => finding.category === 'unused_exports')).toBe(
+      true
+    );
+    commit(
+      `export function used(value) {\n${Array.from({ length: 25 }, (_, index) => `if (value === ${index}) return ${index};`).join('\n')}\nreturn -1;\n}\n`
+    );
+    result = cli('verify', '--base', base);
+    expect(result, result.text).toMatchObject({ status: 0 });
+    expect(JSON.parse(readFileSync(resolve(bundle, 'audit.json'), 'utf8')).verdict).toBe('fail');
+    expect(
+      JSON.parse(readFileSync(resolve(bundle, 'review.json'), 'utf8')).advisories.some(
+        (finding: any) => finding.category === 'complexity'
+      )
+    ).toBe(true);
+  }, 180_000);
 
   it('invalidates certification before a failed producer and retains its diagnostics', () => {
     write(

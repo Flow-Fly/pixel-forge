@@ -9,6 +9,7 @@ import {
   validateBundle,
   writeJson,
 } from './quality/bundle.mjs';
+import { collectFallow, validateFallow } from './quality/fallow.mjs';
 import { validateCoverage } from './quality/coverage.mjs';
 
 const root = process.cwd();
@@ -35,7 +36,8 @@ try {
     ]);
   } else if (action === 'check') {
     bundle = resolve(root, options['--bundle'] ?? '.fallow/quality');
-    validateBundle(root, bundle, options['--base'], options['--head']);
+    const manifest = validateBundle(root, bundle, options['--base'], options['--head']);
+    validateFallow(root, bundle, manifest);
     console.log(`Accepted quality evidence for ${options['--head']}`);
   } else if (action === 'verify') {
     if (options['--bundle'] || options['--head'])
@@ -66,7 +68,14 @@ try {
       { head: producer.head, dirty: producer.dirty, inputs: producer.inputs },
       'post-run checkout'
     );
-    saveManifest(bundle, producer, profileList, commands);
+    const manifest = saveManifest(bundle, producer, profileList, commands);
+    collectFallow(root, bundle, manifest);
+    validateFallow(root, bundle, manifest);
+    same(
+      identity(root),
+      { head: producer.head, dirty: producer.dirty, inputs: producer.inputs },
+      'post-constraint checkout'
+    );
     validateBundle(root, bundle, producer.base, producer.head, false);
     writeJson(resolve(bundle, 'certification.json'), {
       base: producer.base,

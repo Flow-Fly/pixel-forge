@@ -25,5 +25,75 @@
     "createRenderRoot",
     "shouldUpdate",
     "update"
-  ]
+  ],
+  "boundaries": {
+    "zones": [
+      {
+        "name": "browser",
+        "patterns": ["src/**"]
+      },
+      {
+        "name": "shared",
+        "patterns": ["shared/src/**"]
+      },
+      {
+        "name": "server",
+        "patterns": ["server/src/**"]
+      },
+      {
+        "name": "worker",
+        "patterns": ["workers/telemetry/src/**"]
+      },
+      {
+        "name": "tooling",
+        "patterns": ["scripts/**"]
+      },
+      {
+        "name": "root-tests",
+        "patterns": ["tests/**"]
+      },
+      {
+        "name": "server-tests",
+        "patterns": ["server/tests/**"]
+      },
+      {
+        "name": "shared-tests",
+        "patterns": ["shared/tests/**"]
+      }
+    ],
+    "rules": [
+      {
+        "from": "browser",
+        "allow": ["browser", "shared"]
+      },
+      {
+        "from": "shared",
+        "allow": ["shared"]
+      },
+      {
+        "from": "server",
+        "allow": ["server", "shared"]
+      },
+      {
+        "from": "worker",
+        "allow": ["worker", "shared"]
+      },
+      {
+        "from": "tooling",
+        "allow": ["tooling", "shared"]
+      },
+      {
+        "from": "root-tests",
+        "allow": ["browser", "shared", "worker", "tooling", "root-tests"]
+      },
+      {
+        "from": "server-tests",
+        "allow": ["server", "shared", "server-tests"]
+      },
+      {
+        "from": "shared-tests",
+        "allow": ["shared", "shared-tests"]
+      }
+    ]
+  }
 }
