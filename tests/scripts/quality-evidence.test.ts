@@ -323,6 +323,30 @@ describe('public quality evidence CLI', () => {
         (finding: any) => finding.category === 'complexity'
       )
     ).toBe(true);
+    const sarifPath = resolve(bundle, 'audit.sarif.json');
+    const sarif = JSON.parse(readFileSync(sarifPath, 'utf8'));
+    const nativeResult = sarif.runs.flatMap((run: any) => run.results ?? [])[0];
+    expect(nativeResult.level).toBe('error');
+    nativeResult.ruleId = 'fallow/css-broken-reference';
+    const changedSarif = JSON.stringify(sarif);
+    writeFileSync(sarifPath, changedSarif);
+    const manifest = JSON.parse(readFileSync(resolve(bundle, 'manifest.json'), 'utf8'));
+    manifest.artifacts['audit.sarif.json'] = createHash('sha256')
+      .update(changedSarif)
+      .digest('hex');
+    const changedManifest = JSON.stringify(manifest);
+    writeFileSync(resolve(bundle, 'manifest.json'), changedManifest);
+    writeFileSync(
+      resolve(bundle, 'certification.json'),
+      JSON.stringify({
+        base,
+        head,
+        manifest: createHash('sha256').update(changedManifest).digest('hex'),
+      })
+    );
+    result = check();
+    expect(result.status).toBe(1);
+    expect(result.text).toContain('unmatched Fallow result: fallow/css-broken-reference');
   }, 600_000);
 
   it('invalidates certification before a failed producer and retains its diagnostics', () => {

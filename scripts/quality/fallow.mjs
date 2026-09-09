@@ -65,7 +65,15 @@ function reconcile(audit, sarif, registry, base, head) {
   }
   const heuristicRules = new Set(
     registry.issue_types
-      .filter((entry) => ['health', 'dupes'].includes(entry.command))
+      .filter((entry) =>
+        [
+          'code-duplication',
+          'high-complexity',
+          'high-cyclomatic-complexity',
+          'high-cognitive-complexity',
+          'high-crap-score',
+        ].includes(entry.id)
+      )
       .flatMap((entry) => [entry.rule_id, ...(entry.sarif_rule_ids ?? [])])
   );
   for (const result of results)
