@@ -43,3 +43,32 @@ const siteToolHost = new SiteToolHost(undefined, (controller) => {
 });
 if (editorApp) editorApp.siteToolHost = siteToolHost;
 
+import { SiteToolTransport } from './editor/site-tool-transport';
+let siteTransport = new SiteToolTransport(siteToolHost.facade);
+const registerSiteTools = () => {
+  const surface = document as Document & { modelContext?: unknown };
+  void siteTransport.register(surface.modelContext);
+};
+// The fallback exposes only the public tools, never browser approval helpers.
+Object.defineProperty(window, 'pixelForgeSiteTools', { configurable: true, get: () => siteTransport.fallback });
+registerSiteTools();
+const suspendSiteTools = () => { siteTransport.suspend(); siteToolHost.endAuthority(); };
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') suspendSiteTools();
+  else {
+    siteTransport = new SiteToolTransport(siteToolHost.facade);
+    registerSiteTools();
+  }
+});
+document.addEventListener('freeze', suspendSiteTools);
+window.addEventListener('pagehide', suspendSiteTools);
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && document.visibilityState === 'visible') {
+    siteTransport = new SiteToolTransport(siteToolHost.facade);
+    registerSiteTools();
+  }
+});
+
+declare global {
+  interface Window { readonly pixelForgeSiteTools: SiteToolTransport['fallback']; }
+}
