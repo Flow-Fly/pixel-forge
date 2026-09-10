@@ -100,6 +100,7 @@ export interface CreativeRunStepContext {
 
 export type CreativeRunStepSource = (
   context: CreativeRunStepContext,
+  signal: AbortSignal,
 ) => CreativeRunStep | null | Promise<CreativeRunStep | null>;
 
 export interface CreativeRunPackageRequest {
@@ -313,6 +314,7 @@ export class CreativeRunController {
   private readonly lifecycleEvents?: EventTarget;
   private readonly sessionId: string;
   private readonly stepSource: CreativeRunStepSource;
+  private pendingStep: AbortController | null = null;
   private readonly observationClass: InspectObservationClass;
   private readonly clock: () => number;
   private readonly getCurrentRevision: () => number;
@@ -417,6 +419,10 @@ export class CreativeRunController {
     });
   }
 
+  get supportsSessionReplacement(): boolean {
+    return this.createReplacementController !== undefined;
+  }
+
   /** The replacement controller is intentionally separate from this terminal run. */
   get replacement(): CreativeRunController | null {
     return this.replacementController;
@@ -477,7 +483,7 @@ export class CreativeRunController {
     this.approvedBriefRevision = null;
     this.packagePreparedRevision = null;
     this.clearError();
-    this.generation += 1;
+    this.invalidateStep();
 
     const wasPaused = this.phase === 'paused';
     if (this.inFlight) {
@@ -520,7 +526,7 @@ export class CreativeRunController {
     if (!live.ok || live.authority.grant.status !== 'running') {
       return this.fail('write_turn', true, 'start-run');
     }
-    this.generation += 1;
+    this.invalidateStep();
     this.clearError();
     this.setPhase('running');
     return this.processSteps();
@@ -532,6 +538,7 @@ export class CreativeRunController {
     if (busy) return busy;
     if (this.recovery?.status.interrupted) return this.fail('recovery_resume_required', false, 'resume-interrupted');
     if (this.phase !== 'paused') return this.fail('invalid_transition', false, 'resume-run');
+    if (this.inFlight) return this.fail('in_flight', true, 'resume-run');
     if (this.approvedBriefRevision !== this.brief.revision) {
       return this.fail('brief_approval_required', false, 'approve-brief');
     }
@@ -539,7 +546,7 @@ export class CreativeRunController {
     if (!authority.ok) return this.fail(authority.code, authority.retryable, authority.nextAction);
     const resumed = this.sessionManager.resumeArtistMode(this.sessionId, this.brief.runId);
     if (!resumed.ok) return this.failFromAdapter(resumed, 'resume-run');
-    this.generation += 1;
+    this.invalidateStep();
     this.clearError();
     this.setPhase('running');
     return this.processSteps();
@@ -553,7 +560,7 @@ export class CreativeRunController {
     if (this.phase !== 'running' && this.phase !== 'ready') {
       return this.fail('invalid_transition', false, 'pause-run');
     }
-    this.generation += 1;
+    this.invalidateStep();
     this.pendingLifecycle = this.inFlight ? { phase: 'paused' } : null;
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
     if (this.inFlight) {
@@ -572,7 +579,7 @@ export class CreativeRunController {
     if (this.phase === 'accepted' || this.phase === 'rejected') {
       return this.fail('invalid_transition', false, 'none');
     }
-    this.generation += 1;
+    this.invalidateStep();
     const wasInFlight = this.inFlight !== null;
     if (wasInFlight) this.pendingLifecycle = { phase: 'paused' };
     this.sessionManager.takeoverProjectWriteTurn(this.target.id, ownerId);
@@ -594,7 +601,7 @@ export class CreativeRunController {
     if (!isReviewablePhase(this.phase)) {
       return this.fail('invalid_transition', false, 'stop-run');
     }
-    this.generation += 1;
+    this.invalidateStep();
     this.pendingLifecycle = this.inFlight ? { phase: 'stopped' } : null;
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
     if (this.inFlight) {
@@ -661,6 +668,47 @@ export class CreativeRunController {
     this.completeAuthority();
     this.setPhase('accepted');
     return this.succeed();
+  }
+
+  /** Prepare a review package without accepting the result or ending consent. */
+  async preparePackageForReview(): Promise<CreativeRunPackageResponse> {
+    const blocked = this.packageReviewBlock();
+    if (blocked) return blocked;
+    const prepare = this.preparePackageBoundary!;
+    const revision = readRevision(this.getCurrentRevision, this.currentRevision);
+    const generation = this.generation;
+    this.inFlight = 'observation';
+    this.publish();
+    try {
+      const saveSafety = redactTransport(await this.readSaveSafety(revision));
+      if (isFailure(saveSafety)) return saveSafety;
+      const result = await prepare({ expectedRevision: revision, expectedSaveSafety: saveSafety, expectedPackageDigest: null });
+      if (generation !== this.generation || this.disposed) return failure('cancelled', false);
+      if (readRevision(this.getCurrentRevision, revision) !== revision) return failure('revision_conflict', true);
+      if (result.ok) {
+        this.packagePreparedRevision = revision;
+        this.appendTimeline({ kind: 'package', outcome: 'prepared', fromRevision: revision, toRevision: revision });
+      }
+      return result;
+    } catch {
+      return failure('internal', true);
+    } finally {
+      this.inFlight = null;
+      this.settlePendingLifecycle();
+      this.publish();
+    }
+  }
+
+  private packageReviewBlock(): ReturnType<typeof failure> | null {
+    if (this.disposed || this.recoveryActionPromise || this.inFlight || this.phase !== 'paused') return failure('invalid_state', false);
+    if (!this.preparePackageBoundary) return failure('unsupported', false);
+    return this.packageReviewAuthorityBlock();
+  }
+
+  private packageReviewAuthorityBlock(): ReturnType<typeof failure> | null {
+    if (this.approvedBriefRevision !== this.brief.revision || !this.checkAuthority().ok) return failure('capability_denied', false);
+    const revision = readRevision(this.getCurrentRevision, this.currentRevision);
+    return revision === this.lastDurableRevision ? null : failure('revision_conflict', true);
   }
 
   /**
@@ -752,7 +800,7 @@ export class CreativeRunController {
     if (this.disposed) return this.disposedResult();
     if (!this.recovery) return this.fail('unsupported', false, 'recover-manually');
     if (this.inFlight) return this.fail('in_flight', true, 'recover-manually');
-    this.generation += 1;
+    this.invalidateStep();
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
     const result = await this.recovery.markInterrupted(reason);
     if (!result.ok) return this.recoveryFailure(result.reason ?? 'recovery_required');
@@ -922,7 +970,7 @@ export class CreativeRunController {
     if (this.phase !== 'paused' && this.phase !== 'stopped' && this.phase !== 'recovery-required') {
       return { ok: false, action: this.fail('invalid_transition', false, nextAction) };
     }
-    this.generation += 1;
+    this.invalidateStep();
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
     return { ok: true, recovery };
   }
@@ -930,7 +978,7 @@ export class CreativeRunController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.generation += 1;
+    this.invalidateStep();
     this.interruptionPending = this.hasMutationAuthority();
     if (this.inFlight) this.pendingLifecycle = { phase: 'stopped' };
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
@@ -944,7 +992,7 @@ export class CreativeRunController {
     if (this.disposed || this.phase === 'accepted' || this.phase === 'rejected') return;
     if (this.recovery?.status.interrupted && !this.inFlight) return;
     if (!this.hasMutationAuthority()) return;
-    this.generation += 1;
+    this.invalidateStep();
     this.interruptionPending = true;
     this.interruptionReason = reason;
     this.sessionManager.pauseArtistMode(this.sessionId, this.brief.runId);
@@ -1214,12 +1262,20 @@ export class CreativeRunController {
     }
   }
 
+  private invalidateStep(): void {
+    this.generation += 1;
+    this.pendingStep?.abort();
+    this.pendingStep = null;
+  }
+
   private async planStep(
     generation: number,
     expectedRevision: number,
     observation: unknown,
   ): Promise<{ readonly ok: true; readonly step: CreativeRunStep | null } | { readonly ok: false }> {
     this.inFlight = 'step';
+    const cancellation = new AbortController();
+    this.pendingStep = cancellation;
     this.publish();
     try {
       const step = await this.stepSource({
@@ -1228,12 +1284,13 @@ export class CreativeRunController {
         revision: expectedRevision,
         transactionOrdinal: this.transactionsUsed + 1,
         observation: redactTransport(observation),
-      });
+      }, cancellation.signal);
       return { ok: true, step };
     } catch {
       return { ok: false };
     } finally {
       this.inFlight = null;
+      if (this.pendingStep === cancellation) this.pendingStep = null;
       if (!this.canContinue(generation)) this.publish();
     }
   }

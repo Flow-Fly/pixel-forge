@@ -1,3 +1,4 @@
+import type { SiteToolHost } from '../../editor/site-tool-host';
 import { html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { BaseComponent } from "../../core/base-component";
@@ -70,6 +71,7 @@ const SIDEBAR_KEYBOARD_STEP = 16;
 
 @customElement("pixel-forge-app")
 export class PixelForgeApp extends BaseComponent {
+  @property({ attribute: false }) siteToolHost: SiteToolHost | null = null;
   @property({ attribute: false }) creativeRunController: CreativeRunController | null = null;
 
   protected willUpdate(): void {
@@ -1405,7 +1407,7 @@ export class PixelForgeApp extends BaseComponent {
       <pf-grid-settings-dialog></pf-grid-settings-dialog>
       <pf-checker-settings-dialog></pf-checker-settings-dialog>
       <pf-accent-color-dialog></pf-accent-color-dialog>
-      <pf-automation-session-dialog></pf-automation-session-dialog>
+      <pf-automation-session-dialog .siteTools=${this.siteToolHost}></pf-automation-session-dialog>
 
       ${this.renderWarningToasts()}
       ${this.renderFileImportStatus()}
