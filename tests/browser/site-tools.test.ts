@@ -239,6 +239,21 @@ it('loads the normal entry and controls a safe copy of the Golden asset through 
     )
     .toBeTruthy();
 
+  // The drop handler is installed only after saved-workspace restoration finishes.
+  const startupTransfer = new DataTransfer();
+  startupTransfer.items.add(new File([], 'startup.pf'));
+  await expect.poll(() => {
+    const drag = new DragEvent('dragover', { dataTransfer: startupTransfer, cancelable: true });
+    window.dispatchEvent(drag);
+    return drag.defaultPrevented;
+  }).toBe(true);
+
+  const restoredProjectId = workspaceStore.activeItem.context.project.id.value;
+  await userEvent.click(page.getByRole('button', { name: 'File', exact: true }));
+  await userEvent.click(page.getByText('New Project...', { exact: false }));
+  await userEvent.click(page.getByRole('button', { name: 'Create', exact: true }));
+  await expect.poll(() => workspaceStore.activeItem.context.project.id.value)
+    .not.toBe(restoredProjectId);
   await verifyFirstRasterWrite();
 
   const fixture = createFixtureSession();
