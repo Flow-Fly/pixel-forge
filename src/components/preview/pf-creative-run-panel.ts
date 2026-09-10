@@ -575,12 +575,12 @@ export class PFCreativeRunPanel extends LitElement {
         : nothing}
       ${state.phase === 'paused' || state.phase === 'stopped'
         ? html`
-            <button type="button" ?disabled=${state.packagePreparedRevision !== null || this.actionBusy} @click=${() => void this.runAction(() => controller.accept())}>
+            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.accept())}>
               Accept / Prepare Package
             </button>
           `
         : nothing}
-      ${state.recovery && (state.phase === 'paused' || state.phase === 'stopped')
+      ${state.recovery && (state.phase === 'paused' || state.phase === 'stopped' || state.phase === 'recovery-required')
         ? html`
             <button type="button" ?disabled=${this.actionBusy} @click=${() => this.requestCheckpointRewind()}>
               Rewind to Checkpoint…
@@ -599,11 +599,13 @@ export class PFCreativeRunPanel extends LitElement {
           </button>`
         : nothing}
       ${state.recovery?.interrupted
-        ? html`
-            <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.resumeAfterInterruption())}>
-              Resume with New Session…
-            </button>
-          `
+        ? controller.supportsSessionReplacement
+          ? html`
+              <button type="button" ?disabled=${this.actionBusy} @click=${() => void this.runAction(() => controller.resumeAfterInterruption())}>
+                Resume with New Session…
+              </button>
+            `
+          : html`<p>Ask the external agent to request a new session. Choose the working project and approve sharing, Artist Mode and the Brief again, then start the new run. The previous session remains expired or revoked.</p>`
         : nothing}
       ${state.recovery
         ? html`

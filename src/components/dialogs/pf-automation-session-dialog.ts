@@ -15,6 +15,7 @@ import {
   type InspectObservationClass,
 } from '../../editor/automation-session';
 import '../ui/pf-dialog';
+import type { SiteToolHost } from '../../editor/site-tool-host';
 
 const OBSERVATION_LABELS: Readonly<Record<InspectObservationClass, string>> = {
   structure: 'Project structure',
@@ -227,6 +228,11 @@ export class PFAutomationSessionDialog extends BaseComponent {
   @property({ attribute: false }) controller: AutomationSessionManager =
     automationSessionController;
 
+  @property({ attribute: false }) siteTools: SiteToolHost | null = null;
+  @state() private sharingApproved = false;
+  @state() private targetMode: 'copy' | 'existing' | 'blank' = 'copy';
+  @state() private approving = false;
+
   @state() private pending: AutomationSessionRequestStatus | null = null;
   @state() private pendingArtistMode: ArtistModeRequestStatus | null = null;
   @state() private pendingEscalation: AutomationArtistModeEscalationRequest | null = null;
@@ -365,6 +371,8 @@ export class PFAutomationSessionDialog extends BaseComponent {
       this.targets = this.controller.captureLocalTargets(next.requestId);
       this.selectedTargetId = '';
       this.selectedClasses = [];
+      this.sharingApproved = false;
+      this.targetMode = 'copy';
       this.errorMessage = '';
     }
     this.open = true;
@@ -398,11 +406,13 @@ export class PFAutomationSessionDialog extends BaseComponent {
 
   private handleTargetChange(event: Event) {
     this.selectedTargetId = (event.target as HTMLSelectElement).value;
+    this.sharingApproved = false;
     this.errorMessage = '';
   }
 
   private handleClassChange(observationClass: InspectObservationClass, event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
+    this.sharingApproved = false;
     this.selectedClasses = checked
       ? [...this.selectedClasses, observationClass]
       : this.selectedClasses.filter((item) => item !== observationClass);
@@ -436,9 +446,13 @@ export class PFAutomationSessionDialog extends BaseComponent {
     this.refreshPendingSoon();
   };
 
-  private approve = () => {
+  private approve = async () => {
     const pending = this.pending;
-    if (!pending || !this.selectedTargetId || this.selectedClasses.length === 0) return;
+    if (!pending || !this.selectedTargetId || this.selectedClasses.length === 0 || this.approving) return;
+    if (this.siteTools?.disclosure(pending.requestId)) {
+      await this.approveSiteRequest(pending.requestId);
+      return;
+    }
 
     const result = this.controller.approveRequest(
       pending.requestId,
@@ -459,6 +473,18 @@ export class PFAutomationSessionDialog extends BaseComponent {
     this.errorMessage = '';
     this.refreshPendingSoon();
   };
+
+  private async approveSiteRequest(requestId: string): Promise<void> {
+      if (!this.sharingApproved) return;
+      this.approving = true;
+      try {
+        const host: SiteToolHost = this.siteTools!;
+        const approved = await host.approve(requestId, this.selectedTargetId, this.selectedClasses, this.targetMode);
+        if (!approved) this.errorMessage = 'The request could not be approved. Review the project and sharing choices.';
+        else { this.pending = null; this.refreshPendingSoon(); }
+      } catch { this.errorMessage = 'The local project could not be prepared. Your existing project is preserved.'; }
+      finally { this.approving = false; }
+  }
 
   private approveArtistMode = () => {
     const pending = this.pendingArtistMode;
@@ -546,6 +572,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
   }
 
   private renderPending(pending: AutomationSessionRequestStatus) {
+    const disclosure = this.siteTools?.disclosure(pending.requestId);
     return html`
       <p class="intro">
         <strong>${pending.client.name}</strong> is requesting a temporary, inspect-only session.
@@ -569,6 +596,21 @@ export class PFAutomationSessionDialog extends BaseComponent {
             : nothing
         }
       </div>
+
+      ${disclosure ? html`
+        <div class="section">
+          <label for="site-target-mode">Working project</label>
+          <select id="site-target-mode" .value=${this.targetMode} @change=${(event: Event) => { this.targetMode = (event.target as HTMLSelectElement).value as 'copy' | 'existing' | 'blank'; this.sharingApproved = false; }}>
+            <option value="copy">Create a safe copy of the selected project</option>
+            <option value="blank">Create a new 32 × 32 project</option>
+            <option value="existing">Work on the selected original</option>
+          </select>
+          <p class="hint">Recipient: ${disclosure.clientName} (self-declared; provider identity and retention are unknown).</p>
+          <p class="hint">Purpose: ${disclosure.purpose}</p>
+          <p class="hint">Only the selected categories below may leave the chosen working project. Sharing ends when this run completes, is rejected, expires or loses its session. A local record keeps categories, revisions, times, sizes and digests, without artwork or prompts.</p>
+          <label class="check-label"><input type="checkbox" .checked=${this.sharingApproved} @change=${(event: Event) => { this.sharingApproved = (event.target as HTMLInputElement).checked; }} />Allow these categories to be shared for this run</label>
+        </div>
+      ` : nothing}
 
       <div class="section">
         <div class="section-title">Requested observations</div>
@@ -775,6 +817,11 @@ export class PFAutomationSessionDialog extends BaseComponent {
     `;
   }
 
+  private canApproveRequest(requestId: string): boolean {
+    if (!this.selectedTargetId || this.selectedClasses.length === 0 || this.approving) return false;
+    return !this.siteTools?.disclosure(requestId) || this.sharingApproved;
+  }
+
   private renderActions(pending: AutomationSessionRequestStatus | null) {
     if (this.pendingArtistMode) {
       const canApprove = Boolean(this.artistTarget && this.selectedArtistCategories.length > 0
@@ -806,7 +853,7 @@ export class PFAutomationSessionDialog extends BaseComponent {
         Close
       </button>`;
     }
-    const canApprove = Boolean(this.selectedTargetId && this.selectedClasses.length > 0);
+    const canApprove = this.canApproveRequest(pending.requestId);
     return html`
       <button class="secondary" type="button" @click=${this.handleClose}>Deny</button>
       <button class="primary" type="button" ?disabled=${!canApprove} @click=${this.approve}>
