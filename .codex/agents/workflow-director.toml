@@ -40,9 +40,9 @@ configuration, revision, measured scopes, exclusions, result, evidence
 location, and provenance; and separate Standards and Spec findings with an
 explicit disposition and rationale. Compare requirement content when its body
 or governing decision changes. A changed head, wrong scope, absent evidence,
-or wrong checkout invalidates affected approval and evidence. For local Fallow,
-pin FALLOW_AUDIT_BASE to the exact starting origin/develop SHA and verify the
-reported comparison range.
+or wrong checkout invalidates affected approval and evidence. Use
+docs/agents/quality-verification.md and quality:check with the exact starting
+origin/develop base and candidate head to accept retained quality evidence.
 
 Every delivery brief names the outcome, acceptance criteria, non-goals, write
 boundaries, contract and runtime surfaces, decision and safety gates,

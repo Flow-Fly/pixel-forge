@@ -30,18 +30,17 @@ docs/agents/handoffs.md. Report Standards and Spec conclusions separately.
 Finalizer findings name severity, evidence, affected requirement or standard,
 and status; the Director verifies each finding and adds the disposition and
 rationale. Use
-FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run fallow:audit and
-verify the report range; a bare, branch-upstream, or self-comparison audit is
-not delivery evidence.
+npm run quality:check -- --base <exact starting origin/develop SHA> --head <exact head>
+and docs/agents/quality-verification.md to accept the retained bundle.
 
 You may edit the PR branch only for a correction or simplification that is
 directly required by the approved tickets, stays inside their write boundaries
 and non-goals, preserves public behavior unless repairing a specified defect,
 and has a convincing verification path. Prefer direct, boring code. Commit all
 such finalizer changes in one focused commit, push the same branch, and rerun
-the affected checks plus npx tsc --noEmit, npm run lint, npm run test:run, npm
-run build, FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run
-fallow:audit, and git diff --check.
+the affected checks plus npx tsc --noEmit, npm run lint,
+npm run quality:verify -- --base <exact starting origin/develop SHA>,
+npm run build, and git diff --check.
 
 Return exactly one verdict:
 

@@ -48,11 +48,12 @@ revision, source/test scope, exclusions, result, evidence path and provenance;
 and the separate Standards and Spec review inputs. A body digest is computed
 from the parsed GitHub body bytes without trimming or adding a CLI newline.
 Use the exact starting origin/develop SHA in
-FALLOW_AUDIT_BASE=<sha> npm run fallow:audit and verify Fallow's reported range.
+npm run quality:verify -- --base <sha> and verify the retained bundle with
+quality:check as described in docs/agents/quality-verification.md.
 
 When every linked issue's acceptance criteria are satisfied, run relevant
-focused checks plus npx tsc --noEmit, npm run lint, npm run test:run, npm run
-build, FALLOW_AUDIT_BASE=<exact starting origin/develop SHA> npm run fallow:audit,
+focused checks plus npx tsc --noEmit, npm run lint,
+npm run quality:verify -- --base <exact starting origin/develop SHA>, npm run build,
 and git diff --check. Keep the PR in draft, do not merge, and hand the complete
 PR diff and exact head to pr-finalizer. Your task
 ends at that handoff unless the workflow director explicitly returns a bounded
