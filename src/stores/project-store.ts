@@ -9,6 +9,9 @@ import {
   drawArtworkComposition,
 } from '../services/export-composition';
 import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_PALETTE_ID } from '../services/project-defaults';
+import { buildIndexBufferFromCanvas } from '../utils/indexed-color';
+import { buildColorMaps, getColorIndex, getColorByIndex, findClosestColorIndex } from './palette/indexed-color';
+import { MAX_PALETTE_SIZE } from './palette/types';
 import { canvasToPngBytes } from '../utils/canvas-binary';
 import {
   dispatchProjectCompatibilityWarning,
@@ -88,8 +91,12 @@ function hasRuntimeEmptyCel(
   cel: Cel,
   textCelData: ReturnType<ProjectAnimationStore['getTextCelData']>
 ): boolean {
-  const hasPixelIndices = cel.indexBuffer?.some((index) => index !== 0) ?? false;
-  return animation.isRuntimeEmptyCel(cel) && !textCelData && !hasPixelIndices;
+  if (!animation.isRuntimeEmptyCel(cel) || textCelData) return false;
+  if (cel.indexBuffer?.some((index) => index !== 0)) return false;
+  // A non-indexed raster write can paint a canvas that began as a runtime blank.
+  const drawing = cel.canvas.getContext('2d');
+  const pixels = drawing?.getImageData(0, 0, cel.canvas.width, cel.canvas.height).data;
+  return !pixels?.some((value, index) => index % 4 === 3 && value !== 0);
 }
 
 interface ProjectLoadOptions {
@@ -97,17 +104,18 @@ interface ProjectLoadOptions {
 }
 
 interface ProjectSerializationOptions {
-  /** Keep legacy canvas-to-index migration enabled unless explicitly disabled. */
-  rebuildIndexBuffers?: boolean;
+  /** Rebuild live indices by default, or project them into a detached snapshot. */
+  rebuildIndexBuffers?: boolean | 'snapshot';
 }
 
 async function serializeCelForLayer(
   animation: ProjectAnimationStore,
   layer: Layer,
-  frame: Frame
+  frame: Frame,
+  cels: ReadonlyMap<string, Cel>
 ): Promise<ProjectCelFile> {
   const celKey = animation.getCelKey(layer.id, frame.id);
-  const cel = animation.cels.value.get(celKey);
+  const cel = cels.get(celKey);
 
   if (!cel) {
     return {
@@ -153,6 +161,54 @@ async function serializeExistingCel(
   if (textCelData) celFile.textCelData = textCelData;
 
   return celFile;
+}
+
+/** Rebuild derived indices without changing the project observed by a pending write. */
+function captureSnapshotCels(
+  cels: ReadonlyMap<string, Cel>,
+  paletteEntries: NonNullable<ProjectFile['paletteEntries']>,
+): Map<string, Cel> {
+  const colors = paletteEntries.map((entry) => entry.color);
+  const { colorToIndex } = buildColorMaps(colors);
+  const entryIds = new Set(paletteEntries.map((entry) => entry.id));
+  const palette = {
+    getColorIndex: (color: string) => getColorIndex(color, colorToIndex),
+    getColorByIndex: (index: number) => getColorByIndex(index, colors),
+    findClosestColorIndex: (color: string) => findClosestColorIndex(color, colors),
+    getOrAddColor: (color: string) => {
+      const existing = getColorIndex(color, colorToIndex);
+      if (existing) return existing;
+      if (colors.length >= MAX_PALETTE_SIZE) return findClosestColorIndex(color, colors);
+
+      // Repeated captures must have the same digest, including newly discovered colors.
+      let id = `snapshot-palette-${color.slice(1)}`;
+      while (entryIds.has(id)) id += '-copy';
+      entryIds.add(id);
+      paletteEntries.push({ id, color });
+      colors.push(color);
+      colorToIndex.set(color, colors.length);
+      return colors.length;
+    },
+  };
+  const rasters = new Map<HTMLCanvasElement, { canvas: HTMLCanvasElement; indexBuffer: Uint8Array }>();
+  const snapshot = new Map<string, Cel>();
+  for (const [key, cel] of cels) {
+    if (cel.textCelData) {
+      snapshot.set(key, cel);
+      continue;
+    }
+    let raster = rasters.get(cel.canvas);
+    if (!raster) {
+      const canvas = document.createElement('canvas');
+      canvas.width = cel.canvas.width;
+      canvas.height = cel.canvas.height;
+      canvas.getContext('2d')?.drawImage(cel.canvas, 0, 0);
+      raster = { canvas, indexBuffer: buildIndexBufferFromCanvas(canvas, palette) };
+      rasters.set(cel.canvas, raster);
+    }
+    snapshot.set(key, { ...cel, ...raster });
+  }
+  return snapshot;
 }
 
 class ProjectStore {
@@ -351,9 +407,14 @@ class ProjectStore {
   async saveProject(options: ProjectSerializationOptions = {}): Promise<ProjectFile> {
     // Canvas pixels are the common output of every editing command. Rebuild
     // indices here so canvas-only operations cannot persist stale pixel data.
-    if (options.rebuildIndexBuffers ?? true) {
-      this.animation.rebuildAllIndexBuffers(true);
+    if (options.rebuildIndexBuffers !== 'snapshot' && (options.rebuildIndexBuffers ?? true)) {
+      this.animation.rebuildAllIndexBuffers(true, { preserveUnindexed: true });
     }
+
+    const paletteEntries = this.palette.getProjectPaletteEntries();
+    const cels = options.rebuildIndexBuffers === 'snapshot'
+      ? captureSnapshotCels(this.animation.cels.value, paletteEntries)
+      : this.animation.cels.value;
 
     // Convert layers to binary format (including text layer metadata)
     const layers = await Promise.all(
@@ -384,16 +445,16 @@ class ProjectStore {
     // Convert frames/cels to binary format (including text cel data, linked cel info, and index buffer)
     const frames = await Promise.all(
       this.animation.frames.value.map(async (frame) => {
-        const cels = await Promise.all(
+        const serializedCels = await Promise.all(
           this.layers.layers.value
             .filter(layerSerializesCels)
-            .map((layer) => serializeCelForLayer(this.animation, layer, frame))
+            .map((layer) => serializeCelForLayer(this.animation, layer, frame, cels))
         );
 
         return {
           id: frame.id,
           duration: frame.duration,
-          cels,
+          cels: serializedCels,
         };
       })
     );
@@ -409,8 +470,8 @@ class ProjectStore {
       name: this.name.value,
       width: this.width.value,
       height: this.height.value,
-      palette: this.palette.mainColors.value, // v3.0+: Save the main palette
-      paletteEntries: this.palette.getProjectPaletteEntries(),
+      palette: paletteEntries.map((entry) => entry.color),
+      paletteEntries,
       layers,
       frames,
       animation: {

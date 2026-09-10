@@ -441,11 +441,15 @@ class AnimationStore {
     indexBuffer.rebuildAllCelCanvases(this.cels.value, this.palette.colors.value);
   }
 
-  rebuildAllIndexBuffers(addMissingColors = false): void {
+  rebuildAllIndexBuffers(
+    addMissingColors = false,
+    options: { preserveUnindexed?: boolean } = {},
+  ): void {
     this.cels.value = indexBuffer.rebuildAllIndexBuffers(
       this.cels.value,
       this.palette,
-      addMissingColors
+      addMissingColors,
+      options,
     );
   }
 

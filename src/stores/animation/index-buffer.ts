@@ -143,7 +143,8 @@ export function rebuildAllCelCanvases(cels: Map<string, Cel>, palette: string[])
 export function rebuildAllIndexBuffers(
   cels: Map<string, Cel>,
   palette: PaletteColorSource,
-  addMissingColors = false
+  addMissingColors = false,
+  options: { preserveUnindexed?: boolean } = {},
 ): Map<string, Cel> {
   const newCels = new Map(cels);
   const rebuiltBuffers = new Map<HTMLCanvasElement, Uint8Array>();
@@ -155,20 +156,11 @@ export function rebuildAllIndexBuffers(
 
     let newIndexBuffer = rebuiltBuffers.get(cel.canvas);
     if (!newIndexBuffer) {
-      const rebuiltIndexBuffer = buildIndexBufferFromCanvas(
-        cel.canvas,
-        palette,
-        addMissingColors
-      );
-      const existingIndexBuffer = cel.indexBuffer;
-      if (existingIndexBuffer && existingIndexBuffer.length === rebuiltIndexBuffer.length) {
-        existingIndexBuffer.set(rebuiltIndexBuffer);
-        newIndexBuffer = existingIndexBuffer;
-      } else {
-        newIndexBuffer = rebuiltIndexBuffer;
-      }
+      newIndexBuffer = rebuildCelIndexBuffer(cel, palette, addMissingColors);
       rebuiltBuffers.set(cel.canvas, newIndexBuffer);
     }
+
+    if (options.preserveUnindexed && !cel.indexBuffer) continue;
 
     if (cel.indexBuffer !== newIndexBuffer) {
       newCels.set(key, { ...cel, indexBuffer: newIndexBuffer });
@@ -177,6 +169,17 @@ export function rebuildAllIndexBuffers(
   }
 
   return changed ? newCels : cels;
+}
+
+function rebuildCelIndexBuffer(
+  cel: Cel,
+  palette: PaletteColorSource,
+  addMissingColors: boolean,
+): Uint8Array {
+  const rebuilt = buildIndexBufferFromCanvas(cel.canvas, palette, addMissingColors);
+  if (cel.indexBuffer?.length !== rebuilt.length) return rebuilt;
+  cel.indexBuffer.set(rebuilt);
+  return cel.indexBuffer;
 }
 
 /**

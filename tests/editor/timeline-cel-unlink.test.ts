@@ -279,7 +279,7 @@ describe('timeline cel unlink transaction', () => {
     )?.linkedCelId).toBeUndefined();
   });
 
-  it('keeps unlink Undo and Redo valid when save materializes an undefined index buffer', async () => {
+  it('keeps absent indices and unlink Undo and Redo intact through ordinary save', async () => {
     const { context, layer, middleCel, canvas } = createHardLinkedContext(false, false);
     const imageData = canvas.getContext('2d')?.getImageData(0, 0, 2, 2);
     if (!imageData) throw new Error('Expected canvas image data');
@@ -295,12 +295,12 @@ describe('timeline cel unlink transaction', () => {
     const unlinkedBeforeSave = context.animation.cels.value.get(key);
     expect(unlinkedBeforeSave?.indexBuffer).toBeUndefined();
 
-    await context.project.saveProject();
+    const saved = await context.project.saveProject();
 
     const unlinkedAfterSave = context.animation.cels.value.get(key);
-    expect(unlinkedAfterSave).not.toBe(unlinkedBeforeSave);
-    expect(unlinkedAfterSave?.indexBuffer).toBeDefined();
-    expect(unlinkedAfterSave?.indexBuffer).toHaveLength(4);
+    expect(unlinkedAfterSave).toBe(unlinkedBeforeSave);
+    expect(unlinkedAfterSave?.indexBuffer).toBeUndefined();
+    expect(saved.frames.flatMap((frame) => frame.cels).every((cel) => cel.indexData === undefined)).toBe(true);
 
     await context.history.undo();
     expect(context.animation.cels.value.get(key)?.linkedCelId).toBeTruthy();
