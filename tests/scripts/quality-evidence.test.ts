@@ -46,6 +46,7 @@ beforeAll(() => {
     'scripts/quality',
     'vitest.config.ts',
     'vitest.browser.config.ts',
+    'vite.config.ts',
     'server/vitest.config.ts',
     'eslint.config.js',
     '.fallowrc.json',
