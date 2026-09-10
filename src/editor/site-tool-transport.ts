@@ -75,7 +75,7 @@ export class SiteToolTransport {
       this.availability = 'registered';
     } catch {
       this.registration.abort();
-      this.availability = 'unsupported';
+      if (this.active) this.availability = 'unsupported';
     }
     return this.availability;
   }
@@ -107,7 +107,7 @@ export class SiteToolTransport {
     signal?: AbortSignal
   ): Promise<string> {
     if (!(signal instanceof AbortSignal)) {
-      this.availability = 'unsupported';
+      if (this.active) this.availability = 'unsupported';
       this.unregister();
       return JSON.stringify(
         siteFailure(

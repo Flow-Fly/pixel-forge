@@ -16,6 +16,8 @@ export interface SiteSchema {
   readonly const?: string | number | boolean | null;
   readonly enum?: readonly (string | number)[];
   readonly oneOf?: readonly SiteSchema[];
+  readonly allOf?: readonly SiteSchema[];
+  readonly contains?: SiteSchema;
 }
 
 export const siteString = (maxLength = 256): SiteSchema => ({
@@ -51,8 +53,19 @@ export const siteObject = (
 /** Validation and published schemas use the same bounded definitions. */
 export function matchesSiteSchema(value: unknown, schema: SiteSchema, depth = 0): boolean {
   if (depth > 24) return false;
-  if (schema.oneOf)
-    return schema.oneOf.filter((item) => matchesSiteSchema(value, item, depth + 1)).length === 1;
+  if (
+    schema.oneOf &&
+    schema.oneOf.filter((item) => matchesSiteSchema(value, item, depth + 1)).length !== 1
+  )
+    return false;
+  if (schema.allOf && !schema.allOf.every((item) => matchesSiteSchema(value, item, depth + 1)))
+    return false;
+  if (
+    schema.contains &&
+    (!Array.isArray(value) ||
+      !value.some((item) => matchesSiteSchema(item, schema.contains!, depth + 1)))
+  )
+    return false;
   if ('const' in schema && value !== schema.const) return false;
   if (schema.enum && !schema.enum.includes(value as string)) return false;
   return matchesSchemaType(value, schema, depth);
@@ -74,7 +87,7 @@ function matchesSchemaType(value: unknown, schema: SiteSchema, depth: number): b
     case 'object':
       return matchesObject(value, schema, depth);
     default:
-      return 'const' in schema || !!schema.enum;
+      return ['const', 'enum', 'oneOf', 'allOf', 'contains'].some((key) => Object.hasOwn(schema, key));
   }
 }
 

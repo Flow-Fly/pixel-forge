@@ -193,17 +193,17 @@ export const siteTransactionSchema: SiteSchema = {
       'oneOfEach' in definition.children
         ? definition.children.oneOfEach
         : definition.children.oneOf;
+    const children = commands.map((command) =>
+      object({ command: { const: command }, input: siteCommandInputSchemas[command] })
+    );
     return object({
       profile: { const: profile },
-      children: array(
-        {
-          oneOf: commands.map((command) =>
-            object({ command: { const: command }, input: siteCommandInputSchemas[command] })
-          ),
-        },
-        definition.children.exact,
-        definition.children.exact
-      ),
+      children: {
+        ...array({ oneOf: children }, definition.children.exact, definition.children.exact),
+        ...('oneOfEach' in definition.children
+          ? { allOf: children.map((child) => ({ contains: child })) }
+          : {}),
+      },
     });
   }),
 };

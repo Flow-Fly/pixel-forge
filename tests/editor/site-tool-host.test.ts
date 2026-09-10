@@ -106,7 +106,7 @@ async function approved(kind: 'fallback' | 'webmcp') {
       contentEgress: brief.contentEgress,
     }).ok
   ).toBe(true);
-  return { ...setupResult, credential, controller };
+  return { ...setupResult, credential, controller, latestController: setupResult.controller };
 }
 async function observation(
   client: SiteToolFacade,
@@ -293,4 +293,133 @@ describe.each(['fallback', 'webmcp'] as const)('%s public site conformance', (ki
       initial.frames[0].duration
     );
   });
+});
+
+it('keeps local recovery usable and continues only through a newly approved ordinary request', async () => {
+  const { client, host, manager, context, controller, credential, latestController } =
+    await approved('fallback');
+  const initial = await observation(client, credential);
+  const running = controller.start();
+  await vi.waitFor(() => expect(controller.getState().inFlight).toBe('step'));
+  const transaction = {
+    profile: 'animation',
+    children: [
+      {
+        command: ANIMATION_FRAME_COMMAND_ID,
+        input: { kind: 'frame.duration', frameId: initial.frames[0].id, duration: 150 },
+      },
+    ],
+  };
+  expect(
+    await client.invoke('propose', {
+      ...credential,
+      operationId: 'before-hide',
+      expectedRevision: initial.revision,
+      transaction,
+    })
+  ).toMatchObject({ ok: true, result: { outcome: 'committed' } });
+  host.endAuthority();
+  await running;
+  await vi.waitFor(() => expect(controller.getState().recovery?.interrupted).toBe(true));
+  expect(controller.supportsSessionReplacement).toBe(false);
+  expect(await controller.createRecoveryCopy()).toMatchObject({ ok: true });
+  expect(controller.getState().recovery?.recoveryCopyId).toEqual(expect.any(String));
+
+  const nextCredential = await requested(client);
+  expect(
+    await host.approve(
+      nextCredential.requestId as string,
+      context.project.id.value,
+      ['structure', 'save-state'],
+      'existing'
+    )
+  ).toBe(true);
+  const pending = manager.listPendingArtistModeRequests()[0];
+  expect(manager.approveArtistMode(pending.requestId, ['timeline'], 3).ok).toBe(true);
+  const next = latestController();
+  expect(next.getState().sessionId).not.toBe(controller.getState().sessionId);
+  expect(next.getState().runId).not.toBe(controller.getState().runId);
+  const brief = next.getState().brief;
+  expect(
+    next.approveBrief({
+      briefRevision: brief.revision,
+      targetId: brief.targetId,
+      requestedWriteCategories: brief.requestedWriteCategories,
+      transactionLimit: brief.transactionLimit,
+      durationSeconds: brief.durationSeconds,
+      contentEgress: brief.contentEgress,
+    }).ok
+  ).toBe(true);
+  const continuing = next.start();
+  await vi.waitFor(() => expect(next.getState().inFlight).toBe('step'));
+  const proposal = {
+    ...nextCredential,
+    operationId: 'after-new-consent',
+    expectedRevision: initial.revision + 1,
+    transaction,
+  };
+  expect(await client.invoke('propose', proposal)).toMatchObject({
+    ok: false,
+    error: { code: 'revision_conflict' },
+  });
+  const fresh = await observation(client, nextCredential);
+  expect(fresh.revision).toBe(initial.revision + 1);
+  const updated = {
+    ...proposal,
+    transaction: {
+      profile: 'animation',
+      children: [
+        {
+          command: ANIMATION_FRAME_COMMAND_ID,
+          input: { kind: 'frame.duration', frameId: fresh.frames[0].id, duration: 170 },
+        },
+      ],
+    },
+  };
+  expect(await client.invoke('propose', updated)).toMatchObject({
+    ok: true,
+    result: { outcome: 'committed', revision: initial.revision + 2 },
+  });
+  expect(
+    await client.invoke('propose', { ...updated, ...credential, operationId: 'old-caller' })
+  ).toMatchObject({ ok: false, error: { code: 'capability_denied' } });
+  expect(
+    await client.invoke('observe', {
+      ...credential,
+      observationClass: 'structure',
+      expectedRevision: initial.revision + 2,
+    })
+  ).toMatchObject({ ok: false, error: { code: 'capability_denied' } });
+  next.pause();
+  await continuing;
+});
+
+it('refuses resume while a paused run prepares its package', async () => {
+  const { client, controller, credential } = await approved('fallback');
+  await observation(client, credential);
+  const running = controller.start();
+  await vi.waitFor(() => expect(controller.getState().inFlight).toBe('step'));
+  controller.pause();
+  await running;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started!: () => void;
+  const saveStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const save = autoSaveService.saveNow.bind(autoSaveService);
+  vi.spyOn(autoSaveService, 'saveNow').mockImplementationOnce(async (context) => {
+    started();
+    await held;
+    await save(context);
+  });
+  const preparing = controller.preparePackageForReview();
+  await saveStarted;
+  const resumed = await controller.resume();
+  release();
+  await preparing;
+  expect(resumed).toMatchObject({ ok: false, error: { code: 'in_flight' } });
+  expect(controller.getState().phase).toBe('paused');
 });

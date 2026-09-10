@@ -71,3 +71,28 @@ describe('site tool registration and lifecycle', () => {
     }
   });
 });
+
+it('preserves terminal lifecycle state when registration or a retained callback fails late', async () => {
+  for (const lifecycle of ['suspend', 'dispose'] as const) {
+    const transport = new SiteToolTransport({ invoke: vi.fn(async () => siteSuccess({})) });
+    let retained!: Parameters<SiteWebMcp['registerTool']>[0];
+    const registering = transport.register({
+      registerTool: (
+        tool: Parameters<SiteWebMcp['registerTool']>[0],
+        { signal }: { signal: AbortSignal }
+      ) => {
+        retained = tool;
+        return new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('registration cancelled')), {
+            once: true,
+          });
+        });
+      },
+    });
+    transport[lifecycle]();
+    const expected = lifecycle === 'suspend' ? 'suspended' : 'disposed';
+    expect(await registering).toBe(expected);
+    expect(JSON.parse(await retained.execute({}))).toMatchObject({ ok: false });
+    expect(transport.fallback.availability()).toBe(expected);
+  }
+});

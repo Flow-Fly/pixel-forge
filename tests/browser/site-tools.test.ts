@@ -46,6 +46,27 @@ function select(selector: string, value: string) {
   control.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+async function approveLocalSession(targetName: string, mode: 'copy' | 'existing') {
+  await expect.poll(() => dialogRoot().querySelector('select option:nth-child(2)')).toBeTruthy();
+  const target = [
+    ...dialogRoot().querySelectorAll<HTMLOptionElement>('#automation-session-target option'),
+  ].find((option) => option.textContent?.includes(targetName))!;
+  expect(target).toBeTruthy();
+  select('#automation-session-target', target.value);
+  select('#site-target-mode', mode);
+  for (const checkbox of [
+    ...dialogRoot().querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].reverse())
+    checkbox.click();
+  await userEvent.click(page.getByRole('button', { name: 'Approve selected access', exact: true }));
+  await expect.poll(() => dialogRoot().textContent).toContain('Allow Artist Mode');
+  for (const checkbox of dialogRoot().querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+    if (!checkbox.checked) checkbox.click();
+  await userEvent.click(page.getByRole('button', { name: 'Approve Artist Mode', exact: true }));
+  await userEvent.click(page.getByRole('button', { name: 'Close dialog', exact: true }));
+  await userEvent.click(page.getByRole('button', { name: 'Approve Brief', exact: true }));
+}
+
 it('loads the normal entry and controls a safe copy of the Golden asset through shipped tools and local UI', async () => {
   const fixture = createFixtureSession();
   const golden = await runGoldenAutomationJourney({ fixture });
@@ -95,36 +116,19 @@ it('loads the normal entry and controls a safe copy of the Golden asset through 
       setTimeout(() => reject(new Error('Import UI did not report completion')), 10000)
     ),
   ]);
-  const requested = result(
-    await window.pixelForgeSiteTools.invoke('request', {
-      facadeVersion: '1.0',
-      catalogVersion: '1.0',
-      clientName: 'Deterministic Golden client',
-      purpose: 'Refine the Golden animation timing',
-      observationClasses: ['structure', 'palette', 'timeline', 'raster', 'render', 'save-state'],
-      writeCategories: ['timeline'],
-      transactionLimit: 3,
-      lifetimeSeconds: 300,
-    })
-  );
+  const requestInput = {
+    facadeVersion: '1.0',
+    catalogVersion: '1.0',
+    clientName: 'Deterministic Golden client',
+    purpose: 'Refine the Golden animation timing',
+    observationClasses: ['structure', 'palette', 'timeline', 'raster', 'render', 'save-state'],
+    writeCategories: ['timeline'],
+    transactionLimit: 3,
+    lifetimeSeconds: 300,
+  };
+  const requested = result(await window.pixelForgeSiteTools.invoke('request', requestInput));
   const credential = { requestId: requested.requestId, requestSecret: requested.requestSecret };
-  await expect.poll(() => dialogRoot().querySelector('select option:nth-child(2)')).toBeTruthy();
-  const target = [
-    ...dialogRoot().querySelectorAll<HTMLOptionElement>('#automation-session-target option'),
-  ].find((option) => option.textContent?.includes('Golden Automation Journey'))!;
-  expect(target).toBeTruthy();
-  select('#automation-session-target', target.value);
-  for (const checkbox of [
-    ...dialogRoot().querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
-  ].reverse())
-    checkbox.click();
-  await userEvent.click(page.getByRole('button', { name: 'Approve selected access', exact: true }));
-  await expect.poll(() => dialogRoot().textContent).toContain('Allow Artist Mode');
-  for (const checkbox of dialogRoot().querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-    if (!checkbox.checked) checkbox.click();
-  await userEvent.click(page.getByRole('button', { name: 'Approve Artist Mode', exact: true }));
-  await userEvent.click(page.getByRole('button', { name: 'Close dialog', exact: true }));
-  await userEvent.click(page.getByRole('button', { name: 'Approve Brief', exact: true }));
+  await approveLocalSession('Golden Automation Journey', 'copy');
   const handle = result(
     await window.pixelForgeSiteTools.invoke('observe', {
       ...credential,
@@ -214,6 +218,81 @@ it('loads the normal entry and controls a safe copy of the Golden asset through 
   ).toMatchObject({ ok: false, error: { code: 'capability_denied' } });
   document.dispatchEvent(new Event('freeze'));
   expect(window.pixelForgeSiteTools.availability()).toBe('suspended');
+  await expect
+    .element(page.getByText('Ask the external agent to request a new session.', { exact: false }))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole('button', { name: 'Resume with New Session…', exact: true }))
+    .not.toBeInTheDocument();
+  await userEvent.click(page.getByRole('button', { name: 'Create Recovery Copy', exact: true }));
+  await expect
+    .element(page.getByRole('button', { name: 'Open Recovery Copy', exact: true }))
+    .toBeEnabled();
+
+  document.dispatchEvent(new Event('resume'));
+  const renewed = result(await window.pixelForgeSiteTools.invoke('request', requestInput));
+  const nextCredential = { requestId: renewed.requestId, requestSecret: renewed.requestSecret };
+  await approveLocalSession('Copy of Golden Automation Journey', 'existing');
+  const fresh = await readResult(
+    nextCredential,
+    result(
+      await window.pixelForgeSiteTools.invoke('observe', {
+        ...nextCredential,
+        observationClass: 'structure',
+      })
+    )
+  );
+  expect(fresh.revision).toBe(initial.revision + 1);
+  expect(fresh.frames[0].duration).toBe(150);
+  await userEvent.click(page.getByRole('button', { name: 'Start Run', exact: true }));
+  const continuation = {
+    ...nextCredential,
+    operationId: 'new-session-timing',
+    expectedRevision: fresh.revision,
+    transaction: {
+      profile: 'animation',
+      children: [
+        {
+          command: 'project.animation.frame',
+          input: { kind: 'frame.duration', frameId: fresh.frames[0].id, duration: 180 },
+        },
+      ],
+    },
+  };
+  await expect
+    .poll(async () => {
+      const response = await window.pixelForgeSiteTools.invoke('propose', continuation);
+      return response.ok && response.result.outcome;
+    })
+    .toBe('committed');
+  await userEvent.click(page.getByRole('button', { name: 'Pause', exact: true }));
+  const continued = await readResult(
+    nextCredential,
+    result(
+      await window.pixelForgeSiteTools.invoke('observe', {
+        ...nextCredential,
+        observationClass: 'structure',
+        expectedRevision: fresh.revision + 1,
+      })
+    )
+  );
+  expect(continued.frames[0].duration).toBe(180);
+  expect(
+    await window.pixelForgeSiteTools.invoke('propose', {
+      ...continuation,
+      ...credential,
+      operationId: 'old-request-after-renewal',
+    })
+  ).toMatchObject({ ok: false, error: { code: 'capability_denied' } });
+  expect(
+    await window.pixelForgeSiteTools.invoke('result', {
+      ...credential,
+      handle: packageHandle.handle,
+      offset: 0,
+      maxBytes: 49152,
+    })
+  ).toMatchObject({ ok: false, error: { code: 'capability_denied' } });
+  document.dispatchEvent(new Event('freeze'));
 }, 60_000);
 
 const native = (

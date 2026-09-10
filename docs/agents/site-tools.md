@@ -32,7 +32,12 @@ already dispatched atomic work returns its actual commit or failure outcome.
 Pause invalidates queued work and requires a fresh observation on resume.
 Stop, revocation, expiry, hide, freeze and page close end the relevant authority.
 Returning to the foreground registers fresh tool callbacks but grants no
-session automatically.
+session automatically. Ask the external agent to make a new ordinary `request`,
+then select the current working project locally and approve sharing, Artist Mode
+and the Brief again. Observe its current revision before starting further writes.
+The old request credentials and result handles remain without authority. Local
+checkpoint, rejection and Recovery Copy controls stay available after interruption;
+this composition does not transfer new credentials through the old request.
 
 While paused with live authority, `control` / `prepare-package` prepares a
 review package through the run's save and package boundary. It requires every

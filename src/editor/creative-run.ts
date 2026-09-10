@@ -419,6 +419,10 @@ export class CreativeRunController {
     });
   }
 
+  get supportsSessionReplacement(): boolean {
+    return this.createReplacementController !== undefined;
+  }
+
   /** The replacement controller is intentionally separate from this terminal run. */
   get replacement(): CreativeRunController | null {
     return this.replacementController;
@@ -534,6 +538,7 @@ export class CreativeRunController {
     if (busy) return busy;
     if (this.recovery?.status.interrupted) return this.fail('recovery_resume_required', false, 'resume-interrupted');
     if (this.phase !== 'paused') return this.fail('invalid_transition', false, 'resume-run');
+    if (this.inFlight) return this.fail('in_flight', true, 'resume-run');
     if (this.approvedBriefRevision !== this.brief.revision) {
       return this.fail('brief_approval_required', false, 'approve-brief');
     }

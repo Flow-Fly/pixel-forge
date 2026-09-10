@@ -115,3 +115,69 @@ describe('site binary wire representation', () => {
     await expect(encodeSiteResult({ value: Infinity })).rejects.toThrow('result_type');
   });
 });
+
+it('preserves the catalogue and runtime one-of-each requirement in the published schema', async () => {
+  const palette = {
+    command: 'project.palette.declaration',
+    input: { kind: 'palette.declaration', entries: [{ id: 'ink', color: '#000000' }] },
+  };
+  const layers = {
+    command: 'project.layer.tree',
+    input: {
+      kind: 'layer-tree.declaration',
+      layers: [
+        {
+          id: 'art',
+          name: 'Artwork',
+          type: 'image',
+          parentId: null,
+          visible: true,
+          locked: false,
+          opacity: 255,
+          blendMode: 'normal',
+        },
+      ],
+    },
+  };
+  expect(transactionCatalog.profiles['static-structure'].children.oneOfEach).toEqual([
+    palette.command,
+    layers.command,
+  ]);
+  for (const children of [
+    [palette, layers],
+    [layers, palette],
+  ])
+    expect(
+      matchesSiteSchema({ profile: 'static-structure', children }, siteTransactionSchema)
+    ).toBe(true);
+  expect(
+    matchesSiteSchema(
+      { profile: 'static-structure', children: [palette, palette] },
+      siteTransactionSchema
+    )
+  ).toBe(false);
+  const { createProjectContext } = await import('../../src/stores/project-context');
+  const { createAutomationAdapter } = await import('../../src/editor/automation-adapter');
+  const context = createProjectContext();
+  const target = { projectId: context.project.id.value };
+  const adapter = createAutomationAdapter({ targetRegistry: new Map([[target.projectId, context]]) });
+  try {
+    expect(adapter.negotiateCatalog({ version: editorCatalog.version }).ok).toBe(true);
+    expect(
+      await adapter.executeTransaction({
+        profile: 'static-structure',
+        target,
+        expectedRevision: 0,
+        provenance: {
+          clientId: 'schema-test',
+          sessionId: 'schema-session',
+          runId: 'schema-run',
+          operationId: 'schema-operation',
+        },
+        children: [palette, palette],
+      })
+    ).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  } finally {
+    context.dispose();
+  }
+});

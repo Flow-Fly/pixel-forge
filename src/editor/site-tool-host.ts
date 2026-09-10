@@ -703,12 +703,12 @@ export class SiteToolHost {
       if (request.sessionId) this.manager.revokeSession(request.sessionId);
       request.grant = undefined;
       request.results.clear();
-      request.controller?.dispose();
       this.cancelProposal(request);
     }
   }
   dispose(): void {
     this.endAuthority();
+    for (const request of this.requests.values()) request.controller?.dispose();
     this.disposed = true;
   }
 }
