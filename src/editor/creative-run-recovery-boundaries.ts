@@ -55,7 +55,7 @@ export function createProjectRecoveryTarget(
   return {
     target: { projectId: target.projectId },
     getRevision: () => context.project.revision.value,
-    captureProject: async () => structuredClone(await context.project.saveProject()),
+    captureProject: async () => structuredClone(await context.project.saveProject({ rebuildIndexBuffers: 'snapshot' })),
     restoreProject: async (project, expectedRevision) => restoreProject(context, project, expectedRevision, target.projectId),
     repository,
     createProjectId,

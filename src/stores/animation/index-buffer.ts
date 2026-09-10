@@ -143,7 +143,8 @@ export function rebuildAllCelCanvases(cels: Map<string, Cel>, palette: string[])
 export function rebuildAllIndexBuffers(
   cels: Map<string, Cel>,
   palette: PaletteColorSource,
-  addMissingColors = false
+  addMissingColors = false,
+  options: { preserveUnindexed?: boolean } = {},
 ): Map<string, Cel> {
   const newCels = new Map(cels);
   const rebuiltBuffers = new Map<HTMLCanvasElement, Uint8Array>();
@@ -169,6 +170,8 @@ export function rebuildAllIndexBuffers(
       }
       rebuiltBuffers.set(cel.canvas, newIndexBuffer);
     }
+
+    if (options.preserveUnindexed && !cel.indexBuffer) continue;
 
     if (cel.indexBuffer !== newIndexBuffer) {
       newCels.set(key, { ...cel, indexBuffer: newIndexBuffer });

@@ -1,8 +1,14 @@
+import pako from 'pako';
 import { expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { createFixtureSession } from '../../src/editor/fixture-session';
 import { runGoldenAutomationJourney } from '../../src/editor/golden-automation-journey';
 import type { SiteToolResult } from '../../src/editor/site-tool-contract';
+import { createProjectContext } from '../../src/stores/project-context';
+import { createProjectRecoveryTarget } from '../../src/editor/creative-run-recovery-boundaries';
+import { digestProjectFile } from '../../src/editor/creative-run-recovery';
+import { workspaceStore } from '../../src/stores/workspace';
+import { projectRepository, creativeRunRecoveryPersistence } from '../../src/services/persistence/indexed-db';
 import { siteDigest } from '../../src/editor/site-tool-wire';
 
 vi.mock('../../src/sentry', () => ({}));
@@ -67,14 +73,152 @@ async function approveLocalSession(targetName: string, mode: 'copy' | 'existing'
   await userEvent.click(page.getByRole('button', { name: 'Approve Brief', exact: true }));
 }
 
+it('captures coherent stale-index pixels without changing live canvas, indices, palette, or history', async () => {
+  const context = createProjectContext();
+  const restored = createProjectContext();
+  try {
+    context.project.setSize(2, 1);
+    context.palette.setPalette(['#ff0000']);
+    const layer = context.layers.layers.value[0];
+    const frameId = context.animation.currentFrameId.value;
+    const key = context.animation.getCelKey(layer.id, frameId);
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 1;
+    const drawing = canvas.getContext('2d')!;
+    drawing.putImageData(new ImageData(new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255]), 2, 1), 0, 0);
+    const staleIndices = new Uint8Array([0, 0]);
+    context.layers.updateLayer(layer.id, { canvas, continuous: false });
+    context.animation.cels.value = new Map([[key, {
+      ...context.animation.cels.value.get(key)!, canvas, indexBuffer: staleIndices,
+    }]]);
+    const cels = context.animation.cels.value;
+    const palette = context.palette.captureProjectSnapshot();
+    const history = [...context.history.undoStack.value];
+    const revision = context.project.revision.value;
+    const changes = vi.fn();
+    context.project.changeEvents.addEventListener('project-change', changes);
+    const target = createProjectRecoveryTarget(context, projectRepository);
+    const checkpoint = await target.captureProject();
+    const repeated = await target.captureProject();
+    expect(await digestProjectFile(repeated)).toBe(await digestProjectFile(checkpoint));
+    expect(context.animation.cels.value).toBe(cels);
+    expect(context.animation.cels.value.get(key)?.indexBuffer).toBe(staleIndices);
+    expect([...staleIndices]).toEqual([0, 0]);
+    expect([...drawing.getImageData(0, 0, 2, 1).data]).toEqual([255, 0, 0, 255, 0, 0, 255, 255]);
+    expect(context.palette.captureProjectSnapshot()).toEqual(palette);
+    expect(context.history.undoStack.value).toEqual(history);
+    expect(context.project.revision.value).toBe(revision);
+    expect(changes).not.toHaveBeenCalled();
+    expect(checkpoint.frames[0].cels[0].indexData).toEqual([1, 2]);
+    expect(checkpoint.palette).toEqual(['#ff0000', '#0000ff']);
+    expect(checkpoint.paletteEntries?.[0]).toEqual(palette.entries[0]);
+    await restored.project.loadProject(checkpoint);
+    const loaded = restored.animation.cels.value.get(key)!;
+    expect([...loaded.canvas.getContext('2d')!.getImageData(0, 0, 2, 1).data])
+      .toEqual([255, 0, 0, 255, 0, 0, 255, 255]);
+    expect([...loaded.indexBuffer!]).toEqual([1, 2]);
+    expect(await createProjectRecoveryTarget(restored, projectRepository).captureProject()).toEqual(checkpoint);
+  } finally {
+    context.dispose();
+    restored.dispose();
+  }
+});
+
+async function verifyFirstRasterWrite() {
+  const original = workspaceStore.activeItem.context;
+  const originalId = original.project.id.value;
+  const originalPixels = [...original.layers.layers.value[0].canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data];
+  const requested = result(await window.pixelForgeSiteTools.invoke('request', {
+    facadeVersion: '1.0', catalogVersion: '1.0',
+    clientName: 'First raster regression', purpose: 'Draw one pixel on a fresh safe copy',
+    observationClasses: ['structure', 'palette', 'timeline', 'raster', 'render', 'save-state'], writeCategories: ['raster'],
+    transactionLimit: 2, lifetimeSeconds: 300,
+  }));
+  const credential = { requestId: requested.requestId, requestSecret: requested.requestSecret };
+  await approveLocalSession('Untitled', 'copy');
+  const observe = async (observationClass: string, input = {}) => readResult(credential, result(
+    await window.pixelForgeSiteTools.invoke('observe', { ...credential, observationClass, ...input })
+  ));
+  const working = workspaceStore.activeItem.context;
+  expect(working.project.id.value).not.toBe(originalId);
+  const structure = await observe('structure');
+  expect(structure.revision).toBe(0);
+  const palette = await observe('palette', { expectedRevision: 0 });
+  const cel = structure.frames[0].cels[0];
+  const region = { x: 0, y: 0, width: 1, height: 1 };
+  const source = { kind: 'layer', layerId: cel.layerId, frameId: cel.frameId, celId: cel.id };
+  const raster = await observe('raster', { expectedRevision: 0, source, region });
+  expect(raster.rows).toEqual(['.']);
+  await userEvent.click(page.getByRole('button', { name: 'Start Run', exact: true }));
+  await expect.poll(async () => result(await window.pixelForgeSiteTools.invoke('status', credential)).phase)
+    .toBe('running');
+  const proposal = {
+    ...credential, operationId: 'first-raster-write', expectedRevision: 0,
+    transaction: { profile: 'raster-patch', children: [{ command: 'project.raster.patch', input: {
+      kind: 'raster.patch', layerId: cel.layerId, frameId: cel.frameId, celId: cel.id,
+      region, digest: raster.digest,
+      legend: [{ symbol: 'A', paletteEntryId: palette.palette.find((entry: { color: string }) => entry.color === '#df7126').id }],
+      patches: [{ ...region, rows: ['A'] }],
+    } }] },
+  };
+  const committed = await window.pixelForgeSiteTools.invoke('propose', proposal);
+  expect(committed).toMatchObject({ ok: true, result: { outcome: 'committed', revision: 1 } });
+  expect(await window.pixelForgeSiteTools.invoke('propose', proposal)).toEqual(committed);
+  expect(working.history.undoStack.value).toHaveLength(1);
+  const committedCel = working.animation.cels.value.get(working.animation.getCelKey(cel.layerId, cel.frameId))!;
+  expect([...committedCel.canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data]).toEqual([223, 113, 38, 255]);
+  const saved = await createProjectRecoveryTarget(working, projectRepository).captureProject();
+  expect(saved.frames[0].cels[0].indexData?.[0]).toBe(saved.palette!.indexOf('#df7126') + 1);
+  expect(result(await window.pixelForgeSiteTools.invoke('status', credential)).phase).toBe('running');
+  const after = await observe('raster', { expectedRevision: 1, source, region });
+  expect(after.legend.find((entry: { symbol: string }) => entry.symbol === after.rows[0]).color).toBe('#df7126ff');
+  await userEvent.click(page.getByRole('button', { name: 'Pause', exact: true }));
+  const prepared = await readResult(credential, result(await window.pixelForgeSiteTools.invoke('control', {
+    ...credential, action: 'prepare-package',
+  })));
+  const sourceArtifact = prepared.artifacts.find((artifact: { role: string }) => artifact.role === 'source');
+  const sourceBytes = Uint8Array.from(atob(sourceArtifact.bytes.data), (character) => character.charCodeAt(0));
+  expect(await siteDigest(sourceBytes)).toBe(sourceArtifact.digest);
+  const packaged = JSON.parse(pako.inflate(sourceBytes, { to: 'string' }));
+  const ordinary = await working.project.saveProject();
+  expect(ordinary.frames[0].cels[0].indexData).toBeUndefined();
+  expect(committedCel.indexBuffer).toBeUndefined();
+  const reopened = createProjectContext();
+  try {
+    for (const file of [ordinary, packaged]) {
+      await reopened.project.loadProject(file);
+      const reopenedCel = reopened.animation.cels.value.get(reopened.animation.getCelKey(cel.layerId, cel.frameId))!;
+      expect(reopenedCel.indexBuffer).toBeUndefined();
+      expect([...reopenedCel.canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data])
+        .toEqual([223, 113, 38, 255]);
+    }
+  } finally {
+    reopened.dispose();
+  }
+  const runId = working.history.undoStack.value[0]?.provenance?.runId;
+  await userEvent.click(page.getByRole('button', { name: 'Reject Run…', exact: true }));
+  await userEvent.click(page.getByRole('dialog', { name: 'Confirm reject', exact: true })
+    .getByRole('button', { name: 'Reject Run', exact: true }));
+  await expect.element(page.getByRole('dialog', { name: 'Confirm reject', exact: true })).not.toBeInTheDocument();
+  const rejectedStatus = result(await window.pixelForgeSiteTools.invoke('status', credential));
+  const record = await creativeRunRecoveryPersistence.load(runId!);
+  const capturedAfterReject = await createProjectRecoveryTarget(working, projectRepository).captureProject();
+  expect(capturedAfterReject).toEqual(record!.checkpoint.project);
+  expect(rejectedStatus).toMatchObject({ phase: 'rejected' });
+  expect(working.project.revision.value).toBe(2);
+  const restoredCel = working.animation.cels.value.get(working.animation.getCelKey(cel.layerId, cel.frameId))!;
+  expect([...restoredCel.canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data]).toEqual([0, 0, 0, 0]);
+  expect(restoredCel.indexBuffer?.[0]).toBe(0);
+  expect(original.project.id.value).toBe(originalId);
+  expect([...original.layers.layers.value[0].canvas.getContext('2d')!.getImageData(0, 0, 1, 1).data]).toEqual(originalPixels);
+  const copy = (await projectRepository.list()).find((entry) => entry.name === 'Rejected Result Recovery Copy')!;
+  expect(copy).toBeTruthy();
+  const rejected = await projectRepository.load(copy.id);
+  expect(rejected!.frames[0].cels[0].indexData?.[0]).toBe(rejected!.palette!.indexOf('#df7126') + 1);
+}
+
 it('loads the normal entry and controls a safe copy of the Golden asset through shipped tools and local UI', async () => {
-  const fixture = createFixtureSession();
-  const golden = await runGoldenAutomationJourney({ fixture });
-  const source = golden.package.assetPackage.artifacts.find(
-    (artifact) => artifact.role === 'source'
-  )!;
-  const file = new File([source.bytes.slice().buffer], source.filename, { type: source.mediaType });
-  fixture.dispose();
   document.body.innerHTML = '<pixel-forge-app></pixel-forge-app>';
   await import('../../src/main');
   const discovery = result(
@@ -94,6 +238,17 @@ it('loads the normal entry and controls a safe copy of the Golden asset through 
         ?.shadowRoot?.querySelector('pf-automation-session-dialog')
     )
     .toBeTruthy();
+
+  await verifyFirstRasterWrite();
+
+  const fixture = createFixtureSession();
+  const golden = await runGoldenAutomationJourney({ fixture });
+  const source = golden.package.assetPackage.artifacts.find(
+    (artifact) => artifact.role === 'source'
+  )!;
+  const file = new File([source.bytes.slice().buffer], source.filename, { type: source.mediaType });
+  fixture.dispose();
+
 
   const imported = new Promise<void>((resolve) =>
     window.addEventListener('project-file-import-report', () => resolve(), { once: true })
