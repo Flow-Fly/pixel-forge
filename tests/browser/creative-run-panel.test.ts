@@ -788,7 +788,10 @@ describe('Creative Run panel in Chromium', () => {
     });
     expect(rewind.primary.project.name.value).toBe('Browser recovery original');
     expect(rewind.primary.project.revision.value).toBe(2);
-    expect(await digestProjectFile(await rewind.primary.project.saveProject())).toBe(rewind.checkpointDigest);
+    const ordinary = await rewind.primary.project.saveProject();
+    expect(ordinary.frames.flatMap((frame) => frame.cels).every((cel) => cel.indexData === undefined)).toBe(true);
+    const restoredCheckpoint = await createProjectRecoveryTarget(rewind.primary, projectRepository).captureProject();
+    expect(await digestProjectFile(restoredCheckpoint)).toBe(rewind.checkpointDigest);
   });
 
   it('lets the composed app render and control a supplied run without creating one', async () => {

@@ -156,18 +156,7 @@ export function rebuildAllIndexBuffers(
 
     let newIndexBuffer = rebuiltBuffers.get(cel.canvas);
     if (!newIndexBuffer) {
-      const rebuiltIndexBuffer = buildIndexBufferFromCanvas(
-        cel.canvas,
-        palette,
-        addMissingColors
-      );
-      const existingIndexBuffer = cel.indexBuffer;
-      if (existingIndexBuffer && existingIndexBuffer.length === rebuiltIndexBuffer.length) {
-        existingIndexBuffer.set(rebuiltIndexBuffer);
-        newIndexBuffer = existingIndexBuffer;
-      } else {
-        newIndexBuffer = rebuiltIndexBuffer;
-      }
+      newIndexBuffer = rebuildCelIndexBuffer(cel, palette, addMissingColors);
       rebuiltBuffers.set(cel.canvas, newIndexBuffer);
     }
 
@@ -180,6 +169,17 @@ export function rebuildAllIndexBuffers(
   }
 
   return changed ? newCels : cels;
+}
+
+function rebuildCelIndexBuffer(
+  cel: Cel,
+  palette: PaletteColorSource,
+  addMissingColors: boolean,
+): Uint8Array {
+  const rebuilt = buildIndexBufferFromCanvas(cel.canvas, palette, addMissingColors);
+  if (cel.indexBuffer?.length !== rebuilt.length) return rebuilt;
+  cel.indexBuffer.set(rebuilt);
+  return cel.indexBuffer;
 }
 
 /**
